@@ -89,7 +89,9 @@ export class GoogleAdapter implements AIProviderAdapter {
   readonly displayName = 'Google AI';
 
   async listModels(config: AIProviderConfig): Promise<AIModel[]> {
-    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/models?key=${encodeURIComponent(config.apiKey)}`);
+    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/models`, {
+      headers: { 'x-goog-api-key': config.apiKey },
+    });
     if (!response.ok) throw new Error(`Google models request failed: ${response.status}`);
     const data = (await response.json()) as { models?: Array<{ name: string; displayName?: string; supportedGenerationMethods?: string[] }> };
     return (data.models || [])
@@ -115,9 +117,9 @@ export class GoogleAdapter implements AIProviderAdapter {
   }
 
   async send(config: AIProviderConfig, request: AIRequest): Promise<AIResponse> {
-    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/models/${encodeURIComponent(request.model)}:generateContent?key=${encodeURIComponent(config.apiKey)}`, {
+    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/models/${encodeURIComponent(request.model)}:generateContent`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
       body: JSON.stringify(this.buildBody(request)),
     });
 
@@ -140,9 +142,9 @@ export class GoogleAdapter implements AIProviderAdapter {
   }
 
   async *stream(config: AIProviderConfig, request: AIRequest): AsyncGenerator<AIStreamEvent> {
-    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/models/${encodeURIComponent(request.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(config.apiKey)}`, {
+    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/models/${encodeURIComponent(request.model)}:streamGenerateContent?alt=sse`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
       body: JSON.stringify(this.buildBody(request)),
     });
 
