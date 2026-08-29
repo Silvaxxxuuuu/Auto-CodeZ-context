@@ -5,6 +5,12 @@ import type {
 } from '../../ai/aiConnector';
 
 import {
+  captureResponseReaderState,
+  readNewAiResponse,
+  type AiResponseReaderState,
+} from '../ai-response-reader';
+
+import {
   findAiTab,
   focusBrowserInput,
   focusBrowserTab,
@@ -22,6 +28,10 @@ export class GeminiConnector
 {
   readonly provider =
     'gemini' as const;
+
+  private responseReader:
+    AiResponseReaderState | null =
+    null;
 
   async isAvailable(): Promise<boolean> {
     const browserTab =
@@ -95,10 +105,19 @@ export class GeminiConnector
         );
       }
 
+      this.responseReader =
+        await captureResponseReaderState(
+          browserTab.handle,
+          request.prompt,
+        );
+
       const sent =
         await pasteClipboardAndSend();
 
       if (!sent) {
+        this.responseReader =
+          null;
+
         throw new Error(
           'Não foi possível enviar o prompt para o Gemini.',
         );
@@ -149,10 +168,19 @@ export class GeminiConnector
       );
     }
 
+    this.responseReader =
+      await captureResponseReaderState(
+        appHandle,
+        request.prompt,
+      );
+
     const sent =
       await pasteClipboardAndSend();
 
     if (!sent) {
+      this.responseReader =
+        null;
+
       throw new Error(
         'Não foi possível enviar o prompt para o Gemini.',
       );
@@ -169,6 +197,17 @@ export class GeminiConnector
   }
 
   async readResponse(): Promise<AiResponse | null> {
-    return null;
+    const response =
+      await readNewAiResponse(
+        this.responseReader,
+        this.provider,
+      );
+
+    if (response) {
+      this.responseReader =
+        null;
+    }
+
+    return response;
   }
 }
