@@ -116,12 +116,34 @@ ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: str
 });
 
 ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
-  const { chat, config, projectContext } = await getChatContext(input.chatId); const content = input.content.trim(); if (!content) throw new Error('A mensagem não pode estar vazia.');
-  await chatManager.addMessage(chat.id, { role: 'user', content }); const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
-  let finalResponse: AIStreamEvent['response']; let streamedText = '';
-  for await (const event of chatRuntime.stream(config, current, projectContext)) { if (event.type === 'delta' && event.text) streamedText += event.text; if (event.type === 'complete' && event.response) finalResponse = event.response; mainWindow?.webContents.send('chat:stream-event', event); }
-  if (finalResponse) await chatManager.addMessage(chat.id, { role: 'assistant', content: finalResponse.content }); else if (streamedText) await chatManager.addMessage(chat.id, { role: 'assistant', content: streamedText });
-  return { chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  const { chat, config, projectContext } = await getChatContext(input.chatId);
+  const content = input.content.trim();
+  if (!content) throw new Error('A mensagem não pode estar vazia.');
+  await chatManager.addMessage(chat.id, { role: 'user', content });
+  const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
+  const models = await modelResolver.list(config);
+  const model = modelResolver.find(models, current.model);
+  const supportsTools = model.capabilities.includes('tools');
+
+  if (supportsTools) {
+    const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
+    mainWindow?.webContents.send('chat:stream-event', { type: 'start' } satisfies AIStreamEvent);
+    if (result.response.content) mainWindow?.webContents.send('chat:stream-event', { type: 'delta', text: result.response.content } satisfies AIStreamEvent);
+    mainWindow?.webContents.send('chat:stream-event', { type: 'complete', response: result.response, usage: result.response.usage } satisfies AIStreamEvent);
+    await chatManager.update({ ...current, messages: result.messages });
+    return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  }
+
+  let finalResponse: AIStreamEvent['response'];
+  let streamedText = '';
+  for await (const event of chatRuntime.stream(config, current, projectContext)) {
+    if (event.type === 'delta' && event.text) streamedText += event.text;
+    if (event.type === 'complete' && event.response) finalResponse = event.response;
+    mainWindow?.webContents.send('chat:stream-event', event);
+  }
+  if (finalResponse) await chatManager.addMessage(chat.id, { role: 'assistant', content: finalResponse.content });
+  else if (streamedText) await chatManager.addMessage(chat.id, { role: 'assistant', content: streamedText });
+  return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 });
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
