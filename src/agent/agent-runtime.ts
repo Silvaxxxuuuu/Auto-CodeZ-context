@@ -1,4 +1,4 @@
-import type { AIProviderConfig, AIResponse, ChatRecord, PermissionLevel } from '../ai/types';
+import type { AIMessage, AIProviderConfig, AIResponse, ChatRecord, PermissionLevel } from '../ai/types';
 import { ActivityRuntime } from './activity-runtime';
 import { ToolRuntime } from './tool-runtime';
 import { ChatRuntime } from '../ai/chat-runtime';
@@ -15,9 +15,11 @@ type PendingRun = {
 };
 
 export interface AgentRunResult {
+  chatId: string;
   response: AIResponse;
   toolRounds: number;
   pendingApprovalIds: string[];
+  messages: AIMessage[];
 }
 
 export class AgentRuntime {
@@ -55,9 +57,11 @@ export class AgentRuntime {
 
     if (pending.pendingApprovalIds.length) {
       return {
+        chatId: pending.chat.id,
         response: { content: '', model: pending.workingChat.model, providerId: pending.workingChat.providerId },
         toolRounds: 0,
         pendingApprovalIds: [...pending.pendingApprovalIds],
+        messages: [...pending.workingChat.messages],
       };
     }
 
@@ -81,7 +85,10 @@ export class AgentRuntime {
   ): Promise<AgentRunResult> {
     while (true) {
       const response = await this.chatRuntime.send(config, workingChat, projectContext);
-      if (!response.toolCalls?.length) return { response, toolRounds, pendingApprovalIds: [] };
+      if (!response.toolCalls?.length) {
+        workingChat.messages.push({ role: 'assistant', content: response.content, createdAt: Date.now() });
+        return { chatId: chat.id, response, toolRounds, pendingApprovalIds: [], messages: [...workingChat.messages] };
+      }
       if (!workingChat.projectId) throw new Error('Uma ferramenta foi solicitada sem um projeto ativo.');
       if (toolRounds >= MAX_TOOL_ROUNDS) throw new Error('O agente atingiu o limite de ciclos de ferramentas.');
 
@@ -106,7 +113,7 @@ export class AgentRuntime {
         const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds };
         for (const approvalId of pendingApprovalIds) this.pendingRuns.set(approvalId, pendingRun);
         this.activity.emit({ type: 'action', message: 'O agente aguarda aprovação antes de continuar.', status: 'pending' });
-        return { response, toolRounds, pendingApprovalIds };
+        return { chatId: chat.id, response, toolRounds, pendingApprovalIds, messages: [...workingChat.messages] };
       }
       this.activity.success('tool', `Ciclo de ferramentas ${toolRounds} concluído.`);
     }
