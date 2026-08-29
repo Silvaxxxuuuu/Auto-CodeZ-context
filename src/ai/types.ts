@@ -88,6 +88,7 @@ export interface AIToolCall {
   id: string;
   name: ToolName;
   input: Record<string, unknown>;
+  providerData?: Record<string, unknown>;
 }
 
 export interface FileDiff {
