@@ -23,6 +23,7 @@ import {
 } from 'electron';
 
 const GEMINI_URL = 'https://gemini.google.com/app';
+const GEMINI_TAB_TERMS = ['Gemini', 'gemini.google.com', 'Google Gemini'];
 
 export class GeminiConnector implements AiConnector {
   readonly provider = 'gemini' as const;
@@ -35,7 +36,7 @@ export class GeminiConnector implements AiConnector {
 
   async prepare(): Promise<boolean> {
     const browserTab = await waitForAiTab(
-      ['Gemini', 'gemini.google.com', 'Google Gemini'],
+      GEMINI_TAB_TERMS,
       2,
       300,
     );
@@ -52,7 +53,7 @@ export class GeminiConnector implements AiConnector {
     }
 
     const openedTab = await waitForAiTab(
-      ['Gemini', 'gemini.google.com', 'Google Gemini'],
+      GEMINI_TAB_TERMS,
       30,
       500,
     );
@@ -71,10 +72,8 @@ export class GeminiConnector implements AiConnector {
       throw new Error('O prompt do Gemini está vazio.');
     }
 
-    clipboard.writeText(request.prompt);
-
     const browserTab = await waitForAiTab(
-      ['Gemini', 'gemini.google.com', 'Google Gemini'],
+      GEMINI_TAB_TERMS,
       10,
       300,
     );
@@ -89,7 +88,7 @@ export class GeminiConnector implements AiConnector {
 
     if (!selected) {
       throw new Error(
-        'Não foi possível selecionar a aba do Gemini.',
+        'Não foi possível selecionar a aba correta do Gemini.',
       );
     }
 
@@ -100,21 +99,27 @@ export class GeminiConnector implements AiConnector {
 
     if (!inputFocused) {
       throw new Error(
-        'Não foi possível identificar com segurança o campo de mensagem do Gemini.',
+        'O campo de mensagem do Gemini não foi identificado com segurança. O prompt não foi enviado.',
       );
     }
+
+    clipboard.writeText(request.prompt);
 
     this.responseReader = await captureResponseReaderState(
       browserTab.handle,
       request.prompt,
     );
 
-    const sent = await pasteClipboardAndSend();
+    const sent = await pasteClipboardAndSend(
+      request.prompt,
+      browserTab,
+      this.provider,
+    );
 
     if (!sent) {
       this.responseReader = null;
       throw new Error(
-        'Não foi possível enviar o prompt para o Gemini.',
+        'O Gemini não confirmou a inserção do prompt no campo de mensagem. O envio foi interrompido.',
       );
     }
 
