@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectRecord } from '../ai/types';
 
+const MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
+
 export class WorkspaceRuntime {
   constructor(private readonly projects: () => Promise<ProjectRecord[]>) {}
 
@@ -50,28 +52,46 @@ export class WorkspaceRuntime {
     }
   }
 
+  private async assertTextFileSize(filePath: string, allowMissing = false): Promise<void> {
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.size > MAX_TEXT_FILE_BYTES) throw new Error(`Arquivo excede o limite de ${MAX_TEXT_FILE_BYTES} bytes para operações do agente.`);
+    } catch (error) {
+      if (allowMissing && (error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+  }
+
   async readFile(projectId: string, requestedPath: string): Promise<string> {
-    return fs.readFile(await this.resolve(projectId, requestedPath), 'utf8');
+    const filePath = await this.resolve(projectId, requestedPath);
+    await this.assertTextFileSize(filePath);
+    return fs.readFile(filePath, 'utf8');
   }
 
   async writeFile(projectId: string, requestedPath: string, content: string): Promise<void> {
+    if (Buffer.byteLength(content, 'utf8') > MAX_TEXT_FILE_BYTES) throw new Error(`Conteúdo excede o limite de ${MAX_TEXT_FILE_BYTES} bytes.`);
     const filePath = await this.resolve(projectId, requestedPath);
+    await this.assertTextFileSize(filePath);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, content, 'utf8');
   }
 
   async createFile(projectId: string, requestedPath: string, content: string): Promise<void> {
+    if (Buffer.byteLength(content, 'utf8') > MAX_TEXT_FILE_BYTES) throw new Error(`Conteúdo excede o limite de ${MAX_TEXT_FILE_BYTES} bytes.`);
     const filePath = await this.resolve(projectId, requestedPath);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, content, { encoding: 'utf8', flag: 'wx' });
   }
 
   async deleteFile(projectId: string, requestedPath: string): Promise<void> {
-    await fs.rm(await this.resolve(projectId, requestedPath), { force: false });
+    const filePath = await this.resolve(projectId, requestedPath);
+    await this.assertTextFileSize(filePath);
+    await fs.rm(filePath, { force: false });
   }
 
   async renameFile(projectId: string, from: string, to: string): Promise<void> {
     const source = await this.resolve(projectId, from);
+    await this.assertTextFileSize(source);
     const destination = await this.resolve(projectId, to);
     await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.rename(source, destination);
@@ -80,6 +100,8 @@ export class WorkspaceRuntime {
   async searchFiles(projectId: string, query: string): Promise<string[]> {
     const project = await this.getProject(projectId);
     const root = await fs.realpath(path.resolve(project.rootPath));
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) throw new Error('A busca precisa conter um texto.');
     const ignored = new Set(['node_modules', '.git', '.vite', 'dist', 'build', 'out', 'coverage']);
     const results: string[] = [];
 
@@ -93,7 +115,7 @@ export class WorkspaceRuntime {
           await visit(full);
           continue;
         }
-        if (entry.name.toLowerCase().includes(query.toLowerCase())) results.push(path.relative(root, full));
+        if (entry.name.toLowerCase().includes(normalizedQuery)) results.push(path.relative(root, full));
       }
     };
 
