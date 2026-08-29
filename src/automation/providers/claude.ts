@@ -36,28 +36,32 @@ export class ClaudeConnector
     const appHandle =
       await findWindowHandleByTitle([
         'Claude',
+        'claude.ai',
+        'Anthropic',
       ]);
 
     return appHandle !== null;
   }
 
   async prepare(): Promise<boolean> {
-  const browserTab =
-    await findAiTab([
-      'Claude',
-    ]);
+    const browserTab =
+      await findAiTab([
+        'Claude',
+      ]);
 
-  if (browserTab) {
-    return true;
+    if (browserTab) {
+      return true;
+    }
+
+    const appHandle =
+      await findWindowHandleByTitle([
+        'Claude',
+        'claude.ai',
+        'Anthropic',
+      ]);
+
+    return appHandle !== null;
   }
-
-  const appHandle =
-    await findWindowHandleByTitle([
-      'Claude',
-    ]);
-
-  return appHandle !== null;
-}
 
   async send(
     request: AiRequest,
@@ -129,6 +133,8 @@ export class ClaudeConnector
     const appHandle =
       await findWindowHandleByTitle([
         'Claude',
+        'claude.ai',
+        'Anthropic',
       ]);
 
     if (!appHandle) {
