@@ -4,8 +4,8 @@ import {
   AiConnectorManager,
 } from '../ai/aiConnectorManager';
 
-import {
-  AiProviderId,
+import type {
+  AiResponse,
 } from '../ai/aiConnector';
 
 import {
@@ -15,6 +15,9 @@ import {
   AiSessionResult,
   createAiSession,
 } from './ai-session';
+
+const RESPONSE_TIMEOUT_MS = 120000;
+const RESPONSE_POLL_INTERVAL_MS = 250;
 
 export type AiSessionStateChange = {
   sessionId: string;
@@ -133,162 +136,165 @@ export class SessionManager
   }
 
   async execute(
-  session: AiSession,
-): Promise<AiSessionResult> {
-  if (
-    this.get(session.id) !==
-    session
-  ) {
-    throw new Error(
-      'A sessão não pertence a este Session Manager.',
-    );
-  }
-
-  if (
-    session.isFinished()
-  ) {
-    throw new Error(
-      'A sessão já foi finalizada.',
-    );
-  }
-
-  try {
-    this.changeState(
-      session,
-      'preparing',
-    );
-
-    const available =
-      await this.connectorManager.isAvailable(
-        session.provider,
-      );
-
-    if (!available) {
+    session: AiSession,
+  ): Promise<AiSessionResult> {
+    if (
+      this.get(session.id) !==
+      session
+    ) {
       throw new Error(
-        `O provider ${session.provider} não está disponível neste sistema.`,
-      );
-    }
-
-    const connector =
-      this.connectorManager.get(
-        session.provider,
-      );
-
-    if (!connector) {
-      throw new Error(
-        `Nenhum conector registrado para ${session.provider}.`,
-      );
-    }
-
-    const prepared =
-      await connector.prepare();
-
-    if (!prepared) {
-      throw new Error(
-        `Não foi possível preparar a IA ${session.provider}.`,
+        'A sessão não pertence a este Session Manager.',
       );
     }
 
     if (
-      session.state ===
-      'cancelled'
+      session.isFinished()
     ) {
       throw new Error(
-        'A sessão foi cancelada.',
+        'A sessão já foi finalizada.',
       );
     }
 
-    this.changeState(
-      session,
-      'waiting',
-    );
+    try {
+      this.changeState(
+        session,
+        'preparing',
+      );
 
-    const response =
-      await this.connectorManager.send({
+      const available =
+        await this.connectorManager.isAvailable(
+          session.provider,
+        );
+
+      if (!available) {
+        throw new Error(
+          `O provider ${session.provider} não está disponível neste sistema.`,
+        );
+      }
+
+      const connector =
+        this.connectorManager.get(
+          session.provider,
+        );
+
+      if (!connector) {
+        throw new Error(
+          `Nenhum conector registrado para ${session.provider}.`,
+        );
+      }
+
+      const prepared =
+        await connector.prepare();
+
+      if (!prepared) {
+        throw new Error(
+          `Não foi possível preparar a IA ${session.provider}.`,
+        );
+      }
+
+      this.throwIfCancelled(
+        session,
+      );
+
+      this.changeState(
+        session,
+        'sending',
+      );
+
+      await connector.send({
         provider:
           session.provider,
         prompt:
           session.prompt,
+        purpose: 'modify',
       });
 
-    if (
-      session.state ===
-      'cancelled'
-    ) {
-      throw new Error(
-        'A sessão foi cancelada.',
-      );
-    }
-
-    this.changeState(
-      session,
-      'receiving',
-    );
-
-    session.setResponse(
-      response,
-    );
-
-    this.emit(
-      'state-changed',
-      this.createStateChange(
+      this.throwIfCancelled(
         session,
-      ),
-    );
+      );
 
-    this.emit(
-      'completed',
-      session,
-    );
+      this.changeState(
+        session,
+        'waiting',
+      );
 
-    return session.toResult();
-  } catch (error) {
-    if (
-      session.state ===
-      'cancelled'
-    ) {
+      const response =
+        await this.waitForResponse(
+          session,
+          connector,
+        );
+
+      this.throwIfCancelled(
+        session,
+      );
+
+      this.changeState(
+        session,
+        'receiving',
+      );
+
+      session.setResponse(
+        response,
+      );
+
+      this.changeState(
+        session,
+        'completed',
+      );
+
       this.emit(
-        'cancelled',
+        'completed',
         session,
       );
 
-      throw error;
-    }
+      return session.toResult();
+    } catch (error) {
+      if (
+        session.state ===
+        'cancelled'
+      ) {
+        this.emit(
+          'cancelled',
+          session,
+        );
 
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Erro desconhecido durante a sessão de IA.';
+        throw error;
+      }
 
-    session.fail(
-      message,
-    );
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Erro desconhecido durante a sessão de IA.';
 
-    this.emit(
-      'state-changed',
-      this.createStateChange(
+      session.fail(
+        message,
+      );
+
+      this.emit(
+        'state-changed',
+        this.createStateChange(
+          session,
+        ),
+      );
+
+      this.emit(
+        'failed',
         session,
-      ),
-    );
+      );
 
-    this.emit(
-      'failed',
-      session,
-    );
-
-    throw new Error(
-      message,
-    );
-  } finally {
-    if (
-      this.activeSessionId ===
-      session.id
-    ) {
-      this.activeSessionId =
-        null;
+      throw new Error(
+        message,
+      );
+    } finally {
+      if (
+        this.activeSessionId ===
+        session.id
+      ) {
+        this.activeSessionId =
+          null;
+      }
     }
   }
-}
 
   cancel(
     sessionId: string,
@@ -391,6 +397,70 @@ export class SessionManager
         listener,
       );
     };
+  }
+
+  private async waitForResponse(
+    session: AiSession,
+    connector: {
+      readResponse:
+        () => Promise<AiResponse | null>;
+    },
+  ): Promise<AiResponse> {
+    const deadline =
+      Date.now() +
+      RESPONSE_TIMEOUT_MS;
+
+    while (
+      Date.now() < deadline
+    ) {
+      this.throwIfCancelled(
+        session,
+      );
+
+      const response =
+        await connector.readResponse();
+
+      if (
+        response &&
+        response.content.trim()
+      ) {
+        return response;
+      }
+
+      await this.delay(
+        RESPONSE_POLL_INTERVAL_MS,
+      );
+    }
+
+    throw new Error(
+      `A IA ${session.provider} não respondeu dentro do tempo limite de ${RESPONSE_TIMEOUT_MS / 1000} segundos.`,
+    );
+  }
+
+  private throwIfCancelled(
+    session: AiSession,
+  ): void {
+    if (
+      session.state ===
+      'cancelled'
+    ) {
+      throw new Error(
+        'A sessão foi cancelada.',
+      );
+    }
+  }
+
+  private delay(
+    milliseconds: number,
+  ): Promise<void> {
+    return new Promise(
+      (resolve) => {
+        setTimeout(
+          resolve,
+          milliseconds,
+        );
+      },
+    );
   }
 
   private changeState(
