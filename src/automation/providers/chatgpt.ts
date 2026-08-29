@@ -5,6 +5,14 @@ import type {
 } from '../../ai/aiConnector';
 
 import {
+  sendMessageInBackground,
+} from '../background-ui';
+
+import {
+  AiResponseReader,
+} from '../ai-response-reader';
+
+import {
   findAiTab,
   focusBrowserInput,
   focusBrowserTab,
@@ -22,6 +30,9 @@ export class ChatGptConnector
 {
   readonly provider =
     'chatgpt' as const;
+
+  private readonly responseReader =
+    new AiResponseReader();
 
   async isAvailable(): Promise<boolean> {
     const browserTab =
@@ -42,22 +53,22 @@ export class ChatGptConnector
   }
 
   async prepare(): Promise<boolean> {
-  const browserTab =
-    await findAiTab([
-      'ChatGPT',
-    ]);
+    const browserTab =
+      await findAiTab([
+        'ChatGPT',
+      ]);
 
-  if (browserTab) {
-    return true;
+    if (browserTab) {
+      return true;
+    }
+
+    const appHandle =
+      await findWindowHandleByTitle([
+        'ChatGPT',
+      ]);
+
+    return appHandle !== null;
   }
-
-  const appHandle =
-    await findWindowHandleByTitle([
-      'ChatGPT',
-    ]);
-
-  return appHandle !== null;
-}
 
   async send(
     request: AiRequest,
@@ -85,6 +96,27 @@ export class ChatGptConnector
       ]);
 
     if (browserTab) {
+      await this.responseReader.captureFromWindow(
+        browserTab.handle,
+      );
+
+      const backgroundSent =
+        await sendMessageInBackground(
+          browserTab.handle,
+          request.prompt,
+        );
+
+      if (backgroundSent) {
+        return {
+          provider:
+            this.provider,
+          content:
+            '',
+          receivedAt:
+            Date.now(),
+        };
+      }
+
       const selected =
         await focusBrowserTab(
           browserTab,
@@ -120,7 +152,7 @@ export class ChatGptConnector
         provider:
           this.provider,
         content:
-          'Solicitação enviada ao ChatGPT.',
+          '',
         receivedAt:
           Date.now(),
       };
@@ -135,6 +167,27 @@ export class ChatGptConnector
       throw new Error(
         'O ChatGPT não está aberto.',
       );
+    }
+
+    await this.responseReader.captureFromWindow(
+      appHandle,
+    );
+
+    const backgroundSent =
+      await sendMessageInBackground(
+        appHandle,
+        request.prompt,
+      );
+
+    if (backgroundSent) {
+      return {
+        provider:
+          this.provider,
+        content:
+          '',
+        receivedAt:
+          Date.now(),
+      };
     }
 
     const focused =
@@ -172,13 +225,15 @@ export class ChatGptConnector
       provider:
         this.provider,
       content:
-        'Solicitação enviada ao ChatGPT.',
+        '',
       receivedAt:
         Date.now(),
     };
   }
 
   async readResponse(): Promise<AiResponse | null> {
-    return null;
+    return this.responseReader.read(
+      this.provider,
+    );
   }
 }
