@@ -23,6 +23,7 @@ import {
 } from 'electron';
 
 const CHATGPT_URL = 'https://chatgpt.com/';
+const CHATGPT_TAB_TERMS = ['ChatGPT', 'chatgpt.com', 'OpenAI'];
 
 export class ChatGptConnector implements AiConnector {
   readonly provider = 'chatgpt' as const;
@@ -35,7 +36,7 @@ export class ChatGptConnector implements AiConnector {
 
   async prepare(): Promise<boolean> {
     const browserTab = await waitForAiTab(
-      ['ChatGPT', 'chatgpt.com', 'OpenAI'],
+      CHATGPT_TAB_TERMS,
       2,
       300,
     );
@@ -52,7 +53,7 @@ export class ChatGptConnector implements AiConnector {
     }
 
     const openedTab = await waitForAiTab(
-      ['ChatGPT', 'chatgpt.com', 'OpenAI'],
+      CHATGPT_TAB_TERMS,
       30,
       500,
     );
@@ -71,10 +72,8 @@ export class ChatGptConnector implements AiConnector {
       throw new Error('O prompt do ChatGPT está vazio.');
     }
 
-    clipboard.writeText(request.prompt);
-
     const browserTab = await waitForAiTab(
-      ['ChatGPT', 'chatgpt.com', 'OpenAI'],
+      CHATGPT_TAB_TERMS,
       10,
       300,
     );
@@ -89,7 +88,7 @@ export class ChatGptConnector implements AiConnector {
 
     if (!selected) {
       throw new Error(
-        'Não foi possível selecionar a aba do ChatGPT.',
+        'Não foi possível selecionar a aba correta do ChatGPT.',
       );
     }
 
@@ -100,21 +99,27 @@ export class ChatGptConnector implements AiConnector {
 
     if (!inputFocused) {
       throw new Error(
-        'Não foi possível identificar com segurança o campo de mensagem do ChatGPT.',
+        'O campo de mensagem do ChatGPT não foi identificado com segurança. O prompt não foi enviado.',
       );
     }
+
+    clipboard.writeText(request.prompt);
 
     this.responseReader = await captureResponseReaderState(
       browserTab.handle,
       request.prompt,
     );
 
-    const sent = await pasteClipboardAndSend();
+    const sent = await pasteClipboardAndSend(
+      request.prompt,
+      browserTab,
+      this.provider,
+    );
 
     if (!sent) {
       this.responseReader = null;
       throw new Error(
-        'Não foi possível enviar o prompt para o ChatGPT.',
+        'O ChatGPT não confirmou a inserção do prompt no campo de mensagem. O envio foi interrompido.',
       );
     }
 
