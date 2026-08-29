@@ -1,0 +1,637 @@
+AUTO CODEZ - CONTEXTO PERMANENTE DO PROJETO
+
+Versão de referência: 2026-08-29
+Repositório: Silvaxxxuuuu/Auto-CodeZ-context
+Branch de trabalho atual: fix/ai-session-error-handling
+
+============================================================
+1. OBJETIVO DO PROJETO
+============================================================
+
+O Auto CodeZ é um aplicativo desktop desenvolvido com Electron. Ele funciona como um ambiente de desenvolvimento integrado a IAs externas, principalmente ChatGPT, Claude e Gemini.
+
+A proposta central é permitir que o usuário trabalhe em projetos locais dentro do Auto CodeZ e use IAs externas para analisar o projeto, propor alterações e auxiliar na implementação sem depender de API keys dessas IAs dentro do aplicativo.
+
+O Auto CodeZ deve ser a interface principal do usuário. ChatGPT, Claude e Gemini são mecanismos externos de execução controlados por automação de interface.
+
+O usuário não deve precisar trabalhar manualmente dentro das janelas externas das IAs.
+
+============================================================
+2. PRINCÍPIO ARQUITETURAL PRINCIPAL
+============================================================
+
+Fluxo conceitual:
+
+USUÁRIO
+  |
+  v
+AUTO CODEZ
+  |
+  +--> contexto do projeto
+  |
+  +--> pedido do usuário
+  |
+  +--> SessionManager
+  |
+  +--> AiConnectorManager
+  |
+  +--> conector da IA escolhida
+  |
+  +--> automação Windows / navegador
+  |
+  +--> IA externa
+  |
+  +--> leitura da resposta
+  |
+  +--> parser
+  |
+  +--> proposta de alteração
+  |
+  +--> editor / diff
+  |
+  +--> aceitar ou rejeitar
+  |
+  v
+PROJETO LOCAL
+
+O Auto CodeZ não deve depender da janela externa como interface de trabalho.
+
+============================================================
+3. IAs SUPORTADAS
+============================================================
+
+Providers principais:
+
+- ChatGPT
+- Claude
+- Gemini
+
+A arquitetura deve permitir adicionar outros providers no futuro sem reescrever o fluxo inteiro.
+
+Cada provider possui seu próprio conector, mas todos devem respeitar a mesma interface conceitual:
+
+- verificar disponibilidade
+- preparar a sessão
+- localizar a interface correta
+- enviar o prompt
+- aguardar processamento
+- ler a resposta
+- retornar resposta estruturada
+
+============================================================
+4. REGRA CRÍTICA SOBRE API KEYS
+============================================================
+
+O Auto CodeZ foi projetado para funcionar sem exigir API keys do ChatGPT, Claude ou Gemini.
+
+A comunicação com essas IAs ocorre por automação da interface disponível no computador do usuário.
+
+Não introduzir API keys como requisito do fluxo atual sem solicitação explícita.
+
+============================================================
+5. FLUXO EXATO DE UMA SESSÃO DE IA
+============================================================
+
+1. O usuário seleciona uma IA no Auto CodeZ.
+
+2. O usuário escreve o pedido no Auto CodeZ.
+
+3. O Auto CodeZ reúne o contexto necessário do projeto.
+
+4. O Auto CodeZ cria uma sessão de IA.
+
+5. O SessionManager controla o ciclo completo da sessão.
+
+6. O AiConnectorManager seleciona o conector correto.
+
+7. O conector identifica a interface correta da IA escolhida.
+
+8. Se a IA já estiver aberta, a sessão deve reutilizar a instância existente.
+
+9. Se a IA não estiver aberta, o Auto CodeZ deve abrir a página correta automaticamente.
+
+10. O Auto CodeZ deve esperar a página carregar antes de tentar interagir.
+
+11. O Auto CodeZ deve identificar especificamente a aba da IA escolhida.
+
+12. O Auto CodeZ deve localizar especificamente o campo de composição de mensagem da IA.
+
+13. O Auto CodeZ deve colocar o prompt no campo de mensagem.
+
+14. O prompt NUNCA deve ser enviado para a barra de endereço, barra de pesquisa do navegador, campo de pesquisa interno ou outro elemento da página.
+
+15. O Auto CodeZ envia o prompt.
+
+16. A janela externa deve permanecer em segundo plano sempre que a automação permitir. Trazer a janela para frente não é um objetivo do produto.
+
+17. Se uma ação de automação exigir foco temporário, isso deve ocorrer de forma controlada e voltar ao Auto CodeZ assim que possível.
+
+18. O Auto CodeZ aguarda a resposta.
+
+19. O Auto CodeZ detecta quando a resposta terminou.
+
+20. O Auto CodeZ lê somente a resposta relevante, sem confundir prompt, interface, botões ou conteúdo antigo da página com a resposta.
+
+21. O Auto CodeZ retorna a resposta para o pipeline interno.
+
+22. A sessão é encerrada corretamente.
+
+23. A resposta passa para o parser.
+
+24. O parser identifica explicação, arquivos afetados e alterações propostas.
+
+25. O Auto CodeZ mostra as alterações no próprio editor.
+
+26. O usuário aceita ou rejeita as alterações.
+
+27. Somente alterações aceitas são aplicadas ao projeto local.
+
+============================================================
+6. REQUISITOS DE AUTOMACAO DO NAVEGADOR
+============================================================
+
+A automação não pode usar uma estratégia genérica como "primeiro elemento editável" para enviar mensagens.
+
+Isso é perigoso porque o primeiro elemento editável de uma janela pode ser:
+
+- barra de endereço
+- barra de pesquisa
+- campo de pesquisa da página
+- campo de login
+- outro controle da interface
+
+A automação deve identificar o campo de mensagem da IA escolhida de maneira específica e confiável.
+
+Também não é aceitável selecionar uma janela arbitrária apenas porque o título contém uma palavra semelhante.
+
+Exemplo de comportamento proibido:
+
+- procurar qualquer janela contendo "Claude"
+- encontrar uma janela errada
+- colocar essa janela em primeiro plano
+- executar Ctrl+V
+- enviar o prompt para o local atualmente focado
+
+Esse fluxo já causou um problema real no projeto e não deve voltar.
+
+A automação deve diferenciar:
+
+- janela do navegador
+- aba do provider
+- elemento de entrada da mensagem
+- botão de envio
+- conteúdo da resposta
+
+============================================================
+7. ESTADO DAS JANELAS E ABAS
+============================================================
+
+Prioridade:
+
+1. Reutilizar a aba existente do provider.
+2. Se não existir, abrir a URL oficial do provider.
+3. Esperar a aba aparecer.
+4. Confirmar que a aba pertence ao provider solicitado.
+5. Interagir somente com essa aba.
+
+URLs esperadas:
+
+ChatGPT: https://chatgpt.com/
+Claude: https://claude.ai/
+Gemini: https://gemini.google.com/app
+
+Não abrir uma nova aba se uma aba válida do mesmo provider já estiver disponível, salvo quando a sessão exigir explicitamente uma nova conversa.
+
+============================================================
+8. FOCO E SEGUNDO PLANO
+============================================================
+
+O objetivo do Auto CodeZ é controlar a IA sem exigir que o usuário fique alternando manualmente entre janelas.
+
+A janela externa não deve ser tratada como a interface principal.
+
+Não usar focusWindow() de forma indiscriminada.
+
+Não usar findWindowHandleByTitle() como fallback genérico para decidir qual aplicativo receberá o prompt.
+
+O problema observado no desenvolvimento foi o VS Code sendo trazido para frente quando o usuário pretendia usar Claude. Isso ocorreu porque a identificação por janela era ampla demais.
+
+Se o mecanismo de acessibilidade exigir foco, o foco deve ser direcionado ao elemento correto da aba correta, não simplesmente à primeira janela correspondente.
+
+============================================================
+9. PROMPT ENVIADO PARA A IA
+============================================================
+
+O prompt deve combinar:
+
+- instruções do Auto CodeZ
+- pedido do usuário
+- contexto relevante do projeto
+- arquivo ativo, quando aplicável
+- arquivos necessários para a tarefa
+
+Formato conceitual atual:
+
+Você está trabalhando com o Auto CodeZ.
+
+O Auto CodeZ é um ambiente de desenvolvimento que permite trabalhar com projetos locais usando IAs externas.
+
+Sua tarefa é analisar o pedido do usuário considerando o contexto fornecido do projeto.
+
+REGRAS:
+1. Preserve o comportamento existente sempre que possível.
+2. Altere somente o que for necessário para atender ao pedido.
+3. Não remova funcionalidades existentes sem uma solicitação explícita.
+4. Considere dependências entre arquivos antes de propor alterações.
+5. Mantenha o padrão de código já utilizado pelo projeto.
+6. Não invente arquivos, APIs ou bibliotecas sem necessidade.
+7. Quando uma alteração exigir múltiplos arquivos, identifique todos os arquivos afetados.
+8. A resposta será processada pelo Auto CodeZ posteriormente.
+
+FORMATO DA RESPOSTA:
+Explique brevemente o que será alterado.
+Depois, apresente as alterações de código necessárias.
+Identifique claramente o caminho de cada arquivo afetado.
+Não omita arquivos necessários para que a alteração funcione.
+
+Depois entram os dados do projeto, arquivo ativo, pedido do usuário e contexto relevante.
+
+============================================================
+10. CONTEXTO DO PROJETO
+============================================================
+
+O Auto CodeZ precisa enviar contexto útil, não lixo de build.
+
+Arquivos e diretórios gerados ou temporários não devem dominar o prompt.
+
+Evitar incluir automaticamente:
+
+- .gradle
+- .idea
+- .kotlin
+- caches
+- arquivos binários
+- artefatos de build
+- logs
+- arquivos temporários
+- dependências geradas
+
+Priorizar:
+
+- código-fonte
+- arquivos de configuração relevantes
+- arquivos de projeto
+- arquivos relacionados diretamente à tarefa
+- arquivo ativo
+- dependências entre arquivos necessárias para compreender a alteração
+
+O contexto deve ser seletivo e relevante.
+
+============================================================
+11. SESSIONMANAGER
+============================================================
+
+O SessionManager controla o ciclo de vida da sessão.
+
+Estados conceituais:
+
+- created
+- preparing
+- waiting
+- reading
+- completed
+- failed
+- cancelled
+
+Uma Promise executada em segundo plano nunca deve ser descartada sem tratamento.
+
+Erro de uma sessão deve virar estado failed e chegar à interface.
+
+Não usar catch vazio somente para esconder UnhandledPromiseRejection.
+
+O usuário precisa receber uma falha compreensível.
+
+Também não permitir que uma sessão presa indefinidamente bloqueie novas sessões sem uma política clara de timeout/cancelamento.
+
+============================================================
+12. SESSOES CONCORRENTES
+============================================================
+
+Por padrão, uma sessão ativa por vez evita conflitos de automação.
+
+Se já existe uma sessão ativa, o Auto CodeZ deve informar o estado real dela.
+
+Não simplesmente ignorar o segundo pedido.
+
+Se a sessão anterior ficar presa aguardando uma resposta, o problema deve ser corrigido no ciclo da sessão, não mascarado permitindo duas automações simultâneas no mesmo navegador.
+
+============================================================
+13. LEITURA DA RESPOSTA
+============================================================
+
+A resposta não deve ser obtida simplesmente lendo todo o texto da janela.
+
+O leitor precisa distinguir:
+
+- conteúdo anterior
+- prompt enviado
+- resposta nova
+- botões da interface
+- textos de navegação
+- controles como Copy, Retry, Regenerate, Stop etc.
+
+O estado antes do envio deve servir como baseline.
+
+Depois do envio, o leitor compara o estado atual e procura conteúdo novo.
+
+A leitura precisa funcionar durante respostas que aparecem progressivamente.
+
+A sessão deve terminar somente quando houver evidência de que a resposta terminou.
+
+============================================================
+14. PARSER DA RESPOSTA
+============================================================
+
+A resposta da IA não deve ser aplicada diretamente ao disco.
+
+Primeiro deve ser interpretada.
+
+O parser precisa identificar:
+
+- explicação da solução
+- arquivos afetados
+- caminho de cada arquivo
+- conteúdo novo ou alteração proposta
+- blocos de código
+- possíveis dependências entre alterações
+
+Quando houver vários arquivos, o parser deve produzir uma estrutura por arquivo.
+
+Exemplo conceitual:
+
+ChangeProposal
+  - filePath
+  - originalContent
+  - proposedContent
+  - explanation
+  - sourceProvider
+  - confidence / validation state
+
+============================================================
+15. ALTERAÇÕES NO EDITOR
+============================================================
+
+A IA não deve escrever diretamente no arquivo local sem aprovação do usuário.
+
+O Auto CodeZ deve apresentar uma proposta.
+
+A interface deve permitir:
+
+- visualizar o arquivo afetado
+- visualizar diff
+- aceitar alteração
+- rejeitar alteração
+- revisar alterações de vários arquivos
+
+O editor é a fonte visual principal da alteração.
+
+O usuário continua no controle.
+
+============================================================
+16. MULTIPLOS ARQUIVOS
+============================================================
+
+Uma solicitação pode afetar vários arquivos.
+
+O Auto CodeZ precisa:
+
+1. Identificar todos os arquivos afetados.
+2. Validar se os caminhos existem ou se a criação de arquivo foi realmente solicitada.
+3. Mostrar cada alteração separadamente.
+4. Permitir aceitar ou rejeitar cada alteração, ou o conjunto, conforme a interface definida posteriormente.
+5. Evitar aplicar metade de uma alteração que dependa obrigatoriamente de outro arquivo sem deixar isso claro.
+
+============================================================
+17. SEGURANCA DE ALTERACOES
+============================================================
+
+A IA não recebe permissão implícita para modificar qualquer arquivo do computador.
+
+O contexto enviado deve ser limitado ao projeto selecionado.
+
+A aplicação deve validar caminhos para impedir escrita fora da raiz do projeto.
+
+Não aceitar caminhos absolutos arbitrários fornecidos pela IA para modificar arquivos fora do projeto.
+
+Antes de aplicar alterações, validar:
+
+- caminho
+- existência
+- conteúdo original esperado
+- conflito com alterações locais
+- dependências entre arquivos
+
+============================================================
+18. INTERFACE
+============================================================
+
+A interface do Auto CodeZ deve seguir uma experiência próxima à de um editor moderno, especialmente VS Code.
+
+Requisitos já definidos:
+
+- não usar grandes títulos "Auto Code Z" ocupando espaço no topo
+- usar a marca de forma discreta quando necessário
+- nomes e elementos da interface devem ter escala adequada
+- editor de código deve ocupar o espaço principal
+- navegação lateral deve lembrar a organização de editores modernos
+- a interface não deve perder espaço útil com branding desnecessário
+
+A nova aba de IA faz parte do plano do produto, mas não deve ser finalizada enquanto o pipeline de automação estiver instável.
+
+============================================================
+19. NOVA ABA DE IA
+============================================================
+
+A nova aba de IA será uma experiência própria dentro do Auto CodeZ.
+
+Ela não deve ser simplesmente um espelho da janela do ChatGPT, Claude ou Gemini.
+
+Objetivo:
+
+- conversa com a IA
+- contexto do projeto
+- seleção de provider
+- estado da sessão
+- respostas
+- propostas de alteração
+- diffs
+- aprovação das mudanças
+
+A aba só deve receber acabamento final depois de estabilizar:
+
+1. detecção
+2. preparação
+3. envio
+4. leitura
+5. parser
+6. proposta
+7. aprovação
+
+============================================================
+20. ESTRUTURA TECNICA
+============================================================
+
+Arquitetura relevante:
+
+- AiConnectorManager
+- AiConnector
+- AiSession
+- SessionManager
+- project-context
+- automação Windows UI
+- automação de navegador
+- main process
+- preload
+- renderer
+- editor Monaco
+
+Fluxo técnico esperado:
+
+SessionManager
+    -> AiConnectorManager
+        -> provider connector
+            -> browser / Windows UI
+                -> external AI
+            -> response reader
+        -> parser
+    -> renderer
+        -> editor / diff
+
+============================================================
+21. ORDEM DE DESENVOLVIMENTO
+============================================================
+
+A ordem prioritária é:
+
+1. Detecção confiável dos providers.
+2. Abertura ou reutilização da aba correta.
+3. Localização correta do campo de mensagem.
+4. Envio confiável do prompt.
+5. Execução em segundo plano sempre que possível.
+6. Detecção do início da resposta.
+7. Detecção do fim da resposta.
+8. Leitura confiável da resposta.
+9. Tratamento de erros e timeout.
+10. Parser.
+11. Proposta de alterações.
+12. Diff no editor.
+13. Aceitar/rejeitar.
+14. Fluxo de múltiplos arquivos.
+15. Nova aba de IA e acabamento visual.
+
+Não pular etapas fundamentais para criar uma interface bonita sobre uma automação instável.
+
+============================================================
+22. REGRAS DE DESENVOLVIMENTO DO PROJETO
+============================================================
+
+Antes de alterar código:
+
+- analisar a arquitetura existente
+- analisar dependências entre arquivos
+- verificar como o fluxo atual realmente funciona
+- evitar soluções genéricas que possam atingir janelas ou elementos errados
+- não inventar APIs
+- não substituir partes funcionando sem necessidade
+
+Ao corrigir bugs:
+
+- corrigir a causa, não somente esconder o erro
+- evitar catch vazio
+- evitar timeouts artificiais como substituição de detecção correta
+- preservar comportamento existente
+- validar o fluxo completo depois da alteração
+
+============================================================
+23. GIT E GITHUB
+============================================================
+
+Regra permanente para o desenvolvimento do Auto CodeZ:
+
+1. Nunca fazer commit diretamente em main ou master.
+2. Criar branch isolada para cada tarefa.
+3. Usar padrões como feature/nome-da-funcao ou fix/nome-do-bug.
+4. Gravar alterações diretamente na branch de trabalho.
+5. Criar Pull Request para main.
+6. Não mesclar automaticamente o PR.
+7. Informar ao usuário o comando exato para puxar a branch.
+8. Listar arquivos modificados.
+9. Sempre analisar o projeto antes de modificar múltiplos arquivos.
+
+Comando padrão de atualização do usuário:
+
+git pull origin NOME-DA-BRANCH
+
+O usuário decide quando fazer merge do PR.
+
+============================================================
+24. ESTADO ATUAL DESTA FASE
+============================================================
+
+A branch atual contém trabalho relacionado a:
+
+- tratamento de falhas de sessão
+- prevenção de UnhandledPromiseRejection
+- detecção de providers
+- abertura de páginas dos providers
+- espera por abas
+- automação de envio
+- leitor inicial de respostas
+
+Problemas observados durante os testes:
+
+1. Claude e Gemini inicialmente falharam na sessão.
+2. ChatGPT chegou a trazer o navegador para frente sem executar corretamente o fluxo.
+3. O VS Code chegou a ser trazido para frente durante tentativa de automação do Claude.
+4. Depois de minimizar os aplicativos em segundo plano, o Claude chegou a responder ao foco, demonstrando que a estratégia de foco estava ampla demais.
+5. O prompt chegou a ser colado na barra de pesquisa do navegador Claude. Isso confirma que "primeiro elemento editável" ou foco genérico é incorreto.
+6. Uma sessão presa gerou "Já existe uma sessão de IA em execução." ao tentar iniciar outro teste.
+7. O contexto de projeto chegou a incluir muitos arquivos .gradle, .idea, .kotlin e binários. Isso precisa ser filtrado.
+
+Esses problemas são sinais de que a automação precisa ficar mais específica antes de avançar para a interface final.
+
+============================================================
+25. PROXIMO OBJETIVO TECNICO
+============================================================
+
+O próximo objetivo não é criar mais uma camada genérica de foco.
+
+O objetivo é criar uma automação específica e verificável para cada provider.
+
+Para cada provider:
+
+- identificar a aba correta
+- identificar o domínio correto
+- localizar o campo de mensagem correto
+- verificar que o elemento pertence à página da IA
+- inserir o prompt nesse campo
+- confirmar que o texto entrou no campo correto
+- executar envio
+- confirmar que o envio ocorreu
+- monitorar a resposta
+- detectar fim da geração
+- ler a resposta
+
+Somente depois de esse ciclo funcionar individualmente para ChatGPT, Claude e Gemini deve-se tratar os três como uma abstração comum.
+
+============================================================
+26. PRINCIPIO FINAL
+============================================================
+
+O Auto CodeZ deve agir como um agente de desenvolvimento controlado pelo usuário.
+
+A IA externa executa raciocínio e geração de código.
+
+O Auto CodeZ fornece contexto, controla a sessão, recebe a resposta, interpreta a proposta e mantém o usuário no controle da aplicação e dos arquivos locais.
+
+Qualquer alteração futura deve preservar esse objetivo.
