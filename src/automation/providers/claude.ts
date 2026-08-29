@@ -10,15 +10,10 @@ import {
   type AiResponseReaderState,
 } from '../ai-response-reader';
 
-import {
-  verifyFocusedAiMessageInput,
-} from '../browser-input-verifier';
+import { focusAndSendChromiumAiPrompt } from '../chromium-ai-input';
 
 import {
-  findAiTab,
-  focusBrowserMessageInput,
   focusBrowserTab,
-  pasteClipboardAndSend,
   waitForAiTab,
 } from '../browser';
 
@@ -40,7 +35,11 @@ export class ClaudeConnector implements AiConnector {
   }
 
   async prepare(): Promise<boolean> {
-    const browserTab = await findAiTab(CLAUDE_TAB_TERMS);
+    const browserTab = await waitForAiTab(
+      CLAUDE_TAB_TERMS,
+      2,
+      300,
+    );
 
     if (browserTab) {
       return true;
@@ -93,28 +92,6 @@ export class ClaudeConnector implements AiConnector {
       );
     }
 
-    const inputFocused = await focusBrowserMessageInput(
-      browserTab,
-      this.provider,
-    );
-
-    if (!inputFocused) {
-      throw new Error(
-        'O campo de mensagem do Claude não foi identificado com segurança. O prompt não foi enviado.',
-      );
-    }
-
-    const verifiedInput = await verifyFocusedAiMessageInput(
-      browserTab,
-      this.provider,
-    );
-
-    if (!verifiedInput) {
-      throw new Error(
-        'O foco do Claude não foi confirmado no campo de mensagem. O prompt não foi enviado.',
-      );
-    }
-
     clipboard.writeText(request.prompt);
 
     this.responseReader = await captureResponseReaderState(
@@ -122,8 +99,7 @@ export class ClaudeConnector implements AiConnector {
       request.prompt,
     );
 
-    const sent = await pasteClipboardAndSend(
-      request.prompt,
+    const sent = await focusAndSendChromiumAiPrompt(
       browserTab,
       this.provider,
     );
@@ -131,7 +107,7 @@ export class ClaudeConnector implements AiConnector {
     if (!sent) {
       this.responseReader = null;
       throw new Error(
-        'O Claude não confirmou a inserção do prompt no campo de mensagem. O envio foi interrompido.',
+        'O campo de mensagem do Claude não foi identificado com segurança no conteúdo da página. O prompt não foi enviado.',
       );
     }
 
