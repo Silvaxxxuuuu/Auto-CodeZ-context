@@ -11,14 +11,32 @@ export class WorkspaceRuntime {
     return project;
   }
 
+  private assertInside(root: string, candidate: string): void {
+    const relative = path.relative(root, candidate);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Operação bloqueada: caminho fora do workspace.');
+  }
+
+  private async nearestExisting(pathname: string): Promise<string> {
+    let current = pathname;
+    while (true) {
+      try {
+        return await fs.realpath(current);
+      } catch {
+        const parent = path.dirname(current);
+        if (parent === current) throw new Error('Não foi possível validar o caminho do workspace.');
+        current = parent;
+      }
+    }
+  }
+
   async resolve(projectId: string, requestedPath: string): Promise<string> {
     const project = await this.getProject(projectId);
-    const root = path.resolve(project.rootPath);
+    const root = await fs.realpath(path.resolve(project.rootPath));
     const candidate = path.resolve(root, requestedPath);
-    const relative = path.relative(root, candidate);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-      throw new Error('Operação bloqueada: caminho fora do workspace.');
-    }
+    this.assertInside(root, candidate);
+
+    const existingCandidate = await this.nearestExisting(candidate);
+    this.assertInside(root, existingCandidate);
     return candidate;
   }
 
@@ -51,21 +69,21 @@ export class WorkspaceRuntime {
 
   async searchFiles(projectId: string, query: string): Promise<string[]> {
     const project = await this.getProject(projectId);
-    const root = path.resolve(project.rootPath);
+    const root = await fs.realpath(path.resolve(project.rootPath));
     const ignored = new Set(['node_modules', '.git', '.vite', 'dist', 'build', 'out', 'coverage']);
     const results: string[] = [];
 
     const visit = async (directory: string): Promise<void> => {
-      for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const safeDirectory = await fs.realpath(directory);
+      this.assertInside(root, safeDirectory);
+      for (const entry of await fs.readdir(safeDirectory, { withFileTypes: true })) {
         if (ignored.has(entry.name)) continue;
-        const full = path.join(directory, entry.name);
+        const full = path.join(safeDirectory, entry.name);
         if (entry.isDirectory()) {
           await visit(full);
           continue;
         }
-        if (entry.name.toLowerCase().includes(query.toLowerCase())) {
-          results.push(path.relative(root, full));
-        }
+        if (entry.name.toLowerCase().includes(query.toLowerCase())) results.push(path.relative(root, full));
       }
     };
 
