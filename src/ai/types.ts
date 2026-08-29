@@ -31,6 +31,7 @@ export interface AIMessage {
   createdAt?: number;
   toolCallId?: string;
   toolName?: ToolName;
+  toolCalls?: AIToolCall[];
 }
 
 export interface AIModel {
@@ -112,6 +113,7 @@ export interface AIToolResult {
 export interface AIToolDefinition {
   name: ToolName;
   description: string;
+  parameters: Record<string, unknown>;
   requiresWriteAccess: boolean;
   requiresApproval: boolean;
 }
