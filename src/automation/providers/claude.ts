@@ -23,6 +23,10 @@ import {
   focusWindow,
 } from '../windows-ui';
 
+import {
+  clipboard,
+} from 'electron';
+
 export class ClaudeConnector
   implements AiConnector
 {
@@ -92,6 +96,10 @@ export class ClaudeConnector
         'O prompt do Claude está vazio.',
       );
     }
+
+    clipboard.writeText(
+      request.prompt,
+    );
 
     const browserTab =
       await findAiTab([
