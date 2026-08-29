@@ -3,13 +3,16 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export class LocalStorage {
-  private readonly root = path.join(app.getPath('userData'), 'data');
+  private get root(): string {
+    return path.join(app.getPath('userData'), 'data');
+  }
 
   async init(): Promise<void> {
     await fs.mkdir(this.root, { recursive: true });
   }
 
   private file(name: string): string {
+    if (path.basename(name) !== name) throw new Error('Nome de armazenamento inválido.');
     return path.join(this.root, name);
   }
 
@@ -23,6 +26,7 @@ export class LocalStorage {
   }
 
   async write<T>(name: string, value: T): Promise<void> {
+    await fs.mkdir(this.root, { recursive: true });
     await fs.writeFile(this.file(name), JSON.stringify(value, null, 2), 'utf8');
   }
 
@@ -38,6 +42,7 @@ export class LocalStorage {
 
   async writeEncrypted(name: string, value: string): Promise<void> {
     if (!safeStorage.isEncryptionAvailable()) throw new Error('Sistema de armazenamento seguro indisponível.');
+    await fs.mkdir(this.root, { recursive: true });
     const encrypted = safeStorage.encryptString(value).toString('base64');
     await fs.writeFile(this.file(name), encrypted, 'utf8');
   }
