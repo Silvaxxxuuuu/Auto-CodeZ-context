@@ -32,6 +32,7 @@ export interface AIMessage {
   toolCallId?: string;
   toolName?: ToolName;
   toolCalls?: AIToolCall[];
+  changes?: FileDiff[];
 }
 
 export interface AIModel {
