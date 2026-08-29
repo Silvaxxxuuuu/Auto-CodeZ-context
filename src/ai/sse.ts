@@ -28,7 +28,7 @@ async function readWithIdleTimeout(reader: ReadableStreamDefaultReader<Uint8Arra
       }),
     ]);
   } catch (error) {
-    await reader.cancel().catch(() => undefined);
+    await reader.cancel().catch((): undefined => undefined);
     throw error;
   } finally {
     if (timer) clearTimeout(timer);
