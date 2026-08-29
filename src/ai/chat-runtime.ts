@@ -14,28 +14,33 @@ export class ChatRuntime {
     private readonly models = new ModelResolver(registry),
   ) {}
 
-  private async prepare(config: AIProviderConfig, chat: ChatRecord) {
+  private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string) {
     const adapter = this.registry.get(config.id);
     const availableModels = await this.models.list(config);
     const model = this.models.find(availableModels, chat.model);
     if (!this.capabilities.supports(model, 'text')) throw new Error('O modelo selecionado não suporta texto.');
     const resolution = this.intelligence.resolve(model, chat.intelligence);
+    const messages = projectContext
+      ? [{ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` }, ...chat.messages]
+      : chat.messages;
     return {
       adapter,
       request: {
         providerId: config.id,
         model: chat.model,
-        messages: chat.messages,
+        messages,
         intelligence: resolution.effective,
+        projectContext,
         toolsEnabled: this.capabilities.supports(model, 'tools'),
       },
       resolution,
     };
   }
 
-  async send(config: AIProviderConfig, chat: ChatRecord): Promise<AIResponse> {
-    const { adapter, request, resolution } = await this.prepare(config, chat);
+  async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string): Promise<AIResponse> {
+    const { adapter, request, resolution } = await this.prepare(config, chat, projectContext);
     this.activity.start('action', `Enviando mensagem para ${adapter.displayName}`);
+    if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
     if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
 
     try {
@@ -49,12 +54,11 @@ export class ChatRuntime {
     }
   }
 
-  async *stream(config: AIProviderConfig, chat: ChatRecord): AsyncGenerator<AIStreamEvent> {
-    const { adapter, request, resolution } = await this.prepare(config, chat);
+  async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string): AsyncGenerator<AIStreamEvent> {
+    const { adapter, request, resolution } = await this.prepare(config, chat, projectContext);
     this.activity.start('action', `Transmitindo resposta de ${adapter.displayName}`);
-    if (!resolution.supported) {
-      this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
-    }
+    if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
+    if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
 
     try {
       if (adapter.stream) {
