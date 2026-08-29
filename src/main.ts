@@ -14,6 +14,7 @@ import { ChatManager } from './core/chat-manager';
 import { ActivityRuntime } from './agent/activity-runtime';
 import { WorkspaceRuntime } from './agent/workspace-runtime';
 import { ToolRuntime } from './agent/tool-runtime';
+import { ApprovalRuntime } from './agent/approval-runtime';
 
 if (started) app.quit();
 
@@ -24,9 +25,10 @@ registry.register(new GoogleAdapter());
 registry.register(new AnthropicAdapter());
 const modelResolver = new ModelResolver(registry);
 const activityRuntime = new ActivityRuntime();
+const approvalRuntime = new ApprovalRuntime();
 const projectManager = new ProjectManager(storage);
 const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
-const toolRuntime = new ToolRuntime(workspaceRuntime, undefined, activityRuntime);
+const toolRuntime = new ToolRuntime(workspaceRuntime, undefined, activityRuntime, approvalRuntime);
 const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver);
 const chatManager = new ChatManager(storage);
 
@@ -182,20 +184,16 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     mainWindow?.webContents.send('chat:stream-event', event);
   }
 
-  if (finalResponse) {
-    await chatManager.addMessage(chat.id, { role: 'assistant', content: finalResponse.content });
-  } else if (streamedText) {
-    await chatManager.addMessage(chat.id, { role: 'assistant', content: streamedText });
-  }
-
+  if (finalResponse) await chatManager.addMessage(chat.id, { role: 'assistant', content: finalResponse.content });
+  else if (streamedText) await chatManager.addMessage(chat.id, { role: 'assistant', content: streamedText });
   return { chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 });
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
-
-ipcMain.handle('agent:execute-tool', async (_event, input: { projectId: string; permissionLevel: PermissionLevel; toolCall: AIToolCall }) => {
-  return toolRuntime.execute(input.projectId, input.permissionLevel, input.toolCall);
-});
+ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
+ipcMain.handle('agent:execute-tool', async (_event, input: { projectId: string; permissionLevel: PermissionLevel; toolCall: AIToolCall }) => toolRuntime.execute(input.projectId, input.permissionLevel, input.toolCall));
+ipcMain.handle('agent:approve', async (_event, approvalId: string) => toolRuntime.approve(approvalId));
+ipcMain.handle('agent:deny', async (_event, approvalId: string) => toolRuntime.deny(approvalId));
 
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => projectManager.create(input.name, input.rootPath));
 
