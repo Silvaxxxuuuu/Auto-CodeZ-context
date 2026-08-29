@@ -1,9 +1,11 @@
-import type { AIMessage, AIProviderConfig, AIResponse, AIToolCall, ChatRecord, PermissionLevel } from '../ai/types';
+import type { AIMessage, AIProviderConfig, AIResponse, AIStreamEvent, AIToolCall, ChatRecord, PermissionLevel } from '../ai/types';
 import { ActivityRuntime } from './activity-runtime';
 import { ToolRuntime } from './tool-runtime';
 import { ChatRuntime } from '../ai/chat-runtime';
 
 const MAX_TOOL_ROUNDS = 12;
+
+type StreamEmitter = (event: AIStreamEvent) => void;
 
 type PendingRun = {
   config: AIProviderConfig;
@@ -13,6 +15,7 @@ type PendingRun = {
   workingChat: ChatRecord;
   pendingApprovalIds: string[];
   approvalCalls: Record<string, AIToolCall>;
+  streamEmitter?: StreamEmitter;
 };
 
 export interface AgentRunResult {
@@ -37,6 +40,17 @@ export class AgentRuntime {
     return this.runLoop(config, chat, workingChat, projectContext, permission, 0);
   }
 
+  async runStreaming(
+    config: AIProviderConfig,
+    chat: ChatRecord,
+    projectContext: string | undefined,
+    permission: PermissionLevel,
+    emit: StreamEmitter,
+  ): Promise<AgentRunResult> {
+    const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
+    return this.runStreamLoop(config, chat, workingChat, projectContext, permission, 0, emit);
+  }
+
   async resume(approvalId: string): Promise<AgentRunResult> {
     const pending = this.getPending(approvalId);
     const call = pending.approvalCalls[approvalId];
@@ -50,6 +64,7 @@ export class AgentRuntime {
       changes: result.changes,
       createdAt: Date.now(),
     });
+    if (pending.streamEmitter) pending.streamEmitter({ type: 'activity', activity: { id: `approval_${Date.now()}`, type: 'tool', message: `Aprovado: ${call.name}`, status: result.ok ? 'success' : 'failed', createdAt: Date.now() } });
     return this.finishApproval(pending, approvalId);
   }
 
@@ -59,6 +74,7 @@ export class AgentRuntime {
     if (!call) throw new Error('Chamada de ferramenta associada à aprovação não encontrada.');
     if (!this.tools.deny(approvalId)) throw new Error('Aprovação não encontrada ou já processada.');
     pending.workingChat.messages.push({ role: 'tool', content: 'Operação recusada pelo usuário.', toolCallId: call.id, toolName: call.name, createdAt: Date.now() });
+    if (pending.streamEmitter) pending.streamEmitter({ type: 'activity', activity: { id: `approval_${Date.now()}`, type: 'tool', message: `Recusado: ${call.name}`, status: 'failed', createdAt: Date.now() } });
     return this.finishApproval(pending, approvalId);
   }
 
@@ -81,6 +97,7 @@ export class AgentRuntime {
         messages: [...pending.workingChat.messages],
       };
     }
+    if (pending.streamEmitter) return this.runStreamLoop(pending.config, pending.chat, pending.workingChat, pending.projectContext, pending.permission, 0, pending.streamEmitter);
     return this.runLoop(pending.config, pending.chat, pending.workingChat, pending.projectContext, pending.permission, 0);
   }
 
@@ -115,6 +132,62 @@ export class AgentRuntime {
         const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds, approvalCalls };
         for (const approvalId of pendingApprovalIds) this.pendingRuns.set(approvalId, pendingRun);
         this.activity.emit({ type: 'action', message: 'O agente aguarda aprovação antes de continuar.', status: 'pending' });
+        return { chatId: chat.id, response, toolRounds, pendingApprovalIds, messages: [...workingChat.messages] };
+      }
+      this.activity.success('tool', `Ciclo de ferramentas ${toolRounds} concluído.`);
+    }
+  }
+
+  private async runStreamLoop(
+    config: AIProviderConfig,
+    chat: ChatRecord,
+    workingChat: ChatRecord,
+    projectContext: string | undefined,
+    permission: PermissionLevel,
+    toolRounds: number,
+    emit: StreamEmitter,
+  ): Promise<AgentRunResult> {
+    while (true) {
+      let response: AIResponse | undefined;
+      let streamError: string | undefined;
+      for await (const event of this.chatRuntime.stream(config, workingChat, projectContext)) {
+        if (event.type === 'complete' && event.response) response = event.response;
+        if (event.type === 'error') streamError = event.error || 'Erro durante o streaming.';
+        emit(event);
+      }
+      if (streamError) throw new Error(streamError);
+      if (!response) throw new Error('O provider encerrou o streaming sem uma resposta final.');
+
+      if (!response.toolCalls?.length) {
+        workingChat.messages.push({ role: 'assistant', content: response.content, createdAt: Date.now() });
+        return { chatId: chat.id, response, toolRounds, pendingApprovalIds: [], messages: [...workingChat.messages] };
+      }
+      if (!workingChat.projectId) throw new Error('Uma ferramenta foi solicitada sem um projeto ativo.');
+      if (toolRounds >= MAX_TOOL_ROUNDS) throw new Error('O agente atingiu o limite de ciclos de ferramentas.');
+
+      toolRounds += 1;
+      workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, createdAt: Date.now() });
+      const pendingApprovalIds: string[] = [];
+      const approvalCalls: Record<string, AIToolCall> = {};
+
+      for (const call of response.toolCalls) {
+        emit({ type: 'tool_call', toolCall: call });
+        const result = await this.tools.execute(workingChat.projectId, permission, call);
+        if (result.pendingApproval && result.approvalId) {
+          pendingApprovalIds.push(result.approvalId);
+          approvalCalls[result.approvalId] = call;
+          continue;
+        }
+        const content = result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`;
+        workingChat.messages.push({ role: 'tool', content, toolCallId: call.id, toolName: call.name, changes: result.changes, createdAt: Date.now() });
+        emit({ type: 'activity', activity: { id: `tool_${Date.now()}`, type: 'tool', message: result.ok ? `Concluído: ${call.name}` : `Falha: ${call.name}`, status: result.ok ? 'success' : 'failed', createdAt: Date.now() } });
+      }
+
+      if (pendingApprovalIds.length) {
+        const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds, approvalCalls, streamEmitter: emit };
+        for (const approvalId of pendingApprovalIds) this.pendingRuns.set(approvalId, pendingRun);
+        this.activity.emit({ type: 'action', message: 'O agente aguarda aprovação antes de continuar.', status: 'pending' });
+        emit({ type: 'approval_required', pendingApprovalIds: [...pendingApprovalIds] });
         return { chatId: chat.id, response, toolRounds, pendingApprovalIds, messages: [...workingChat.messages] };
       }
       this.activity.success('tool', `Ciclo de ferramentas ${toolRounds} concluído.`);
