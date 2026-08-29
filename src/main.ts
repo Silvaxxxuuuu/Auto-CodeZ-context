@@ -14,6 +14,7 @@ import { ChatManager } from './core/chat-manager';
 import { ActivityRuntime } from './agent/activity-runtime';
 import { WorkspaceRuntime } from './agent/workspace-runtime';
 import { ToolRuntime } from './agent/tool-runtime';
+import { AgentRuntime } from './agent/agent-runtime';
 import { ApprovalRuntime } from './agent/approval-runtime';
 import { ProjectContextRuntime } from './agent/project-context-runtime';
 import { CommandRuntime } from './agent/command-runtime';
@@ -34,6 +35,7 @@ const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
 const commandRuntime = new CommandRuntime(() => projectManager.list());
 const toolRuntime = new ToolRuntime(workspaceRuntime, undefined, activityRuntime, approvalRuntime, commandRuntime);
 const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver);
+const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime);
 const chatManager = new ChatManager(storage);
 
 let providerConfigs: AIProviderConfig[] = [];
@@ -105,8 +107,9 @@ async function getChatContext(chatId: string): Promise<{ chat: ChatRecord; confi
 ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => {
   const { chat, config, projectContext } = await getChatContext(input.chatId); const content = input.content.trim(); if (!content) throw new Error('A mensagem não pode estar vazia.');
   await chatManager.addMessage(chat.id, { role: 'user', content }); const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
-  const response = await chatRuntime.send(config, current, projectContext); await chatManager.addMessage(chat.id, { role: 'assistant', content: response.content });
-  return { response, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
+  await chatManager.addMessage(chat.id, { role: 'assistant', content: result.response.content });
+  return { response: result.response, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 });
 ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
   const { chat, config, projectContext } = await getChatContext(input.chatId); const content = input.content.trim(); if (!content) throw new Error('A mensagem não pode estar vazia.');
