@@ -15,6 +15,7 @@ import { ActivityRuntime } from './agent/activity-runtime';
 import { WorkspaceRuntime } from './agent/workspace-runtime';
 import { ToolRuntime } from './agent/tool-runtime';
 import { ApprovalRuntime } from './agent/approval-runtime';
+import { ProjectContextRuntime } from './agent/project-context-runtime';
 
 if (started) app.quit();
 
@@ -27,6 +28,7 @@ const modelResolver = new ModelResolver(registry);
 const activityRuntime = new ActivityRuntime();
 const approvalRuntime = new ApprovalRuntime();
 const projectManager = new ProjectManager(storage);
+const projectContextRuntime = new ProjectContextRuntime(projectManager);
 const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
 const toolRuntime = new ToolRuntime(workspaceRuntime, undefined, activityRuntime, approvalRuntime);
 const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver);
@@ -87,11 +89,8 @@ async function createWindow(): Promise<void> {
     mainWindow = null;
   });
 
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    await mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
-    await mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
-  }
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) await mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  else await mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
 }
 
 ipcMain.handle('app:get-state', async () => ({
@@ -135,9 +134,7 @@ ipcMain.handle('providers:remove', async (_event, providerId: ProviderId) => {
   return publicProviders();
 });
 
-ipcMain.handle('chat:create', async (_event, input: { providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel; projectId?: string }) => {
-  return chatManager.create(input);
-});
+ipcMain.handle('chat:create', async (_event, input: { providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel; projectId?: string }) => chatManager.create(input));
 
 ipcMain.handle('chat:update-settings', async (_event, input: { chatId: string; providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel }) => {
   const chats = await chatManager.list();
@@ -148,42 +145,39 @@ ipcMain.handle('chat:update-settings', async (_event, input: { chatId: string; p
   return updated;
 });
 
-async function getChatContext(chatId: string): Promise<{ chat: ChatRecord; config: AIProviderConfig }> {
+async function getChatContext(chatId: string): Promise<{ chat: ChatRecord; config: AIProviderConfig; projectContext?: string }> {
   const chat = (await chatManager.list()).find((item) => item.id === chatId);
   if (!chat) throw new Error('Chat não encontrado.');
   const config = providerConfigs.find((item) => item.id === chat.providerId);
   if (!config?.apiKey) throw new Error('A IA deste chat não possui uma API key configurada.');
-  return { chat, config };
+  const projectContext = chat.projectId ? await projectContextRuntime.build(chat.projectId) : undefined;
+  return { chat, config, projectContext };
 }
 
 ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => {
-  const { chat, config } = await getChatContext(input.chatId);
+  const { chat, config, projectContext } = await getChatContext(input.chatId);
   const content = input.content.trim();
   if (!content) throw new Error('A mensagem não pode estar vazia.');
-
   await chatManager.addMessage(chat.id, { role: 'user', content });
   const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
-  const response = await chatRuntime.send(config, current);
+  const response = await chatRuntime.send(config, current, projectContext);
   await chatManager.addMessage(chat.id, { role: 'assistant', content: response.content });
   return { response, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 });
 
 ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
-  const { chat, config } = await getChatContext(input.chatId);
+  const { chat, config, projectContext } = await getChatContext(input.chatId);
   const content = input.content.trim();
   if (!content) throw new Error('A mensagem não pode estar vazia.');
-
   await chatManager.addMessage(chat.id, { role: 'user', content });
   const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
   let finalResponse: AIStreamEvent['response'];
   let streamedText = '';
-
-  for await (const event of chatRuntime.stream(config, current)) {
+  for await (const event of chatRuntime.stream(config, current, projectContext)) {
     if (event.type === 'delta' && event.text) streamedText += event.text;
     if (event.type === 'complete' && event.response) finalResponse = event.response;
     mainWindow?.webContents.send('chat:stream-event', event);
   }
-
   if (finalResponse) await chatManager.addMessage(chat.id, { role: 'assistant', content: finalResponse.content });
   else if (streamedText) await chatManager.addMessage(chat.id, { role: 'assistant', content: streamedText });
   return { chat: (await chatManager.list()).find((item) => item.id === chat.id) };
@@ -196,13 +190,11 @@ ipcMain.handle('agent:approve', async (_event, approvalId: string) => toolRuntim
 ipcMain.handle('agent:deny', async (_event, approvalId: string) => toolRuntime.deny(approvalId));
 
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => projectManager.create(input.name, input.rootPath));
-
 ipcMain.handle('projects:open-folder', async () => {
   const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
   if (result.canceled || !result.filePaths[0]) return null;
   return result.filePaths[0];
 });
-
 ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(rootPath));
 ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(filePath));
 ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => projectManager.writeFile(input.filePath, input.content));
@@ -214,7 +206,6 @@ app.whenReady().then(async () => {
   await projectManager.init();
   await chatManager.init();
   await createWindow();
-
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createWindow();
   });
