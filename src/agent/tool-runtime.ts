@@ -7,13 +7,55 @@ import { CommandRuntime } from './command-runtime';
 import { DiffRuntime } from './diff-runtime';
 
 const definitions: AIToolDefinition[] = [
-  { name: 'read_file', description: 'Read a text file inside the active workspace.', requiresWriteAccess: false, requiresApproval: false },
-  { name: 'write_file', description: 'Replace the contents of an existing file inside the active workspace.', requiresWriteAccess: true, requiresApproval: true },
-  { name: 'create_file', description: 'Create a new file inside the active workspace.', requiresWriteAccess: true, requiresApproval: true },
-  { name: 'delete_file', description: 'Delete a file inside the active workspace.', requiresWriteAccess: true, requiresApproval: true },
-  { name: 'rename_file', description: 'Rename or move a file inside the active workspace.', requiresWriteAccess: true, requiresApproval: true },
-  { name: 'search_files', description: 'Search workspace file names.', requiresWriteAccess: false, requiresApproval: false },
-  { name: 'run_command', description: 'Run an approved package script such as tests, build, typecheck or lint inside the active workspace.', requiresWriteAccess: false, requiresApproval: true },
+  {
+    name: 'read_file',
+    description: 'Read a UTF-8 text file inside the active workspace.',
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false },
+    requiresWriteAccess: false,
+    requiresApproval: false,
+  },
+  {
+    name: 'write_file',
+    description: 'Replace the contents of an existing UTF-8 text file inside the active workspace.',
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Complete replacement file contents.' } }, required: ['path', 'content'], additionalProperties: false },
+    requiresWriteAccess: true,
+    requiresApproval: true,
+  },
+  {
+    name: 'create_file',
+    description: 'Create a new UTF-8 text file inside the active workspace.',
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path'], additionalProperties: false },
+    requiresWriteAccess: true,
+    requiresApproval: true,
+  },
+  {
+    name: 'delete_file',
+    description: 'Delete a file inside the active workspace.',
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false },
+    requiresWriteAccess: true,
+    requiresApproval: true,
+  },
+  {
+    name: 'rename_file',
+    description: 'Rename or move a file inside the active workspace.',
+    parameters: { type: 'object', properties: { from: { type: 'string', description: 'Current workspace-relative path.' }, to: { type: 'string', description: 'Destination workspace-relative path.' } }, required: ['from', 'to'], additionalProperties: false },
+    requiresWriteAccess: true,
+    requiresApproval: true,
+  },
+  {
+    name: 'search_files',
+    description: 'Search workspace file names for a text query.',
+    parameters: { type: 'object', properties: { query: { type: 'string', description: 'Text to search for in workspace file names.' } }, required: ['query'], additionalProperties: false },
+    requiresWriteAccess: false,
+    requiresApproval: false,
+  },
+  {
+    name: 'run_command',
+    description: 'Run an approved package script such as tests, build, typecheck or lint inside the active workspace.',
+    parameters: { type: 'object', properties: { manager: { type: 'string', enum: ['npm', 'pnpm', 'yarn', 'bun'] }, script: { type: 'string', enum: ['test', 'build', 'typecheck', 'lint', 'package', 'check'] } }, required: ['manager', 'script'], additionalProperties: false },
+    requiresWriteAccess: false,
+    requiresApproval: true,
+  },
 ];
 
 interface ToolExecution {
@@ -31,10 +73,12 @@ export class ToolRuntime {
     private readonly diffs = new DiffRuntime(),
   ) {}
 
-  listDefinitions(): AIToolDefinition[] { return definitions.map((definition) => ({ ...definition })); }
+  listDefinitions(): AIToolDefinition[] { return definitions.map((definition) => ({ ...definition, parameters: { ...definition.parameters } })); }
   listApprovals(): ApprovalRequest[] { return this.approvals.list(); }
 
   async execute(projectId: string, permission: PermissionLevel, call: AIToolCall): Promise<AIToolResult> {
+    const definition = definitions.find((item) => item.name === call.name);
+    if (!definition) return { toolCallId: call.id, ok: false, error: `Ferramenta desconhecida: ${call.name}` };
     const decision = this.permissions.decide(permission, call.name);
     if (decision === 'deny') return { toolCallId: call.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
     if (decision === 'ask') {
