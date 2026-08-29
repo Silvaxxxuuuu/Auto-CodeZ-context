@@ -76,12 +76,13 @@ export interface AIResponse {
 }
 
 export interface AIStreamEvent {
-  type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'error';
+  type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'error';
   text?: string;
   activity?: ActivityEvent;
   toolCall?: AIToolCall;
   usage?: AIResponse['usage'];
   response?: AIResponse;
+  pendingApprovalIds?: string[];
   error?: string;
 }
 
