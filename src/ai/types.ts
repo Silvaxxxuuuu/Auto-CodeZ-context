@@ -88,6 +88,8 @@ export interface AIToolResult {
   ok: boolean;
   output?: string;
   error?: string;
+  approvalId?: string;
+  pendingApproval?: boolean;
 }
 
 export interface AIToolDefinition {
@@ -95,6 +97,14 @@ export interface AIToolDefinition {
   description: string;
   requiresWriteAccess: boolean;
   requiresApproval: boolean;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  projectId: string;
+  permissionLevel: PermissionLevel;
+  toolCall: AIToolCall;
+  createdAt: number;
 }
 
 export interface AIProviderAdapter {
