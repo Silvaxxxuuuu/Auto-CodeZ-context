@@ -5,7 +5,7 @@ export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestIn
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const signal = init.signal;
-  const onAbort = () => controller.abort();
+  const onAbort = (): void => controller.abort();
   signal?.addEventListener('abort', onAbort, { once: true });
   try {
     return await fetch(input, { ...init, signal: controller.signal });
@@ -23,8 +23,8 @@ async function readWithIdleTimeout(reader: ReadableStreamDefaultReader<Uint8Arra
   try {
     return await Promise.race([
       reader.read(),
-      new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`O stream do provider ficou sem dados por ${Math.round(timeoutMs / 1000)} segundos.`)), timeoutMs);
+      new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject): void => {
+        timer = setTimeout((): void => reject(new Error(`O stream do provider ficou sem dados por ${Math.round(timeoutMs / 1000)} segundos.`)), timeoutMs);
       }),
     ]);
   } catch (error) {
