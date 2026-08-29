@@ -4,7 +4,7 @@ import { parseSSE } from '../sse';
 const DEFAULT_BASE_URL = 'https://api.anthropic.com/v1';
 
 function supportsEffort(model: string): boolean {
-  return /claude-(opus|sonnet|fable|mythos)-5|claude-(opus|sonnet)-4-7|claude-opus-4-8/i.test(model);
+  return /claude-(opus|sonnet)-5|claude-(opus|sonnet)-4-[7-8]|claude-(fable|mythos)-5/i.test(model);
 }
 
 function effort(level: AIRequest['intelligence']): string {
@@ -23,9 +23,7 @@ function buildMessages(messages: AIMessage[]): Array<Record<string, unknown>> {
       const content: Array<Record<string, unknown>> = [];
       while (index < messages.length && messages[index].role === 'tool') {
         const toolMessage = messages[index];
-        if (toolMessage.toolCallId) {
-          content.push({ type: 'tool_result', tool_use_id: toolMessage.toolCallId, content: toolMessage.content });
-        }
+        if (toolMessage.toolCallId) content.push({ type: 'tool_result', tool_use_id: toolMessage.toolCallId, content: toolMessage.content });
         index += 1;
       }
       index -= 1;
@@ -152,7 +150,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
     });
 
     if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
+      const data = await response.json().catch(() => ({})) as { error?: { message?: string } };
       throw new Error(data.error?.message || `Anthropic streaming request failed: ${response.status}`);
     }
 
@@ -172,9 +170,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
         content += event.delta.text;
         yield { type: 'delta', text: event.delta.text };
       }
-      if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta' && activeTool) {
-        activeTool.json += event.delta.partial_json || '';
-      }
+      if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta' && activeTool) activeTool.json += event.delta.partial_json || '';
       if (event.type === 'content_block_stop' && activeTool) {
         let input: Record<string, unknown> = {};
         try {
@@ -188,16 +184,8 @@ export class AnthropicAdapter implements AIProviderAdapter {
         yield { type: 'tool_call', toolCall: call };
         activeTool = undefined;
       }
-      if (event.type === 'message_start' && event.message?.usage) {
-        usage = { inputTokens: event.message.usage.input_tokens, outputTokens: event.message.usage.output_tokens };
-      }
-      if (event.type === 'message_delta' && event.usage) {
-        usage = {
-          inputTokens: usage?.inputTokens,
-          outputTokens: event.usage.output_tokens,
-          totalTokens: (usage?.inputTokens || 0) + (event.usage.output_tokens || 0),
-        };
-      }
+      if (event.type === 'message_start' && event.message?.usage) usage = { inputTokens: event.message.usage.input_tokens, outputTokens: event.message.usage.output_tokens };
+      if (event.type === 'message_delta' && event.usage) usage = { inputTokens: usage?.inputTokens, outputTokens: event.usage.output_tokens, totalTokens: (usage?.inputTokens || 0) + (event.usage.output_tokens || 0) };
     }
 
     const result: AIResponse = { content, model: request.model, providerId: this.id, usage, toolCalls };
