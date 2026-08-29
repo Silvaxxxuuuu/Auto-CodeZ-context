@@ -36,28 +36,16 @@ export class ChatGptConnector
     const appHandle =
       await findWindowHandleByTitle([
         'ChatGPT',
+        'chatgpt.com',
+        'OpenAI',
       ]);
 
     return appHandle !== null;
   }
 
   async prepare(): Promise<boolean> {
-  const browserTab =
-    await findAiTab([
-      'ChatGPT',
-    ]);
-
-  if (browserTab) {
-    return true;
+    return this.isAvailable();
   }
-
-  const appHandle =
-    await findWindowHandleByTitle([
-      'ChatGPT',
-    ]);
-
-  return appHandle !== null;
-}
 
   async send(
     request: AiRequest,
@@ -129,6 +117,8 @@ export class ChatGptConnector
     const appHandle =
       await findWindowHandleByTitle([
         'ChatGPT',
+        'chatgpt.com',
+        'OpenAI',
       ]);
 
     if (!appHandle) {
