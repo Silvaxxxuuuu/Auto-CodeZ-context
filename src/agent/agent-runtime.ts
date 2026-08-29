@@ -40,13 +40,7 @@ export class AgentRuntime {
     return this.runLoop(config, chat, workingChat, projectContext, permission, 0);
   }
 
-  async runStreaming(
-    config: AIProviderConfig,
-    chat: ChatRecord,
-    projectContext: string | undefined,
-    permission: PermissionLevel,
-    emit: StreamEmitter,
-  ): Promise<AgentRunResult> {
+  async runStreaming(config: AIProviderConfig, chat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel, emit: StreamEmitter): Promise<AgentRunResult> {
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
     return this.runStreamLoop(config, chat, workingChat, projectContext, permission, 0, emit);
   }
@@ -138,15 +132,7 @@ export class AgentRuntime {
     }
   }
 
-  private async runStreamLoop(
-    config: AIProviderConfig,
-    chat: ChatRecord,
-    workingChat: ChatRecord,
-    projectContext: string | undefined,
-    permission: PermissionLevel,
-    toolRounds: number,
-    emit: StreamEmitter,
-  ): Promise<AgentRunResult> {
+  private async runStreamLoop(config: AIProviderConfig, chat: ChatRecord, workingChat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel, toolRounds: number, emit: StreamEmitter): Promise<AgentRunResult> {
     while (true) {
       let response: AIResponse | undefined;
       let streamError: string | undefined;
@@ -171,7 +157,6 @@ export class AgentRuntime {
       const approvalCalls: Record<string, AIToolCall> = {};
 
       for (const call of response.toolCalls) {
-        emit({ type: 'tool_call', toolCall: call });
         const result = await this.tools.execute(workingChat.projectId, permission, call);
         if (result.pendingApproval && result.approvalId) {
           pendingApprovalIds.push(result.approvalId);
