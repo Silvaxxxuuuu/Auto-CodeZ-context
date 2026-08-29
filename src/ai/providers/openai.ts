@@ -1,6 +1,14 @@
-import type { AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse } from '../types';
+import type { AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent } from '../types';
+import { parseSSE } from '../sse';
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
+
+function reasoningEffort(level: AIRequest['intelligence']): string | undefined {
+  if (level === 'normal') return undefined;
+  if (level === 'low') return 'low';
+  if (level === 'maximum') return 'high';
+  return level;
+}
 
 export class OpenAIAdapter implements AIProviderAdapter {
   readonly id = 'openai';
@@ -23,7 +31,7 @@ export class OpenAIAdapter implements AIProviderAdapter {
       }));
   }
 
-  async send(config: AIProviderConfig, request: AIRequest): Promise<AIResponse> {
+  private buildBody(request: AIRequest, stream = false): Record<string, unknown> {
     const body: Record<string, unknown> = {
       model: request.model,
       input: request.messages.map((message) => ({
@@ -31,18 +39,20 @@ export class OpenAIAdapter implements AIProviderAdapter {
         content: [{ type: 'input_text', text: message.content }],
       })),
     };
+    const effort = reasoningEffort(request.intelligence);
+    if (effort) body.reasoning = { effort };
+    if (stream) body.stream = true;
+    return body;
+  }
 
-    if (request.intelligence !== 'normal') {
-      body.reasoning = { effort: request.intelligence === 'low' ? 'low' : request.intelligence === 'maximum' ? 'high' : request.intelligence };
-    }
-
+  async send(config: AIProviderConfig, request: AIRequest): Promise<AIResponse> {
     const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/responses`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${config.apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(this.buildBody(request)),
     });
 
     const data = (await response.json()) as {
@@ -63,5 +73,46 @@ export class OpenAIAdapter implements AIProviderAdapter {
         totalTokens: data.usage?.total_tokens,
       },
     };
+  }
+
+  async *stream(config: AIProviderConfig, request: AIRequest): AsyncGenerator<AIStreamEvent> {
+    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/responses`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(this.buildBody(request, true)),
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
+      throw new Error(data.error?.message || `OpenAI streaming request failed: ${response.status}`);
+    }
+
+    let content = '';
+    let usage: AIResponse['usage'];
+    yield { type: 'start' };
+
+    for await (const raw of parseSSE(response)) {
+      const event = raw as { type?: string; delta?: string; response?: { output_text?: string; usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } } };
+      if (event.type === 'response.output_text.delta' && event.delta) {
+        content += event.delta;
+        yield { type: 'delta', text: event.delta };
+      }
+      if (event.type === 'response.completed' && event.response) {
+        usage = {
+          inputTokens: event.response.usage?.input_tokens,
+          outputTokens: event.response.usage?.output_tokens,
+          totalTokens: event.response.usage?.total_tokens,
+        };
+      }
+      if (event.type === 'error') {
+        throw new Error('OpenAI retornou um erro durante o streaming.');
+      }
+    }
+
+    const result: AIResponse = { content, model: request.model, providerId: this.id, usage };
+    yield { type: 'complete', response: result, usage };
   }
 }
