@@ -1,4 +1,4 @@
-import type { AIMessage, AIProviderConfig, AIResponse, ChatRecord, PermissionLevel } from '../ai/types';
+import type { AIMessage, AIProviderConfig, AIResponse, AIToolCall, ChatRecord, PermissionLevel } from '../ai/types';
 import { ActivityRuntime } from './activity-runtime';
 import { ToolRuntime } from './tool-runtime';
 import { ChatRuntime } from '../ai/chat-runtime';
@@ -12,7 +12,7 @@ type PendingRun = {
   permission: PermissionLevel;
   workingChat: ChatRecord;
   pendingApprovalIds: string[];
-  approvalCallIds: Record<string, string>;
+  approvalCalls: Record<string, AIToolCall>;
 };
 
 export interface AgentRunResult {
@@ -39,11 +39,14 @@ export class AgentRuntime {
 
   async resume(approvalId: string): Promise<AgentRunResult> {
     const pending = this.getPending(approvalId);
+    const call = pending.approvalCalls[approvalId];
+    if (!call) throw new Error('Chamada de ferramenta associada à aprovação não encontrada.');
     const result = await this.tools.approve(approvalId);
     pending.workingChat.messages.push({
       role: 'tool',
       content: result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`,
       toolCallId: result.toolCallId,
+      toolName: call.name,
       createdAt: Date.now(),
     });
     return this.finishApproval(pending, approvalId);
@@ -51,9 +54,10 @@ export class AgentRuntime {
 
   async reject(approvalId: string): Promise<AgentRunResult> {
     const pending = this.getPending(approvalId);
-    const callId = pending.approvalCallIds[approvalId];
+    const call = pending.approvalCalls[approvalId];
+    if (!call) throw new Error('Chamada de ferramenta associada à aprovação não encontrada.');
     if (!this.tools.deny(approvalId)) throw new Error('Aprovação não encontrada ou já processada.');
-    pending.workingChat.messages.push({ role: 'tool', content: 'Operação recusada pelo usuário.', toolCallId: callId, createdAt: Date.now() });
+    pending.workingChat.messages.push({ role: 'tool', content: 'Operação recusada pelo usuário.', toolCallId: call.id, toolName: call.name, createdAt: Date.now() });
     return this.finishApproval(pending, approvalId);
   }
 
@@ -65,7 +69,7 @@ export class AgentRuntime {
 
   private async finishApproval(pending: PendingRun, approvalId: string): Promise<AgentRunResult> {
     pending.pendingApprovalIds = pending.pendingApprovalIds.filter((id) => id !== approvalId);
-    delete pending.approvalCallIds[approvalId];
+    delete pending.approvalCalls[approvalId];
     this.pendingRuns.delete(approvalId);
     if (pending.pendingApprovalIds.length) {
       return {
@@ -93,13 +97,13 @@ export class AgentRuntime {
       this.activity.emit({ type: 'tool', message: `Executando ${response.toolCalls.length} ferramenta(s).`, status: 'running' });
       workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, createdAt: Date.now() });
       const pendingApprovalIds: string[] = [];
-      const approvalCallIds: Record<string, string> = {};
+      const approvalCalls: Record<string, AIToolCall> = {};
 
       for (const call of response.toolCalls) {
         const result = await this.tools.execute(workingChat.projectId, permission, call);
         if (result.pendingApproval && result.approvalId) {
           pendingApprovalIds.push(result.approvalId);
-          approvalCallIds[result.approvalId] = call.id;
+          approvalCalls[result.approvalId] = call;
           continue;
         }
         const content = result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`;
@@ -107,7 +111,7 @@ export class AgentRuntime {
       }
 
       if (pendingApprovalIds.length) {
-        const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds, approvalCallIds };
+        const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds, approvalCalls };
         for (const approvalId of pendingApprovalIds) this.pendingRuns.set(approvalId, pendingRun);
         this.activity.emit({ type: 'action', message: 'O agente aguarda aprovação antes de continuar.', status: 'pending' });
         return { chatId: chat.id, response, toolRounds, pendingApprovalIds, messages: [...workingChat.messages] };
