@@ -291,6 +291,39 @@ async function sendMessage(): Promise<void> {
   }
 }
 
+async function resumeApproval(id: string, approve: boolean): Promise<void> {
+  if (streaming) return;
+  streaming = true;
+  streamingText = '';
+  streamingActivity = [approve ? 'Aprovando operação...' : 'Recusando operação...'];
+  pendingApprovals = pendingApprovals.filter((item) => item.id !== id);
+  renderMessages();
+  renderComposer();
+  try {
+    if (approve) await window.autoCodez.approveTool(id);
+    else await window.autoCodez.denyTool(id);
+    const remaining = await window.autoCodez.listApprovals();
+    pendingApprovals = remaining;
+    if (!remaining.length) {
+      streaming = false;
+      streamingText = '';
+      streamingActivity = [];
+      await refresh();
+    } else {
+      streaming = false;
+      streamingActivity.push('Outras operações ainda aguardam aprovação.');
+      renderMessages();
+      renderComposer();
+    }
+  } catch (error) {
+    streaming = false;
+    pendingApprovals = await window.autoCodez.listApprovals();
+    streamingActivity.push(error instanceof Error ? error.message : 'Não foi possível processar a aprovação.');
+    renderMessages();
+    renderComposer();
+  }
+}
+
 async function setComposerIntelligence(level: IntelligenceLevel): Promise<void> {
   const previous = composerIntelligence;
   composerIntelligence = level;
@@ -452,23 +485,20 @@ modalRoot.addEventListener('click', async (event) => {
       alert(error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.');
     }
   }
+});
+
+document.addEventListener('click', async (event) => {
+  const target = event.target as HTMLElement;
   const approve = target.closest<HTMLElement>('[data-approve]');
   if (approve) {
     const id = approve.dataset.approve;
-    if (!id) return;
-    approve.setAttribute('aria-disabled', 'true');
-    try { await window.autoCodez.approveTool(id); } catch (error) { alert(error instanceof Error ? error.message : 'Não foi possível aprovar a operação.'); }
-    await refreshApprovals();
-    await refresh();
+    if (id) await resumeApproval(id, true);
     return;
   }
   const deny = target.closest<HTMLElement>('[data-deny]');
   if (deny) {
     const id = deny.dataset.deny;
-    if (!id) return;
-    try { await window.autoCodez.denyTool(id); } catch (error) { alert(error instanceof Error ? error.message : 'Não foi possível recusar a operação.'); }
-    await refreshApprovals();
-    await refresh();
+    if (id) await resumeApproval(id, false);
   }
 });
 
