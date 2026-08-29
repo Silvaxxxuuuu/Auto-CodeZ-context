@@ -107,6 +107,31 @@ try {
     exit
   }
 
+  $rootRuntimeId = [string]::Join(',', $root.GetRuntimeId())
+  $cursor = $focused
+  $insideRoot = $false
+
+  for ($depth = 0; $depth -lt 20 -and $null -ne $cursor; $depth++) {
+    try {
+      $cursorRuntimeId = [string]::Join(',', $cursor.GetRuntimeId())
+
+      if ($cursorRuntimeId -eq $rootRuntimeId) {
+        $insideRoot = $true
+        break
+      }
+
+      $cursor = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($cursor)
+    }
+    catch {
+      $cursor = $null
+    }
+  }
+
+  if (-not $insideRoot) {
+    Write-Output "false"
+    exit
+  }
+
   $cursor = $focused
 
   for ($depth = 0; $depth -lt 12 -and $null -ne $cursor; $depth++) {
