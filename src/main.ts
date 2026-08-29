@@ -105,12 +105,16 @@ async function getChatContext(chatId: string): Promise<{ chat: ChatRecord; confi
 }
 
 ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => {
-  const { chat, config, projectContext } = await getChatContext(input.chatId); const content = input.content.trim(); if (!content) throw new Error('A mensagem não pode estar vazia.');
-  await chatManager.addMessage(chat.id, { role: 'user', content }); const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
+  const { chat, config, projectContext } = await getChatContext(input.chatId);
+  const content = input.content.trim();
+  if (!content) throw new Error('A mensagem não pode estar vazia.');
+  await chatManager.addMessage(chat.id, { role: 'user', content });
+  const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
   const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
-  await chatManager.addMessage(chat.id, { role: 'assistant', content: result.response.content });
-  return { response: result.response, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  await chatManager.update({ ...current, messages: result.messages });
+  return { response: result.response, pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 });
+
 ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
   const { chat, config, projectContext } = await getChatContext(input.chatId); const content = input.content.trim(); if (!content) throw new Error('A mensagem não pode estar vazia.');
   await chatManager.addMessage(chat.id, { role: 'user', content }); const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
@@ -123,7 +127,12 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
 ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
 ipcMain.handle('agent:execute-tool', async (_event, input: { projectId: string; permissionLevel: PermissionLevel; toolCall: AIToolCall }) => toolRuntime.execute(input.projectId, input.permissionLevel, input.toolCall));
-ipcMain.handle('agent:approve', async (_event, approvalId: string) => toolRuntime.approve(approvalId));
+ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
+  const result = await agentRuntime.resume(approvalId);
+  const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+  if (chat) await chatManager.update({ ...chat, messages: result.messages });
+  return result;
+});
 ipcMain.handle('agent:deny', async (_event, approvalId: string) => toolRuntime.deny(approvalId));
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => projectManager.create(input.name, input.rootPath));
 ipcMain.handle('projects:open-folder', async () => { const result = await dialog.showOpenDialog({ properties: ['openDirectory'] }); if (result.canceled || !result.filePaths[0]) return null; return result.filePaths[0]; });
