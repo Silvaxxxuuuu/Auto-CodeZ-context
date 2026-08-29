@@ -2,10 +2,12 @@ import './index.css';
 
 type ProviderSummary = { id: string; displayName: string; configured: boolean; selectedModel?: string; model?: string; apiKeyConfigured: boolean };
 type Model = { id: string; name: string; providerId: string; capabilities: string[]; reasoningLevels?: string[] };
-type Message = { role: 'user' | 'assistant' | 'system'; content: string; createdAt?: number };
+type Message = { role: 'user' | 'assistant' | 'system' | 'tool'; content: string; createdAt?: number; toolCallId?: string; toolName?: string; changes?: Array<{ path: string; type: string; before: string; after: string; addedLines: number; removedLines: number }> };
 type Chat = { id: string; title: string; projectId?: string; providerId: string; model: string; intelligence: 'low' | 'normal' | 'high' | 'maximum'; permissionLevel: 'read-only' | 'safe' | 'ask' | 'unrestricted'; messages: Message[]; createdAt: number; updatedAt: number };
 type Project = { id: string; name: string; rootPath: string; createdAt: number; updatedAt: number };
 type IntelligenceLevel = Chat['intelligence'];
+type StreamEvent = { type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'error'; text?: string; activity?: { message: string; status: string }; toolCall?: { id: string; name: string; input: Record<string, unknown> }; pendingApprovalIds?: string[]; error?: string };
+type Approval = { id: string; projectId: string; permissionLevel: string; toolCall: { id: string; name: string; input: Record<string, unknown> }; createdAt: number };
 
 declare global {
   interface Window {
@@ -17,6 +19,12 @@ declare global {
       createChat: (input: { providerId: string; model: string; intelligence: string; permissionLevel: string; projectId?: string }) => Promise<Chat>;
       updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
       sendChat: (input: { chatId: string; content: string }) => Promise<{ response: { content: string; model: string; providerId: string }; chat: Chat }>;
+      streamChat: (input: { chatId: string; content: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
+      onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
+      listApprovals: () => Promise<Approval[]>;
+      approveTool: (approvalId: string) => Promise<unknown>;
+      denyTool: (approvalId: string) => Promise<unknown>;
+      onActivity: (listener: (event: { message?: string; status?: string }) => void) => () => void;
       createProject: (input: { name: string; rootPath: string }) => Promise<Project>;
       openFolder: () => Promise<string | null>;
     };
@@ -37,6 +45,10 @@ let activeChat: Chat | null = null;
 let activePanel = 'chats';
 let composerIntelligence: IntelligenceLevel = 'normal';
 let intelligenceMenuOpen = false;
+let streaming = false;
+let streamingText = '';
+let streamingActivity: string[] = [];
+let pendingApprovals: Approval[] = [];
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('Elemento #app não encontrado.');
@@ -150,20 +162,27 @@ function renderHeader(): void {
   chatHeader.innerHTML = `<div><div class="chat-title-row"><h1>${escapeHtml(activeChat.title)}</h1><button class="gear" data-chat-settings="${activeChat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button></div><div class="chat-subtitle">${escapeHtml(providerName(activeChat.providerId))} · ${escapeHtml(activeChat.model)} · Inteligência ${intelligenceLabel(activeChat.intelligence)}</div></div><div class="header-actions"><button class="provider-chip" data-chat-settings="${activeChat.id}">${escapeHtml(providerName(activeChat.providerId))}<span class="provider-chevron" aria-hidden="true"></span></button></div>`;
 }
 
+function renderApprovals(): string {
+  if (!pendingApprovals.length) return '';
+  return pendingApprovals.map((approval) => `<div class="approval-card" data-approval="${approval.id}"><div class="approval-heading">Aprovação necessária</div><div class="approval-tool">${escapeHtml(approval.toolCall.name)}</div><div class="approval-input">${escapeHtml(JSON.stringify(approval.toolCall.input, null, 2))}</div><div class="approval-actions"><button data-approve="${approval.id}" class="primary-button">Aprovar</button><button data-deny="${approval.id}" class="danger-button">Recusar</button></div></div>`).join('');
+}
+
 function renderMessages(extraActivity = ''): void {
   if (!activeChat) {
     messages.innerHTML = `<div class="welcome"><div class="welcome-mark"><span class="welcome-mark-eye"></span></div><h2>Como você quer trabalhar?</h2><p>Converse com uma IA, crie conteúdo ou abra um projeto para trabalhar em arquivos.</p><div class="welcome-grid"><button data-suggestion="Explique como o Auto CodeZ funciona.">Pergunte qualquer coisa</button><button data-suggestion="Analise meu projeto e explique a estrutura.">Analise um projeto</button><button data-suggestion="Crie uma ideia de interface moderna.">Crie conteúdo</button></div></div>`;
     return;
   }
-  const rendered = activeChat.messages.map((message) => `<article class="message ${message.role}"><div class="message-label">${message.role === 'user' ? 'Você' : providerName(activeChat.providerId)}</div><div class="message-content">${escapeHtml(message.content).replace(/\n/g, '<br>')}</div></article>`).join('');
-  const activity = extraActivity ? `<div class="activity-card"><div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${extraActivity}</div>` : '';
-  messages.innerHTML = rendered + activity;
+  const rendered = activeChat.messages.map((message) => `<article class="message ${message.role}"><div class="message-label">${message.role === 'user' ? 'Você' : message.role === 'tool' ? 'Ferramenta' : providerName(activeChat!.providerId)}</div><div class="message-content">${escapeHtml(message.content).replace(/\n/g, '<br>')}</div></article>`).join('');
+  const live = streaming && streamingText ? `<article class="message assistant streaming"><div class="message-label">${escapeHtml(providerName(activeChat.providerId))}</div><div class="message-content">${escapeHtml(streamingText).replace(/\n/g, '<br>')}</div></article>` : '';
+  const activityLines = [...streamingActivity, ...(extraActivity ? [extraActivity] : [])];
+  const activity = activityLines.length || pendingApprovals.length ? `<div class="activity-card"><div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line running">${escapeHtml(line)}</div>`).join('')}${renderApprovals()}</div>` : '';
+  messages.innerHTML = rendered + live + activity;
   messages.scrollTop = messages.scrollHeight;
 }
 
 function renderComposer(): void {
   intelligenceButton.querySelector<HTMLElement>('.intelligence-current')!.textContent = intelligenceLabel(composerIntelligence);
-  sendButton.disabled = !activeChat || !prompt.value.trim();
+  sendButton.disabled = !activeChat || !prompt.value.trim() || streaming || pendingApprovals.length > 0;
   renderIntelligenceMenu();
 }
 
@@ -172,7 +191,7 @@ async function refresh(): Promise<void> {
   providers = state.providers;
   chats = state.chats;
   projects = state.projects;
-  if (activeChat) activeChat = chats.find((chat) => chat.id === activeChat!.id) || null;
+  if (activeChat) activeChat = chats.find((chat) => chat.id === activeChat!.id) || activeChat;
   if (activeChat) composerIntelligence = activeChat.intelligence;
   renderNav();
   renderHeader();
@@ -218,6 +237,7 @@ async function newChat(projectId?: string): Promise<void> {
   const model = provider.selectedModel || provider.model || available[0]?.id;
   if (!model) { await openProviderSettings(provider.id); return; }
   activeChat = await window.autoCodez.createChat({ providerId: provider.id, model, intelligence: 'normal', permissionLevel: 'safe', projectId });
+  pendingApprovals = [];
   activePanel = projectId ? 'projects' : 'chats';
   await refresh();
 }
@@ -231,21 +251,43 @@ async function newProject(): Promise<void> {
   await refresh();
 }
 
+async function refreshApprovals(): Promise<void> {
+  pendingApprovals = await window.autoCodez.listApprovals();
+  renderMessages();
+  renderComposer();
+}
+
 async function sendMessage(): Promise<void> {
   const content = prompt.value.trim();
-  if (!content || !activeChat) return;
+  if (!content || !activeChat || streaming || pendingApprovals.length) return;
   prompt.value = '';
   prompt.style.height = '';
+  streaming = true;
+  streamingText = '';
+  streamingActivity = ['Enviando para ' + providerName(activeChat.providerId)];
   renderComposer();
   activeChat.messages.push({ role: 'user', content, createdAt: Date.now() });
-  renderMessages(`<div class="activity-line done">Conversa preparada</div><div class="activity-line running">Enviando para ${escapeHtml(providerName(activeChat.providerId))}</div>`);
+  renderMessages();
   try {
-    const result = await window.autoCodez.sendChat({ chatId: activeChat.id, content });
+    const result = await window.autoCodez.streamChat({ chatId: activeChat.id, content });
     activeChat = result.chat;
-    renderMessages(`<div class="activity-line done">Solicitação concluída</div><div class="activity-line done">Resposta recebida de ${escapeHtml(providerName(result.response.providerId))}</div>`);
-    await refresh();
+    pendingApprovals = result.pendingApprovalIds.length ? await window.autoCodez.listApprovals() : [];
+    if (!pendingApprovals.length) {
+      streaming = false;
+      streamingText = '';
+      streamingActivity = [];
+      await refresh();
+    } else {
+      streaming = false;
+      streamingActivity.push('Aguardando sua aprovação.');
+      renderMessages();
+      renderComposer();
+    }
   } catch (error) {
-    renderMessages(`<div class="activity-line error">${escapeHtml(error instanceof Error ? error.message : 'Falha ao enviar mensagem.')}</div>`);
+    streaming = false;
+    streamingActivity.push(error instanceof Error ? error.message : 'Falha ao enviar mensagem.');
+    renderMessages();
+    renderComposer();
   }
 }
 
@@ -314,6 +356,7 @@ app.addEventListener('click', async (event) => {
 
   const chatSettings = target.closest<HTMLElement>('[data-chat-settings]');
   if (chatSettings) {
+    if (streaming) return;
     const chat = chats.find((item) => item.id === chatSettings.dataset.chatSettings);
     if (chat) await openChatSettings(chat);
     return;
@@ -321,7 +364,9 @@ app.addEventListener('click', async (event) => {
 
   const chatButton = target.closest<HTMLElement>('[data-chat]');
   if (chatButton) {
+    if (streaming) return;
     activeChat = chats.find((chat) => chat.id === chatButton.dataset.chat) || null;
+    pendingApprovals = [];
     composerIntelligence = activeChat?.intelligence || 'normal';
     renderNav();
     renderHeader();
@@ -406,6 +451,57 @@ modalRoot.addEventListener('click', async (event) => {
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.');
     }
+  }
+  const approve = target.closest<HTMLElement>('[data-approve]');
+  if (approve) {
+    const id = approve.dataset.approve;
+    if (!id) return;
+    approve.setAttribute('aria-disabled', 'true');
+    try { await window.autoCodez.approveTool(id); } catch (error) { alert(error instanceof Error ? error.message : 'Não foi possível aprovar a operação.'); }
+    await refreshApprovals();
+    await refresh();
+    return;
+  }
+  const deny = target.closest<HTMLElement>('[data-deny]');
+  if (deny) {
+    const id = deny.dataset.deny;
+    if (!id) return;
+    try { await window.autoCodez.denyTool(id); } catch (error) { alert(error instanceof Error ? error.message : 'Não foi possível recusar a operação.'); }
+    await refreshApprovals();
+    await refresh();
+  }
+});
+
+window.autoCodez.onStreamEvent((event) => {
+  if (event.type === 'delta' && event.text) {
+    streamingText += event.text;
+    renderMessages();
+    return;
+  }
+  if (event.type === 'tool_call' && event.toolCall) {
+    streamingActivity.push(`Solicitou ferramenta: ${event.toolCall.name}`);
+    renderMessages();
+    return;
+  }
+  if (event.type === 'activity' && event.activity?.message) {
+    streamingActivity.push(event.activity.message);
+    renderMessages();
+    return;
+  }
+  if (event.type === 'approval_required') {
+    void refreshApprovals();
+    return;
+  }
+  if (event.type === 'error' && event.error) {
+    streamingActivity.push(event.error);
+    renderMessages();
+  }
+});
+
+window.autoCodez.onActivity((event) => {
+  if (event.message) {
+    streamingActivity.push(event.message);
+    if (streaming) renderMessages();
   }
 });
 
