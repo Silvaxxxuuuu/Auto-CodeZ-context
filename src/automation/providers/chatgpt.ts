@@ -11,18 +11,11 @@ import {
 } from '../ai-response-reader';
 
 import {
-  findAiTab,
   focusBrowserInput,
   focusBrowserTab,
   pasteClipboardAndSend,
   waitForAiTab,
 } from '../browser';
-
-import {
-  findWindowHandleByTitle,
-  focusFirstEditableElement,
-  focusWindow,
-} from '../windows-ui';
 
 import {
   clipboard,
@@ -41,19 +34,13 @@ export class ChatGptConnector implements AiConnector {
   }
 
   async prepare(): Promise<boolean> {
-    const browserTab = await findAiTab(['ChatGPT']);
+    const browserTab = await waitForAiTab(
+      ['ChatGPT', 'chatgpt.com', 'OpenAI'],
+      2,
+      300,
+    );
 
     if (browserTab) {
-      return true;
-    }
-
-    const appHandle = await findWindowHandleByTitle([
-      'ChatGPT',
-      'chatgpt.com',
-      'OpenAI',
-    ]);
-
-    if (appHandle !== null) {
       return true;
     }
 
@@ -65,7 +52,7 @@ export class ChatGptConnector implements AiConnector {
     }
 
     const openedTab = await waitForAiTab(
-      ['ChatGPT'],
+      ['ChatGPT', 'chatgpt.com', 'OpenAI'],
       30,
       500,
     );
@@ -86,63 +73,27 @@ export class ChatGptConnector implements AiConnector {
 
     clipboard.writeText(request.prompt);
 
-    const browserTab = await findAiTab(['ChatGPT']);
+    const browserTab = await waitForAiTab(
+      ['ChatGPT', 'chatgpt.com', 'OpenAI'],
+      10,
+      300,
+    );
 
-    if (browserTab) {
-      const selected = await focusBrowserTab(browserTab);
-
-      if (!selected) {
-        throw new Error(
-          'Não foi possível selecionar a aba do ChatGPT.',
-        );
-      }
-
-      const inputFocused = await focusBrowserInput(browserTab);
-
-      if (!inputFocused) {
-        throw new Error(
-          'Não foi possível focar o campo de mensagem do ChatGPT.',
-        );
-      }
-
-      this.responseReader = await captureResponseReaderState(
-        browserTab.handle,
-        request.prompt,
+    if (!browserTab) {
+      throw new Error(
+        'Não foi possível localizar a aba do ChatGPT no navegador.',
       );
-
-      const sent = await pasteClipboardAndSend();
-
-      if (!sent) {
-        this.responseReader = null;
-        throw new Error(
-          'Não foi possível enviar o prompt para o ChatGPT.',
-        );
-      }
-
-      return {
-        provider: this.provider,
-        content: 'Solicitação enviada ao ChatGPT.',
-        receivedAt: Date.now(),
-      };
     }
 
-    const appHandle = await findWindowHandleByTitle([
-      'ChatGPT',
-      'chatgpt.com',
-      'OpenAI',
-    ]);
+    const selected = await focusBrowserTab(browserTab);
 
-    if (!appHandle) {
-      throw new Error('O ChatGPT não está aberto.');
+    if (!selected) {
+      throw new Error(
+        'Não foi possível selecionar a aba do ChatGPT.',
+      );
     }
 
-    const focused = await focusWindow(appHandle);
-
-    if (!focused) {
-      throw new Error('Não foi possível focar o ChatGPT.');
-    }
-
-    const inputFocused = await focusFirstEditableElement(appHandle);
+    const inputFocused = await focusBrowserInput(browserTab);
 
     if (!inputFocused) {
       throw new Error(
@@ -151,7 +102,7 @@ export class ChatGptConnector implements AiConnector {
     }
 
     this.responseReader = await captureResponseReaderState(
-      appHandle,
+      browserTab.handle,
       request.prompt,
     );
 
