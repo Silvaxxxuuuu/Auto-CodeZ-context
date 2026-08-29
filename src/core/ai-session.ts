@@ -51,6 +51,101 @@ export type AiSessionEvent = {
   timestamp: number;
 };
 
+const MAX_PROMPT_FILES = 60;
+const MAX_PROMPT_FILE_SIZE = 120000;
+const MAX_PROMPT_CONTEXT_CHARS = 500000;
+
+const ignoredDirectoryNames = new Set([
+  '.git',
+  '.gradle',
+  '.idea',
+  '.kotlin',
+  '.next',
+  '.nuxt',
+  '.turbo',
+  '.vite',
+  '__pycache__',
+  '.pytest_cache',
+  '.cache',
+  'node_modules',
+  'dist',
+  'build',
+  'out',
+  'coverage',
+  'target',
+  'bin',
+  'obj',
+  'Pods',
+  'DerivedData',
+]);
+
+const sourceExtensions = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.java',
+  '.kt',
+  '.kts',
+  '.py',
+  '.go',
+  '.rs',
+  '.c',
+  '.cc',
+  '.cpp',
+  '.h',
+  '.hh',
+  '.hpp',
+  '.cs',
+  '.swift',
+  '.dart',
+  '.vue',
+  '.svelte',
+  '.html',
+  '.css',
+  '.scss',
+  '.sass',
+  '.less',
+  '.json',
+  '.jsonc',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.xml',
+  '.properties',
+  '.gradle',
+  '.sql',
+  '.sh',
+  '.ps1',
+]);
+
+const binaryExtensions = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.ico',
+  '.bmp',
+  '.svgz',
+  '.pdf',
+  '.zip',
+  '.7z',
+  '.rar',
+  '.jar',
+  '.class',
+  '.exe',
+  '.dll',
+  '.so',
+  '.dylib',
+  '.bin',
+  '.db',
+  '.sqlite',
+  '.sqlite3',
+]);
+
 export class AiSession {
   readonly id: string;
   readonly provider: AiProviderId;
@@ -292,9 +387,9 @@ function buildSessionPrompt(
     'ARQUIVOS DO PROJETO:',
   );
 
-  for (
-    const file of request.files
-  ) {
+  const files = selectPromptFiles(request.files, request.activeFile);
+
+  for (const file of files) {
     sections.push(
       '',
       `===== ${file.relativePath} =====`,
@@ -310,4 +405,151 @@ function buildSessionPrompt(
   return sections.join(
     '\n',
   );
+}
+
+function selectPromptFiles(
+  files: AiSessionFile[],
+  activeFile: AiSessionActiveFile,
+): AiSessionFile[] {
+  const normalizedActive = normalizePath(activeFile.relativePath);
+
+  const candidates = files
+    .filter((file) => file.content.length <= MAX_PROMPT_FILE_SIZE)
+    .filter((file) => !isIgnoredPath(file.relativePath))
+    .filter((file) => !isBinaryPath(file.relativePath))
+    .map((file) => ({
+      file,
+      score: scoreContextFile(file, normalizedActive),
+    }))
+    .sort((a, b) => {
+      if (a.score !== b.score) {
+        return b.score - a.score;
+      }
+
+      return normalizePath(a.file.relativePath).localeCompare(
+        normalizePath(b.file.relativePath),
+      );
+    });
+
+  const selected: AiSessionFile[] = [];
+  let totalChars = 0;
+
+  for (const candidate of candidates) {
+    if (selected.length >= MAX_PROMPT_FILES) {
+      break;
+    }
+
+    const contentLength = candidate.file.content.length;
+
+    if (
+      selected.length > 0 &&
+      totalChars + contentLength > MAX_PROMPT_CONTEXT_CHARS
+    ) {
+      continue;
+    }
+
+    selected.push(candidate.file);
+    totalChars += contentLength;
+  }
+
+  if (
+    !selected.some(
+      (file) =>
+        normalizePath(file.relativePath) === normalizedActive,
+    )
+  ) {
+    const active = files.find(
+      (file) =>
+        normalizePath(file.relativePath) === normalizedActive,
+    );
+
+    if (
+      active &&
+      active.content.length <= MAX_PROMPT_FILE_SIZE &&
+      !isIgnoredPath(active.relativePath) &&
+      !isBinaryPath(active.relativePath)
+    ) {
+      selected.unshift(active);
+    }
+  }
+
+  return selected.slice(0, MAX_PROMPT_FILES);
+}
+
+function scoreContextFile(
+  file: AiSessionFile,
+  normalizedActive: string,
+): number {
+  const path = normalizePath(file.relativePath);
+  const lower = path.toLowerCase();
+  const extension = getExtension(lower);
+  let score = 0;
+
+  if (path === normalizedActive) {
+    score += 10000;
+  }
+
+  if (sourceExtensions.has(extension)) {
+    score += 500;
+  }
+
+  if (
+    lower === 'package.json' ||
+    lower === 'tsconfig.json' ||
+    lower.endsWith('.gradle.kts') ||
+    lower.endsWith('gradle.properties') ||
+    lower === 'settings.gradle' ||
+    lower === 'settings.gradle.kts' ||
+    lower === 'vite.config.ts' ||
+    lower === 'vite.config.js'
+  ) {
+    score += 250;
+  }
+
+  if (
+    lower.endsWith('readme.md') ||
+    lower.endsWith('.md')
+  ) {
+    score += 100;
+  }
+
+  if (
+    lower.endsWith('.lock') ||
+    lower.endsWith('.sum')
+  ) {
+    score -= 100;
+  }
+
+  return score;
+}
+
+function isIgnoredPath(value: string): boolean {
+  const normalized = normalizePath(value);
+  const segments = normalized.split('/');
+
+  return segments.some((segment) =>
+    ignoredDirectoryNames.has(segment.toLowerCase()),
+  );
+}
+
+function isBinaryPath(value: string): boolean {
+  return binaryExtensions.has(
+    getExtension(normalizePath(value).toLowerCase()),
+  );
+}
+
+function getExtension(value: string): string {
+  const basename = value.split('/').pop() || value;
+  const index = basename.lastIndexOf('.');
+
+  return index >= 0
+    ? basename.slice(index)
+    : '';
+}
+
+function normalizePath(value: string): string {
+  return value
+    .trim()
+    .replaceAll('\\', '/')
+    .replace(/^\.\/+/, '');
 }
