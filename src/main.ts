@@ -3,6 +3,7 @@ import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { ProviderRegistry } from './ai/provider-registry';
 import { ChatRuntime } from './ai/chat-runtime';
+import { ModelResolver } from './ai/model-resolver';
 import { OpenAIAdapter } from './ai/providers/openai';
 import { GoogleAdapter } from './ai/providers/google';
 import { AnthropicAdapter } from './ai/providers/anthropic';
@@ -21,11 +22,12 @@ const registry = new ProviderRegistry();
 registry.register(new OpenAIAdapter());
 registry.register(new GoogleAdapter());
 registry.register(new AnthropicAdapter());
+const modelResolver = new ModelResolver(registry);
 const activityRuntime = new ActivityRuntime();
 const projectManager = new ProjectManager(storage);
 const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
 const toolRuntime = new ToolRuntime(workspaceRuntime, undefined, activityRuntime);
-const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime);
+const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver);
 const chatManager = new ChatManager(storage);
 
 let providerConfigs: AIProviderConfig[] = [];
@@ -99,7 +101,7 @@ ipcMain.handle('app:get-state', async () => ({
 ipcMain.handle('providers:list-models', async (_event, providerId: ProviderId) => {
   const config = providerConfigs.find((item) => item.id === providerId);
   if (!config?.apiKey) throw new Error('Configure a API key primeiro.');
-  return registry.listModels(config);
+  return modelResolver.list(config);
 });
 
 ipcMain.handle('providers:save', async (_event, input: { providerId: ProviderId; apiKey: string; model?: string; baseUrl?: string }) => {
@@ -113,10 +115,12 @@ ipcMain.handle('providers:save', async (_event, input: { providerId: ProviderId;
     selectedModel: input.model,
     baseUrl: input.baseUrl?.trim() || undefined,
   };
+  if (!config.apiKey) throw new Error('API key não pode estar vazia.');
+  const models = await modelResolver.list(config, true);
+  if (!models.length) throw new Error('O provider não retornou modelos utilizáveis.');
+  if (!config.selectedModel && models[0]) config.selectedModel = models[0].id;
   if (existing) providerConfigs = providerConfigs.map((item) => item.id === input.providerId ? config : item);
   else providerConfigs.push(config);
-  const models = await registry.listModels(config);
-  if (!config.selectedModel && models[0]) config.selectedModel = models[0].id;
   await saveProviders();
   return { providers: publicProviders(), models };
 });
@@ -124,6 +128,7 @@ ipcMain.handle('providers:save', async (_event, input: { providerId: ProviderId;
 ipcMain.handle('providers:remove', async (_event, providerId: ProviderId) => {
   providerConfigs = providerConfigs.filter((item) => item.id !== providerId);
   delete providerKeys[providerId];
+  modelResolver.invalidate(providerId);
   await saveProviders();
   return publicProviders();
 });
@@ -172,7 +177,6 @@ ipcMain.handle('projects:open-folder', async () => {
 });
 
 ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(rootPath));
-
 ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(filePath));
 ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => projectManager.writeFile(input.filePath, input.content));
 ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(url));
