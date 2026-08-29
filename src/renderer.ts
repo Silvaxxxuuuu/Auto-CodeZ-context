@@ -1,6 +1,6 @@
 import './index.css';
 
-type ProviderSummary = { id: string; displayName: string; configured: boolean; selectedModel?: string; apiKeyConfigured: boolean };
+type ProviderSummary = { id: string; displayName: string; configured: boolean; selectedModel?: string; model?: string; apiKeyConfigured: boolean };
 type Model = { id: string; name: string; providerId: string; capabilities: string[]; reasoningLevels?: string[] };
 type Message = { role: 'user' | 'assistant' | 'system'; content: string; createdAt?: number };
 type Chat = { id: string; title: string; projectId?: string; providerId: string; model: string; intelligence: 'low' | 'normal' | 'high' | 'maximum'; permissionLevel: 'read-only' | 'safe' | 'ask' | 'unrestricted'; messages: Message[]; createdAt: number; updatedAt: number };
@@ -136,7 +136,7 @@ function renderNav(): void {
     return;
   }
   if (activePanel === 'plugins') {
-    navPanel.innerHTML = `<div class="panel-title">Plugins</div><div class="plugin-card"><span class="plugin-card-icon" aria-hidden="true"></span><div><strong>Ecossistema de extensões</strong><span>A barra lateral direita permanece reservada para extensões.</span></div></div><div class="empty-panel">Nenhum plugin instalado.</div>`;
+    navPanel.innerHTML = `<div class="panel-title">Plugins</div><div class="plugin-card"><span class="plugin-card-icon plugin-extension-icon" aria-hidden="true"></span><div><strong>Ecossistema de extensões</strong><span>A barra lateral direita permanece reservada para extensões.</span></div></div><div class="empty-panel">Nenhum plugin instalado.</div>`;
     return;
   }
   navPanel.innerHTML = `<div class="panel-title">Chats</div><button class="new-item" data-action="new-chat"><span class="new-item-icon new-chat-icon" aria-hidden="true"></span><span>Novo chat</span></button><div class="group-label">Recentes</div>${chats.map((chat) => `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-settings="${chat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button></div>`).join('') || '<div class="empty-panel">Nenhum chat salvo. Chats vazios não são persistidos.</div>'}`;
@@ -215,7 +215,7 @@ async function newChat(projectId?: string): Promise<void> {
   if (!provider) { await openProviderSettings(); return; }
   let available: Model[] = [];
   try { available = await window.autoCodez.listModels(provider.id); } catch { available = []; }
-  const model = provider.selectedModel || available[0]?.id;
+  const model = provider.selectedModel || provider.model || available[0]?.id;
   if (!model) { await openProviderSettings(provider.id); return; }
   activeChat = await window.autoCodez.createChat({ providerId: provider.id, model, intelligence: 'normal', permissionLevel: 'safe', projectId });
   activePanel = projectId ? 'projects' : 'chats';
