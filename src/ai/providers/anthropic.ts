@@ -1,4 +1,4 @@
-import type { AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent } from '../types';
+import type { AIMessage, AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent, AIToolCall } from '../types';
 import { parseSSE } from '../sse';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com/v1';
@@ -14,13 +14,56 @@ function effort(level: AIRequest['intelligence']): string {
   return 'max';
 }
 
+function buildMessages(messages: AIMessage[]): Array<Record<string, unknown>> {
+  const result: Array<Record<string, unknown>> = [];
+  for (const message of messages) {
+    if (message.role === 'system') continue;
+    if (message.role === 'tool') {
+      if (!message.toolCallId) continue;
+      result.push({
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: message.toolCallId, content: message.content }],
+      });
+      continue;
+    }
+    if (message.role === 'assistant' && message.toolCalls?.length) {
+      const content: Array<Record<string, unknown>> = [];
+      if (message.content) content.push({ type: 'text', text: message.content });
+      for (const call of message.toolCalls) content.push({ type: 'tool_use', id: call.id, name: call.name, input: call.input });
+      result.push({ role: 'assistant', content });
+      continue;
+    }
+    result.push({ role: message.role, content: message.content });
+  }
+  return result;
+}
+
+function buildTools(request: AIRequest): Array<Record<string, unknown>> | undefined {
+  if (!request.toolsEnabled || !request.tools?.length) return undefined;
+  return request.tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.parameters,
+  }));
+}
+
 type AnthropicEvent = {
   type?: string;
-  delta?: { type?: string; text?: string };
+  index?: number;
+  delta?: { type?: string; text?: string; partial_json?: string };
+  content_block?: { type?: string; id?: string; name?: string };
   message?: { usage?: { input_tokens?: number; output_tokens?: number } };
   usage?: { input_tokens?: number; output_tokens?: number };
   error?: { message?: string };
 };
+
+function parseToolBlocks(content: Array<{ type?: string; id?: string; name?: string; input?: unknown }>): AIToolCall[] {
+  return content.flatMap((item) => {
+    if (item.type !== 'tool_use' || !item.id || !item.name) return [];
+    const input = item.input && typeof item.input === 'object' && !Array.isArray(item.input) ? item.input as Record<string, unknown> : {};
+    return [{ id: item.id, name: item.name as AIToolCall['name'], input }];
+  });
+}
 
 export class AnthropicAdapter implements AIProviderAdapter {
   readonly id = 'anthropic';
@@ -46,16 +89,15 @@ export class AnthropicAdapter implements AIProviderAdapter {
 
   private buildBody(request: AIRequest, stream = false): Record<string, unknown> {
     const systemMessages = request.messages.filter((message) => message.role === 'system');
-    const messages = request.messages
-      .filter((message) => message.role !== 'system')
-      .map((message) => ({ role: message.role, content: message.content }));
     const body: Record<string, unknown> = {
       model: request.model,
       max_tokens: 8192,
       system: systemMessages.map((message) => message.content).join('\n\n') || undefined,
-      messages,
+      messages: buildMessages(request.messages),
       stream,
     };
+    const tools = buildTools(request);
+    if (tools) body.tools = tools;
     if (supportsEffort(request.model)) body.output_config = { effort: effort(request.intelligence) };
     return body;
   }
@@ -72,7 +114,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
     });
 
     const data = (await response.json()) as {
-      content?: Array<{ type?: string; text?: string }>;
+      content?: Array<{ type?: string; text?: string; id?: string; name?: string; input?: unknown }>;
       error?: { message?: string };
       usage?: { input_tokens?: number; output_tokens?: number };
     };
@@ -88,6 +130,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
         outputTokens: data.usage?.output_tokens,
         totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
       },
+      toolCalls: parseToolBlocks(data.content || []),
     };
   }
 
@@ -109,14 +152,35 @@ export class AnthropicAdapter implements AIProviderAdapter {
 
     let content = '';
     let usage: AIResponse['usage'];
+    const toolCalls: AIToolCall[] = [];
+    let activeTool: { id: string; name: string; json: string } | undefined;
     yield { type: 'start' };
 
     for await (const raw of parseSSE(response)) {
       const event = raw as AnthropicEvent;
       if (event.type === 'error' && event.error?.message) throw new Error(event.error.message);
+      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use' && event.content_block.id && event.content_block.name) {
+        activeTool = { id: event.content_block.id, name: event.content_block.name, json: '' };
+      }
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
         content += event.delta.text;
         yield { type: 'delta', text: event.delta.text };
+      }
+      if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta' && activeTool) {
+        activeTool.json += event.delta.partial_json || '';
+      }
+      if (event.type === 'content_block_stop' && activeTool) {
+        let input: Record<string, unknown> = {};
+        try {
+          const parsed = JSON.parse(activeTool.json || '{}');
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) input = parsed as Record<string, unknown>;
+        } catch {
+          throw new Error('Anthropic retornou argumentos inválidos para uma ferramenta.');
+        }
+        const call: AIToolCall = { id: activeTool.id, name: activeTool.name as AIToolCall['name'], input };
+        toolCalls.push(call);
+        yield { type: 'tool_call', toolCall: call };
+        activeTool = undefined;
       }
       if (event.type === 'message_start' && event.message?.usage) {
         usage = { inputTokens: event.message.usage.input_tokens, outputTokens: event.message.usage.output_tokens };
@@ -130,7 +194,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
       }
     }
 
-    const result: AIResponse = { content, model: request.model, providerId: this.id, usage };
+    const result: AIResponse = { content, model: request.model, providerId: this.id, usage, toolCalls };
     yield { type: 'complete', response: result, usage };
   }
 }
