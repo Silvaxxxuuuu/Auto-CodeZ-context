@@ -8,7 +8,8 @@ export class ChatManager {
   constructor(private readonly storage: LocalStorage) {}
 
   async init(): Promise<void> {
-    this.chats = await this.storage.read<ChatRecord[]>('chats.json', []);
+    const stored = await this.storage.read<ChatRecord[]>('chats.json', []);
+    this.chats = stored.filter((chat) => chat.messages.length > 0);
   }
 
   async list(): Promise<ChatRecord[]> {
@@ -19,7 +20,6 @@ export class ChatManager {
     const now = Date.now();
     const chat: ChatRecord = { id: crypto.randomUUID(), title: input.title?.trim() || 'Novo chat', projectId: input.projectId, providerId: input.providerId, model: input.model, intelligence: input.intelligence, permissionLevel: input.permissionLevel, messages: [], createdAt: now, updatedAt: now };
     this.chats.unshift(chat);
-    await this.storage.write('chats.json', this.chats);
     return chat;
   }
 
@@ -28,7 +28,8 @@ export class ChatManager {
     if (index < 0) throw new Error('Chat não encontrado.');
     chat.updatedAt = Date.now();
     this.chats[index] = chat;
-    await this.storage.write('chats.json', this.chats);
+    const persisted = this.chats.filter((item) => item.messages.length > 0);
+    await this.storage.write('chats.json', persisted);
   }
 
   async addMessage(chatId: string, message: AIMessage): Promise<ChatRecord> {
