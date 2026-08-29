@@ -12,6 +12,8 @@ export type AiResponseReaderState = {
   prompt: string;
   baseline: string[];
   startedAt: number;
+  candidate: string | null;
+  candidateSince: number | null;
 };
 
 const ignoredTexts = new Set([
@@ -25,7 +27,17 @@ const ignoredTexts = new Set([
   'bad response',
   'send',
   'new chat',
+  'stop response',
 ]);
+
+const busyTerms = [
+  'stop generating',
+  'stop response',
+  'generating',
+  'responding',
+];
+
+const RESPONSE_STABILITY_MS = 900;
 
 function normalize(value: string): string {
   return value
@@ -46,10 +58,15 @@ function cleanCandidate(
     candidate.startsWith(normalizedPrompt)
   ) {
     candidate = normalize(
-      candidate.slice(
-        normalizedPrompt.length,
-      ),
+      candidate.slice(normalizedPrompt.length),
     );
+  }
+
+  if (
+    normalizedPrompt &&
+    candidate === normalizedPrompt
+  ) {
+    return '';
   }
 
   return candidate;
@@ -67,71 +84,42 @@ function isIgnored(value: string): boolean {
   );
 }
 
-export async function captureResponseReaderState(
-  handle: number,
-  prompt: string,
-): Promise<AiResponseReaderState> {
-  return {
-    handle,
-    prompt,
-    baseline:
-      await readWindowText(handle),
-    startedAt:
-      Date.now(),
-  };
+function containsBusyIndicator(
+  values: string[],
+): boolean {
+  return values.some((value) => {
+    const normalized = normalize(value).toLowerCase();
+
+    return busyTerms.some((term) =>
+      normalized.includes(term),
+    );
+  });
 }
 
-export async function readNewAiResponse(
-  state: AiResponseReaderState | null,
-  provider: AiProviderId,
-): Promise<AiResponse | null> {
-  if (!state) {
-    return null;
-  }
-
-  const current =
-    await readWindowText(
-      state.handle,
-    );
-
-  if (current.length === 0) {
-    return null;
-  }
-
-  const baseline =
-    state.baseline.map(
-      normalize,
-    );
-
+function collectCandidates(
+  current: string[],
+  baseline: string[],
+  prompt: string,
+): string[] {
   const candidates: string[] = [];
 
   for (const raw of current) {
-    const normalized =
-      normalize(raw);
+    const normalized = normalize(raw);
 
-    if (
-      !normalized ||
-      isIgnored(normalized)
-    ) {
+    if (!normalized || isIgnored(normalized)) {
       continue;
     }
 
-    if (
-      baseline.includes(normalized)
-    ) {
+    if (baseline.includes(normalized)) {
       continue;
     }
 
-    const cleaned =
-      cleanCandidate(
-        normalized,
-        state.prompt,
-      );
+    const cleaned = cleanCandidate(
+      normalized,
+      prompt,
+    );
 
-    if (
-      !cleaned ||
-      isIgnored(cleaned)
-    ) {
+    if (!cleaned || isIgnored(cleaned)) {
       continue;
     }
 
@@ -149,13 +137,9 @@ export async function readNewAiResponse(
   }
 
   for (const raw of current) {
-    const normalized =
-      normalize(raw);
+    const normalized = normalize(raw);
 
-    if (
-      !normalized ||
-      isIgnored(normalized)
-    ) {
+    if (!normalized || isIgnored(normalized)) {
       continue;
     }
 
@@ -167,41 +151,90 @@ export async function readNewAiResponse(
         continue;
       }
 
-      const suffix =
-        cleanCandidate(
-          normalized.slice(
-            previous.length,
-          ),
-          state.prompt,
-        );
+      const suffix = cleanCandidate(
+        normalized.slice(previous.length),
+        prompt,
+      );
 
-      if (
-        suffix &&
-        !isIgnored(suffix)
-      ) {
+      if (suffix && !isIgnored(suffix)) {
         candidates.push(suffix);
       }
     }
   }
 
-  const unique = [
+  return [
     ...new Set(
       candidates.map(normalize),
     ),
-  ];
+  ].sort((a, b) => b.length - a.length);
+}
 
-  if (unique.length === 0) {
+export async function captureResponseReaderState(
+  handle: number,
+  prompt: string,
+): Promise<AiResponseReaderState> {
+  return {
+    handle,
+    prompt,
+    baseline: await readWindowText(handle),
+    startedAt: Date.now(),
+    candidate: null,
+    candidateSince: null,
+  };
+}
+
+export async function readNewAiResponse(
+  state: AiResponseReaderState | null,
+  provider: AiProviderId,
+): Promise<AiResponse | null> {
+  if (!state) {
     return null;
   }
 
-  unique.sort(
-    (a, b) =>
-      b.length - a.length,
+  const current = await readWindowText(state.handle);
+
+  if (current.length === 0) {
+    return null;
+  }
+
+  if (containsBusyIndicator(current)) {
+    state.candidate = null;
+    state.candidateSince = null;
+    return null;
+  }
+
+  const baseline = state.baseline.map(normalize);
+  const candidates = collectCandidates(
+    current,
+    baseline,
+    state.prompt,
   );
+
+  if (candidates.length === 0) {
+    state.candidate = null;
+    state.candidateSince = null;
+    return null;
+  }
+
+  const bestCandidate = candidates[0];
+  const now = Date.now();
+
+  if (state.candidate !== bestCandidate) {
+    state.candidate = bestCandidate;
+    state.candidateSince = now;
+    return null;
+  }
+
+  if (
+    state.candidateSince === null ||
+    now - state.candidateSince < RESPONSE_STABILITY_MS
+  ) {
+    return null;
+  }
 
   return {
     provider,
-    content: unique[0],
-    receivedAt: Date.now(),
+    content: bestCandidate,
+    receivedAt: now,
   };
 }
