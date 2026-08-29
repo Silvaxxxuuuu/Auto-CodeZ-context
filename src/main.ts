@@ -7,7 +7,7 @@ import { ModelResolver } from './ai/model-resolver';
 import { OpenAIAdapter } from './ai/providers/openai';
 import { GoogleAdapter } from './ai/providers/google';
 import { AnthropicAdapter } from './ai/providers/anthropic';
-import type { AIProviderConfig, ChatRecord, IntelligenceLevel, PermissionLevel, ProviderId, AIToolCall, AIStreamEvent } from './ai/types';
+import type { AIProviderConfig, ChatRecord, IntelligenceLevel, PermissionLevel, ProviderId, AIStreamEvent } from './ai/types';
 import { LocalStorage } from './core/storage';
 import { ProjectManager } from './core/project-manager';
 import { ChatManager } from './core/chat-manager';
@@ -52,7 +52,13 @@ activityRuntime.subscribe((event) => { mainWindow?.webContents.send('agent:activ
 
 async function loadProviders(): Promise<void> {
   providerConfigs = await storage.read<AIProviderConfig[]>('providers.json', defaultProviders);
-  providerKeys = JSON.parse((await storage.readEncrypted('provider-keys.dat')) || '{}') as Record<string, string>;
+  const encrypted = await storage.readEncrypted('provider-keys.dat');
+  try {
+    const parsed = encrypted ? JSON.parse(encrypted) : {};
+    providerKeys = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, string> : {};
+  } catch {
+    providerKeys = {};
+  }
   providerConfigs = providerConfigs.map((config) => ({ ...config, apiKey: providerKeys[config.id] || '' }));
 }
 
@@ -63,7 +69,23 @@ async function saveProviders(): Promise<void> {
   await storage.writeEncrypted('provider-keys.dat', JSON.stringify(providerKeys));
 }
 
-function publicProviders() { return registry.summaries(providerConfigs).map((summary) => ({ ...summary, apiKeyConfigured: Boolean(providerKeys[summary.id]) })); }
+function publicProviders() {
+  return registry.summaries(providerConfigs).map((summary) => ({ ...summary, apiKeyConfigured: Boolean(providerKeys[summary.id]) }));
+}
+
+async function getConfiguredProvider(providerId: ProviderId): Promise<AIProviderConfig> {
+  const config = providerConfigs.find((item) => item.id === providerId);
+  if (!config?.enabled || !config.apiKey) throw new Error('O provider selecionado não está configurado.');
+  return config;
+}
+
+async function validateChatInput(input: { providerId: ProviderId; model: string; projectId?: string }): Promise<void> {
+  const config = await getConfiguredProvider(input.providerId);
+  const models = await modelResolver.list(config);
+  const model = modelResolver.find(models, input.model);
+  if (model.providerId !== input.providerId) throw new Error('O modelo não pertence ao provider selecionado.');
+  if (input.projectId && !(await projectManager.list()).some((project) => project.id === input.projectId)) throw new Error('Projeto não encontrado.');
+}
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({ width: 1440, height: 900, minWidth: 1050, minHeight: 700, backgroundColor: '#090b0f', title: 'Auto CodeZ', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
@@ -73,7 +95,10 @@ async function createWindow(): Promise<void> {
 }
 
 ipcMain.handle('app:get-state', async () => ({ providers: publicProviders(), chats: await chatManager.list(), projects: await projectManager.list() }));
-ipcMain.handle('providers:list-models', async (_event, providerId: ProviderId) => { const config = providerConfigs.find((item) => item.id === providerId); if (!config?.apiKey) throw new Error('Configure a API key primeiro.'); return modelResolver.list(config); });
+ipcMain.handle('providers:list-models', async (_event, providerId: ProviderId) => {
+  const config = await getConfiguredProvider(providerId);
+  return modelResolver.list(config);
+});
 ipcMain.handle('providers:save', async (_event, input: { providerId: ProviderId; apiKey: string; model?: string; baseUrl?: string }) => {
   const adapter = registry.get(input.providerId);
   const existing = providerConfigs.find((item) => item.id === input.providerId);
@@ -81,25 +106,38 @@ ipcMain.handle('providers:save', async (_event, input: { providerId: ProviderId;
   if (!config.apiKey) throw new Error('API key não pode estar vazia.');
   const models = await modelResolver.list(config, true);
   if (!models.length) throw new Error('O provider não retornou modelos utilizáveis.');
+  if (config.selectedModel && !models.some((model) => model.id === config.selectedModel)) throw new Error('O modelo selecionado não pertence aos modelos disponíveis do provider.');
   if (!config.selectedModel && models[0]) config.selectedModel = models[0].id;
   if (existing) providerConfigs = providerConfigs.map((item) => item.id === input.providerId ? config : item); else providerConfigs.push(config);
   await saveProviders();
   return { providers: publicProviders(), models };
 });
-ipcMain.handle('providers:remove', async (_event, providerId: ProviderId) => { providerConfigs = providerConfigs.filter((item) => item.id !== providerId); delete providerKeys[providerId]; modelResolver.invalidate(providerId); await saveProviders(); return publicProviders(); });
-ipcMain.handle('chat:create', async (_event, input: { providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel; projectId?: string }) => chatManager.create(input));
+ipcMain.handle('providers:remove', async (_event, providerId: ProviderId) => {
+  providerConfigs = providerConfigs.filter((item) => item.id !== providerId);
+  delete providerKeys[providerId];
+  modelResolver.invalidate(providerId);
+  await saveProviders();
+  return publicProviders();
+});
+ipcMain.handle('chat:create', async (_event, input: { providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel; projectId?: string }) => {
+  await validateChatInput(input);
+  return chatManager.create(input);
+});
 ipcMain.handle('chat:update-settings', async (_event, input: { chatId: string; providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel }) => {
   const chat = (await chatManager.list()).find((item) => item.id === input.chatId);
   if (!chat) throw new Error('Chat não encontrado.');
+  await validateChatInput(input);
   const updated: ChatRecord = { ...chat, providerId: input.providerId, model: input.model, intelligence: input.intelligence, permissionLevel: input.permissionLevel };
-  await chatManager.update(updated); return updated;
+  await chatManager.update(updated);
+  return updated;
 });
 
 async function getChatContext(chatId: string): Promise<{ chat: ChatRecord; config: AIProviderConfig; projectContext?: string }> {
   const chat = (await chatManager.list()).find((item) => item.id === chatId);
   if (!chat) throw new Error('Chat não encontrado.');
-  const config = providerConfigs.find((item) => item.id === chat.providerId);
-  if (!config?.apiKey) throw new Error('A IA deste chat não possui uma API key configurada.');
+  const config = await getConfiguredProvider(chat.providerId);
+  const models = await modelResolver.list(config);
+  modelResolver.find(models, chat.model);
   const projectContext = chat.projectId ? await projectContextRuntime.build(chat.projectId) : undefined;
   return { chat, config, projectContext };
 }
@@ -121,29 +159,12 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
   if (!content) throw new Error('A mensagem não pode estar vazia.');
   await chatManager.addMessage(chat.id, { role: 'user', content });
   const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
-  const models = await modelResolver.list(config);
-  const model = modelResolver.find(models, current.model);
-  const supportsTools = model.capabilities.includes('tools');
-
-  if (supportsTools) {
-    const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
-    mainWindow?.webContents.send('chat:stream-event', { type: 'start' } satisfies AIStreamEvent);
-    if (result.response.content) mainWindow?.webContents.send('chat:stream-event', { type: 'delta', text: result.response.content } satisfies AIStreamEvent);
-    mainWindow?.webContents.send('chat:stream-event', { type: 'complete', response: result.response, usage: result.response.usage } satisfies AIStreamEvent);
-    await chatManager.update({ ...current, messages: result.messages });
-    return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
-  }
-
-  let finalResponse: AIStreamEvent['response'];
-  let streamedText = '';
-  for await (const event of chatRuntime.stream(config, current, projectContext)) {
-    if (event.type === 'delta' && event.text) streamedText += event.text;
-    if (event.type === 'complete' && event.response) finalResponse = event.response;
-    mainWindow?.webContents.send('chat:stream-event', event);
-  }
-  if (finalResponse) await chatManager.addMessage(chat.id, { role: 'assistant', content: finalResponse.content });
-  else if (streamedText) await chatManager.addMessage(chat.id, { role: 'assistant', content: streamedText });
-  return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  const emit = (event: AIStreamEvent): void => { mainWindow?.webContents.send('chat:stream-event', event); };
+  emit({ type: 'start' });
+  const result = await agentRuntime.runStreaming(config, current, projectContext, current.permissionLevel, emit);
+  await chatManager.update({ ...current, messages: result.messages });
+  if (result.pendingApprovalIds.length) emit({ type: 'approval_required', pendingApprovalIds: result.pendingApprovalIds });
+  return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 });
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
