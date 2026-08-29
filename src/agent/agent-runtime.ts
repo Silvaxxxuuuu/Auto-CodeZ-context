@@ -47,6 +47,7 @@ export class AgentRuntime {
       content: result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`,
       toolCallId: result.toolCallId,
       toolName: call.name,
+      changes: result.changes,
       createdAt: Date.now(),
     });
     return this.finishApproval(pending, approvalId);
@@ -107,7 +108,7 @@ export class AgentRuntime {
           continue;
         }
         const content = result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`;
-        workingChat.messages.push({ role: 'tool', content, toolCallId: call.id, toolName: call.name, createdAt: Date.now() });
+        workingChat.messages.push({ role: 'tool', content, toolCallId: call.id, toolName: call.name, changes: result.changes, createdAt: Date.now() });
       }
 
       if (pendingApprovalIds.length) {
