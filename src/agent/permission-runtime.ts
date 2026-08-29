@@ -3,19 +3,19 @@ import type { PermissionLevel, ToolName } from '../ai/types';
 export type PermissionDecision = 'allow' | 'ask' | 'deny';
 
 const readTools = new Set<ToolName>(['read_file', 'search_files']);
-const writeTools = new Set<ToolName>(['write_file', 'create_file', 'delete_file', 'rename_file']);
+const safeWriteTools = new Set<ToolName>(['write_file', 'create_file']);
+const sensitiveWriteTools = new Set<ToolName>(['delete_file', 'rename_file', 'run_command']);
 
 export class PermissionRuntime {
   decide(level: PermissionLevel, tool: ToolName): PermissionDecision {
     if (readTools.has(tool)) return 'allow';
-    if (!writeTools.has(tool)) return 'deny';
     if (level === 'read-only') return 'deny';
-    if (level === 'safe') return 'allow';
-    if (level === 'ask') return 'ask';
-    return 'allow';
+    if (sensitiveWriteTools.has(tool)) return level === 'unrestricted' ? 'allow' : 'ask';
+    if (safeWriteTools.has(tool)) return level === 'ask' ? 'ask' : 'allow';
+    return 'deny';
   }
 
   isWriteTool(tool: ToolName): boolean {
-    return writeTools.has(tool);
+    return safeWriteTools.has(tool) || sensitiveWriteTools.has(tool);
   }
 }
