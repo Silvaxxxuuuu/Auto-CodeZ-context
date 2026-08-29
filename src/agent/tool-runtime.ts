@@ -1,5 +1,6 @@
-import type { AIToolCall, AIToolDefinition, AIToolResult, PermissionLevel, ToolName } from '../ai/types';
+import type { ApprovalRequest, AIToolCall, AIToolDefinition, AIToolResult, PermissionLevel, ToolName } from '../ai/types';
 import { ActivityRuntime } from './activity-runtime';
+import { ApprovalRuntime } from './approval-runtime';
 import { PermissionRuntime } from './permission-runtime';
 import { WorkspaceRuntime } from './workspace-runtime';
 
@@ -17,17 +18,38 @@ export class ToolRuntime {
     private readonly workspace: WorkspaceRuntime,
     private readonly permissions = new PermissionRuntime(),
     private readonly activity = new ActivityRuntime(),
+    private readonly approvals = new ApprovalRuntime(),
   ) {}
 
   listDefinitions(): AIToolDefinition[] {
     return definitions.map((definition) => ({ ...definition }));
   }
 
+  listApprovals(): ApprovalRequest[] {
+    return this.approvals.list();
+  }
+
   async execute(projectId: string, permission: PermissionLevel, call: AIToolCall): Promise<AIToolResult> {
     const decision = this.permissions.decide(permission, call.name);
     if (decision === 'deny') return { toolCallId: call.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
-    if (decision === 'ask') return { toolCallId: call.id, ok: false, error: 'Operação requer aprovação do usuário.' };
+    if (decision === 'ask') {
+      const approval = this.approvals.request({ projectId, permissionLevel: permission, toolCall: call });
+      this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${call.name}.`, status: 'pending' });
+      return { toolCallId: call.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true };
+    }
+    return this.executeNow(projectId, call);
+  }
 
+  async approve(approvalId: string): Promise<AIToolResult> {
+    const approval = this.approvals.resolve(approvalId);
+    return this.executeNow(approval.projectId, approval.toolCall);
+  }
+
+  deny(approvalId: string): boolean {
+    return Boolean(this.approvals.get(approvalId)) && (this.approvals.resolve(approvalId), true);
+  }
+
+  private async executeNow(projectId: string, call: AIToolCall): Promise<AIToolResult> {
     const activity = this.activity.start('tool', `Executando ${call.name}`);
     try {
       const output = await this.executeAllowed(projectId, call.name, call.input);
