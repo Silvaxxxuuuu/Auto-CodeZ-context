@@ -11,7 +11,7 @@ import {
 } from '../ai-response-reader';
 
 import {
-  focusBrowserInput,
+  focusBrowserMessageInput,
   focusBrowserTab,
   pasteClipboardAndSend,
   waitForAiTab,
@@ -93,11 +93,14 @@ export class GeminiConnector implements AiConnector {
       );
     }
 
-    const inputFocused = await focusBrowserInput(browserTab);
+    const inputFocused = await focusBrowserMessageInput(
+      browserTab,
+      this.provider,
+    );
 
     if (!inputFocused) {
       throw new Error(
-        'Não foi possível focar o campo de mensagem do Gemini.',
+        'Não foi possível identificar com segurança o campo de mensagem do Gemini.',
       );
     }
 
