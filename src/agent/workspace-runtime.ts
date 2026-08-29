@@ -40,6 +40,16 @@ export class WorkspaceRuntime {
     return candidate;
   }
 
+  async exists(projectId: string, requestedPath: string): Promise<boolean> {
+    try {
+      const filePath = await this.resolve(projectId, requestedPath);
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async readFile(projectId: string, requestedPath: string): Promise<string> {
     return fs.readFile(await this.resolve(projectId, requestedPath), 'utf8');
   }
