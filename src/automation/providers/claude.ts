@@ -5,6 +5,12 @@ import type {
 } from '../../ai/aiConnector';
 
 import {
+  captureResponseReaderState,
+  readNewAiResponse,
+  type AiResponseReaderState,
+} from '../ai-response-reader';
+
+import {
   findAiTab,
   focusBrowserInput,
   focusBrowserTab,
@@ -22,6 +28,10 @@ export class ClaudeConnector
 {
   readonly provider =
     'claude' as const;
+
+  private responseReader:
+    AiResponseReaderState | null =
+    null;
 
   async isAvailable(): Promise<boolean> {
     const browserTab =
@@ -111,10 +121,19 @@ export class ClaudeConnector
         );
       }
 
+      this.responseReader =
+        await captureResponseReaderState(
+          browserTab.handle,
+          request.prompt,
+        );
+
       const sent =
         await pasteClipboardAndSend();
 
       if (!sent) {
+        this.responseReader =
+          null;
+
         throw new Error(
           'Não foi possível enviar o prompt para o Claude.',
         );
@@ -165,10 +184,19 @@ export class ClaudeConnector
       );
     }
 
+    this.responseReader =
+      await captureResponseReaderState(
+        appHandle,
+        request.prompt,
+      );
+
     const sent =
       await pasteClipboardAndSend();
 
     if (!sent) {
+      this.responseReader =
+        null;
+
       throw new Error(
         'Não foi possível enviar o prompt para o Claude.',
       );
@@ -185,6 +213,17 @@ export class ClaudeConnector
   }
 
   async readResponse(): Promise<AiResponse | null> {
-    return null;
+    const response =
+      await readNewAiResponse(
+        this.responseReader,
+        this.provider,
+      );
+
+    if (response) {
+      this.responseReader =
+        null;
+    }
+
+    return response;
   }
 }
