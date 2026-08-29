@@ -163,7 +163,6 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
   emit({ type: 'start' });
   const result = await agentRuntime.runStreaming(config, current, projectContext, current.permissionLevel, emit);
   await chatManager.update({ ...current, messages: result.messages });
-  if (result.pendingApprovalIds.length) emit({ type: 'approval_required', pendingApprovalIds: result.pendingApprovalIds });
   return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 });
 
