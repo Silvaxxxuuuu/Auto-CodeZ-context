@@ -2,6 +2,7 @@ import type { AIProviderConfig, AIResponse, ChatRecord } from './types';
 import { ActivityRuntime } from '../agent/activity-runtime';
 import { CapabilityResolver } from './capability-resolver';
 import { IntelligenceRuntime } from './intelligence-runtime';
+import { ModelResolver } from './model-resolver';
 import { ProviderRegistry } from './provider-registry';
 
 export class ChatRuntime {
@@ -10,13 +11,13 @@ export class ChatRuntime {
     private readonly capabilities = new CapabilityResolver(),
     private readonly intelligence = new IntelligenceRuntime(capabilities),
     private readonly activity = new ActivityRuntime(),
+    private readonly models = new ModelResolver(registry),
   ) {}
 
   async send(config: AIProviderConfig, chat: ChatRecord): Promise<AIResponse> {
     const adapter = this.registry.get(config.id);
-    const models = await adapter.listModels(config);
-    const model = models.find((item) => item.id === chat.model);
-    if (!model) throw new Error(`Modelo '${chat.model}' não está disponível para este provider.`);
+    const availableModels = await this.models.list(config);
+    const model = this.models.find(availableModels, chat.model);
     if (!this.capabilities.supports(model, 'text')) throw new Error('O modelo selecionado não suporta texto.');
 
     const resolution = this.intelligence.resolve(model, chat.intelligence);
