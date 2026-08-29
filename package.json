@@ -1,8 +1,8 @@
 {
-  "name": "auto codez",
-  "productName": "auto codez",
-  "version": "1.0.0",
-  "description": "My Electron application description",
+  "name": "auto-codez",
+  "productName": "Auto CodeZ",
+  "version": "2.0.0-alpha.1",
+  "description": "Local-first multi-provider AI workspace for chats, projects and agent tools.",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {
@@ -10,12 +10,12 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
-    "lint": "eslint --ext .ts,.tsx ."
+    "lint": "eslint --ext .ts,.tsx .",
+    "typecheck": "tsc --noEmit"
   },
-  "keywords": [],
+  "keywords": ["ai", "electron", "typescript", "workspace", "agents"],
   "author": {
-    "name": "ggmacro",
-    "email": "sebastiao54e@gmail.com"
+    "name": "Auto CodeZ"
   },
   "license": "MIT",
   "devDependencies": {
@@ -25,7 +25,7 @@
     "@electron-forge/maker-squirrel": "^7.11.2",
     "@electron-forge/maker-zip": "^7.11.2",
     "@electron-forge/plugin-auto-unpack-natives": "^7.11.2",
-    "@electron-forge/plugin-fuses": "^7.11.2",
+    "@electron-forge/plugin-fuses": "^1.8.0",
     "@electron-forge/plugin-vite": "^7.11.2",
     "@electron/fuses": "^1.8.0",
     "@types/electron-squirrel-startup": "^1.0.2",
