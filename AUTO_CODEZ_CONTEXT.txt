@@ -1,0 +1,625 @@
+AUTO CODEZ
+DOCUMENTO DE CONTEXTO PERMANENTE DO PROJETO
+
+Objetivo deste arquivo
+
+Este arquivo registra a visão funcional, arquitetura, fluxo, regras, interface, prioridades e decisões do Auto CodeZ. Ele serve como referência permanente para qualquer trabalho futuro no projeto. Antes de alterar código, leia este arquivo e compare o estado real do repositório com estas regras. O código existente sempre tem prioridade para fatos sobre o estado atual. Este arquivo tem prioridade para intenção, fluxo desejado e decisões de produto, salvo quando o usuário mudar explicitamente uma decisão.
+
+1. VISÃO DO PRODUTO
+
+O Auto CodeZ é um aplicativo desktop Electron voltado para desenvolvimento de software com auxílio de IAs externas.
+
+A ideia central é transformar o Auto CodeZ na interface principal de trabalho do desenvolvedor. ChatGPT, Claude e Gemini são mecanismos externos usados pelo Auto CodeZ por automação de interface. O usuário não deve precisar alternar manualmente entre o Auto CodeZ e as interfaces externas para trabalhar.
+
+O aplicativo trabalha com projetos locais. Ele conhece a estrutura do projeto, arquivos relevantes, arquivo ativo e contexto necessário para uma solicitação. O usuário descreve uma tarefa no Auto CodeZ. O Auto CodeZ prepara o contexto, envia o pedido para a IA escolhida, lê a resposta, interpreta a proposta e apresenta alterações para aprovação no próprio editor.
+
+O projeto não deve depender de API keys das IAs externas para o fluxo principal. A automação deve operar sobre as interfaces que o usuário já possui abertas ou que o Auto CodeZ consegue abrir.
+
+2. PRINCÍPIO CENTRAL DA EXPERIÊNCIA
+
+O usuário trabalha dentro do Auto CodeZ.
+
+A janela externa da IA é um mecanismo de execução e não a interface principal.
+
+O Auto CodeZ deve:
+
+1. Preparar o pedido.
+2. Preparar o contexto do projeto.
+3. Selecionar o provider escolhido.
+4. Encontrar ou abrir a interface correta da IA.
+5. Encontrar a aba correta da IA.
+6. Encontrar o campo de composição da mensagem da IA.
+7. Colocar o prompt nesse campo.
+8. Enviar o prompt.
+9. Aguardar a conclusão da resposta.
+10. Ler a resposta.
+11. Interpretar a resposta.
+12. Identificar arquivos e alterações.
+13. Mostrar uma proposta no editor.
+14. Permitir aceitar ou rejeitar.
+15. Aplicar somente alterações aceitas.
+
+Não é aceitável colar o prompt na barra de endereço, barra de pesquisa, campo de pesquisa do navegador, campo de pesquisa interno da página ou outro controle que não seja o campo de composição da IA.
+
+Não é aceitável focar uma janela aleatória apenas porque o título contém uma palavra semelhante ao nome do provider.
+
+3. PROVIDERS
+
+Providers previstos:
+
+- ChatGPT
+- Claude
+- Gemini
+
+Cada provider deve possuir um conector próprio, implementando a mesma interface de alto nível.
+
+O conector é responsável por:
+
+- disponibilidade lógica
+- preparação da interface externa
+- localização da aba
+- foco da aba
+- localização do campo de mensagem
+- envio do prompt
+- leitura da resposta
+- tratamento de falhas específicas do provider
+
+A lógica comum não deve depender de nomes frágeis de processos do Windows quando existe uma forma mais segura de identificar a aba ou a interface web correta.
+
+4. FLUXO CORRETO DE UMA SESSÃO DE IA
+
+Estado inicial:
+
+O usuário está no Auto CodeZ e escolhe uma IA.
+
+Etapa 1, criar sessão:
+
+O Auto CodeZ cria uma AiSession com provider, prompt, contexto do projeto e estado inicial.
+
+Etapa 2, validar sessão:
+
+O SessionManager garante que não existe outra sessão ativa quando o produto estiver configurado para uma sessão por vez. Uma sessão antiga presa em waiting deve terminar, falhar ou ser cancelada de forma controlada. Não se deve mascarar esse problema permitindo múltiplas execuções concorrentes sem uma arquitetura explícita para isso.
+
+Etapa 3, preparar provider:
+
+O conector tenta localizar a interface correta da IA.
+
+Se a IA já estiver aberta, reutilizar a interface existente.
+
+Se não estiver aberta, abrir a URL oficial da interface web correspondente.
+
+Depois de abrir, esperar a página carregar e localizar a aba correta antes de continuar.
+
+Etapa 4, selecionar aba:
+
+A aba do provider deve ser identificada por evidência da própria aba ou da interface web. Não usar a primeira janela do navegador encontrada como substituto.
+
+O Auto CodeZ deve trabalhar com a aba do provider selecionado.
+
+Etapa 5, foco do campo de mensagem:
+
+Este é um ponto crítico.
+
+O Auto CodeZ deve localizar especificamente o elemento usado para escrever uma nova mensagem para a IA.
+
+Não usar simplesmente o primeiro elemento editável encontrado.
+
+Não usar Ctrl+V antes de confirmar o foco do campo correto.
+
+Não aceitar a barra de endereço do navegador como fallback.
+
+Não aceitar a barra de pesquisa do navegador como fallback.
+
+Não aceitar o campo de pesquisa interno da página como fallback.
+
+Se o campo correto não for encontrado, a sessão deve falhar com uma mensagem específica e não enviar o prompt para outro lugar.
+
+Etapa 6, preparar contexto:
+
+O prompt final inclui as regras do Auto CodeZ, pedido do usuário e contexto relevante do projeto.
+
+O contexto deve priorizar arquivos de código e configuração relevantes.
+
+Arquivos gerados, caches, binários e diretórios de IDE não devem dominar o contexto. Exemplos de conteúdo que normalmente deve ser excluído ou fortemente despriorizado:
+
+- .gradle
+- .idea
+- .kotlin
+- caches
+- binários
+- arquivos temporários
+- artefatos de build
+- arquivos gerados automaticamente
+
+O Auto CodeZ deve respeitar .gitignore e regras próprias de exclusão de contexto quando disponíveis.
+
+Etapa 7, enviar:
+
+Somente depois de confirmar o campo correto, colocar o prompt nele e enviar.
+
+O método de envio deve ser específico e confiável. Clipboard pode ser usado como mecanismo de transferência de texto, mas nunca como substituto da identificação correta do campo.
+
+Etapa 8, aguardar:
+
+Após o envio, a sessão entra em estado waiting.
+
+O Auto CodeZ não deve considerar a confirmação de envio como resposta da IA.
+
+A resposta precisa ser detectada separadamente.
+
+Etapa 9, detectar fim:
+
+O Auto CodeZ precisa detectar quando a IA terminou de gerar a resposta.
+
+A detecção deve evitar:
+
+- capturar o prompt como resposta
+- capturar botões da interface
+- capturar texto antigo da página
+- capturar mensagens anteriores da conversa como resposta nova
+- retornar enquanto a IA ainda está gerando
+
+Etapa 10, ler resposta:
+
+A resposta deve ser coletada da interface correta do provider.
+
+A leitura deve ser robusta contra diferenças entre ChatGPT, Claude e Gemini.
+
+A resposta recebida deve possuir provider, conteúdo e timestamp.
+
+Etapa 11, encerrar sessão:
+
+Quando a resposta válida for obtida, a sessão muda para completed.
+
+Se ocorrer uma falha, muda para failed com erro útil.
+
+Se o usuário cancelar, muda para cancelled.
+
+Nenhuma Promise rejeitada deve escapar do fluxo de uma sessão em segundo plano.
+
+5. TRATAMENTO DE ERROS
+
+Erros de execução não devem gerar UnhandledPromiseRejectionWarning.
+
+O create-ai-session não deve descartar uma Promise sem que o SessionManager trate sua rejeição.
+
+Erros devem virar estado de sessão e chegar ao renderer.
+
+Mensagens genéricas como "A sessão da IA falhou" devem ser acompanhadas internamente pelo erro real e, quando apropriado, por uma mensagem útil para o usuário.
+
+Exemplos de erros que devem ser distinguíveis:
+
+- provider não encontrado
+- aba não encontrada
+- página ainda carregando
+- campo de mensagem não encontrado
+- foco do campo falhou
+- envio falhou
+- resposta não detectada dentro do timeout
+- leitura da resposta falhou
+- sessão já ativa
+- sessão cancelada
+
+Não usar catch vazio apenas para esconder erro.
+
+6. DETECÇÃO DE INTERFACE EXTERNA
+
+A detecção precisa ser conservadora.
+
+O Auto CodeZ não deve trazer o VS Code ou outra janela aleatória para frente por causa de uma correspondência parcial no título.
+
+Quando houver um navegador com várias abas, o alvo deve ser a aba do provider escolhido.
+
+Se a automação não conseguir distinguir a aba correta, deve falhar de forma controlada em vez de enviar o prompt para um destino incerto.
+
+Quando for necessário colocar a interface externa em foco para uma operação de UI Automation, isso deve durar somente o necessário e não deve alterar a experiência do usuário além do necessário.
+
+O objetivo final é permitir execução em segundo plano sempre que a tecnologia disponível suportar isso de forma confiável.
+
+7. ARQUITETURA ATUAL E CAMADAS
+
+Fluxo principal esperado:
+
+SessionManager
+    -> AiConnectorManager
+        -> AiConnector
+            -> provider específico
+                -> browser / windows-ui
+                    -> interface externa
+
+Camadas importantes:
+
+- src/core/session-manager.ts
+- src/ai/aiConnectorManager.ts
+- src/ai/aiConnector.ts
+- src/automation/browser.ts
+- src/automation/windows-ui.ts
+- src/automation/providers/chatgpt.ts
+- src/automation/providers/claude.ts
+- src/automation/providers/gemini.ts
+- src/automation/ai-response-reader.ts
+
+Também existem camadas de projeto, contexto, renderer, preload e processo principal. Alterações devem respeitar as dependências existentes.
+
+8. SESSION MANAGER
+
+O SessionManager coordena o ciclo de vida da sessão.
+
+Responsabilidades:
+
+- criar sessão
+- validar estado
+- executar sessão
+- atualizar estado
+- emitir eventos
+- tratar erro
+- cancelar sessão
+- evitar rejeições não tratadas
+- entregar resultado ao restante do aplicativo
+
+Estados esperados:
+
+- created
+- preparing
+- sending
+- waiting
+- completed
+- failed
+- cancelled
+
+Os nomes exatos devem seguir o código atual quando forem diferentes, mas a semântica deve ser preservada.
+
+9. AICONNECTORMANAGER
+
+O AiConnectorManager seleciona o conector correto e centraliza acesso aos providers.
+
+Ele não deve fingir que um provider está disponível quando a automação necessária não existe.
+
+Ao mesmo tempo, disponibilidade não deve depender de uma única heurística frágil.
+
+A arquitetura deve separar:
+
+- provider conhecido
+- conector carregado
+- interface detectada
+- interface pronta para receber mensagem
+
+10. BROWSER AUTOMATION
+
+browser.ts deve concentrar operações comuns do navegador quando possível.
+
+Funções desejadas incluem conceitos como:
+
+- localizar aba do provider
+- aguardar aba aparecer
+- selecionar aba
+- localizar campo de entrada correto
+- enviar texto
+- enviar mensagem
+
+As funções devem ser específicas e seguras.
+
+Uma função genérica como "focusFirstEditableElement" não deve ser usada como fallback para enviar uma mensagem em uma página complexa. O primeiro elemento editável pode ser uma barra de pesquisa, filtro ou outro controle.
+
+11. WINDOWS UI AUTOMATION
+
+windows-ui.ts deve oferecer operações de baixo nível para automação Windows quando necessárias.
+
+Essas operações devem ser usadas com critérios claros.
+
+Não assumir que o primeiro elemento editável de uma janela é o campo de mensagem.
+
+Não assumir que uma janela com título semelhante é o provider correto.
+
+12. RESPOSTA DA IA
+
+A resposta inicial devolvida pelo conector serve para indicar que a solicitação foi enviada, mas não deve ser tratada como a resposta final da IA.
+
+O resultado final precisa vir do leitor de resposta.
+
+O leitor atual usa uma estratégia de baseline e comparação. Essa estratégia é um ponto de partida, mas deve evoluir para seletores ou estruturas de acessibilidade específicas quando necessário.
+
+Cada provider possui diferenças de interface. O leitor deve permitir estratégias específicas por provider sem duplicar toda a arquitetura.
+
+13. PARSER DA RESPOSTA
+
+Depois que a resposta for lida, o Auto CodeZ precisa interpretar uma resposta estruturada de desenvolvimento.
+
+A resposta desejada deve permitir identificar:
+
+- resumo da alteração
+- arquivos afetados
+- caminho de cada arquivo
+- conteúdo ou diff proposto
+- operações de criação
+- operações de alteração
+- operações de exclusão
+- dependências entre alterações
+
+O parser não deve aplicar código automaticamente sem passar pela etapa de proposta e aprovação.
+
+14. PROPOSTA DE ALTERAÇÃO
+
+A IA pode responder com uma proposta para um ou vários arquivos.
+
+O Auto CodeZ transforma essa resposta em uma estrutura interna de alterações.
+
+Cada alteração deve possuir pelo menos:
+
+- caminho do arquivo
+- tipo da operação
+- conteúdo ou patch
+- estado de aprovação
+
+Estados desejados:
+
+- pending
+- accepted
+- rejected
+- applied
+- failed
+
+15. EDITOR
+
+O editor é uma parte central da experiência.
+
+A interface deve seguir uma experiência semelhante ao VS Code, sem copiar sua identidade visual inteira.
+
+O editor deve permitir:
+
+- abrir arquivos
+- visualizar código
+- selecionar arquivo
+- mostrar contexto do projeto
+- mostrar propostas de alteração
+- visualizar diff
+- aceitar alteração
+- rejeitar alteração
+
+As alterações não devem aparecer aplicadas silenciosamente.
+
+16. MÚLTIPLOS ARQUIVOS
+
+Quando a IA propuser alterações em vários arquivos, o Auto CodeZ deve identificar todos eles antes de aplicar qualquer alteração.
+
+O usuário deve conseguir revisar o conjunto.
+
+Dependências entre arquivos devem ser consideradas.
+
+Uma alteração parcial que deixe o projeto inconsistente deve ser evitada.
+
+O sistema deve separar proposta, aprovação e aplicação.
+
+17. CONTEXTO DO PROJETO
+
+O Auto CodeZ trabalha com projetos locais.
+
+O contexto enviado à IA deve ser relevante e controlado.
+
+Prioridade aproximada:
+
+1. pedido atual do usuário
+2. arquivo ativo
+3. arquivos diretamente relacionados
+4. configurações relevantes
+5. demais arquivos necessários
+
+Evitar enviar caches e artefatos sem relação com a tarefa.
+
+O contexto deve preservar caminhos relativos ou absolutos de forma consistente, conforme o contrato atual do sistema.
+
+18. PROMPT BASE
+
+Existe um prompt base usado para orientar a IA. Ele deve preservar as seguintes intenções:
+
+- trabalhar considerando o contexto do projeto
+- preservar comportamento existente sempre que possível
+- alterar somente o necessário
+- não remover funcionalidades sem solicitação
+- considerar dependências entre arquivos
+- seguir padrões existentes
+- não inventar APIs ou bibliotecas sem necessidade
+- identificar todos os arquivos afetados
+- retornar uma resposta que o Auto CodeZ consiga processar
+
+O prompt base deve permanecer separado da lógica de automação.
+
+19. INTERFACE PRINCIPAL
+
+A interface deve ser inspirada na organização de ferramentas como VS Code.
+
+Elementos principais:
+
+- barra lateral para navegação do projeto
+- árvore de arquivos
+- editor central
+- área de IA integrada
+- status da sessão
+- controles de provider
+- área de propostas e diffs
+
+Não exibir um título grande "Auto CodeZ" ocupando espaço no topo do editor. A marca deve ser discreta.
+
+A interface não precisa mudar de cor para parecer com VS Code. A prioridade é a organização e hierarquia visual.
+
+20. NOVA ABA DE IA
+
+A nova aba de IA faz parte do plano final, mas não deve receber prioridade enquanto o pipeline de automação estiver instável.
+
+A ordem de prioridade é:
+
+1. detecção confiável
+2. preparação confiável
+3. foco correto
+4. envio confiável
+5. leitura confiável
+6. parser
+7. proposta de alteração
+8. aceitação e rejeição
+9. múltiplos arquivos
+10. experiência completa da aba de IA
+
+21. PRINCÍPIO DE SEGURANÇA DO CÓDIGO
+
+O Auto CodeZ não deve modificar arquivos automaticamente apenas porque uma IA sugeriu uma alteração.
+
+A IA fornece proposta.
+
+O usuário aprova.
+
+O Auto CodeZ aplica.
+
+Operações destrutivas devem exigir revisão explícita.
+
+22. PLANO DE EVOLUÇÃO
+
+FASE 1, FUNDAÇÃO
+
+- SessionManager estável
+- tratamento de erros
+- ciclo de vida de sessão
+- eventos corretos
+
+FASE 2, AUTOMAÇÃO
+
+- detecção ChatGPT
+- detecção Claude
+- detecção Gemini
+- abertura automática
+- reutilização de abas
+- foco correto
+- envio correto
+
+FASE 3, RESPOSTA
+
+- detectar geração concluída
+- ler resposta
+- normalizar resposta
+- tratar diferenças entre providers
+
+FASE 4, CÓDIGO
+
+- parser
+- identificação de arquivos
+- diff
+- proposta
+- revisão
+- aceitar/rejeitar
+
+FASE 5, PROJETO
+
+- múltiplos arquivos
+- dependências
+- aplicação transacional quando possível
+- recuperação de falhas
+
+FASE 6, INTERFACE
+
+- aba de IA completa
+- histórico de sessões
+- status detalhado
+- diffs integrados
+- UX refinada
+
+23. PRIORIDADE ATUAL
+
+O projeto não deve avançar para uma interface sofisticada de IA enquanto o envio para o campo correto e a leitura da resposta não forem confiáveis.
+
+O problema atual conhecido é especialmente relacionado à automação de navegador e foco de elementos.
+
+O fato de o navegador abrir e o prompt acabar na barra de pesquisa é uma falha crítica de automação. Não tratar como comportamento aceitável.
+
+24. REGRAS PARA ALTERAÇÕES FUTURAS
+
+Antes de alterar qualquer arquivo:
+
+1. Ler este arquivo.
+2. Analisar o estado real do repositório.
+3. Identificar dependências.
+4. Verificar o fluxo completo afetado.
+5. Fazer a menor alteração coerente com a arquitetura.
+6. Evitar correções genéricas que possam atingir janelas ou elementos errados.
+7. Validar os possíveis caminhos de erro.
+8. Não declarar uma etapa como concluída sem considerar os efeitos nos três providers.
+
+25. GIT E WORKFLOW
+
+Regra padrão do projeto:
+
+Nunca fazer commit direto em main ou master para alterações normais.
+
+Criar branch isolada por tarefa.
+
+Padrões:
+
+feature/nome-da-funcao
+fix/nome-do-bug
+
+Criar Pull Request.
+
+Informar ao usuário:
+
+- branch criada
+- arquivos modificados
+- resumo das alterações
+- comando git pull exato
+- PR correspondente
+
+Exceção explícita registrada neste documento:
+
+O usuário solicitou que este próprio arquivo de contexto fosse criado diretamente na main para servir como referência permanente do projeto.
+
+Essa exceção vale para a criação inicial deste arquivo. Alterações futuras neste arquivo devem seguir a regra normal de branch e Pull Request, salvo nova autorização explícita do usuário.
+
+26. COMANDO DE ATUALIZAÇÃO LOCAL
+
+Para uma branch normal de trabalho:
+
+git pull origin nome-da-branch
+
+Para este documento criado na main nesta tarefa:
+
+git pull origin main
+
+27. CRITÉRIO DE CONCLUSÃO DO PIPELINE DE IA
+
+O pipeline só deve ser considerado funcional quando for possível executar, para cada um dos três providers:
+
+1. selecionar provider no Auto CodeZ
+2. encontrar ou abrir a interface correta
+3. encontrar a aba correta
+4. encontrar o campo de mensagem correto
+5. inserir o prompt no campo correto
+6. enviar o prompt
+7. aguardar a resposta
+8. detectar o fim da geração
+9. ler a resposta correta
+10. encerrar a sessão sem erro
+11. entregar a resposta ao Auto CodeZ
+
+Depois disso começa o parser de alterações.
+
+28. TESTE MÍNIMO DE REGRESSÃO
+
+Prompt mínimo:
+
+Responda apenas: TESTE
+
+O teste deve verificar:
+
+- provider correto
+- aba correta
+- campo correto
+- envio correto
+- ausência de colagem na barra de endereço ou pesquisa
+- resposta recebida
+- sessão encerrada
+- nenhuma rejeição não tratada
+
+29. DECISÃO DE PRODUTO MAIS IMPORTANTE
+
+O Auto CodeZ não é um simples launcher de ChatGPT, Claude ou Gemini.
+
+Ele é um ambiente de desenvolvimento que usa essas IAs como mecanismos externos para executar tarefas de programação, mantendo o controle do projeto, do editor, do contexto e das alterações dentro do próprio Auto CodeZ.
+
+Toda decisão futura deve preservar esse objetivo.
