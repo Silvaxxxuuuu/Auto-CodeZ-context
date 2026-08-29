@@ -8,10 +8,13 @@ export interface CommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  timedOut: boolean;
 }
 
 const SAFE_SCRIPTS = new Set(['test', 'build', 'typecheck', 'lint', 'package', 'check']);
 const MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+const MAX_OUTPUT_CHARS = 2_000_000;
+const TIMEOUT_MS = 10 * 60 * 1000;
 
 export class CommandRuntime {
   constructor(private readonly projects: () => Promise<ProjectRecord[]>) {}
@@ -42,10 +45,31 @@ export class CommandRuntime {
       });
       let stdout = '';
       let stderr = '';
-      child.stdout.on('data', (chunk: Buffer | string) => { stdout += chunk.toString(); });
-      child.stderr.on('data', (chunk: Buffer | string) => { stderr += chunk.toString(); });
-      child.on('error', reject);
-      child.on('close', (exitCode) => resolve({ command: `${manager} run ${script}`, exitCode: exitCode ?? 1, stdout, stderr }));
+      let timedOut = false;
+      let settled = false;
+      const append = (target: 'stdout' | 'stderr', chunk: Buffer | string): void => {
+        const value = chunk.toString();
+        if (target === 'stdout') stdout = (stdout + value).slice(-MAX_OUTPUT_CHARS);
+        else stderr = (stderr + value).slice(-MAX_OUTPUT_CHARS);
+      };
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill();
+      }, TIMEOUT_MS);
+      const finish = (result: CommandResult): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve(result);
+      };
+      child.stdout.on('data', (chunk: Buffer | string) => append('stdout', chunk));
+      child.stderr.on('data', (chunk: Buffer | string) => append('stderr', chunk));
+      child.on('error', (error) => {
+        if (settled) return;
+        clearTimeout(timeout);
+        reject(error);
+      });
+      child.on('close', (exitCode) => finish({ command: `${manager} run ${script}`, exitCode: exitCode ?? 1, stdout, stderr, timedOut }));
     });
   }
 }
