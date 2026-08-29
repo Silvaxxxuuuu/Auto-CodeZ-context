@@ -16,7 +16,6 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   listTools: () => ipcRenderer.invoke('agent:list-tools'),
   listApprovals: () => ipcRenderer.invoke('agent:list-approvals'),
-  executeTool: (input: { projectId: string; permissionLevel: string; toolCall: unknown }) => ipcRenderer.invoke('agent:execute-tool', input),
   approveTool: (approvalId: string) => ipcRenderer.invoke('agent:approve', approvalId),
   denyTool: (approvalId: string) => ipcRenderer.invoke('agent:deny', approvalId),
   onActivity: (listener: (event: unknown) => void) => {
