@@ -1,7 +1,9 @@
 import type { AIMessage, AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent, AIToolCall } from '../types';
-import { parseSSE } from '../sse';
+import { fetchWithTimeout, parseSSE } from '../sse';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+const MODEL_LIST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 120_000;
 
 type GooglePart = {
   text?: string;
@@ -89,9 +91,9 @@ export class GoogleAdapter implements AIProviderAdapter {
   readonly displayName = 'Google AI';
 
   async listModels(config: AIProviderConfig): Promise<AIModel[]> {
-    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/models`, {
+    const response = await fetchWithTimeout(`${config.baseUrl || DEFAULT_BASE_URL}/models`, {
       headers: { 'x-goog-api-key': config.apiKey },
-    });
+    }, MODEL_LIST_TIMEOUT_MS);
     if (!response.ok) throw new Error(`Google models request failed: ${response.status}`);
     const data = (await response.json()) as { models?: Array<{ name: string; displayName?: string; supportedGenerationMethods?: string[] }> };
     return (data.models || [])
@@ -117,11 +119,11 @@ export class GoogleAdapter implements AIProviderAdapter {
   }
 
   async send(config: AIProviderConfig, request: AIRequest): Promise<AIResponse> {
-    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/models/${encodeURIComponent(request.model)}:generateContent`, {
+    const response = await fetchWithTimeout(`${config.baseUrl || DEFAULT_BASE_URL}/models/${encodeURIComponent(request.model)}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
       body: JSON.stringify(this.buildBody(request)),
-    });
+    }, REQUEST_TIMEOUT_MS);
 
     const data = (await response.json()) as GoogleChunk;
     if (!response.ok) throw new Error(data.error?.message || `Google AI request failed: ${response.status}`);
@@ -142,11 +144,11 @@ export class GoogleAdapter implements AIProviderAdapter {
   }
 
   async *stream(config: AIProviderConfig, request: AIRequest): AsyncGenerator<AIStreamEvent> {
-    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/models/${encodeURIComponent(request.model)}:streamGenerateContent?alt=sse`, {
+    const response = await fetchWithTimeout(`${config.baseUrl || DEFAULT_BASE_URL}/models/${encodeURIComponent(request.model)}:streamGenerateContent?alt=sse`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.apiKey },
       body: JSON.stringify(this.buildBody(request)),
-    });
+    }, REQUEST_TIMEOUT_MS);
 
     if (!response.ok) {
       const data = (await response.json().catch(() => ({}))) as GoogleChunk;
