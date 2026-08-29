@@ -733,3 +733,19 @@ Para cada provider verificar nesta ordem:
 8. nenhum segundo teste é iniciado enquanto a primeira sessão estiver ativa
 
 Somente depois de confirmar o comportamento real dos três providers a implementação deve avançar para parser, diff e aplicação de alterações.
+
+36. VINCULAÇÃO DO FOCO AO NAVEGADOR ALVO
+
+A validação do foco recebeu uma segunda barreira de segurança.
+
+Depois de localizar e focar o campo de mensagem, o Auto CodeZ verifica a árvore de acessibilidade a partir do elemento atualmente focado e exige que ele pertença à janela do navegador alvo.
+
+A validação percorre os ancestrais do elemento focado e procura evidência específica do provider. Ela também rejeita evidência de endereço, pesquisa, URL, omnibox ou navegação.
+
+Isso evita aceitar um elemento correto encontrado na árvore do navegador quando, entre a localização e o envio, o foco tiver mudado para outra janela ou outro controle.
+
+A regra permanente é:
+
+provider correto + navegador correto + aba correta + elemento de mensagem correto + foco ainda pertencente ao navegador alvo.
+
+Se qualquer elo dessa cadeia falhar, não enviar o prompt.
