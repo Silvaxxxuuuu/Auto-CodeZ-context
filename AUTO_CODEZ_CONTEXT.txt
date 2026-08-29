@@ -749,3 +749,93 @@ A regra permanente é:
 provider correto + navegador correto + aba correta + elemento de mensagem correto + foco ainda pertencente ao navegador alvo.
 
 Se qualquer elo dessa cadeia falhar, não enviar o prompt.
+
+37. CHROMIUM UI AUTOMATION HARDENING
+
+O Chromium moderno no Windows possui uma camada de acessibilidade específica para o conteúdo renderizado da página. O Auto CodeZ deve tratar a área de conteúdo do Chromium como um alvo diferente da janela principal do navegador.
+
+A automação agora possui uma camada dedicada em:
+
+src/automation/chromium-ai-input.ts
+
+Essa camada localiza o renderer Chrome_RenderWidgetHostHWND1 ou Chrome_RenderWidgetHostHWND dentro da janela do navegador e trabalha sobre a árvore de acessibilidade do conteúdo renderizado.
+
+Antes de procurar o campo de mensagem, a camada tenta inicializar a árvore de acessibilidade do renderer e aguarda a árvore possuir elementos. Isso evita depender somente da árvore da janela principal do navegador, onde o conteúdo web pode não estar disponível de forma confiável.
+
+A busca do campo usa:
+
+- nome acessível
+- AutomationId
+- HelpText
+- ClassName
+- FrameworkId
+- ControlType
+- LocalizedControlType
+- IsKeyboardFocusable
+- IsEnabled
+- IsOffscreen
+- BoundingRectangle
+- ValuePattern disponível
+- TextPattern disponível
+
+A posição do elemento também participa da pontuação. Campos grandes e próximos à região inferior da área de conteúdo recebem prioridade, pois os compositores das três interfaces ficam nessa região. Isso é um critério secundário e nunca substitui a evidência do provider.
+
+Antes da colagem, a camada exige evidência de que a página pertence ao provider selecionado. Sem evidência suficiente, o envio é interrompido.
+
+Depois de SetFocus, a camada verifica o elemento focado e seus ancestrais. Se o foco pertencer a outro processo, outro controle ou apresentar evidência de pesquisa, endereço, URL, omnibox ou navegação, a tentativa é descartada.
+
+O clipboard é preenchido antes da tentativa de foco porque armazenar o prompt no clipboard não executa nenhuma ação externa. A colagem só ocorre depois da validação do destino.
+
+Depois da colagem, ValuePattern ou TextPattern é usado quando disponível para confirmar que houve conteúdo no campo. Se a inserção não for confirmada, o Enter não é enviado.
+
+Essa arquitetura reduz o risco de enviar o prompt para a barra de endereço ou pesquisa e também corrige a situação em que o prompt nem chegava ao clipboard porque a lógica anterior escrevia no clipboard somente depois de localizar o campo.
+
+38. VALIDAÇÃO AUTOMÁTICA NO GITHUB ACTIONS
+
+O projeto agora possui:
+
+.github/workflows/validate.yml
+
+O workflow roda em Windows e executa:
+
+1. checkout do repositório
+2. Node.js 24
+3. npm ci
+4. npx tsc --noEmit
+5. npm run package
+
+Isso permite verificar automaticamente erros de TypeScript e problemas de empacotamento do Electron em cada Pull Request para main e em pushes para branches de feature e fix.
+
+GitHub Actions não substitui os testes reais de UI do Auto CodeZ neste projeto. Um runner Windows hospedado pelo GitHub não possui acesso à sessão interativa do Windows do usuário, às contas conectadas no Chrome, às abas abertas nem ao ambiente gráfico pessoal.
+
+Para testar independentemente o comportamento real do navegador, seria necessário um runner Windows auto-hospedado com sessão gráfica interativa e ambiente controlado. Esse runner deve ser tratado como infraestrutura de CI dedicada. Não usar um computador pessoal com credenciais abertas como runner sem isolamento e sem entender os riscos.
+
+Portanto, o workflow atual valida compilação e empacotamento automaticamente. Os testes de integração ChatGPT, Claude e Gemini continuam exigindo uma sessão Windows real com as contas e navegadores do ambiente de execução.
+
+39. INCIDENTE DE 29 DE AGOSTO DE 2026
+
+Teste real mais recente:
+
+- Claude abriu o site, mas não colocou o prompt no clipboard nem no campo.
+- Gemini abriu o site, mas não colocou o prompt no clipboard nem no campo.
+- ChatGPT trouxe o Chrome para frente sem abrir ou confirmar corretamente a interface desejada.
+
+Diagnóstico:
+
+A árvore UIA usada anteriormente estava concentrada na janela principal do navegador e dependia de nomes acessíveis que não estavam sendo expostos de forma suficiente para os elementos web atuais. O Chrome moderno possui um renderer de conteúdo separado e uma implementação nativa de UIA.
+
+A correção deve usar o renderer de conteúdo como alvo primário para os campos da página, mantendo a janela principal somente para seleção segura da aba.
+
+O problema de o clipboard permanecer sem o prompt também foi identificado como consequência da ordem anterior. A implementação antiga escrevia no clipboard depois da validação do campo. A nova ordem grava o prompt no clipboard antes da busca do campo, mas somente envia depois de validar o destino.
+
+O comportamento do ChatGPT de trazer o navegador para frente sem abrir a página correta também deve ser tratado como falha de preparação ou identificação da aba. Uma aba só é válida quando sua evidência pertence ao provider selecionado e o renderer fornece evidência correspondente do conteúdo.
+
+40. REGRA PERMANENTE PARA AUTOMAÇÃO DE NAVEGADOR
+
+Não considerar uma automação de navegador funcional somente porque uma janela foi trazida para frente.
+
+O mínimo necessário para considerar o provider preparado é:
+
+provider correto + aba correta + renderer de conteúdo acessível + evidência da página do provider + campo de composição identificado + foco confirmado.
+
+Somente depois desses seis pontos o Auto CodeZ pode colar e enviar.
