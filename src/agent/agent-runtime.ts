@@ -35,6 +35,11 @@ export class AgentRuntime {
     private readonly activity = new ActivityRuntime(),
   ) {}
 
+  hasPendingForChat(chatId: string): boolean {
+    for (const pending of this.pendingRuns.values()) if (pending.chat.id === chatId) return true;
+    return false;
+  }
+
   async run(config: AIProviderConfig, chat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel): Promise<AgentRunResult> {
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
     return this.runLoop(config, chat, workingChat, projectContext, permission, 0);
