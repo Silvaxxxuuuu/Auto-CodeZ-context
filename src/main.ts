@@ -41,6 +41,7 @@ const chatManager = new ChatManager(storage);
 let providerConfigs: AIProviderConfig[] = [];
 let providerKeys: Record<string, string> = {};
 let mainWindow: BrowserWindow | null = null;
+const busyChats = new Set<string>();
 
 const defaultProviders: AIProviderConfig[] = [
   { id: 'openai', displayName: 'OpenAI', apiKey: '', enabled: false },
@@ -87,6 +88,15 @@ async function validateChatInput(input: { providerId: ProviderId; model: string;
   if (input.projectId && !(await projectManager.list()).some((project) => project.id === input.projectId)) throw new Error('Projeto não encontrado.');
 }
 
+function beginChatRun(chatId: string): void {
+  if (busyChats.has(chatId) || agentRuntime.hasPendingForChat(chatId)) throw new Error('Este chat já possui uma operação em andamento.');
+  busyChats.add(chatId);
+}
+
+function endChatRun(chatId: string): void {
+  if (!agentRuntime.hasPendingForChat(chatId)) busyChats.delete(chatId);
+}
+
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({ width: 1440, height: 900, minWidth: 1050, minHeight: 700, backgroundColor: '#090b0f', title: 'Auto CodeZ', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   mainWindow.on('closed', () => { mainWindow = null; });
@@ -126,6 +136,7 @@ ipcMain.handle('chat:create', async (_event, input: { providerId: ProviderId; mo
 ipcMain.handle('chat:update-settings', async (_event, input: { chatId: string; providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel }) => {
   const chat = (await chatManager.list()).find((item) => item.id === input.chatId);
   if (!chat) throw new Error('Chat não encontrado.');
+  if (busyChats.has(chat.id) || agentRuntime.hasPendingForChat(chat.id)) throw new Error('Não é possível alterar as configurações durante uma operação.');
   await validateChatInput(input);
   const updated: ChatRecord = { ...chat, providerId: input.providerId, model: input.model, intelligence: input.intelligence, permissionLevel: input.permissionLevel };
   await chatManager.update(updated);
@@ -146,24 +157,34 @@ ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: str
   const { chat, config, projectContext } = await getChatContext(input.chatId);
   const content = input.content.trim();
   if (!content) throw new Error('A mensagem não pode estar vazia.');
-  await chatManager.addMessage(chat.id, { role: 'user', content });
-  const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
-  const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
-  await chatManager.update({ ...current, messages: result.messages });
-  return { response: result.response, pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  beginChatRun(chat.id);
+  try {
+    await chatManager.addMessage(chat.id, { role: 'user', content });
+    const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
+    const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
+    await chatManager.update({ ...current, messages: result.messages });
+    return { response: result.response, pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  } finally {
+    endChatRun(chat.id);
+  }
 });
 
 ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
   const { chat, config, projectContext } = await getChatContext(input.chatId);
   const content = input.content.trim();
   if (!content) throw new Error('A mensagem não pode estar vazia.');
-  await chatManager.addMessage(chat.id, { role: 'user', content });
-  const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
-  const emit = (event: AIStreamEvent): void => { mainWindow?.webContents.send('chat:stream-event', event); };
-  emit({ type: 'start' });
-  const result = await agentRuntime.runStreaming(config, current, projectContext, current.permissionLevel, emit);
-  await chatManager.update({ ...current, messages: result.messages });
-  return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  beginChatRun(chat.id);
+  try {
+    await chatManager.addMessage(chat.id, { role: 'user', content });
+    const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
+    const emit = (event: AIStreamEvent): void => { mainWindow?.webContents.send('chat:stream-event', event); };
+    emit({ type: 'start' });
+    const result = await agentRuntime.runStreaming(config, current, projectContext, current.permissionLevel, emit);
+    await chatManager.update({ ...current, messages: result.messages });
+    return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  } finally {
+    endChatRun(chat.id);
+  }
 });
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
@@ -172,12 +193,14 @@ ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
   const result = await agentRuntime.resume(approvalId);
   const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
   if (chat) await chatManager.update({ ...chat, messages: result.messages });
+  endChatRun(result.chatId);
   return result;
 });
 ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
   const result = await agentRuntime.reject(approvalId);
   const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
   if (chat) await chatManager.update({ ...chat, messages: result.messages });
+  endChatRun(result.chatId);
   return result;
 });
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => projectManager.create(input.name, input.rootPath));
