@@ -23,6 +23,10 @@ import {
   focusWindow,
 } from '../windows-ui';
 
+import {
+  clipboard,
+} from 'electron';
+
 export class ChatGptConnector
   implements AiConnector
 {
@@ -76,6 +80,10 @@ export class ChatGptConnector
         'O prompt do ChatGPT está vazio.',
       );
     }
+
+    clipboard.writeText(
+      request.prompt,
+    );
 
     const browserTab =
       await findAiTab([
