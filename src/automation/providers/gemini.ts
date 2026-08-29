@@ -23,6 +23,10 @@ import {
   focusWindow,
 } from '../windows-ui';
 
+import {
+  clipboard,
+} from 'electron';
+
 export class GeminiConnector
   implements AiConnector
 {
@@ -76,6 +80,10 @@ export class GeminiConnector
         'O prompt do Gemini está vazio.',
       );
     }
+
+    clipboard.writeText(
+      request.prompt,
+    );
 
     const browserTab =
       await findAiTab([
