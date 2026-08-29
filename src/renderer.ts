@@ -19,10 +19,6 @@ declare global {
       sendChat: (input: { chatId: string; content: string }) => Promise<{ response: { content: string; model: string; providerId: string }; chat: Chat }>;
       createProject: (input: { name: string; rootPath: string }) => Promise<Project>;
       openFolder: () => Promise<string | null>;
-      scanProject: (rootPath: string) => Promise<Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>>;
-      readFile: (filePath: string) => Promise<string>;
-      writeFile: (input: { filePath: string; content: string }) => Promise<void>;
-      openExternal: (url: string) => Promise<void>;
     };
   }
 }
@@ -35,12 +31,10 @@ const intelligence: ReadonlyArray<[IntelligenceLevel, string, string]> = [
 ];
 
 let providers: ProviderSummary[] = [];
-let models: Model[] = [];
 let chats: Chat[] = [];
 let projects: Project[] = [];
 let activeChat: Chat | null = null;
 let activePanel = 'chats';
-let modal = '';
 let composerIntelligence: IntelligenceLevel = 'normal';
 let intelligenceMenuOpen = false;
 
@@ -103,7 +97,7 @@ const intelligenceMenu = document.querySelector<HTMLDivElement>('#intelligence-m
 const modalRoot = document.querySelector<HTMLDivElement>('#modal-root')!;
 
 function escapeHtml(value: string): string {
-  return value.replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
+  return value.replace(/[&<>\'\"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
 }
 
 function providerName(id: string): string {
@@ -118,15 +112,6 @@ function intelligenceDescription(level: IntelligenceLevel): string {
   return intelligence.find((item) => item[0] === level)?.[2] || '';
 }
 
-function renderIntelligenceMenu(): void {
-  intelligenceMenu.innerHTML = intelligence.map(([value, label, description]) => `
-    <div class="intelligence-option ${value === composerIntelligence ? 'selected' : ''}" data-intelligence-option="${value}" role="menuitemradio" aria-checked="${value === composerIntelligence}">
-      <span class="intelligence-option-main"><span class="intelligence-option-label">${label}</span></span>
-      <button class="info-button" data-intelligence-info="${value}" title="Informações sobre ${label}" aria-label="Informações sobre ${label}"></button>
-    </div>
-  `).join('');
-}
-
 function setIntelligenceMenu(open: boolean): void {
   intelligenceMenuOpen = open;
   intelligenceMenu.hidden = !open;
@@ -135,50 +120,31 @@ function setIntelligenceMenu(open: boolean): void {
   if (open) renderIntelligenceMenu();
 }
 
-async function setComposerIntelligence(level: IntelligenceLevel): Promise<void> {
-  composerIntelligence = level;
-  setIntelligenceMenu(false);
-  if (!activeChat) {
-    renderComposer();
-    return;
-  }
-  if (activeChat.intelligence === level) {
-    renderComposer();
-    return;
-  }
-  activeChat.intelligence = level;
-  renderComposer();
-  try {
-    activeChat = await window.autoCodez.updateChatSettings({
-      chatId: activeChat.id,
-      providerId: activeChat.providerId,
-      model: activeChat.model,
-      intelligence: activeChat.intelligence,
-      permissionLevel: activeChat.permissionLevel,
-    });
-    await refresh();
-  } catch (error) {
-    composerIntelligence = activeChat.intelligence;
-    renderComposer();
-    alert(error instanceof Error ? error.message : 'Não foi possível atualizar o perfil de raciocínio.');
-  }
+function renderIntelligenceMenu(): void {
+  intelligenceMenu.innerHTML = intelligence.map(([value, label]) => `
+    <div class="intelligence-option ${value === composerIntelligence ? 'selected' : ''}" data-intelligence-option="${value}" role="menuitemradio" aria-checked="${value === composerIntelligence}">
+      <span class="intelligence-option-main"><span class="intelligence-option-label">${label}</span></span>
+      <button class="info-button" data-intelligence-info="${value}" title="Informações sobre ${label}" aria-label="Informações sobre ${label}"></button>
+    </div>
+  `).join('');
 }
 
 function renderNav(): void {
+  document.querySelectorAll('.rail-button').forEach((button) => button.classList.toggle('active', button.getAttribute('data-panel') === activePanel));
   if (activePanel === 'projects') {
-    navPanel.innerHTML = `<div class="panel-title">Projetos</div><button class="new-item" data-action="new-project"><span class="new-item-icon new-folder-icon" aria-hidden="true"></span><span>Novo projeto</span></button>${projects.map((project) => `<div class="project-item" data-project="${project.id}"><span class="project-item-main"><span class="project-folder-icon" aria-hidden="true"></span><span class="project-item-copy"><span>${escapeHtml(project.name)}</span><small>${escapeHtml(project.rootPath)}</small></span></span></div>`).join('') || '<div class="empty-panel">Nenhum projeto criado.</div>'}`;
+    navPanel.innerHTML = `<div class="panel-title">Projetos</div><button class="new-item" data-action="new-project"><span class="new-item-icon new-folder-icon" aria-hidden="true"></span><span>Novo projeto</span></button>${projects.map((project) => `<div class="project-item" data-project="${project.id}" role="button" tabindex="0"><span class="project-item-main"><span class="project-folder-icon" aria-hidden="true"></span><span class="project-item-copy"><span>${escapeHtml(project.name)}</span><small>${escapeHtml(project.rootPath)}</small></span></span></div>`).join('') || '<div class="empty-panel">Nenhum projeto criado.</div>'}`;
     return;
   }
   if (activePanel === 'plugins') {
     navPanel.innerHTML = `<div class="panel-title">Plugins</div><div class="plugin-card"><span class="plugin-card-icon" aria-hidden="true"></span><div><strong>Ecossistema de extensões</strong><span>A barra lateral direita permanece reservada para extensões.</span></div></div><div class="empty-panel">Nenhum plugin instalado.</div>`;
     return;
   }
-  navPanel.innerHTML = `<div class="panel-title">Chats</div><button class="new-item" data-action="new-chat"><span class="new-item-icon new-chat-icon" aria-hidden="true"></span><span>Novo chat</span></button><div class="group-label">Recentes</div>${chats.map((chat) => `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-settings="${chat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button></div>`).join('') || '<div class="empty-panel">Nenhum chat salvo. Chats vazios não são persistidos.</div>'}`;
+  navPanel.innerHTML = `<div class="panel-title">Chats</div><button class="new-item" data-action="new-chat"><span class="new-item-icon new-chat-icon" aria-hidden="true"></span><span>Novo chat</span></button><div class="group-label">Recentes</div>${chats.map((chat) => `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-settings="${chat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button></div>`).join('') || '<div class="empty-panel">Nenhum chat salvo. Chats vazios não são persistidos.</div>'}`;
 }
 
 function renderHeader(): void {
   if (!activeChat) {
-    chatHeader.innerHTML = `<div><div class="eyebrow">NOVO CHAT</div><h1>Comece uma conversa</h1></div><div class="header-actions"><button class="header-button" data-action="settings">Configurar IA</button></div>`;
+    chatHeader.innerHTML = `<div><div class="eyebrow">NOVO CHAT</div><h1>Comece uma conversa</h1></div><div class="header-actions"><button class="header-button" data-action="ai-settings">Configurar IA</button></div>`;
     return;
   }
   chatHeader.innerHTML = `<div><div class="chat-title-row"><h1>${escapeHtml(activeChat.title)}</h1><button class="gear" data-chat-settings="${activeChat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button></div><div class="chat-subtitle">${escapeHtml(providerName(activeChat.providerId))} · ${escapeHtml(activeChat.model)} · Inteligência ${intelligenceLabel(activeChat.intelligence)}</div></div><div class="header-actions"><button class="provider-chip" data-chat-settings="${activeChat.id}">${escapeHtml(providerName(activeChat.providerId))}<span class="provider-chevron" aria-hidden="true"></span></button></div>`;
@@ -189,15 +155,14 @@ function renderMessages(extraActivity = ''): void {
     messages.innerHTML = `<div class="welcome"><div class="welcome-mark"><span class="welcome-mark-eye"></span></div><h2>Como você quer trabalhar?</h2><p>Converse com uma IA, crie conteúdo ou abra um projeto para trabalhar em arquivos.</p><div class="welcome-grid"><button data-suggestion="Explique como o Auto CodeZ funciona.">Pergunte qualquer coisa</button><button data-suggestion="Analise meu projeto e explique a estrutura.">Analise um projeto</button><button data-suggestion="Crie uma ideia de interface moderna.">Crie conteúdo</button></div></div>`;
     return;
   }
-  const rendered = activeChat.messages.map((message) => `<article class="message ${message.role}"><div class="message-label">${message.role === 'user' ? 'Você' : providerName(activeChat!.providerId)}</div><div class="message-content">${escapeHtml(message.content).replace(/\n/g, '<br>')}</div></article>`).join('');
+  const rendered = activeChat.messages.map((message) => `<article class="message ${message.role}"><div class="message-label">${message.role === 'user' ? 'Você' : providerName(activeChat.providerId)}</div><div class="message-content">${escapeHtml(message.content).replace(/\n/g, '<br>')}</div></article>`).join('');
   const activity = extraActivity ? `<div class="activity-card"><div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${extraActivity}</div>` : '';
   messages.innerHTML = rendered + activity;
   messages.scrollTop = messages.scrollHeight;
 }
 
 function renderComposer(): void {
-  const current = intelligenceLabel(composerIntelligence);
-  intelligenceButton.querySelector<HTMLElement>('.intelligence-current')!.textContent = current;
+  intelligenceButton.querySelector<HTMLElement>('.intelligence-current')!.textContent = intelligenceLabel(composerIntelligence);
   sendButton.disabled = !activeChat || !prompt.value.trim();
   renderIntelligenceMenu();
 }
@@ -207,12 +172,16 @@ async function refresh(): Promise<void> {
   providers = state.providers;
   chats = state.chats;
   projects = state.projects;
-  if (activeChat) activeChat = chats.find((chat) => chat.id === activeChat!.id) || activeChat;
+  if (activeChat) activeChat = chats.find((chat) => chat.id === activeChat!.id) || null;
   if (activeChat) composerIntelligence = activeChat.intelligence;
   renderNav();
   renderHeader();
   renderMessages();
   renderComposer();
+}
+
+function closeModal(): void {
+  modalRoot.innerHTML = '';
 }
 
 function openModal(content: string): void {
@@ -223,15 +192,13 @@ function openModal(content: string): void {
   });
 }
 
-function closeModal(): void {
-  modalRoot.innerHTML = '';
-  modal = '';
+async function openGeneralSettings(): Promise<void> {
+  openModal(`<div class="modal-head"><div><div class="eyebrow">AUTO CODEZ</div><h2>Configurações gerais</h2><p>As configurações gerais do aplicativo serão ampliadas conforme os módulos do runtime forem conectados.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="empty-panel">Preferências gerais, aparência, comportamento e integrações globais serão configurados aqui.</div>`);
 }
 
 async function openProviderSettings(providerId = ''): Promise<void> {
-  modal = 'providers';
   const configured = providers.filter((provider) => provider.configured);
-  openModal(`<div class="modal-head"><div><div class="eyebrow">CONFIGURAÇÕES DE IA</div><h2>Inteligências artificiais</h2><p>Cadastre provedores. Cada chat usa uma IA por vez.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="provider-list">${configured.map((provider) => `<div class="provider-row"><div><strong>${escapeHtml(provider.displayName)}</strong><span>API key configurada</span></div><div class="row-actions"><button data-provider-edit="${provider.id}">Configurar</button><button data-provider-remove="${provider.id}" class="danger">Remover</button></div></div>`).join('') || '<div class="empty-panel">Nenhuma IA configurada.</div>'}</div><div class="add-provider"><h3>${providerId ? 'Editar provedor' : 'Adicionar IA'}</h3><label>IA<select id="provider-id">${providers.map((provider) => `<option value="${provider.id}" ${provider.id === providerId ? 'selected' : ''}>${escapeHtml(provider.displayName)}</option>`).join('')}</select></label><label>API Key<input id="provider-key" type="password" placeholder="Cole sua API key aqui"></label><label>Modelo<select id="provider-model"><option value="">Carregue os modelos depois de testar</option></select></label><button class="primary-button" id="save-provider">Testar e salvar</button></div>`);
+  openModal(`<div class="modal-head"><div><div class="eyebrow">CONFIGURAÇÕES DE IA</div><h2>Inteligências artificiais</h2><p>Cadastre provedores, API keys e modelos. Cada chat usa uma IA por vez.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="provider-list">${configured.map((provider) => `<div class="provider-row"><div><strong>${escapeHtml(provider.displayName)}</strong><span>API key configurada</span></div><div class="row-actions"><button data-provider-edit="${provider.id}">Configurar</button><button data-provider-remove="${provider.id}" class="danger">Remover</button></div></div>`).join('') || '<div class="empty-panel">Nenhuma IA configurada.</div>'}</div><div class="add-provider"><h3>${providerId ? 'Editar provedor' : 'Adicionar IA'}</h3><label>IA<select id="provider-id">${providers.map((provider) => `<option value="${provider.id}" ${provider.id === providerId ? 'selected' : ''}>${escapeHtml(provider.displayName)}</option>`).join('')}</select></label><label>API Key<input id="provider-key" type="password" placeholder="Cole sua API key aqui" autocomplete="off"></label><label>Modelo<select id="provider-model"><option value="">Carregue os modelos depois de testar</option></select></label><button class="primary-button" id="save-provider">Testar e salvar</button></div>`);
 }
 
 async function openChatSettings(chat: Chat): Promise<void> {
@@ -243,14 +210,15 @@ async function openChatSettings(chat: Chat): Promise<void> {
   openModal(`<div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Configurações do chat</h2><p>Essas configurações pertencem a esta conversa.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><label>Inteligência artificial<select id="chat-provider">${providers.map((item) => `<option value="${item.id}" ${item.id === chat.providerId ? 'selected' : ''} ${item.configured ? '' : 'disabled'}>${escapeHtml(item.displayName)}${item.configured ? '' : ' · não configurada'}</option>`).join('')}</select></label><label>Modelo<select id="chat-model">${availableModels.map((model) => `<option value="${model.id}" ${model.id === chat.model ? 'selected' : ''}>${escapeHtml(model.name)}</option>`).join('') || `<option value="${escapeHtml(chat.model)}">${escapeHtml(chat.model)}</option>`}</select></label><label>Perfil de raciocínio<select id="chat-intelligence">${intelligence.map((item) => `<option value="${item[0]}" ${item[0] === chat.intelligence ? 'selected' : ''}>${item[1]} · ${item[2]}</option>`).join('')}</select></label><label>Nível de acesso<select id="chat-permission"><option value="read-only" ${chat.permissionLevel === 'read-only' ? 'selected' : ''}>Somente leitura</option><option value="safe" ${chat.permissionLevel === 'safe' ? 'selected' : ''}>Acesso seguro</option><option value="ask" ${chat.permissionLevel === 'ask' ? 'selected' : ''}>Acesso solicitado</option><option value="unrestricted" ${chat.permissionLevel === 'unrestricted' ? 'selected' : ''}>Acesso irrestrito</option></select></label><button class="primary-button" id="save-chat-settings">Salvar configurações</button>`);
 }
 
-async function newChat(): Promise<void> {
+async function newChat(projectId?: string): Promise<void> {
   const provider = providers.find((item) => item.configured);
   if (!provider) { await openProviderSettings(); return; }
   let available: Model[] = [];
   try { available = await window.autoCodez.listModels(provider.id); } catch { available = []; }
   const model = provider.selectedModel || available[0]?.id;
   if (!model) { await openProviderSettings(provider.id); return; }
-  activeChat = await window.autoCodez.createChat({ providerId: provider.id, model, intelligence: 'normal', permissionLevel: 'safe' });
+  activeChat = await window.autoCodez.createChat({ providerId: provider.id, model, intelligence: 'normal', permissionLevel: 'safe', projectId });
+  activePanel = projectId ? 'projects' : 'chats';
   await refresh();
 }
 
@@ -267,6 +235,7 @@ async function sendMessage(): Promise<void> {
   const content = prompt.value.trim();
   if (!content || !activeChat) return;
   prompt.value = '';
+  prompt.style.height = '';
   renderComposer();
   activeChat.messages.push({ role: 'user', content, createdAt: Date.now() });
   renderMessages(`<div class="activity-line done">Conversa preparada</div><div class="activity-line running">Enviando para ${escapeHtml(providerName(activeChat.providerId))}</div>`);
@@ -274,17 +243,32 @@ async function sendMessage(): Promise<void> {
     const result = await window.autoCodez.sendChat({ chatId: activeChat.id, content });
     activeChat = result.chat;
     renderMessages(`<div class="activity-line done">Solicitação concluída</div><div class="activity-line done">Resposta recebida de ${escapeHtml(providerName(result.response.providerId))}</div>`);
-    setTimeout(() => renderMessages(), 500);
     await refresh();
   } catch (error) {
     renderMessages(`<div class="activity-line error">${escapeHtml(error instanceof Error ? error.message : 'Falha ao enviar mensagem.')}</div>`);
   }
 }
 
-intelligenceButton.addEventListener('click', (event) => {
-  if ((event.target as HTMLElement).closest('[data-intelligence-info]')) return;
-  setIntelligenceMenu(!intelligenceMenuOpen);
-});
+async function setComposerIntelligence(level: IntelligenceLevel): Promise<void> {
+  const previous = composerIntelligence;
+  composerIntelligence = level;
+  setIntelligenceMenu(false);
+  if (!activeChat) {
+    renderComposer();
+    return;
+  }
+  if (activeChat.intelligence === level) return;
+  try {
+    activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId: activeChat.providerId, model: activeChat.model, intelligence: level, permissionLevel: activeChat.permissionLevel });
+    await refresh();
+  } catch (error) {
+    composerIntelligence = previous;
+    renderComposer();
+    alert(error instanceof Error ? error.message : 'Não foi possível atualizar o perfil de raciocínio.');
+  }
+}
+
+intelligenceButton.addEventListener('click', () => setIntelligenceMenu(!intelligenceMenuOpen));
 
 intelligenceMenu.addEventListener('click', async (event) => {
   const target = event.target as HTMLElement;
@@ -299,8 +283,19 @@ intelligenceMenu.addEventListener('click', async (event) => {
   if (option) await setComposerIntelligence(option.dataset.intelligenceOption as IntelligenceLevel);
 });
 
-prompt.addEventListener('input', () => { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`; renderComposer(); });
-prompt.addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void sendMessage(); } });
+prompt.addEventListener('input', () => {
+  prompt.style.height = 'auto';
+  prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`;
+  renderComposer();
+});
+
+prompt.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    void sendMessage();
+  }
+});
+
 sendButton.addEventListener('click', () => void sendMessage());
 
 document.addEventListener('click', (event) => {
@@ -313,38 +308,47 @@ app.addEventListener('click', async (event) => {
   const panelButton = target.closest<HTMLElement>('[data-panel]');
   if (panelButton) {
     activePanel = panelButton.dataset.panel || 'chats';
-    document.querySelectorAll('.rail-button').forEach((button) => button.classList.toggle('active', button === panelButton));
     renderNav();
     return;
   }
-  const settingsButton = target.closest<HTMLElement>('[data-chat-settings]');
-  if (settingsButton) {
-    const chat = chats.find((item) => item.id === settingsButton.dataset.chatSettings);
+
+  const chatSettings = target.closest<HTMLElement>('[data-chat-settings]');
+  if (chatSettings) {
+    const chat = chats.find((item) => item.id === chatSettings.dataset.chatSettings);
     if (chat) await openChatSettings(chat);
     return;
   }
+
   const chatButton = target.closest<HTMLElement>('[data-chat]');
   if (chatButton) {
     activeChat = chats.find((chat) => chat.id === chatButton.dataset.chat) || null;
     composerIntelligence = activeChat?.intelligence || 'normal';
-    renderNav(); renderHeader(); renderMessages(); renderComposer();
+    renderNav();
+    renderHeader();
+    renderMessages();
+    renderComposer();
     return;
   }
-  const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
-  if (action === 'new-chat') { closeModal(); await newChat(); return; }
-  if (action === 'new-project') { await newProject(); return; }
-  if (action === 'settings') { await openProviderSettings(); return; }
-  if (action === 'close-modal') { closeModal(); return; }
-  if (action === 'profile') { openModal(`<div class="modal-head"><div><div class="eyebrow">PERFIL</div><h2>Seu perfil</h2><p>O sistema de conta e sincronização será conectado em uma etapa própria.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="profile-preview"><div class="avatar">CZ</div><div><strong>Usuário local</strong><span>Configuração local do Auto CodeZ</span></div></div>`); return; }
-  if (action === 'attachments') { openModal(`<div class="modal-head"><div><div class="eyebrow">ANEXOS</div><h2>Anexar conteúdo</h2><p>O suporte a arquivos e multimídia será conectado ao runtime de capacidades.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="attachment-options"><button>Arquivo</button><button>Imagem</button><button>Áudio</button><button>Vídeo</button></div>`); return; }
+
   const projectButton = target.closest<HTMLElement>('[data-project]');
   if (projectButton) {
     const project = projects.find((item) => item.id === projectButton.dataset.project);
-    if (project) {
-      const projectChats = chats.filter((chat) => chat.projectId === project.id);
-      navPanel.innerHTML = `<div class="panel-title">${escapeHtml(project.name)}</div><div class="group-label">Chats do projeto</div>${projectChats.map((chat) => `<div class="chat-item" data-chat="${chat.id}"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-settings="${chat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button></div>`).join('') || '<div class="empty-panel">Nenhum chat neste projeto.</div>'}`;
-    }
+    if (!project) return;
+    const projectChats = chats.filter((chat) => chat.projectId === project.id);
+    navPanel.innerHTML = `<div class="panel-title">${escapeHtml(project.name)}</div><button class="new-item" data-action="new-project-chat"><span class="new-item-icon new-chat-icon" aria-hidden="true"></span><span>Novo chat neste projeto</span></button><div class="group-label">Chats do projeto</div>${projectChats.map((chat) => `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-settings="${chat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button></div>`).join('') || '<div class="empty-panel">Nenhum chat neste projeto.</div>'}`;
+    navPanel.dataset.activeProject = project.id;
+    return;
   }
+
+  const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
+  if (action === 'new-chat') { closeModal(); await newChat(); return; }
+  if (action === 'new-project-chat') { const projectId = navPanel.dataset.activeProject; if (projectId) await newChat(projectId); return; }
+  if (action === 'new-project') { await newProject(); return; }
+  if (action === 'settings') { await openGeneralSettings(); return; }
+  if (action === 'ai-settings') { await openProviderSettings(); return; }
+  if (action === 'close-modal') { closeModal(); return; }
+  if (action === 'profile') { openModal(`<div class="modal-head"><div><div class="eyebrow">PERFIL</div><h2>Seu perfil</h2><p>O sistema de conta e sincronização será conectado em uma etapa própria.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="profile-preview"><div class="avatar">CZ</div><div><strong>Usuário local</strong><span>Configuração local do Auto CodeZ</span></div></div>`); return; }
+  if (action === 'attachments') { openModal(`<div class="modal-head"><div><div class="eyebrow">ANEXOS</div><h2>Anexar conteúdo</h2><p>O suporte a arquivos e multimídia será conectado ao runtime de capacidades.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="attachment-options"><button>Arquivo</button><button>Imagem</button><button>Áudio</button><button>Vídeo</button></div>`); return; }
 });
 
 modalRoot.addEventListener('click', async (event) => {
@@ -352,7 +356,12 @@ modalRoot.addEventListener('click', async (event) => {
   const edit = target.closest<HTMLElement>('[data-provider-edit]');
   if (edit) { await openProviderSettings(edit.dataset.providerEdit || ''); return; }
   const remove = target.closest<HTMLElement>('[data-provider-remove]');
-  if (remove) { await window.autoCodez.removeProvider(remove.dataset.providerRemove || ''); await refresh(); await openProviderSettings(); return; }
+  if (remove) {
+    await window.autoCodez.removeProvider(remove.dataset.providerRemove || '');
+    await refresh();
+    await openProviderSettings();
+    return;
+  }
   if (target.id === 'save-provider') {
     const providerId = document.querySelector<HTMLSelectElement>('#provider-id')!.value;
     const apiKey = document.querySelector<HTMLInputElement>('#provider-key')!.value;
@@ -362,9 +371,7 @@ modalRoot.addEventListener('click', async (event) => {
     button.disabled = true;
     button.textContent = 'Validando...';
     try {
-      const result = await window.autoCodez.saveProvider({ providerId, apiKey, model });
-      providers = result.providers;
-      models = result.models;
+      await window.autoCodez.saveProvider({ providerId, apiKey, model });
       await refresh();
       await openProviderSettings();
     } catch (error) {
@@ -379,8 +386,10 @@ modalRoot.addEventListener('click', async (event) => {
     const select = document.querySelector<HTMLSelectElement>('#chat-model');
     try {
       const nextModels = await window.autoCodez.listModels(providerId);
-      if (select) select.innerHTML = nextModels.map((model) => `<option value="${model.id}">${escapeHtml(model.name)}</option>`).join('');
-    } catch {}
+      if (select) select.innerHTML = nextModels.map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name)}</option>`).join('');
+    } catch {
+      if (select) select.innerHTML = '<option value="">Não foi possível carregar os modelos</option>';
+    }
     return;
   }
   if (target.id === 'save-chat-settings') {
@@ -389,10 +398,14 @@ modalRoot.addEventListener('click', async (event) => {
     const model = document.querySelector<HTMLSelectElement>('#chat-model')!.value;
     const intelligenceLevel = document.querySelector<HTMLSelectElement>('#chat-intelligence')!.value;
     const permissionLevel = document.querySelector<HTMLSelectElement>('#chat-permission')!.value;
-    activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId, model, intelligence: intelligenceLevel, permissionLevel });
-    composerIntelligence = activeChat.intelligence;
-    closeModal();
-    await refresh();
+    try {
+      activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId, model, intelligence: intelligenceLevel, permissionLevel });
+      composerIntelligence = activeChat.intelligence;
+      closeModal();
+      await refresh();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.');
+    }
   }
 });
 
