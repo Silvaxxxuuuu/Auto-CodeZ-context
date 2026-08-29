@@ -4,7 +4,7 @@ export type IntelligenceLevel = 'low' | 'normal' | 'high' | 'maximum';
 
 export type PermissionLevel = 'read-only' | 'safe' | 'ask' | 'unrestricted';
 
-export type MessageRole = 'user' | 'assistant' | 'system';
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 
 export type Capability =
   | 'text'
@@ -22,12 +22,15 @@ export type ToolName =
   | 'create_file'
   | 'delete_file'
   | 'rename_file'
-  | 'search_files';
+  | 'search_files'
+  | 'run_command';
 
 export interface AIMessage {
   role: MessageRole;
   content: string;
   createdAt?: number;
+  toolCallId?: string;
+  toolName?: ToolName;
 }
 
 export interface AIModel {
@@ -55,6 +58,7 @@ export interface AIRequest {
   intelligence: IntelligenceLevel;
   projectContext?: string;
   toolsEnabled: boolean;
+  tools?: AIToolDefinition[];
 }
 
 export interface AIResponse {
@@ -66,12 +70,14 @@ export interface AIResponse {
     outputTokens?: number;
     totalTokens?: number;
   };
+  toolCalls?: AIToolCall[];
 }
 
 export interface AIStreamEvent {
-  type: 'start' | 'delta' | 'activity' | 'usage' | 'complete' | 'error';
+  type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'error';
   text?: string;
   activity?: ActivityEvent;
+  toolCall?: AIToolCall;
   usage?: AIResponse['usage'];
   response?: AIResponse;
   error?: string;
