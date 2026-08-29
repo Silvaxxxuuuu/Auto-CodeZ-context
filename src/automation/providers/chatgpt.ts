@@ -15,6 +15,7 @@ import {
   focusBrowserInput,
   focusBrowserTab,
   pasteClipboardAndSend,
+  waitForAiTab,
 } from '../browser';
 
 import {
@@ -25,76 +26,70 @@ import {
 
 import {
   clipboard,
+  shell,
 } from 'electron';
 
-export class ChatGptConnector
-  implements AiConnector
-{
-  readonly provider =
-    'chatgpt' as const;
+const CHATGPT_URL = 'https://chatgpt.com/';
 
-  private responseReader:
-    AiResponseReaderState | null =
-    null;
+export class ChatGptConnector implements AiConnector {
+  readonly provider = 'chatgpt' as const;
+
+  private responseReader: AiResponseReaderState | null = null;
 
   async isAvailable(): Promise<boolean> {
-    const browserTab =
-      await findAiTab([
-        'ChatGPT',
-      ]);
+    return true;
+  }
+
+  async prepare(): Promise<boolean> {
+    const browserTab = await findAiTab(['ChatGPT']);
 
     if (browserTab) {
       return true;
     }
 
-    const appHandle =
-      await findWindowHandleByTitle([
-        'ChatGPT',
-        'chatgpt.com',
-        'OpenAI',
-      ]);
+    const appHandle = await findWindowHandleByTitle([
+      'ChatGPT',
+      'chatgpt.com',
+      'OpenAI',
+    ]);
 
-    return appHandle !== null;
+    if (appHandle !== null) {
+      return true;
+    }
+
+    try {
+      await shell.openExternal(CHATGPT_URL);
+    }
+    catch {
+      return false;
+    }
+
+    const openedTab = await waitForAiTab(
+      ['ChatGPT'],
+      30,
+      500,
+    );
+
+    return openedTab !== null;
   }
 
-  async prepare(): Promise<boolean> {
-    return this.isAvailable();
-  }
-
-  async send(
-    request: AiRequest,
-  ): Promise<AiResponse> {
-    if (
-      request.provider !==
-      this.provider
-    ) {
+  async send(request: AiRequest): Promise<AiResponse> {
+    if (request.provider !== this.provider) {
       throw new Error(
         'O conector do ChatGPT recebeu um provider inválido.',
       );
     }
 
-    if (
-      !request.prompt.trim()
-    ) {
-      throw new Error(
-        'O prompt do ChatGPT está vazio.',
-      );
+    if (!request.prompt.trim()) {
+      throw new Error('O prompt do ChatGPT está vazio.');
     }
 
-    clipboard.writeText(
-      request.prompt,
-    );
+    clipboard.writeText(request.prompt);
 
-    const browserTab =
-      await findAiTab([
-        'ChatGPT',
-      ]);
+    const browserTab = await findAiTab(['ChatGPT']);
 
     if (browserTab) {
-      const selected =
-        await focusBrowserTab(
-          browserTab,
-        );
+      const selected = await focusBrowserTab(browserTab);
 
       if (!selected) {
         throw new Error(
@@ -102,10 +97,7 @@ export class ChatGptConnector
         );
       }
 
-      const inputFocused =
-        await focusBrowserInput(
-          browserTab,
-        );
+      const inputFocused = await focusBrowserInput(browserTab);
 
       if (!inputFocused) {
         throw new Error(
@@ -113,62 +105,44 @@ export class ChatGptConnector
         );
       }
 
-      this.responseReader =
-        await captureResponseReaderState(
-          browserTab.handle,
-          request.prompt,
-        );
+      this.responseReader = await captureResponseReaderState(
+        browserTab.handle,
+        request.prompt,
+      );
 
-      const sent =
-        await pasteClipboardAndSend();
+      const sent = await pasteClipboardAndSend();
 
       if (!sent) {
-        this.responseReader =
-          null;
-
+        this.responseReader = null;
         throw new Error(
           'Não foi possível enviar o prompt para o ChatGPT.',
         );
       }
 
       return {
-        provider:
-          this.provider,
-        content:
-          'Solicitação enviada ao ChatGPT.',
-        receivedAt:
-          Date.now(),
+        provider: this.provider,
+        content: 'Solicitação enviada ao ChatGPT.',
+        receivedAt: Date.now(),
       };
     }
 
-    const appHandle =
-      await findWindowHandleByTitle([
-        'ChatGPT',
-        'chatgpt.com',
-        'OpenAI',
-      ]);
+    const appHandle = await findWindowHandleByTitle([
+      'ChatGPT',
+      'chatgpt.com',
+      'OpenAI',
+    ]);
 
     if (!appHandle) {
-      throw new Error(
-        'O ChatGPT não está aberto.',
-      );
+      throw new Error('O ChatGPT não está aberto.');
     }
 
-    const focused =
-      await focusWindow(
-        appHandle,
-      );
+    const focused = await focusWindow(appHandle);
 
     if (!focused) {
-      throw new Error(
-        'Não foi possível focar o ChatGPT.',
-      );
+      throw new Error('Não foi possível focar o ChatGPT.');
     }
 
-    const inputFocused =
-      await focusFirstEditableElement(
-        appHandle,
-      );
+    const inputFocused = await focusFirstEditableElement(appHandle);
 
     if (!inputFocused) {
       throw new Error(
@@ -176,44 +150,35 @@ export class ChatGptConnector
       );
     }
 
-    this.responseReader =
-      await captureResponseReaderState(
-        appHandle,
-        request.prompt,
-      );
+    this.responseReader = await captureResponseReaderState(
+      appHandle,
+      request.prompt,
+    );
 
-    const sent =
-      await pasteClipboardAndSend();
+    const sent = await pasteClipboardAndSend();
 
     if (!sent) {
-      this.responseReader =
-        null;
-
+      this.responseReader = null;
       throw new Error(
         'Não foi possível enviar o prompt para o ChatGPT.',
       );
     }
 
     return {
-      provider:
-        this.provider,
-      content:
-        'Solicitação enviada ao ChatGPT.',
-      receivedAt:
-        Date.now(),
+      provider: this.provider,
+      content: 'Solicitação enviada ao ChatGPT.',
+      receivedAt: Date.now(),
     };
   }
 
   async readResponse(): Promise<AiResponse | null> {
-    const response =
-      await readNewAiResponse(
-        this.responseReader,
-        this.provider,
-      );
+    const response = await readNewAiResponse(
+      this.responseReader,
+      this.provider,
+    );
 
     if (response) {
-      this.responseReader =
-        null;
+      this.responseReader = null;
     }
 
     return response;
