@@ -11,18 +11,11 @@ import {
 } from '../ai-response-reader';
 
 import {
-  findAiTab,
   focusBrowserInput,
   focusBrowserTab,
   pasteClipboardAndSend,
   waitForAiTab,
 } from '../browser';
-
-import {
-  findWindowHandleByTitle,
-  focusFirstEditableElement,
-  focusWindow,
-} from '../windows-ui';
 
 import {
   clipboard,
@@ -41,19 +34,13 @@ export class GeminiConnector implements AiConnector {
   }
 
   async prepare(): Promise<boolean> {
-    const browserTab = await findAiTab(['Gemini']);
+    const browserTab = await waitForAiTab(
+      ['Gemini', 'gemini.google.com', 'Google Gemini'],
+      2,
+      300,
+    );
 
     if (browserTab) {
-      return true;
-    }
-
-    const appHandle = await findWindowHandleByTitle([
-      'Gemini',
-      'gemini.google.com',
-      'Google Gemini',
-    ]);
-
-    if (appHandle !== null) {
       return true;
     }
 
@@ -65,7 +52,7 @@ export class GeminiConnector implements AiConnector {
     }
 
     const openedTab = await waitForAiTab(
-      ['Gemini'],
+      ['Gemini', 'gemini.google.com', 'Google Gemini'],
       30,
       500,
     );
@@ -86,63 +73,27 @@ export class GeminiConnector implements AiConnector {
 
     clipboard.writeText(request.prompt);
 
-    const browserTab = await findAiTab(['Gemini']);
+    const browserTab = await waitForAiTab(
+      ['Gemini', 'gemini.google.com', 'Google Gemini'],
+      10,
+      300,
+    );
 
-    if (browserTab) {
-      const selected = await focusBrowserTab(browserTab);
-
-      if (!selected) {
-        throw new Error(
-          'Não foi possível selecionar a aba do Gemini.',
-        );
-      }
-
-      const inputFocused = await focusBrowserInput(browserTab);
-
-      if (!inputFocused) {
-        throw new Error(
-          'Não foi possível focar o campo de mensagem do Gemini.',
-        );
-      }
-
-      this.responseReader = await captureResponseReaderState(
-        browserTab.handle,
-        request.prompt,
+    if (!browserTab) {
+      throw new Error(
+        'Não foi possível localizar a aba do Gemini no navegador.',
       );
-
-      const sent = await pasteClipboardAndSend();
-
-      if (!sent) {
-        this.responseReader = null;
-        throw new Error(
-          'Não foi possível enviar o prompt para o Gemini.',
-        );
-      }
-
-      return {
-        provider: this.provider,
-        content: 'Solicitação enviada ao Gemini.',
-        receivedAt: Date.now(),
-      };
     }
 
-    const appHandle = await findWindowHandleByTitle([
-      'Gemini',
-      'gemini.google.com',
-      'Google Gemini',
-    ]);
+    const selected = await focusBrowserTab(browserTab);
 
-    if (!appHandle) {
-      throw new Error('O Gemini não está aberto.');
+    if (!selected) {
+      throw new Error(
+        'Não foi possível selecionar a aba do Gemini.',
+      );
     }
 
-    const focused = await focusWindow(appHandle);
-
-    if (!focused) {
-      throw new Error('Não foi possível focar o Gemini.');
-    }
-
-    const inputFocused = await focusFirstEditableElement(appHandle);
+    const inputFocused = await focusBrowserInput(browserTab);
 
     if (!inputFocused) {
       throw new Error(
@@ -151,7 +102,7 @@ export class GeminiConnector implements AiConnector {
     }
 
     this.responseReader = await captureResponseReaderState(
-      appHandle,
+      browserTab.handle,
       request.prompt,
     );
 
