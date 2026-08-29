@@ -31,30 +31,40 @@ export class AgentRuntime {
     private readonly activity = new ActivityRuntime(),
   ) {}
 
-  async run(
-    config: AIProviderConfig,
-    chat: ChatRecord,
-    projectContext: string | undefined,
-    permission: PermissionLevel,
-  ): Promise<AgentRunResult> {
+  async run(config: AIProviderConfig, chat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel): Promise<AgentRunResult> {
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
     return this.runLoop(config, chat, workingChat, projectContext, permission, 0);
   }
 
   async resume(approvalId: string): Promise<AgentRunResult> {
-    const pending = this.pendingRuns.get(approvalId);
-    if (!pending) throw new Error('Aprovação não encontrada ou já processada.');
-
+    const pending = this.getPending(approvalId);
     const result = await this.tools.approve(approvalId);
+    pending.workingChat.messages.push({ role: 'tool', content: result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`, toolCallId: result.toolCallId, createdAt: Date.now() });
+    return this.finishApproval(pending, approvalId);
+  }
+
+  async reject(approvalId: string): Promise<AgentRunResult> {
+    const pending = this.getPending(approvalId);
+    if (!this.tools.deny(approvalId)) throw new Error('Aprovação não encontrada ou já processada.');
+    const call = pending.workingChat.messages.find((message) => message.toolCallId === pendingApprovalCallId(pending, approvalId));
     pending.workingChat.messages.push({
       role: 'tool',
-      content: result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`,
-      toolCallId: result.toolCallId,
+      content: 'Operação recusada pelo usuário.',
+      toolCallId: call?.toolCallId,
       createdAt: Date.now(),
     });
+    return this.finishApproval(pending, approvalId);
+  }
+
+  private getPending(approvalId: string): PendingRun {
+    const pending = this.pendingRuns.get(approvalId);
+    if (!pending) throw new Error('Aprovação não encontrada ou já processada.');
+    return pending;
+  }
+
+  private async finishApproval(pending: PendingRun, approvalId: string): Promise<AgentRunResult> {
     pending.pendingApprovalIds = pending.pendingApprovalIds.filter((id) => id !== approvalId);
     this.pendingRuns.delete(approvalId);
-
     if (pending.pendingApprovalIds.length) {
       return {
         chatId: pending.chat.id,
@@ -64,25 +74,10 @@ export class AgentRuntime {
         messages: [...pending.workingChat.messages],
       };
     }
-
-    return this.runLoop(
-      pending.config,
-      pending.chat,
-      pending.workingChat,
-      pending.projectContext,
-      pending.permission,
-      0,
-    );
+    return this.runLoop(pending.config, pending.chat, pending.workingChat, pending.projectContext, pending.permission, 0);
   }
 
-  private async runLoop(
-    config: AIProviderConfig,
-    chat: ChatRecord,
-    workingChat: ChatRecord,
-    projectContext: string | undefined,
-    permission: PermissionLevel,
-    toolRounds: number,
-  ): Promise<AgentRunResult> {
+  private async runLoop(config: AIProviderConfig, chat: ChatRecord, workingChat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel, toolRounds: number): Promise<AgentRunResult> {
     while (true) {
       const response = await this.chatRuntime.send(config, workingChat, projectContext);
       if (!response.toolCalls?.length) {
@@ -103,9 +98,7 @@ export class AgentRuntime {
           pendingApprovalIds.push(result.approvalId);
           continue;
         }
-        const content = result.ok
-          ? result.output || 'Operação concluída sem saída.'
-          : `Falha: ${result.error || 'erro desconhecido'}`;
+        const content = result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`;
         workingChat.messages.push({ role: 'tool', content, toolCallId: call.id, toolName: call.name, createdAt: Date.now() });
       }
 
@@ -118,4 +111,11 @@ export class AgentRuntime {
       this.activity.success('tool', `Ciclo de ferramentas ${toolRounds} concluído.`);
     }
   }
+}
+
+function pendingApprovalCallId(pending: PendingRun, approvalId: string): string | undefined {
+  const index = pending.pendingApprovalIds.indexOf(approvalId);
+  if (index < 0) return undefined;
+  const assistant = [...pending.workingChat.messages].reverse().find((message) => message.role === 'assistant' && message.toolCalls?.length);
+  return assistant?.toolCalls?.[index]?.id;
 }
