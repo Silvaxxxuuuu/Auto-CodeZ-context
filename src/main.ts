@@ -166,7 +166,12 @@ ipcMain.handle('projects:open-folder', async () => { const result = await dialog
 ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(rootPath));
 ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(filePath));
 ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => projectManager.writeFile(input.filePath, input.content));
-ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(url));
+ipcMain.handle('app:open-external', async (_event, url: string) => {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { throw new Error('URL externa inválida.'); }
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Somente URLs HTTP e HTTPS podem ser abertas.');
+  await shell.openExternal(parsed.toString());
+});
 
 app.whenReady().then(async () => { await storage.init(); await loadProviders(); await projectManager.init(); await chatManager.init(); await createWindow(); app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createWindow(); }); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
