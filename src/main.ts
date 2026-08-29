@@ -133,7 +133,12 @@ ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
   if (chat) await chatManager.update({ ...chat, messages: result.messages });
   return result;
 });
-ipcMain.handle('agent:deny', async (_event, approvalId: string) => toolRuntime.deny(approvalId));
+ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
+  const result = await agentRuntime.reject(approvalId);
+  const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+  if (chat) await chatManager.update({ ...chat, messages: result.messages });
+  return result;
+});
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => projectManager.create(input.name, input.rootPath));
 ipcMain.handle('projects:open-folder', async () => { const result = await dialog.showOpenDialog({ properties: ['openDirectory'] }); if (result.canceled || !result.filePaths[0]) return null; return result.filePaths[0]; });
 ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(rootPath));
