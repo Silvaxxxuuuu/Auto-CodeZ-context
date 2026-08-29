@@ -1,16 +1,18 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
-import fs from 'node:fs/promises';
 import started from 'electron-squirrel-startup';
 import { ProviderRegistry } from './ai/provider-registry';
-import { AIRuntime } from './ai/ai-runtime';
+import { ChatRuntime } from './ai/chat-runtime';
 import { OpenAIAdapter } from './ai/providers/openai';
 import { GoogleAdapter } from './ai/providers/google';
 import { AnthropicAdapter } from './ai/providers/anthropic';
-import type { AIProviderConfig, ChatRecord, IntelligenceLevel, PermissionLevel, ProviderId } from './ai/types';
+import type { AIProviderConfig, ChatRecord, IntelligenceLevel, PermissionLevel, ProviderId, AIToolCall } from './ai/types';
 import { LocalStorage } from './core/storage';
 import { ProjectManager } from './core/project-manager';
 import { ChatManager } from './core/chat-manager';
+import { ActivityRuntime } from './agent/activity-runtime';
+import { WorkspaceRuntime } from './agent/workspace-runtime';
+import { ToolRuntime } from './agent/tool-runtime';
 
 if (started) app.quit();
 
@@ -19,18 +21,26 @@ const registry = new ProviderRegistry();
 registry.register(new OpenAIAdapter());
 registry.register(new GoogleAdapter());
 registry.register(new AnthropicAdapter());
-const aiRuntime = new AIRuntime(registry);
+const activityRuntime = new ActivityRuntime();
 const projectManager = new ProjectManager(storage);
+const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
+const toolRuntime = new ToolRuntime(workspaceRuntime, undefined, activityRuntime);
+const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime);
 const chatManager = new ChatManager(storage);
 
 let providerConfigs: AIProviderConfig[] = [];
 let providerKeys: Record<string, string> = {};
+let mainWindow: BrowserWindow | null = null;
 
 const defaultProviders: AIProviderConfig[] = [
   { id: 'openai', displayName: 'OpenAI', apiKey: '', enabled: false },
   { id: 'google', displayName: 'Google AI', apiKey: '', enabled: false },
   { id: 'anthropic', displayName: 'Anthropic', apiKey: '', enabled: false },
 ];
+
+activityRuntime.subscribe((event) => {
+  mainWindow?.webContents.send('agent:activity', event);
+});
 
 async function loadProviders(): Promise<void> {
   providerConfigs = await storage.read<AIProviderConfig[]>('providers.json', defaultProviders);
@@ -55,7 +65,7 @@ function publicProviders() {
 }
 
 async function createWindow(): Promise<void> {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1050,
@@ -67,6 +77,10 @@ async function createWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
   });
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
@@ -85,8 +99,7 @@ ipcMain.handle('app:get-state', async () => ({
 ipcMain.handle('providers:list-models', async (_event, providerId: ProviderId) => {
   const config = providerConfigs.find((item) => item.id === providerId);
   if (!config?.apiKey) throw new Error('Configure a API key primeiro.');
-  const models = await registry.listModels(config);
-  return models;
+  return registry.listModels(config);
 });
 
 ipcMain.handle('providers:save', async (_event, input: { providerId: ProviderId; apiKey: string; model?: string; baseUrl?: string }) => {
@@ -102,12 +115,9 @@ ipcMain.handle('providers:save', async (_event, input: { providerId: ProviderId;
   };
   if (existing) providerConfigs = providerConfigs.map((item) => item.id === input.providerId ? config : item);
   else providerConfigs.push(config);
-  await saveProviders();
   const models = await registry.listModels(config);
-  if (!config.selectedModel && models[0]) {
-    config.selectedModel = models[0].id;
-    await saveProviders();
-  }
+  if (!config.selectedModel && models[0]) config.selectedModel = models[0].id;
+  await saveProviders();
   return { providers: publicProviders(), models };
 });
 
@@ -135,15 +145,22 @@ ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: str
   const chats = await chatManager.list();
   const chat = chats.find((item) => item.id === input.chatId);
   if (!chat) throw new Error('Chat não encontrado.');
+  const content = input.content.trim();
+  if (!content) throw new Error('A mensagem não pode estar vazia.');
   const config = providerConfigs.find((item) => item.id === chat.providerId);
   if (!config?.apiKey) throw new Error('A IA deste chat não possui uma API key configurada.');
 
-  await chatManager.addMessage(chat.id, { role: 'user', content: input.content });
-  const updated = await chatManager.list();
-  const current = updated.find((item) => item.id === chat.id)!;
-  const response = await aiRuntime.send(config, current.messages, chat.model, chat.intelligence);
+  await chatManager.addMessage(chat.id, { role: 'user', content });
+  const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
+  const response = await chatRuntime.send(config, current);
   await chatManager.addMessage(chat.id, { role: 'assistant', content: response.content });
   return { response, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+});
+
+ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
+
+ipcMain.handle('agent:execute-tool', async (_event, input: { projectId: string; permissionLevel: PermissionLevel; toolCall: AIToolCall }) => {
+  return toolRuntime.execute(input.projectId, input.permissionLevel, input.toolCall);
 });
 
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => projectManager.create(input.name, input.rootPath));
@@ -155,6 +172,7 @@ ipcMain.handle('projects:open-folder', async () => {
 });
 
 ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(rootPath));
+
 ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(filePath));
 ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => projectManager.writeFile(input.filePath, input.content));
 ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(url));
