@@ -70,14 +70,6 @@ export class ToolRuntime {
     }
   }
 
-  private async readOptional(projectId: string, requestedPath: string): Promise<string | null> {
-    try {
-      return await this.workspace.readFile(projectId, requestedPath);
-    } catch {
-      return null;
-    }
-  }
-
   private async executeAllowed(projectId: string, name: ToolName, input: Record<string, unknown>): Promise<ToolExecution> {
     const stringValue = (key: string): string => {
       const value = input[key];
@@ -90,12 +82,12 @@ export class ToolRuntime {
         return { output: await this.workspace.readFile(projectId, stringValue('path')) };
       case 'write_file': {
         const requestedPath = stringValue('path');
-        const before = (await this.readOptional(projectId, requestedPath)) ?? '';
+        if (!(await this.workspace.exists(projectId, requestedPath))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.');
+        const before = await this.workspace.readFile(projectId, requestedPath);
         const content = stringValue('content');
         await this.workspace.writeFile(projectId, requestedPath, content);
         const after = await this.workspace.readFile(projectId, requestedPath);
-        const type = before ? 'modified' : 'created';
-        return { output: 'Arquivo atualizado.', changes: [this.diffs.create(requestedPath, type, before, after)] };
+        return { output: 'Arquivo atualizado.', changes: [this.diffs.create(requestedPath, 'modified', before, after)] };
       }
       case 'create_file': {
         const requestedPath = stringValue('path');
