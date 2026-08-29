@@ -128,7 +128,8 @@ export class ToolRuntime {
         const requestedPath = stringValue('path');
         if (!(await this.workspace.exists(projectId, requestedPath))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.');
         const before = await this.workspace.readFile(projectId, requestedPath);
-        const content = stringValue('content');
+        const content = input.content;
+        if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido.");
         await this.workspace.writeFile(projectId, requestedPath, content);
         const after = await this.workspace.readFile(projectId, requestedPath);
         return { output: 'Arquivo atualizado.', changes: [this.diffs.create(requestedPath, 'modified', before, after)] };
