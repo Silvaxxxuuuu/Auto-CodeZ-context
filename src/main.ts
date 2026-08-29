@@ -7,7 +7,7 @@ import { ModelResolver } from './ai/model-resolver';
 import { OpenAIAdapter } from './ai/providers/openai';
 import { GoogleAdapter } from './ai/providers/google';
 import { AnthropicAdapter } from './ai/providers/anthropic';
-import type { AIProviderConfig, ChatRecord, IntelligenceLevel, PermissionLevel, ProviderId, AIToolCall } from './ai/types';
+import type { AIProviderConfig, ChatRecord, IntelligenceLevel, PermissionLevel, ProviderId, AIToolCall, AIStreamEvent } from './ai/types';
 import { LocalStorage } from './core/storage';
 import { ProjectManager } from './core/project-manager';
 import { ChatManager } from './core/chat-manager';
@@ -146,20 +146,49 @@ ipcMain.handle('chat:update-settings', async (_event, input: { chatId: string; p
   return updated;
 });
 
-ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => {
-  const chats = await chatManager.list();
-  const chat = chats.find((item) => item.id === input.chatId);
+async function getChatContext(chatId: string): Promise<{ chat: ChatRecord; config: AIProviderConfig }> {
+  const chat = (await chatManager.list()).find((item) => item.id === chatId);
   if (!chat) throw new Error('Chat não encontrado.');
-  const content = input.content.trim();
-  if (!content) throw new Error('A mensagem não pode estar vazia.');
   const config = providerConfigs.find((item) => item.id === chat.providerId);
   if (!config?.apiKey) throw new Error('A IA deste chat não possui uma API key configurada.');
+  return { chat, config };
+}
+
+ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => {
+  const { chat, config } = await getChatContext(input.chatId);
+  const content = input.content.trim();
+  if (!content) throw new Error('A mensagem não pode estar vazia.');
 
   await chatManager.addMessage(chat.id, { role: 'user', content });
   const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
   const response = await chatRuntime.send(config, current);
   await chatManager.addMessage(chat.id, { role: 'assistant', content: response.content });
   return { response, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+});
+
+ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
+  const { chat, config } = await getChatContext(input.chatId);
+  const content = input.content.trim();
+  if (!content) throw new Error('A mensagem não pode estar vazia.');
+
+  await chatManager.addMessage(chat.id, { role: 'user', content });
+  const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
+  let finalResponse: AIStreamEvent['response'];
+  let streamedText = '';
+
+  for await (const event of chatRuntime.stream(config, current)) {
+    if (event.type === 'delta' && event.text) streamedText += event.text;
+    if (event.type === 'complete' && event.response) finalResponse = event.response;
+    mainWindow?.webContents.send('chat:stream-event', event);
+  }
+
+  if (finalResponse) {
+    await chatManager.addMessage(chat.id, { role: 'assistant', content: finalResponse.content });
+  } else if (streamedText) {
+    await chatManager.addMessage(chat.id, { role: 'assistant', content: streamedText });
+  }
+
+  return { chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 });
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
