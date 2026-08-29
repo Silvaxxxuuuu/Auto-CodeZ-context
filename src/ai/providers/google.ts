@@ -1,13 +1,76 @@
-import type { AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent } from '../types';
+import type { AIMessage, AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent, AIToolCall } from '../types';
 import { parseSSE } from '../sse';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
+type GooglePart = {
+  text?: string;
+  thought?: boolean;
+  thoughtSignature?: string;
+  functionCall?: { name?: string; args?: Record<string, unknown>; id?: string };
+  functionResponse?: { name?: string; response?: unknown; id?: string };
+};
+
 type GoogleChunk = {
-  candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+  candidates?: Array<{ content?: { parts?: GooglePart[] } }>;
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
   error?: { message?: string };
 };
+
+function buildTools(request: AIRequest): Array<Record<string, unknown>> | undefined {
+  if (!request.toolsEnabled || !request.tools?.length) return undefined;
+  return [{
+    functionDeclarations: request.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    })),
+  }];
+}
+
+function buildContents(messages: AIMessage[]): Array<Record<string, unknown>> {
+  const contents: Array<Record<string, unknown>> = [];
+  for (const message of messages) {
+    if (message.role === 'system') continue;
+    if (message.role === 'tool') {
+      if (!message.toolName) continue;
+      contents.push({
+        role: 'user',
+        parts: [{ functionResponse: { name: message.toolName, response: { result: message.content }, ...(message.toolCallId ? { id: message.toolCallId } : {}) } }],
+      });
+      continue;
+    }
+    if (message.role === 'assistant' && message.toolCalls?.length) {
+      const parts: GooglePart[] = [];
+      if (message.content) parts.push({ text: message.content });
+      for (const call of message.toolCalls) {
+        parts.push({
+          functionCall: { name: call.name, args: call.input, id: call.id },
+          ...(call.providerData?.thoughtSignature ? { thoughtSignature: String(call.providerData.thoughtSignature) } : {}),
+        });
+      }
+      contents.push({ role: 'model', parts });
+      continue;
+    }
+    contents.push({
+      role: message.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: message.content }],
+    });
+  }
+  return contents;
+}
+
+function parseToolCalls(parts: GooglePart[]): AIToolCall[] {
+  return parts.flatMap((part) => {
+    if (!part.functionCall?.name) return [];
+    return [{
+      id: part.functionCall.id || `google_${part.functionCall.name}_${Math.random().toString(36).slice(2)}`,
+      name: part.functionCall.name as AIToolCall['name'],
+      input: part.functionCall.args || {},
+      providerData: part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : undefined,
+    }];
+  });
+}
 
 export class GoogleAdapter implements AIProviderAdapter {
   readonly id = 'google';
@@ -30,16 +93,13 @@ export class GoogleAdapter implements AIProviderAdapter {
 
   private buildBody(request: AIRequest): Record<string, unknown> {
     const systemMessages = request.messages.filter((message) => message.role === 'system');
-    const contents = request.messages
-      .filter((message) => message.role !== 'system')
-      .map((message) => ({
-        role: message.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: message.content }],
-      }));
-    return {
+    const body: Record<string, unknown> = {
       systemInstruction: systemMessages.length ? { parts: systemMessages.map((message) => ({ text: message.content })) } : undefined,
-      contents,
+      contents: buildContents(request.messages),
     };
+    const tools = buildTools(request);
+    if (tools) body.tools = tools;
+    return body;
   }
 
   async send(config: AIProviderConfig, request: AIRequest): Promise<AIResponse> {
@@ -52,7 +112,8 @@ export class GoogleAdapter implements AIProviderAdapter {
     const data = (await response.json()) as GoogleChunk;
     if (!response.ok) throw new Error(data.error?.message || `Google AI request failed: ${response.status}`);
 
-    const content = data.candidates?.[0]?.content?.parts?.filter((part) => !part.thought).map((part) => part.text || '').join('') || '';
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const content = parts.filter((part) => !part.thought && part.text).map((part) => part.text || '').join('');
     return {
       content,
       model: request.model,
@@ -62,6 +123,7 @@ export class GoogleAdapter implements AIProviderAdapter {
         outputTokens: data.usageMetadata?.candidatesTokenCount,
         totalTokens: data.usageMetadata?.totalTokenCount,
       },
+      toolCalls: parseToolCalls(parts),
     };
   }
 
@@ -79,6 +141,7 @@ export class GoogleAdapter implements AIProviderAdapter {
 
     let content = '';
     let usage: AIResponse['usage'];
+    const toolCalls: AIToolCall[] = [];
     yield { type: 'start' };
 
     for await (const raw of parseSSE(response)) {
@@ -86,9 +149,18 @@ export class GoogleAdapter implements AIProviderAdapter {
       if (chunk.error?.message) throw new Error(chunk.error.message);
       const parts = chunk.candidates?.[0]?.content?.parts || [];
       for (const part of parts) {
-        if (part.thought || !part.text) continue;
-        content += part.text;
-        yield { type: 'delta', text: part.text };
+        if (part.thought) continue;
+        if (part.text) {
+          content += part.text;
+          yield { type: 'delta', text: part.text };
+        }
+        if (part.functionCall) {
+          const parsed = parseToolCalls([part]);
+          for (const call of parsed) {
+            toolCalls.push(call);
+            yield { type: 'tool_call', toolCall: call };
+          }
+        }
       }
       if (chunk.usageMetadata) {
         usage = {
@@ -99,7 +171,7 @@ export class GoogleAdapter implements AIProviderAdapter {
       }
     }
 
-    const result: AIResponse = { content, model: request.model, providerId: this.id, usage };
+    const result: AIResponse = { content, model: request.model, providerId: this.id, usage, toolCalls };
     yield { type: 'complete', response: result, usage };
   }
 }
