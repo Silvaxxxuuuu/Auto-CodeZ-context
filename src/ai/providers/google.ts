@@ -30,14 +30,26 @@ function buildTools(request: AIRequest): Array<Record<string, unknown>> | undefi
 
 function buildContents(messages: AIMessage[]): Array<Record<string, unknown>> {
   const contents: Array<Record<string, unknown>> = [];
-  for (const message of messages) {
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
     if (message.role === 'system') continue;
     if (message.role === 'tool') {
-      if (!message.toolName) continue;
-      contents.push({
-        role: 'user',
-        parts: [{ functionResponse: { name: message.toolName, response: { result: message.content }, ...(message.toolCallId ? { id: message.toolCallId } : {}) } }],
-      });
+      const parts: Array<Record<string, unknown>> = [];
+      while (index < messages.length && messages[index].role === 'tool') {
+        const toolMessage = messages[index];
+        if (toolMessage.toolName) {
+          parts.push({
+            functionResponse: {
+              name: toolMessage.toolName,
+              response: { result: toolMessage.content },
+              ...(toolMessage.toolCallId ? { id: toolMessage.toolCallId } : {}),
+            },
+          });
+        }
+        index += 1;
+      }
+      index -= 1;
+      if (parts.length) contents.push({ role: 'user', parts });
       continue;
     }
     if (message.role === 'assistant' && message.toolCalls?.length) {
