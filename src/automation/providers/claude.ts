@@ -11,6 +11,10 @@ import {
 } from '../ai-response-reader';
 
 import {
+  verifyFocusedAiMessageInput,
+} from '../browser-input-verifier';
+
+import {
   findAiTab,
   focusBrowserMessageInput,
   focusBrowserTab,
@@ -97,6 +101,17 @@ export class ClaudeConnector implements AiConnector {
     if (!inputFocused) {
       throw new Error(
         'O campo de mensagem do Claude não foi identificado com segurança. O prompt não foi enviado.',
+      );
+    }
+
+    const verifiedInput = await verifyFocusedAiMessageInput(
+      browserTab,
+      this.provider,
+    );
+
+    if (!verifiedInput) {
+      throw new Error(
+        'O foco do Claude não foi confirmado no campo de mensagem. O prompt não foi enviado.',
       );
     }
 
