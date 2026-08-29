@@ -10,14 +10,10 @@ import {
   type AiResponseReaderState,
 } from '../ai-response-reader';
 
-import {
-  verifyFocusedAiMessageInput,
-} from '../browser-input-verifier';
+import { focusAndSendChromiumAiPrompt } from '../chromium-ai-input';
 
 import {
-  focusBrowserMessageInput,
   focusBrowserTab,
-  pasteClipboardAndSend,
   waitForAiTab,
 } from '../browser';
 
@@ -96,28 +92,6 @@ export class GeminiConnector implements AiConnector {
       );
     }
 
-    const inputFocused = await focusBrowserMessageInput(
-      browserTab,
-      this.provider,
-    );
-
-    if (!inputFocused) {
-      throw new Error(
-        'O campo de mensagem do Gemini não foi identificado com segurança. O prompt não foi enviado.',
-      );
-    }
-
-    const verifiedInput = await verifyFocusedAiMessageInput(
-      browserTab,
-      this.provider,
-    );
-
-    if (!verifiedInput) {
-      throw new Error(
-        'O foco do Gemini não foi confirmado no campo de mensagem. O prompt não foi enviado.',
-      );
-    }
-
     clipboard.writeText(request.prompt);
 
     this.responseReader = await captureResponseReaderState(
@@ -125,8 +99,7 @@ export class GeminiConnector implements AiConnector {
       request.prompt,
     );
 
-    const sent = await pasteClipboardAndSend(
-      request.prompt,
+    const sent = await focusAndSendChromiumAiPrompt(
       browserTab,
       this.provider,
     );
@@ -134,7 +107,7 @@ export class GeminiConnector implements AiConnector {
     if (!sent) {
       this.responseReader = null;
       throw new Error(
-        'O Gemini não confirmou a inserção do prompt no campo de mensagem. O envio foi interrompido.',
+        'O campo de mensagem do Gemini não foi identificado com segurança no conteúdo da página. O prompt não foi enviado.',
       );
     }
 
