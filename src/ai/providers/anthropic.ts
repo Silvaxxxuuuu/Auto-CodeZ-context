@@ -16,14 +16,20 @@ function effort(level: AIRequest['intelligence']): string {
 
 function buildMessages(messages: AIMessage[]): Array<Record<string, unknown>> {
   const result: Array<Record<string, unknown>> = [];
-  for (const message of messages) {
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
     if (message.role === 'system') continue;
     if (message.role === 'tool') {
-      if (!message.toolCallId) continue;
-      result.push({
-        role: 'user',
-        content: [{ type: 'tool_result', tool_use_id: message.toolCallId, content: message.content }],
-      });
+      const content: Array<Record<string, unknown>> = [];
+      while (index < messages.length && messages[index].role === 'tool') {
+        const toolMessage = messages[index];
+        if (toolMessage.toolCallId) {
+          content.push({ type: 'tool_result', tool_use_id: toolMessage.toolCallId, content: toolMessage.content });
+        }
+        index += 1;
+      }
+      index -= 1;
+      if (content.length) result.push({ role: 'user', content });
       continue;
     }
     if (message.role === 'assistant' && message.toolCalls?.length) {
