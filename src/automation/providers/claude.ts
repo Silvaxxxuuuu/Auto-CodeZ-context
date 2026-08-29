@@ -19,12 +19,6 @@ import {
 } from '../browser';
 
 import {
-  findWindowHandleByTitle,
-  focusFirstEditableElement,
-  focusWindow,
-} from '../windows-ui';
-
-import {
   clipboard,
   shell,
 } from 'electron';
@@ -41,19 +35,9 @@ export class ClaudeConnector implements AiConnector {
   }
 
   async prepare(): Promise<boolean> {
-    const browserTab = await findAiTab(['Claude']);
+    const browserTab = await findAiTab(['Claude', 'claude.ai', 'Anthropic']);
 
     if (browserTab) {
-      return true;
-    }
-
-    const appHandle = await findWindowHandleByTitle([
-      'Claude',
-      'claude.ai',
-      'Anthropic',
-    ]);
-
-    if (appHandle !== null) {
       return true;
     }
 
@@ -65,7 +49,7 @@ export class ClaudeConnector implements AiConnector {
     }
 
     const openedTab = await waitForAiTab(
-      ['Claude'],
+      ['Claude', 'claude.ai', 'Anthropic'],
       30,
       500,
     );
@@ -86,63 +70,27 @@ export class ClaudeConnector implements AiConnector {
 
     clipboard.writeText(request.prompt);
 
-    const browserTab = await findAiTab(['Claude']);
+    const browserTab = await waitForAiTab(
+      ['Claude', 'claude.ai', 'Anthropic'],
+      10,
+      300,
+    );
 
-    if (browserTab) {
-      const selected = await focusBrowserTab(browserTab);
-
-      if (!selected) {
-        throw new Error(
-          'Não foi possível selecionar a aba do Claude.',
-        );
-      }
-
-      const inputFocused = await focusBrowserInput(browserTab);
-
-      if (!inputFocused) {
-        throw new Error(
-          'Não foi possível focar o campo de mensagem do Claude.',
-        );
-      }
-
-      this.responseReader = await captureResponseReaderState(
-        browserTab.handle,
-        request.prompt,
+    if (!browserTab) {
+      throw new Error(
+        'Não foi possível localizar a aba do Claude no navegador.',
       );
-
-      const sent = await pasteClipboardAndSend();
-
-      if (!sent) {
-        this.responseReader = null;
-        throw new Error(
-          'Não foi possível enviar o prompt para o Claude.',
-        );
-      }
-
-      return {
-        provider: this.provider,
-        content: 'Solicitação enviada ao Claude.',
-        receivedAt: Date.now(),
-      };
     }
 
-    const appHandle = await findWindowHandleByTitle([
-      'Claude',
-      'claude.ai',
-      'Anthropic',
-    ]);
+    const selected = await focusBrowserTab(browserTab);
 
-    if (!appHandle) {
-      throw new Error('O Claude não está aberto.');
+    if (!selected) {
+      throw new Error(
+        'Não foi possível selecionar a aba do Claude.',
+      );
     }
 
-    const focused = await focusWindow(appHandle);
-
-    if (!focused) {
-      throw new Error('Não foi possível focar o Claude.');
-    }
-
-    const inputFocused = await focusFirstEditableElement(appHandle);
+    const inputFocused = await focusBrowserInput(browserTab);
 
     if (!inputFocused) {
       throw new Error(
@@ -151,7 +99,7 @@ export class ClaudeConnector implements AiConnector {
     }
 
     this.responseReader = await captureResponseReaderState(
-      appHandle,
+      browserTab.handle,
       request.prompt,
     );
 
