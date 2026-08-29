@@ -34,7 +34,7 @@ const projectContextRuntime = new ProjectContextRuntime(projectManager);
 const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
 const commandRuntime = new CommandRuntime(() => projectManager.list());
 const toolRuntime = new ToolRuntime(workspaceRuntime, undefined, activityRuntime, approvalRuntime, commandRuntime);
-const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver);
+const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver, toolRuntime.listDefinitions());
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime);
 const chatManager = new ChatManager(storage);
 
