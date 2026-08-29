@@ -5,71 +5,87 @@ import type {
 } from '../../ai/aiConnector';
 
 import {
-  findAiTab,
+  captureResponseReaderState,
+  readNewAiResponse,
+  type AiResponseReaderState,
+} from '../ai-response-reader';
+
+import {
   focusBrowserInput,
   focusBrowserTab,
   pasteClipboardAndSend,
+  waitForAiTab,
 } from '../browser';
 
-export class GeminiConnector
-  implements AiConnector
-{
-  readonly provider =
-    'gemini' as const;
+import {
+  clipboard,
+  shell,
+} from 'electron';
+
+const GEMINI_URL = 'https://gemini.google.com/app';
+
+export class GeminiConnector implements AiConnector {
+  readonly provider = 'gemini' as const;
+
+  private responseReader: AiResponseReaderState | null = null;
 
   async isAvailable(): Promise<boolean> {
-    const browserTab =
-      await findAiTab([
-        'Gemini',
-      ]);
-
-    return browserTab !== null;
+    return true;
   }
 
   async prepare(): Promise<boolean> {
-  const browserTab =
-    await findAiTab([
-      'Gemini',
-    ]);
+    const browserTab = await waitForAiTab(
+      ['Gemini', 'gemini.google.com', 'Google Gemini'],
+      2,
+      300,
+    );
 
-  return browserTab !== null;
-}
+    if (browserTab) {
+      return true;
+    }
 
-  async send(
-    request: AiRequest,
-  ): Promise<AiResponse> {
-    if (
-      request.provider !==
-      this.provider
-    ) {
+    try {
+      await shell.openExternal(GEMINI_URL);
+    }
+    catch {
+      return false;
+    }
+
+    const openedTab = await waitForAiTab(
+      ['Gemini', 'gemini.google.com', 'Google Gemini'],
+      30,
+      500,
+    );
+
+    return openedTab !== null;
+  }
+
+  async send(request: AiRequest): Promise<AiResponse> {
+    if (request.provider !== this.provider) {
       throw new Error(
         'O conector do Gemini recebeu um provider inválido.',
       );
     }
 
-    if (
-      !request.prompt.trim()
-    ) {
-      throw new Error(
-        'O prompt do Gemini está vazio.',
-      );
+    if (!request.prompt.trim()) {
+      throw new Error('O prompt do Gemini está vazio.');
     }
 
-    const browserTab =
-      await findAiTab([
-        'Gemini',
-      ]);
+    clipboard.writeText(request.prompt);
+
+    const browserTab = await waitForAiTab(
+      ['Gemini', 'gemini.google.com', 'Google Gemini'],
+      10,
+      300,
+    );
 
     if (!browserTab) {
       throw new Error(
-        'O Gemini não está aberto.',
+        'Não foi possível localizar a aba do Gemini no navegador.',
       );
     }
 
-    const selected =
-      await focusBrowserTab(
-        browserTab,
-      );
+    const selected = await focusBrowserTab(browserTab);
 
     if (!selected) {
       throw new Error(
@@ -77,10 +93,7 @@ export class GeminiConnector
       );
     }
 
-    const inputFocused =
-      await focusBrowserInput(
-        browserTab,
-      );
+    const inputFocused = await focusBrowserInput(browserTab);
 
     if (!inputFocused) {
       throw new Error(
@@ -88,26 +101,37 @@ export class GeminiConnector
       );
     }
 
-    const sent =
-      await pasteClipboardAndSend();
+    this.responseReader = await captureResponseReaderState(
+      browserTab.handle,
+      request.prompt,
+    );
+
+    const sent = await pasteClipboardAndSend();
 
     if (!sent) {
+      this.responseReader = null;
       throw new Error(
         'Não foi possível enviar o prompt para o Gemini.',
       );
     }
 
     return {
-      provider:
-        this.provider,
-      content:
-        'Solicitação enviada ao Gemini.',
-      receivedAt:
-        Date.now(),
+      provider: this.provider,
+      content: 'Solicitação enviada ao Gemini.',
+      receivedAt: Date.now(),
     };
   }
 
   async readResponse(): Promise<AiResponse | null> {
-    return null;
+    const response = await readNewAiResponse(
+      this.responseReader,
+      this.provider,
+    );
+
+    if (response) {
+      this.responseReader = null;
+    }
+
+    return response;
   }
 }
