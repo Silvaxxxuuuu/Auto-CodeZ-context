@@ -1,7 +1,9 @@
 import type { AIMessage, AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent, AIToolCall } from '../types';
-import { parseSSE } from '../sse';
+import { fetchWithTimeout, parseSSE } from '../sse';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com/v1';
+const MODEL_LIST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 120_000;
 
 function supportsEffort(model: string): boolean {
   return /claude-(opus|sonnet)-5|claude-(opus|sonnet)-4-[7-8]|claude-(fable|mythos)-5/i.test(model);
@@ -74,12 +76,12 @@ export class AnthropicAdapter implements AIProviderAdapter {
   readonly displayName = 'Anthropic';
 
   async listModels(config: AIProviderConfig): Promise<AIModel[]> {
-    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/models`, {
+    const response = await fetchWithTimeout(`${config.baseUrl || DEFAULT_BASE_URL}/models`, {
       headers: {
         'x-api-key': config.apiKey,
         'anthropic-version': '2023-06-01',
       },
-    });
+    }, MODEL_LIST_TIMEOUT_MS);
     if (!response.ok) throw new Error(`Anthropic models request failed: ${response.status}`);
     const data = (await response.json()) as { data?: Array<{ id: string; display_name?: string }> };
     return (data.data || []).map((model) => ({
@@ -107,7 +109,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
   }
 
   async send(config: AIProviderConfig, request: AIRequest): Promise<AIResponse> {
-    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/messages`, {
+    const response = await fetchWithTimeout(`${config.baseUrl || DEFAULT_BASE_URL}/messages`, {
       method: 'POST',
       headers: {
         'x-api-key': config.apiKey,
@@ -115,7 +117,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
         'content-type': 'application/json',
       },
       body: JSON.stringify(this.buildBody(request)),
-    });
+    }, REQUEST_TIMEOUT_MS);
 
     const data = (await response.json()) as {
       content?: Array<{ type?: string; text?: string; id?: string; name?: string; input?: unknown }>;
@@ -139,7 +141,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
   }
 
   async *stream(config: AIProviderConfig, request: AIRequest): AsyncGenerator<AIStreamEvent> {
-    const response = await fetch(`${config.baseUrl || DEFAULT_BASE_URL}/messages`, {
+    const response = await fetchWithTimeout(`${config.baseUrl || DEFAULT_BASE_URL}/messages`, {
       method: 'POST',
       headers: {
         'x-api-key': config.apiKey,
@@ -147,7 +149,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
         'content-type': 'application/json',
       },
       body: JSON.stringify(this.buildBody(request, true)),
-    });
+    }, REQUEST_TIMEOUT_MS);
 
     if (!response.ok) {
       const data = await response.json().catch(() => ({})) as { error?: { message?: string } };
