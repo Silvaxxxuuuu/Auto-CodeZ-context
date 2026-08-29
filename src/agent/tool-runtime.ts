@@ -1,9 +1,10 @@
-import type { ApprovalRequest, AIToolCall, AIToolDefinition, AIToolResult, PermissionLevel, ToolName } from '../ai/types';
+import type { ApprovalRequest, AIToolCall, AIToolDefinition, AIToolResult, FileDiff, PermissionLevel, ToolName } from '../ai/types';
 import { ActivityRuntime } from './activity-runtime';
 import { ApprovalRuntime } from './approval-runtime';
 import { PermissionRuntime } from './permission-runtime';
 import { WorkspaceRuntime } from './workspace-runtime';
 import { CommandRuntime } from './command-runtime';
+import { DiffRuntime } from './diff-runtime';
 
 const definitions: AIToolDefinition[] = [
   { name: 'read_file', description: 'Read a text file inside the active workspace.', requiresWriteAccess: false, requiresApproval: false },
@@ -15,6 +16,11 @@ const definitions: AIToolDefinition[] = [
   { name: 'run_command', description: 'Run an approved package script such as tests, build, typecheck or lint inside the active workspace.', requiresWriteAccess: false, requiresApproval: true },
 ];
 
+interface ToolExecution {
+  output: string;
+  changes?: FileDiff[];
+}
+
 export class ToolRuntime {
   constructor(
     private readonly workspace: WorkspaceRuntime,
@@ -22,6 +28,7 @@ export class ToolRuntime {
     private readonly activity = new ActivityRuntime(),
     private readonly approvals = new ApprovalRuntime(),
     private readonly commands = new CommandRuntime(async () => []),
+    private readonly diffs = new DiffRuntime(),
   ) {}
 
   listDefinitions(): AIToolDefinition[] { return definitions.map((definition) => ({ ...definition })); }
@@ -44,15 +51,18 @@ export class ToolRuntime {
   }
 
   deny(approvalId: string): boolean {
-    return Boolean(this.approvals.get(approvalId)) && (this.approvals.resolve(approvalId), true);
+    if (!this.approvals.get(approvalId)) return false;
+    this.approvals.resolve(approvalId);
+    this.activity.emit({ type: 'action', message: 'Operação recusada pelo usuário.', status: 'success' });
+    return true;
   }
 
   private async executeNow(projectId: string, call: AIToolCall): Promise<AIToolResult> {
     this.activity.start('tool', `Executando ${call.name}`);
     try {
-      const output = await this.executeAllowed(projectId, call.name, call.input);
+      const execution = await this.executeAllowed(projectId, call.name, call.input);
       this.activity.success('tool', `Concluído: ${call.name}`);
-      return { toolCallId: call.id, ok: true, output };
+      return { toolCallId: call.id, ok: true, output: execution.output, changes: execution.changes };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.activity.failure('tool', `Falha em ${call.name}: ${message}`);
@@ -60,20 +70,58 @@ export class ToolRuntime {
     }
   }
 
-  private async executeAllowed(projectId: string, name: ToolName, input: Record<string, unknown>): Promise<string> {
+  private async readOptional(projectId: string, requestedPath: string): Promise<string | null> {
+    try {
+      return await this.workspace.readFile(projectId, requestedPath);
+    } catch {
+      return null;
+    }
+  }
+
+  private async executeAllowed(projectId: string, name: ToolName, input: Record<string, unknown>): Promise<ToolExecution> {
     const stringValue = (key: string): string => {
       const value = input[key];
       if (typeof value !== 'string' || !value.trim()) throw new Error(`Parâmetro '${key}' inválido.`);
       return value;
     };
+
     switch (name) {
-      case 'read_file': return this.workspace.readFile(projectId, stringValue('path'));
-      case 'write_file': await this.workspace.writeFile(projectId, stringValue('path'), stringValue('content')); return 'Arquivo atualizado.';
-      case 'create_file': await this.workspace.createFile(projectId, stringValue('path'), String(input.content ?? '')); return 'Arquivo criado.';
-      case 'delete_file': await this.workspace.deleteFile(projectId, stringValue('path')); return 'Arquivo excluído.';
-      case 'rename_file': await this.workspace.renameFile(projectId, stringValue('from'), stringValue('to')); return 'Arquivo renomeado.';
-      case 'search_files': return JSON.stringify(await this.workspace.searchFiles(projectId, stringValue('query')));
-      case 'run_command': return JSON.stringify(await this.commands.run(projectId, stringValue('manager'), stringValue('script')));
+      case 'read_file':
+        return { output: await this.workspace.readFile(projectId, stringValue('path')) };
+      case 'write_file': {
+        const requestedPath = stringValue('path');
+        const before = (await this.readOptional(projectId, requestedPath)) ?? '';
+        const content = stringValue('content');
+        await this.workspace.writeFile(projectId, requestedPath, content);
+        const after = await this.workspace.readFile(projectId, requestedPath);
+        const type = before ? 'modified' : 'created';
+        return { output: 'Arquivo atualizado.', changes: [this.diffs.create(requestedPath, type, before, after)] };
+      }
+      case 'create_file': {
+        const requestedPath = stringValue('path');
+        const content = String(input.content ?? '');
+        await this.workspace.createFile(projectId, requestedPath, content);
+        const after = await this.workspace.readFile(projectId, requestedPath);
+        return { output: 'Arquivo criado.', changes: [this.diffs.create(requestedPath, 'created', '', after)] };
+      }
+      case 'delete_file': {
+        const requestedPath = stringValue('path');
+        const before = await this.workspace.readFile(projectId, requestedPath);
+        await this.workspace.deleteFile(projectId, requestedPath);
+        return { output: 'Arquivo excluído.', changes: [this.diffs.create(requestedPath, 'deleted', before, '')] };
+      }
+      case 'rename_file': {
+        const from = stringValue('from');
+        const to = stringValue('to');
+        const before = await this.workspace.readFile(projectId, from);
+        await this.workspace.renameFile(projectId, from, to);
+        const after = await this.workspace.readFile(projectId, to);
+        return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] };
+      }
+      case 'search_files':
+        return { output: JSON.stringify(await this.workspace.searchFiles(projectId, stringValue('query'))) };
+      case 'run_command':
+        return { output: JSON.stringify(await this.commands.run(projectId, stringValue('manager'), stringValue('script'))) };
     }
   }
 }
