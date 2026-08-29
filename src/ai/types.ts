@@ -89,6 +89,16 @@ export interface AIToolCall {
   input: Record<string, unknown>;
 }
 
+export interface FileDiff {
+  path: string;
+  type: 'created' | 'modified' | 'deleted' | 'renamed';
+  before: string;
+  after: string;
+  addedLines: number;
+  removedLines: number;
+  renamedFrom?: string;
+}
+
 export interface AIToolResult {
   toolCallId: string;
   ok: boolean;
@@ -96,6 +106,7 @@ export interface AIToolResult {
   error?: string;
   approvalId?: string;
   pendingApproval?: boolean;
+  changes?: FileDiff[];
 }
 
 export interface AIToolDefinition {
