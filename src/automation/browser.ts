@@ -17,6 +17,11 @@ export type BrowserTab = {
   selected: boolean;
 };
 
+export type AiBrowserProvider =
+  | 'chatgpt'
+  | 'claude'
+  | 'gemini';
+
 type PowerShellResult = {
   success: boolean;
   stdout: string;
@@ -31,6 +36,36 @@ const browserProcesses: BrowserName[] = [
   'opera',
   'opera_gx',
   'vivaldi',
+];
+
+const messageInputTerms: Record<AiBrowserProvider, string[]> = {
+  chatgpt: [
+    'message chatgpt',
+    'send a message',
+    'message',
+    'prompt',
+  ],
+  claude: [
+    'write a message',
+    'reply',
+    'message',
+    'prompt',
+  ],
+  gemini: [
+    'enter a prompt here',
+    'enter a prompt',
+    'prompt',
+    'message',
+  ],
+};
+
+const forbiddenInputTerms = [
+  'address',
+  'search',
+  'find',
+  'url',
+  'omnibox',
+  'navigation',
 ];
 
 function escapePowerShellString(value: string): string {
@@ -319,15 +354,25 @@ else {
   );
 }
 
-export async function focusBrowserInput(
+export async function focusBrowserMessageInput(
   tab: BrowserTab,
+  provider: AiBrowserProvider,
 ): Promise<boolean> {
+  const terms = createPowerShellArray(
+    messageInputTerms[provider],
+  );
+  const forbidden = createPowerShellArray(
+    forbiddenInputTerms,
+  );
+
   const script = `
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 
 $handle = [IntPtr]::new(${tab.handle})
 $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+$terms = @(${terms})
+$forbidden = @(${forbidden})
 
 if ($null -eq $root) {
   Write-Output "false"
@@ -350,25 +395,58 @@ $elements = $root.FindAll(
   $condition
 )
 
+$candidates = @()
+
 foreach ($element in $elements) {
   try {
     $current = $element.Current
 
-    if (-not $current.IsEnabled) {
+    if (-not $current.IsEnabled -or $current.IsOffscreen) {
       continue
     }
 
-    if ($current.IsOffscreen) {
+    $name = ([string]$current.Name).ToLowerInvariant()
+    $automationId = ([string]$current.AutomationId).ToLowerInvariant()
+    $helpText = ([string]$current.HelpText).ToLowerInvariant()
+    $localizedType = ([string]$current.LocalizedControlType).ToLowerInvariant()
+
+    $evidence = "$name $automationId $helpText $localizedType"
+
+    $isForbidden = $false
+
+    foreach ($term in $forbidden) {
+      if ($evidence.Contains($term.ToLowerInvariant())) {
+        $isForbidden = $true
+        break
+      }
+    }
+
+    if ($isForbidden) {
       continue
     }
 
-    try {
-      $element.SetFocus()
-      Write-Output "true"
-      exit
+    $matchesProvider = $false
+
+    foreach ($term in $terms) {
+      if ($evidence.Contains($term.ToLowerInvariant())) {
+        $matchesProvider = $true
+        break
+      }
     }
-    catch {
+
+    if ($matchesProvider) {
+      $candidates += $element
     }
+  }
+  catch {
+  }
+}
+
+foreach ($element in $candidates) {
+  try {
+    $element.SetFocus()
+    Write-Output "true"
+    exit
   }
   catch {
   }
