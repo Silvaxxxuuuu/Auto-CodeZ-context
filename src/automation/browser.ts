@@ -40,22 +40,24 @@ const browserProcesses: BrowserName[] = [
 
 const messageInputTerms: Record<AiBrowserProvider, string[]> = {
   chatgpt: [
-    'message chatgpt',
-    'send a message',
-    'message',
-    'prompt',
+    'chat with chatgpt',
+    'ask anything',
+    'prompt-textarea',
+    'chat input',
   ],
   claude: [
     'write a message',
-    'reply',
-    'message',
-    'prompt',
+    'message claude',
+    'what can i help you with',
+    'what can i help you with today',
+    "what's something you're working on right now",
+    'type your message here',
   ],
   gemini: [
     'enter a prompt here',
-    'enter a prompt',
-    'prompt',
-    'message',
+    'ask gemini',
+    'chat with gemini',
+    'gemini prompt',
   ],
 };
 
@@ -66,6 +68,8 @@ const forbiddenInputTerms = [
   'url',
   'omnibox',
   'navigation',
+  'navigate',
+  'web search',
 ];
 
 function escapePowerShellString(value: string): string {
@@ -109,6 +113,50 @@ function runPowerShell(
   });
 }
 
+function parseBrowserProcessName(value: string): BrowserName {
+  const normalized = value.toLowerCase();
+
+  if (normalized === 'msedge') {
+    return 'msedge';
+  }
+
+  if (normalized === 'opera_gx') {
+    return 'opera_gx';
+  }
+
+  return normalized as BrowserName;
+}
+
+function scoreTab(
+  tab: BrowserTab,
+  searchTerms: string[],
+): number {
+  const title = tab.title.toLowerCase();
+  let score = tab.selected ? 100 : 0;
+
+  for (const term of searchTerms) {
+    const normalized = term.toLowerCase();
+
+    if (title === normalized) {
+      score += 80;
+      continue;
+    }
+
+    if (title.includes(normalized)) {
+      score += 30;
+    }
+
+    if (
+      normalized.includes('.') &&
+      title.includes(normalized)
+    ) {
+      score += 25;
+    }
+  }
+
+  return score;
+}
+
 export async function findAiTab(
   searchTerms: string[],
 ): Promise<BrowserTab | null> {
@@ -125,6 +173,7 @@ Add-Type -AssemblyName UIAutomationTypes
 
 $browserNames = @(${browserNames})
 $terms = @(${terms})
+$results = @()
 
 $processes = @(
   Get-Process -ErrorAction SilentlyContinue |
@@ -132,8 +181,6 @@ $processes = @(
     $browserNames -contains $_.ProcessName
   }
 )
-
-$results = @()
 
 foreach ($process in $processes) {
   if ($process.MainWindowHandle -eq 0) {
@@ -167,18 +214,39 @@ foreach ($process in $processes) {
           continue
         }
 
+        $matched = $false
+
         foreach ($term in $terms) {
           if ($name.ToLowerInvariant().Contains($term.ToLowerInvariant())) {
-            $results += [PSCustomObject]@{
-              browser = [string]$process.ProcessName
-              processId = [int]$process.Id
-              handle = [int64]$process.MainWindowHandle
-              title = $name
-              selected = [bool]$false
-            }
-
+            $matched = $true
             break
           }
+        }
+
+        if (-not $matched) {
+          continue
+        }
+
+        $selected = $false
+
+        try {
+          $selection = $tab.GetCurrentPattern(
+            [System.Windows.Automation.SelectionItemPattern]::Pattern
+          )
+
+          if ($null -ne $selection) {
+            $selected = [bool]$selection.Current.IsSelected
+          }
+        }
+        catch {
+        }
+
+        $results += [PSCustomObject]@{
+          browser = [string]$process.ProcessName
+          processId = [int]$process.Id
+          handle = [int64]$process.MainWindowHandle
+          title = $name
+          selected = $selected
         }
       }
       catch {
@@ -201,21 +269,29 @@ $results | ConvertTo-Json -Compress -Depth 5
   try {
     const parsed = JSON.parse(result.stdout.trim());
     const items = Array.isArray(parsed) ? parsed : [parsed];
-    const first = items.find(
-      (item) => item && Number(item.handle) > 0,
+
+    const tabs = items
+      .filter(
+        (item) =>
+          item &&
+          Number(item.handle) > 0 &&
+          typeof item.title === 'string',
+      )
+      .map<BrowserTab>((item) => ({
+        browser: parseBrowserProcessName(String(item.browser || '')),
+        processId: Number(item.processId),
+        handle: Number(item.handle),
+        title: String(item.title || ''),
+        selected: Boolean(item.selected),
+      }));
+
+    tabs.sort(
+      (a, b) =>
+        scoreTab(b, searchTerms) -
+        scoreTab(a, searchTerms),
     );
 
-    if (!first) {
-      return null;
-    }
-
-    return {
-      browser: String(first.browser || '').toLowerCase() as BrowserName,
-      processId: Number(first.processId),
-      handle: Number(first.handle),
-      title: String(first.title || ''),
-      selected: Boolean(first.selected),
-    };
+    return tabs[0] || null;
   }
   catch {
     return null;
@@ -321,6 +397,13 @@ foreach ($candidate in $tabs) {
       }
     }
     catch {
+      try {
+        if ($candidate.Current.IsEnabled) {
+          $matched = $true
+        }
+      }
+      catch {
+      }
     }
 
     break
@@ -387,6 +470,10 @@ $condition = New-Object System.Windows.Automation.OrCondition(
   (New-Object System.Windows.Automation.PropertyCondition(
     [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
     [System.Windows.Automation.ControlType]::Document
+  )),
+  (New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::Text
   ))
 )
 
@@ -405,48 +492,112 @@ foreach ($element in $elements) {
       continue
     }
 
-    $name = ([string]$current.Name).ToLowerInvariant()
-    $automationId = ([string]$current.AutomationId).ToLowerInvariant()
-    $helpText = ([string]$current.HelpText).ToLowerInvariant()
-    $localizedType = ([string]$current.LocalizedControlType).ToLowerInvariant()
+    $name = [string]$current.Name
+    $automationId = [string]$current.AutomationId
+    $helpText = [string]$current.HelpText
+    $controlType = [string]$current.ControlType.ProgrammaticName
+    $className = [string]$current.ClassName
+    $evidence = "$name $automationId $helpText $controlType $className".ToLowerInvariant()
 
-    $evidence = "$name $automationId $helpText $localizedType"
-
-    $isForbidden = $false
+    $blocked = $false
 
     foreach ($term in $forbidden) {
       if ($evidence.Contains($term.ToLowerInvariant())) {
-        $isForbidden = $true
+        $blocked = $true
         break
       }
     }
 
-    if ($isForbidden) {
+    if ($blocked) {
       continue
     }
 
-    $matchesProvider = $false
+    $score = 0
 
     foreach ($term in $terms) {
       if ($evidence.Contains($term.ToLowerInvariant())) {
-        $matchesProvider = $true
-        break
+        $score += 100
       }
     }
 
-    if ($matchesProvider) {
-      $candidates += $element
+    if ($controlType.ToLowerInvariant().Contains('document')) {
+      $score += 20
+    }
+
+    if ($controlType.ToLowerInvariant().Contains('edit')) {
+      $score += 20
+    }
+
+    if ($evidence.Contains('contenteditable')) {
+      $score += 15
+    }
+
+    if ($evidence.Contains('textbox')) {
+      $score += 15
+    }
+
+    if ($score -gt 0) {
+      $candidates += [PSCustomObject]@{
+        element = $element
+        score = $score
+      }
     }
   }
   catch {
   }
 }
 
-foreach ($element in $candidates) {
+$candidates = @(
+  $candidates |
+  Sort-Object -Property score -Descending
+)
+
+foreach ($candidate in $candidates) {
   try {
-    $element.SetFocus()
-    Write-Output "true"
-    exit
+    $candidate.element.SetFocus()
+    Start-Sleep -Milliseconds 80
+
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+
+    if ($null -eq $focused) {
+      continue
+    }
+
+    $focusedCurrent = $focused.Current
+    $focusedEvidence = (
+      [string]$focusedCurrent.Name + ' ' +
+      [string]$focusedCurrent.AutomationId + ' ' +
+      [string]$focusedCurrent.HelpText + ' ' +
+      [string]$focusedCurrent.ControlType.ProgrammaticName + ' ' +
+      [string]$focusedCurrent.ClassName
+    ).ToLowerInvariant()
+
+    $focusedBlocked = $false
+
+    foreach ($term in $forbidden) {
+      if ($focusedEvidence.Contains($term.ToLowerInvariant())) {
+        $focusedBlocked = $true
+        break
+      }
+    }
+
+    if ($focusedBlocked) {
+      continue
+    }
+
+    $focusedMatches = $false
+
+    foreach ($term in $terms) {
+      if ($focusedEvidence.Contains($term.ToLowerInvariant())) {
+        $focusedMatches = $true
+        break
+      }
+    }
+
+    if ($focusedMatches -or $candidate.score -ge 100) {
+      Write-Output "true"
+      exit
+    }
   }
   catch {
   }
@@ -463,14 +614,109 @@ Write-Output "false"
   );
 }
 
-export async function pasteClipboardAndSend(): Promise<boolean> {
+export async function pasteClipboardAndSend(
+  expectedPrompt = '',
+  _tab?: BrowserTab,
+  provider?: AiBrowserProvider,
+): Promise<boolean> {
+  const terms = provider
+    ? createPowerShellArray(messageInputTerms[provider])
+    : '';
+  const forbidden = createPowerShellArray(forbiddenInputTerms);
+  const escapedPrompt = escapePowerShellString(expectedPrompt);
+
   const script = `
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+
+$terms = @(${terms})
+$forbidden = @(${forbidden})
+$expectedPrompt = '${escapedPrompt}'
+
 try {
+  $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+
+  if ($null -eq $focused) {
+    Write-Output "false"
+    exit
+  }
+
+  $current = $focused.Current
+  $evidence = (
+    [string]$current.Name + ' ' +
+    [string]$current.AutomationId + ' ' +
+    [string]$current.HelpText + ' ' +
+    [string]$current.ControlType.ProgrammaticName + ' ' +
+    [string]$current.ClassName
+  ).ToLowerInvariant()
+
+  foreach ($term in $forbidden) {
+    if ($evidence.Contains($term.ToLowerInvariant())) {
+      Write-Output "false"
+      exit
+    }
+  }
+
+  if ($terms.Count -gt 0) {
+    $matched = $false
+
+    foreach ($term in $terms) {
+      if ($evidence.Contains($term.ToLowerInvariant())) {
+        $matched = $true
+        break
+      }
+    }
+
+    if (-not $matched) {
+      Write-Output "false"
+      exit
+    }
+  }
+
   $shell = New-Object -ComObject WScript.Shell
-  Start-Sleep -Milliseconds 50
+  Start-Sleep -Milliseconds 80
   $shell.SendKeys("^v")
-  Start-Sleep -Milliseconds 120
+  Start-Sleep -Milliseconds 180
+
+  if (-not [string]::IsNullOrWhiteSpace($expectedPrompt)) {
+    $verified = $false
+
+    try {
+      $valuePattern = $focused.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+      )
+
+      if ($null -ne $valuePattern) {
+        $value = [string]$valuePattern.Current.Value
+        $verified = $value.Contains($expectedPrompt)
+      }
+    }
+    catch {
+    }
+
+    if (-not $verified) {
+      try {
+        $textPattern = $focused.GetCurrentPattern(
+          [System.Windows.Automation.TextPattern]::Pattern
+        )
+
+        if ($null -ne $textPattern) {
+          $text = [string]$textPattern.DocumentRange.GetText(-1)
+          $verified = $text.Contains($expectedPrompt)
+        }
+      }
+      catch {
+      }
+    }
+
+    if (-not $verified) {
+      Write-Output "false"
+      exit
+    }
+  }
+
   $shell.SendKeys("{ENTER}")
+  Start-Sleep -Milliseconds 100
   Write-Output "true"
 }
 catch {
@@ -478,7 +724,7 @@ catch {
 }
 `;
 
-  const result = await runPowerShell(script, 4000);
+  const result = await runPowerShell(script, 5000);
 
   return (
     result.success &&
