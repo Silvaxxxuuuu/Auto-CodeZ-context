@@ -4,6 +4,17 @@ export async function* parseSSE(response: Response): AsyncGenerator<unknown> {
   const decoder = new TextDecoder();
   let buffer = '';
 
+  const parseLine = (line: string): unknown | undefined => {
+    if (!line.startsWith('data:')) return undefined;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') return undefined;
+    try {
+      return JSON.parse(payload) as unknown;
+    } catch {
+      return undefined;
+    }
+  };
+
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -12,17 +23,18 @@ export async function* parseSSE(response: Response): AsyncGenerator<unknown> {
       buffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        try {
-          yield JSON.parse(payload) as unknown;
-        } catch {
-          continue;
-        }
+        const parsed = parseLine(line);
+        if (parsed !== undefined) yield parsed;
       }
 
-      if (done) break;
+      if (done) {
+        const finalLine = buffer.trim();
+        if (finalLine) {
+          const parsed = parseLine(finalLine);
+          if (parsed !== undefined) yield parsed;
+        }
+        break;
+      }
     }
   } finally {
     reader.releaseLock();
