@@ -8,6 +8,13 @@ contextBridge.exposeInMainWorld('autoCodez', {
   createChat: (input: { providerId: string; model: string; intelligence: string; permissionLevel: string; projectId?: string }) => ipcRenderer.invoke('chat:create', input),
   updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => ipcRenderer.invoke('chat:update-settings', input),
   sendChat: (input: { chatId: string; content: string }) => ipcRenderer.invoke('chat:send', input),
+  listTools: () => ipcRenderer.invoke('agent:list-tools'),
+  executeTool: (input: { projectId: string; permissionLevel: string; toolCall: unknown }) => ipcRenderer.invoke('agent:execute-tool', input),
+  onActivity: (listener: (event: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+    ipcRenderer.on('agent:activity', handler);
+    return () => ipcRenderer.removeListener('agent:activity', handler);
+  },
   createProject: (input: { name: string; rootPath: string }) => ipcRenderer.invoke('projects:create', input),
   openFolder: () => ipcRenderer.invoke('projects:open-folder'),
   scanProject: (rootPath: string) => ipcRenderer.invoke('projects:scan', rootPath),
