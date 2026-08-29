@@ -23,6 +23,9 @@ import {
   type ProjectContextInputFile,
 } from './core/project-context';
 import {
+  parseAiResponse,
+} from './core/response-parser';
+import {
   app,
   BrowserWindow,
   clipboard,
@@ -74,6 +77,7 @@ const ignoredDirectories = new Set([
 ]);
 
 let projectRoot: string | null = null;
+let mainWindow: BrowserWindow | null = null;
 
 type ClipboardResult = {
   success: boolean;
@@ -147,8 +151,99 @@ const browserProcesses = [
   'vivaldi',
 ];
 
+sessionManager.onStateChange(
+  (change) => {
+    if (
+      !mainWindow ||
+      mainWindow.isDestroyed()
+    ) {
+      return;
+    }
+
+    mainWindow.webContents.send(
+      'ai-session-state',
+      {
+        sessionId:
+          change.sessionId,
+        state:
+          change.state,
+      },
+    );
+  },
+);
+
+sessionManager.on(
+  'completed',
+  (session) => {
+    if (
+      !mainWindow ||
+      mainWindow.isDestroyed()
+    ) {
+      return;
+    }
+
+    try {
+      const result =
+        session.toResult();
+
+      const parsed =
+        parseAiResponse(
+          result.response.content,
+        );
+
+      mainWindow.webContents.send(
+        'ai-session-result',
+        {
+          sessionId:
+            result.sessionId,
+          provider:
+            result.provider,
+          response:
+            result.response,
+          parsed,
+        },
+      );
+    } catch (error) {
+      mainWindow.webContents.send(
+        'ai-session-error',
+        {
+          sessionId:
+            session.id,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Não foi possível processar a resposta da IA.',
+        },
+      );
+    }
+  },
+);
+
+sessionManager.on(
+  'failed',
+  (session) => {
+    if (
+      !mainWindow ||
+      mainWindow.isDestroyed()
+    ) {
+      return;
+    }
+
+    mainWindow.webContents.send(
+      'ai-session-error',
+      {
+        sessionId:
+          session.id,
+        error:
+          session.error ||
+          'A sessão da IA falhou.',
+      },
+    );
+  },
+);
+
 function createWindow() {
-  const mainWindow =
+  mainWindow =
     new BrowserWindow({
       width: 1280,
       height: 800,
@@ -166,23 +261,12 @@ function createWindow() {
       },
     });
 
-    sessionManager.onStateChange(
-  (change) => {
-    if (!mainWindow) {
-      return;
-    }
-
-    mainWindow.webContents.send(
-      'ai-session-state',
-      {
-        sessionId:
-          change.sessionId,
-        state:
-          change.state,
-      },
-    );
-  },
-);
+  mainWindow.on(
+    'closed',
+    () => {
+      mainWindow = null;
+    },
+  );
 
   if (
     MAIN_WINDOW_VITE_DEV_SERVER_URL
@@ -923,7 +1007,7 @@ Write-Output "false"
     result.stdout
       .trim()
       .toLowerCase() ===
-      'true'
+    'true'
   );
 }
 
