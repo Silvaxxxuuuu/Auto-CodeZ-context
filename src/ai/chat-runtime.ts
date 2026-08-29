@@ -1,4 +1,4 @@
-import type { AIProviderConfig, AIResponse, AIStreamEvent, ChatRecord } from './types';
+import type { AIProviderConfig, AIResponse, AIStreamEvent, AIToolDefinition, ChatRecord } from './types';
 import { ActivityRuntime } from '../agent/activity-runtime';
 import { CapabilityResolver } from './capability-resolver';
 import { IntelligenceRuntime } from './intelligence-runtime';
@@ -12,6 +12,7 @@ export class ChatRuntime {
     private readonly intelligence = new IntelligenceRuntime(capabilities),
     private readonly activity = new ActivityRuntime(),
     private readonly models = new ModelResolver(registry),
+    private readonly toolDefinitions: AIToolDefinition[] = [],
   ) {}
 
   private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string) {
@@ -23,6 +24,7 @@ export class ChatRuntime {
     const messages = projectContext
       ? [{ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` }, ...chat.messages]
       : chat.messages;
+    const toolsEnabled = this.capabilities.supports(model, 'tools');
     return {
       adapter,
       request: {
@@ -31,7 +33,8 @@ export class ChatRuntime {
         messages,
         intelligence: resolution.effective,
         projectContext,
-        toolsEnabled: this.capabilities.supports(model, 'tools'),
+        toolsEnabled,
+        tools: toolsEnabled ? this.toolDefinitions.map((tool) => ({ ...tool })) : undefined,
       },
       resolution,
     };
