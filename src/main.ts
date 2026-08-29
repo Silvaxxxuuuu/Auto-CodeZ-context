@@ -148,7 +148,6 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
 ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
-ipcMain.handle('agent:execute-tool', async (_event, input: { projectId: string; permissionLevel: PermissionLevel; toolCall: AIToolCall }) => toolRuntime.execute(input.projectId, input.permissionLevel, input.toolCall));
 ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
   const result = await agentRuntime.resume(approvalId);
   const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
