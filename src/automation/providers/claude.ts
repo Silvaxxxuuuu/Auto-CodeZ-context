@@ -24,6 +24,7 @@ import {
 } from 'electron';
 
 const CLAUDE_URL = 'https://claude.ai/new';
+const CLAUDE_TAB_TERMS = ['Claude', 'claude.ai', 'Anthropic'];
 
 export class ClaudeConnector implements AiConnector {
   readonly provider = 'claude' as const;
@@ -35,7 +36,7 @@ export class ClaudeConnector implements AiConnector {
   }
 
   async prepare(): Promise<boolean> {
-    const browserTab = await findAiTab(['Claude', 'claude.ai', 'Anthropic']);
+    const browserTab = await findAiTab(CLAUDE_TAB_TERMS);
 
     if (browserTab) {
       return true;
@@ -49,7 +50,7 @@ export class ClaudeConnector implements AiConnector {
     }
 
     const openedTab = await waitForAiTab(
-      ['Claude', 'claude.ai', 'Anthropic'],
+      CLAUDE_TAB_TERMS,
       30,
       500,
     );
@@ -68,10 +69,8 @@ export class ClaudeConnector implements AiConnector {
       throw new Error('O prompt do Claude está vazio.');
     }
 
-    clipboard.writeText(request.prompt);
-
     const browserTab = await waitForAiTab(
-      ['Claude', 'claude.ai', 'Anthropic'],
+      CLAUDE_TAB_TERMS,
       10,
       300,
     );
@@ -86,7 +85,7 @@ export class ClaudeConnector implements AiConnector {
 
     if (!selected) {
       throw new Error(
-        'Não foi possível selecionar a aba do Claude.',
+        'Não foi possível selecionar a aba correta do Claude.',
       );
     }
 
@@ -97,21 +96,27 @@ export class ClaudeConnector implements AiConnector {
 
     if (!inputFocused) {
       throw new Error(
-        'Não foi possível identificar com segurança o campo de mensagem do Claude.',
+        'O campo de mensagem do Claude não foi identificado com segurança. O prompt não foi enviado.',
       );
     }
+
+    clipboard.writeText(request.prompt);
 
     this.responseReader = await captureResponseReaderState(
       browserTab.handle,
       request.prompt,
     );
 
-    const sent = await pasteClipboardAndSend();
+    const sent = await pasteClipboardAndSend(
+      request.prompt,
+      browserTab,
+      this.provider,
+    );
 
     if (!sent) {
       this.responseReader = null;
       throw new Error(
-        'Não foi possível enviar o prompt para o Claude.',
+        'O Claude não confirmou a inserção do prompt no campo de mensagem. O envio foi interrompido.',
       );
     }
 
