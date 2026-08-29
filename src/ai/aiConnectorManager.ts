@@ -54,7 +54,11 @@ export class AiConnectorManager {
       return false;
     }
 
-    return connector.isAvailable();
+    try {
+      return await connector.isAvailable();
+    } catch {
+      return false;
+    }
   }
 
   async send(
