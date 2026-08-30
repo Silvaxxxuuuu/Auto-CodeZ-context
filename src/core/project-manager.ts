@@ -74,7 +74,7 @@ export class ProjectManager {
     if (!project) throw new Error('Workspace não encontrado.');
     const root = await fs.realpath(project.rootPath);
     let parent = path.dirname(candidate);
-    while (true) {
+    while (parent !== path.dirname(parent)) {
       try {
         const realParent = await fs.realpath(parent);
         const relative = path.relative(root, realParent);
@@ -82,10 +82,16 @@ export class ProjectManager {
         return candidate;
       } catch (error) {
         if (error instanceof Error && error.message.includes('Operação bloqueada')) throw error;
-        const next = path.dirname(parent);
-        if (next === parent) throw new Error('Não foi possível validar o caminho do workspace.');
-        parent = next;
+        parent = path.dirname(parent);
       }
+    }
+    try {
+      const realParent = await fs.realpath(parent);
+      const relative = path.relative(root, realParent);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Operação bloqueada: diretório simbólico fora do workspace.');
+      return candidate;
+    } catch {
+      throw new Error('Não foi possível validar o caminho do workspace.');
     }
   }
 
