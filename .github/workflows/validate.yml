@@ -30,5 +30,8 @@ jobs:
       - name: TypeScript validation
         run: npx tsc --noEmit
 
+      - name: ESLint validation
+        run: npm run lint
+
       - name: Electron Forge package build
         run: npm run package
