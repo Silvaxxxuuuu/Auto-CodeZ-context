@@ -110,17 +110,23 @@ ipcMain.handle('providers:list-models', async (_event, providerId: ProviderId) =
   return modelResolver.list(config);
 });
 ipcMain.handle('providers:save', async (_event, input: { providerId: ProviderId; apiKey: string; model?: string; baseUrl?: string }) => {
-  const adapter = registry.get(input.providerId);
-  const existing = providerConfigs.find((item) => item.id === input.providerId);
-  const config: AIProviderConfig = { id: input.providerId, displayName: adapter.displayName, apiKey: input.apiKey.trim(), enabled: true, selectedModel: input.model, baseUrl: input.baseUrl?.trim() || undefined };
-  if (!config.apiKey) throw new Error('API key não pode estar vazia.');
-  const models = await modelResolver.list(config, true);
-  if (!models.length) throw new Error('O provider não retornou modelos utilizáveis.');
-  if (config.selectedModel && !models.some((model) => model.id === config.selectedModel)) throw new Error('O modelo selecionado não pertence aos modelos disponíveis do provider.');
-  if (!config.selectedModel && models[0]) config.selectedModel = models[0].id;
-  if (existing) providerConfigs = providerConfigs.map((item) => item.id === input.providerId ? config : item); else providerConfigs.push(config);
-  await saveProviders();
-  return { providers: publicProviders(), models };
+  try {
+    const adapter = registry.get(input.providerId);
+    const existing = providerConfigs.find((item) => item.id === input.providerId);
+    const config: AIProviderConfig = { id: input.providerId, displayName: adapter.displayName, apiKey: input.apiKey.trim(), enabled: true, selectedModel: input.model, baseUrl: input.baseUrl?.trim() || undefined };
+    if (!config.apiKey) throw new Error('API key não pode estar vazia.');
+    const models = await modelResolver.list(config, true);
+    if (!models.length) throw new Error('O provider não retornou modelos utilizáveis.');
+    if (config.selectedModel && !models.some((model) => model.id === config.selectedModel)) throw new Error('O modelo selecionado não pertence aos modelos disponíveis do provider.');
+    if (!config.selectedModel && models[0]) config.selectedModel = models[0].id;
+    if (existing) providerConfigs = providerConfigs.map((item) => item.id === input.providerId ? config : item); else providerConfigs.push(config);
+    await saveProviders();
+    return { providers: publicProviders(), models };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Falha ao validar o provider.';
+    if (mainWindow && !mainWindow.isDestroyed()) void dialog.showMessageBox(mainWindow, { type: 'error', title: 'Não foi possível configurar a IA', message });
+    throw error;
+  }
 });
 ipcMain.handle('providers:remove', async (_event, providerId: ProviderId) => {
   providerConfigs = providerConfigs.filter((item) => item.id !== providerId);
@@ -203,8 +209,25 @@ ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
   endChatRun(result.chatId);
   return result;
 });
-ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => projectManager.create(input.name, input.rootPath));
-ipcMain.handle('projects:open-folder', async () => { const result = await dialog.showOpenDialog({ properties: ['openDirectory'] }); if (result.canceled || !result.filePaths[0]) return null; return result.filePaths[0]; });
+ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => {
+  try {
+    const name = input.name.trim();
+    const rootPath = input.rootPath.trim();
+    if (!name) throw new Error('O nome do projeto não pode estar vazio.');
+    if (!rootPath) throw new Error('A pasta do projeto não foi selecionada.');
+    return await projectManager.create(name, rootPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Não foi possível criar o projeto.';
+    if (mainWindow && !mainWindow.isDestroyed()) void dialog.showMessageBox(mainWindow, { type: 'error', title: 'Não foi possível criar o projeto', message });
+    throw error;
+  }
+});
+ipcMain.handle('projects:open-folder', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.');
+  const result = await dialog.showOpenDialog(mainWindow, { title: 'Escolha a pasta do projeto', buttonLabel: 'Selecionar pasta', properties: ['openDirectory', 'createDirectory'] });
+  if (result.canceled || !result.filePaths[0]) return null;
+  return result.filePaths[0];
+});
 ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(rootPath));
 ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(filePath));
 ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => projectManager.writeFile(input.filePath, input.content));
