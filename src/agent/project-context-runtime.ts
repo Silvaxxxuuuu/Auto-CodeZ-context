@@ -12,6 +12,10 @@ const SENSITIVE_NAMES = new Set(['.env', '.env.local', '.env.production', '.env.
 const SENSITIVE_EXTENSIONS = new Set(['.pem', '.key', '.p12', '.pfx', '.crt', '.cer', '.der', '.keystore']);
 const TEXT_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.txt', '.css', '.scss', '.html', '.yml', '.yaml', '.xml', '.toml', '.py', '.java', '.cs', '.cpp', '.c', '.h', '.hpp', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.kts']);
 
+function isIgnored(relativePath: string): boolean {
+  return relativePath.split(/[\\/]/).some((part) => IGNORED_NAMES.has(part.toLowerCase()));
+}
+
 function isSensitive(relativePath: string): boolean {
   const basename = path.basename(relativePath).toLowerCase();
   const extension = path.extname(basename);
@@ -33,18 +37,27 @@ function scoreFile(relativePath: string): number {
   return score;
 }
 
+function entryScore(relativePath: string, type: string): number {
+  return type === 'directory' ? 0 : scoreFile(relativePath);
+}
+
 export class ProjectContextRuntime {
   constructor(private readonly projects: ProjectManager) {}
 
   async build(projectId: string): Promise<string> {
     const project = await this.getProject(projectId);
-    const entries = await this.projects.scan(project.rootPath);
-    const boundedEntries = entries.slice(0, MAX_ENTRIES);
+    const entries = (await this.projects.scan(project.rootPath)).filter((entry) => !isIgnored(entry.relativePath));
+    const boundedEntries = [...entries]
+      .sort((a, b) => {
+        const scoreDifference = entryScore(b.relativePath, b.type) - entryScore(a.relativePath, a.type);
+        return scoreDifference || a.relativePath.localeCompare(b.relativePath);
+      })
+      .slice(0, MAX_ENTRIES);
     const files = boundedEntries.filter((entry) => entry.type === 'file' && !isSensitive(entry.relativePath));
     const directories = boundedEntries.filter((entry) => entry.type === 'directory');
     const candidates = files
       .filter((entry) => isTextFile(entry.relativePath))
-      .sort((a, b) => scoreFile(b.relativePath) - scoreFile(a.relativePath))
+      .sort((a, b) => scoreFile(b.relativePath) - scoreFile(a.relativePath) || a.relativePath.localeCompare(b.relativePath))
       .slice(0, MAX_FILES_WITH_CONTENT);
 
     let contextSize = 0;
@@ -52,7 +65,7 @@ export class ProjectContextRuntime {
     for (const entry of candidates) {
       try {
         const stat = await fs.stat(entry.path);
-        if (stat.size > MAX_FILE_BYTES) continue;
+        if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
         const content = await fs.readFile(entry.path, 'utf8');
         const remaining = MAX_CONTEXT_BYTES - contextSize;
         if (remaining <= 0) break;
@@ -66,7 +79,7 @@ export class ProjectContextRuntime {
 
     const lines = [
       `Workspace: ${project.name}`,
-      `Root: ${project.rootPath}`,
+      'Root: .',
       `Directories: ${directories.length}`,
       `Files: ${files.length}`,
       '',
