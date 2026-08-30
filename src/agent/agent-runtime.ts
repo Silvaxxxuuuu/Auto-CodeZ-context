@@ -101,14 +101,13 @@ export class AgentRuntime {
   }
 
   private async runLoop(config: AIProviderConfig, chat: ChatRecord, workingChat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel, toolRounds: number): Promise<AgentRunResult> {
-    while (true) {
+    while (toolRounds < MAX_TOOL_ROUNDS) {
       const response = await this.chatRuntime.send(config, workingChat, projectContext);
       if (!response.toolCalls?.length) {
         workingChat.messages.push({ role: 'assistant', content: response.content, createdAt: Date.now() });
         return { chatId: chat.id, response, toolRounds, pendingApprovalIds: [], messages: [...workingChat.messages] };
       }
       if (!workingChat.projectId) throw new Error('Uma ferramenta foi solicitada sem um projeto ativo.');
-      if (toolRounds >= MAX_TOOL_ROUNDS) throw new Error('O agente atingiu o limite de ciclos de ferramentas.');
 
       toolRounds += 1;
       this.activity.emit({ type: 'tool', message: `Executando ${response.toolCalls.length} ferramenta(s).`, status: 'running' });
@@ -135,10 +134,11 @@ export class AgentRuntime {
       }
       this.activity.success('tool', `Ciclo de ferramentas ${toolRounds} concluído.`);
     }
+    throw new Error('O agente atingiu o limite de ciclos de ferramentas.');
   }
 
   private async runStreamLoop(config: AIProviderConfig, chat: ChatRecord, workingChat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel, toolRounds: number, emit: StreamEmitter): Promise<AgentRunResult> {
-    while (true) {
+    while (toolRounds < MAX_TOOL_ROUNDS) {
       let response: AIResponse | undefined;
       let streamError: string | undefined;
       for await (const event of this.chatRuntime.stream(config, workingChat, projectContext)) {
@@ -154,7 +154,6 @@ export class AgentRuntime {
         return { chatId: chat.id, response, toolRounds, pendingApprovalIds: [], messages: [...workingChat.messages] };
       }
       if (!workingChat.projectId) throw new Error('Uma ferramenta foi solicitada sem um projeto ativo.');
-      if (toolRounds >= MAX_TOOL_ROUNDS) throw new Error('O agente atingiu o limite de ciclos de ferramentas.');
 
       toolRounds += 1;
       workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, createdAt: Date.now() });
@@ -182,5 +181,6 @@ export class AgentRuntime {
       }
       this.activity.success('tool', `Ciclo de ferramentas ${toolRounds} concluído.`);
     }
+    throw new Error('O agente atingiu o limite de ciclos de ferramentas.');
   }
 }
