@@ -63,6 +63,31 @@ interface ToolExecution {
   changes?: FileDiff[];
 }
 
+function validateToolInput(definition: AIToolDefinition, input: Record<string, unknown>): void {
+  const schema = definition.parameters;
+  if (schema.type !== 'object' || !input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`Entrada inválida para ${definition.name}.`);
+
+  const required = Array.isArray(schema.required) ? schema.required : [];
+  for (const key of required) {
+    if (!(key in input)) throw new Error(`Parâmetro obrigatório ausente: '${key}'.`);
+  }
+
+  if (schema.additionalProperties === false) {
+    const properties = schema.properties && typeof schema.properties === 'object' ? Object.keys(schema.properties as Record<string, unknown>) : [];
+    for (const key of Object.keys(input)) {
+      if (!properties.includes(key)) throw new Error(`Parâmetro não permitido: '${key}'.`);
+    }
+  }
+
+  const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties as Record<string, Record<string, unknown>> : {};
+  for (const [key, value] of Object.entries(input)) {
+    const property = properties[key];
+    if (!property) continue;
+    if (property.type === 'string' && typeof value !== 'string') throw new Error(`Parâmetro '${key}' deve ser texto.`);
+    if (Array.isArray(property.enum) && !property.enum.includes(value)) throw new Error(`Valor inválido para '${key}'.`);
+  }
+}
+
 export class ToolRuntime {
   constructor(
     private readonly workspace: WorkspaceRuntime,
@@ -79,6 +104,11 @@ export class ToolRuntime {
   async execute(projectId: string, permission: PermissionLevel, call: AIToolCall): Promise<AIToolResult> {
     const definition = definitions.find((item) => item.name === call.name);
     if (!definition) return { toolCallId: call.id, ok: false, error: `Ferramenta desconhecida: ${call.name}` };
+    try {
+      validateToolInput(definition, call.input);
+    } catch (error) {
+      return { toolCallId: call.id, ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
     const decision = this.permissions.decide(permission, call.name);
     if (decision === 'deny') return { toolCallId: call.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
     if (decision === 'ask') {
