@@ -149,20 +149,20 @@ ipcMain.handle('chat:update-settings', async (_event, input: { chatId: string; p
   return updated;
 });
 
-async function getChatContext(chatId: string): Promise<{ chat: ChatRecord; config: AIProviderConfig; projectContext?: string }> {
+async function getChatContext(chatId: string, taskQuery: string): Promise<{ chat: ChatRecord; config: AIProviderConfig; projectContext?: string }> {
   const chat = (await chatManager.list()).find((item) => item.id === chatId);
   if (!chat) throw new Error('Chat não encontrado.');
   const config = await getConfiguredProvider(chat.providerId);
   const models = await modelResolver.list(config);
   modelResolver.find(models, chat.model);
-  const projectContext = chat.projectId ? await projectContextRuntime.build(chat.projectId) : undefined;
+  const projectContext = chat.projectId ? await projectContextRuntime.build(chat.projectId, taskQuery) : undefined;
   return { chat, config, projectContext };
 }
 
 ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => {
-  const { chat, config, projectContext } = await getChatContext(input.chatId);
   const content = input.content.trim();
   if (!content) throw new Error('A mensagem não pode estar vazia.');
+  const { chat, config, projectContext } = await getChatContext(input.chatId, content);
   beginChatRun(chat.id);
   try {
     await chatManager.addMessage(chat.id, { role: 'user', content });
@@ -176,9 +176,9 @@ ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: str
 });
 
 ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
-  const { chat, config, projectContext } = await getChatContext(input.chatId);
   const content = input.content.trim();
   if (!content) throw new Error('A mensagem não pode estar vazia.');
+  const { chat, config, projectContext } = await getChatContext(input.chatId, content);
   beginChatRun(chat.id);
   try {
     await chatManager.addMessage(chat.id, { role: 'user', content });
