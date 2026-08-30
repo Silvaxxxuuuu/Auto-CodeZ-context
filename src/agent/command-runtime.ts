@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import type { ProjectRecord } from '../ai/types';
 
 export interface CommandResult {
@@ -15,6 +15,25 @@ const SAFE_SCRIPTS = new Set(['test', 'build', 'typecheck', 'lint', 'package', '
 const MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 const MAX_OUTPUT_CHARS = 2_000_000;
 const TIMEOUT_MS = 10 * 60 * 1000;
+const TERMINATION_GRACE_MS = 2_000;
+
+function terminateProcessTree(child: ChildProcess): void {
+  if (child.killed) return;
+  if (process.platform === 'win32' && child.pid) {
+    const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+      shell: false,
+    });
+    killer.unref();
+    return;
+  }
+  try {
+    process.kill(-child.pid!, 'SIGTERM');
+  } catch {
+    child.kill('SIGTERM');
+  }
+}
 
 export class CommandRuntime {
   constructor(private readonly projects: () => Promise<ProjectRecord[]>) {}
@@ -41,35 +60,49 @@ export class CommandRuntime {
         cwd,
         shell: false,
         windowsHide: true,
+        detached: process.platform !== 'win32',
         env: { ...process.env, CI: '1' },
       });
       let stdout = '';
       let stderr = '';
       let timedOut = false;
       let settled = false;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
       const append = (target: 'stdout' | 'stderr', chunk: Buffer | string): void => {
         const value = chunk.toString();
         if (target === 'stdout') stdout = (stdout + value).slice(-MAX_OUTPUT_CHARS);
         else stderr = (stderr + value).slice(-MAX_OUTPUT_CHARS);
       };
       const timeout = setTimeout(() => {
+        if (settled) return;
         timedOut = true;
-        child.kill();
+        terminateProcessTree(child);
+        killTimer = setTimeout(() => {
+          if (!settled) child.kill('SIGKILL');
+        }, TERMINATION_GRACE_MS);
       }, TIMEOUT_MS);
       const finish = (result: CommandResult): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
+        if (killTimer) clearTimeout(killTimer);
         resolve(result);
       };
-      child.stdout.on('data', (chunk: Buffer | string) => append('stdout', chunk));
-      child.stderr.on('data', (chunk: Buffer | string) => append('stderr', chunk));
+      child.stdout?.on('data', (chunk: Buffer | string) => append('stdout', chunk));
+      child.stderr?.on('data', (chunk: Buffer | string) => append('stderr', chunk));
       child.on('error', (error) => {
         if (settled) return;
         clearTimeout(timeout);
+        if (killTimer) clearTimeout(killTimer);
         reject(error);
       });
-      child.on('close', (exitCode) => finish({ command: `${manager} run ${script}`, exitCode: exitCode ?? 1, stdout, stderr, timedOut }));
+      child.on('close', (exitCode, signal) => finish({
+        command: `${manager} run ${script}`,
+        exitCode: exitCode ?? (signal ? 1 : 0),
+        stdout,
+        stderr: timedOut ? `${stderr}\nCommand timed out after ${TIMEOUT_MS / 60000} minutes.`.trim() : stderr,
+        timedOut,
+      }));
     });
   }
 }
