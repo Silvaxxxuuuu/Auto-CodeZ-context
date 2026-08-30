@@ -20,14 +20,17 @@ export class WorkspaceRuntime {
 
   private async nearestExisting(pathname: string): Promise<string> {
     let current = pathname;
-    while (true) {
+    while (current !== path.dirname(current)) {
       try {
         return await fs.realpath(current);
       } catch {
-        const parent = path.dirname(current);
-        if (parent === current) throw new Error('Não foi possível validar o caminho do workspace.');
-        current = parent;
+        current = path.dirname(current);
       }
+    }
+    try {
+      return await fs.realpath(current);
+    } catch {
+      throw new Error('Não foi possível validar o caminho do workspace.');
     }
   }
 
