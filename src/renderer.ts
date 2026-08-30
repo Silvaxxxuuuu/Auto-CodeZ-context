@@ -362,7 +362,7 @@ async function resumeApproval(id: string, approve: boolean): Promise<void> {
       await refresh();
     }
   } catch (error) {
-    pendingApprovals = await window.autoCodez.listApprovals().catch(() => []);
+    pendingApprovals = await window.autoCodez.listApprovals().catch((): Approval[] => []);
     setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível processar a aprovação.');
   }
 }
