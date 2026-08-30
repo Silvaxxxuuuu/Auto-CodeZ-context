@@ -26,6 +26,10 @@ function isTextFile(relativePath: string): boolean {
   return TEXT_EXTENSIONS.has(path.extname(relativePath).toLowerCase());
 }
 
+function tokens(value: string): string[] {
+  return value.toLowerCase().split(/[^a-z0-9_./-]+/).filter((token) => token.length >= 2);
+}
+
 function scoreFile(relativePath: string): number {
   const normalized = relativePath.toLowerCase();
   let score = 0;
@@ -37,19 +41,32 @@ function scoreFile(relativePath: string): number {
   return score;
 }
 
-function entryScore(relativePath: string, type: string): number {
-  return type === 'directory' ? 0 : scoreFile(relativePath);
+function taskScore(relativePath: string, query: string): number {
+  const terms = tokens(query);
+  if (terms.length === 0) return 0;
+  const normalized = relativePath.toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (normalized === term) score += 80;
+    else if (path.basename(normalized).includes(term)) score += 45;
+    else if (normalized.includes(term)) score += 20;
+  }
+  return score;
+}
+
+function entryScore(relativePath: string, type: string, query: string): number {
+  return (type === 'directory' ? 0 : scoreFile(relativePath)) + taskScore(relativePath, query);
 }
 
 export class ProjectContextRuntime {
   constructor(private readonly projects: ProjectManager) {}
 
-  async build(projectId: string): Promise<string> {
+  async build(projectId: string, query = ''): Promise<string> {
     const project = await this.getProject(projectId);
     const entries = (await this.projects.scan(project.rootPath)).filter((entry) => !isIgnored(entry.relativePath));
     const boundedEntries = [...entries]
       .sort((a, b) => {
-        const scoreDifference = entryScore(b.relativePath, b.type) - entryScore(a.relativePath, a.type);
+        const scoreDifference = entryScore(b.relativePath, b.type, query) - entryScore(a.relativePath, a.type, query);
         return scoreDifference || a.relativePath.localeCompare(b.relativePath);
       })
       .slice(0, MAX_ENTRIES);
@@ -57,7 +74,10 @@ export class ProjectContextRuntime {
     const directories = boundedEntries.filter((entry) => entry.type === 'directory');
     const candidates = files
       .filter((entry) => isTextFile(entry.relativePath))
-      .sort((a, b) => scoreFile(b.relativePath) - scoreFile(a.relativePath) || a.relativePath.localeCompare(b.relativePath))
+      .sort((a, b) => {
+        const scoreDifference = entryScore(b.relativePath, b.type, query) - entryScore(a.relativePath, a.type, query);
+        return scoreDifference || a.relativePath.localeCompare(b.relativePath);
+      })
       .slice(0, MAX_FILES_WITH_CONTENT);
 
     let contextSize = 0;
@@ -70,7 +90,7 @@ export class ProjectContextRuntime {
         const remaining = MAX_CONTEXT_BYTES - contextSize;
         if (remaining <= 0) break;
         const clipped = content.slice(0, remaining);
-        contextSize += clipped.length;
+        contextSize += Buffer.byteLength(clipped, 'utf8');
         fileContents.push(`\nFile: ${entry.relativePath}\n\`\`\`\n${clipped}\n\`\`\``);
       } catch {
         continue;
@@ -80,6 +100,7 @@ export class ProjectContextRuntime {
     const lines = [
       `Workspace: ${project.name}`,
       'Root: .',
+      query.trim() ? `Task focus: ${query.trim().slice(0, 500)}` : '',
       `Directories: ${directories.length}`,
       `Files: ${files.length}`,
       '',
@@ -90,7 +111,7 @@ export class ProjectContextRuntime {
       'Selected text files:',
       ...fileContents,
     ];
-    return lines.join('\n');
+    return lines.filter((line, index) => line !== '' || index === 0 || lines[index - 1] !== '').join('\n');
   }
 
   private async getProject(projectId: string): Promise<ProjectRecord> {
