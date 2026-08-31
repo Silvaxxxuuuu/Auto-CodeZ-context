@@ -24,7 +24,7 @@ export class ChatRuntime {
     const messages = projectContext
       ? [{ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` }, ...chat.messages]
       : chat.messages;
-    const toolsEnabled = this.capabilities.supports(model, 'tools');
+    const toolsEnabled = Boolean(chat.projectId) && this.capabilities.supports(model, 'tools');
     return {
       adapter,
       request: {
