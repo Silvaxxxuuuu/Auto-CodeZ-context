@@ -41,12 +41,12 @@ export class ChatRuntime {
   }
 
   async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string): Promise<AIResponse> {
-    const { adapter, request, resolution } = await this.prepare(config, chat, projectContext);
-    this.activity.start('action', `Enviando mensagem para ${adapter.displayName}`);
-    if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
-    if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
-
     try {
+      const { adapter, request, resolution } = await this.prepare(config, chat, projectContext);
+      this.activity.start('action', `Enviando mensagem para ${adapter.displayName}`);
+      if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
+      if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
+
       const response = await adapter.send(config, request);
       this.activity.success('complete', 'Resposta recebida.');
       return response;
@@ -58,12 +58,12 @@ export class ChatRuntime {
   }
 
   async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string): AsyncGenerator<AIStreamEvent> {
-    const { adapter, request, resolution } = await this.prepare(config, chat, projectContext);
-    this.activity.start('action', `Transmitindo resposta de ${adapter.displayName}`);
-    if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
-    if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
-
     try {
+      const { adapter, request, resolution } = await this.prepare(config, chat, projectContext);
+      this.activity.start('action', `Transmitindo resposta de ${adapter.displayName}`);
+      if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
+      if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
+
       if (adapter.stream) {
         for await (const event of adapter.stream(config, request)) {
           if (event.type === 'activity' && event.activity) this.activity.emit(event.activity);
