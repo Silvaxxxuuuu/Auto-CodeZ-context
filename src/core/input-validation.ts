@@ -5,9 +5,19 @@ export function requireNonEmptyString(value: unknown, fieldName: string): string
   return value.trim();
 }
 
+function containsControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint !== undefined && ((codePoint >= 0 && codePoint <= 0x1f) || codePoint === 0x7f)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function requireIdentifier(value: unknown, fieldName: string): string {
   const normalized = requireNonEmptyString(value, fieldName);
-  if (normalized.length > 256 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+  if (normalized.length > 256 || containsControlCharacter(normalized)) {
     throw new Error(`${fieldName} é inválido.`);
   }
   return normalized;
