@@ -32,10 +32,10 @@ contextBridge.exposeInMainWorld('autoCodez', {
     return invoke('providers:save', { providerId, apiKey, model, baseUrl });
   },
   removeProvider: (providerId: string) => invoke('providers:remove', requireIdentifier(providerId, 'Provider')),
-  createChat: (input: { providerId: string; model: string; intelligence: string; permissionLevel: string; projectId?: string }) => {
+  createChat: (input: { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }) => {
     const value = requireObject(input, 'Dados do chat');
-    const providerId = requireIdentifier(value.providerId, 'Provider');
-    const model = requireIdentifier(value.model, 'Modelo');
+    const providerId = value.providerId === undefined ? undefined : requireIdentifier(value.providerId, 'Provider');
+    const model = value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo');
     const intelligence = requireIdentifier(value.intelligence, 'Inteligência');
     const permissionLevel = requireIdentifier(value.permissionLevel, 'Permissão');
     const projectId = value.projectId === undefined ? undefined : requireIdentifier(value.projectId, 'Projeto');
