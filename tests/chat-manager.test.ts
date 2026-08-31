@@ -81,6 +81,9 @@ test('lists chats by most recently updated timestamp', async () => {
 
   const older = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
   const newer = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
+
+  assert.deepEqual((await manager.list()).map((chat) => chat.id), [newer.id, older.id]);
+
   await manager.addMessage(older.id, { role: 'user', content: 'Atualizar este chat' });
 
   const chats = await manager.list();
