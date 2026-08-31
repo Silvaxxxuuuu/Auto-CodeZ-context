@@ -18,34 +18,39 @@ const request: AIRequest = {
   toolsEnabled: false,
 };
 
-async function assertStreamError(sse: string, expected: string): Promise<void> {
+async function assertStreamError(event: Record<string, unknown>, expected: string): Promise<void> {
   const originalFetch = globalThis.fetch;
-  const encoder = new TextEncoder();
-  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(encoder.encode(`data: ${sse}\n\n`));
-      controller.close();
-    },
-  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+  globalThis.fetch = async () => new Response(`data: ${JSON.stringify(event)}\n\n`, {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
 
   try {
+    const events: string[] = [];
     await assert.rejects(
       async () => {
-        for await (const event of new OpenAIAdapter().stream(config, request)) {
-          assert.equal(event.type, 'start');
+        for await (const streamEvent of new OpenAIAdapter().stream(config, request)) {
+          events.push(streamEvent.type);
         }
       },
       (error: unknown) => error instanceof Error && error.message === expected,
     );
+    assert.deepEqual(events, ['start']);
   } finally {
     globalThis.fetch = originalFetch;
   }
 }
 
 test('OpenAI stream exposes provider error details', async () => {
-  await assertStreamError('{"type":"error","error":{"message":"invalid request for test"}}', 'invalid request for test');
+  await assertStreamError(
+    { type: 'error', error: { message: 'invalid request for test' } },
+    'invalid request for test',
+  );
 });
 
 test('OpenAI response.failed exposes response error details', async () => {
-  await assertStreamError('{"type":"response.failed","response":{"error":{"message":"failed response for test"}}}', 'failed response for test');
+  await assertStreamError(
+    { type: 'response.failed', response: { error: { message: 'failed response for test' } } },
+    'failed response for test',
+  );
 });
