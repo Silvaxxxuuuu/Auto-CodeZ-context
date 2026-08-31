@@ -6,7 +6,7 @@ const MODEL_LIST_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 
 function supportsEffort(model: string): boolean {
-  return /claude-(opus|sonnet)-5|claude-(opus|sonnet)-4-[7-8]|claude-(fable|mythos)-5/i.test(model);
+  return /claude-(?:opus|sonnet)-5(?:[-.]|$)|claude-(?:opus|sonnet)-4-(?:6|7|8)(?:[-.]|$)/i.test(model);
 }
 
 function effort(level: AIRequest['intelligence']): string {
@@ -88,8 +88,8 @@ export class AnthropicAdapter implements AIProviderAdapter {
       id: model.id,
       name: model.display_name || model.id,
       providerId: this.id,
-      capabilities: ['text', 'vision', 'streaming', 'tools', 'reasoning'],
-      reasoningLevels: ['low', 'normal', 'high', 'maximum'],
+      capabilities: ['text', 'vision', 'streaming', 'tools', ...(supportsEffort(model.id) ? ['reasoning'] : [])],
+      reasoningLevels: supportsEffort(model.id) ? ['low', 'normal', 'high', 'maximum'] : ['normal'],
     }));
   }
 
