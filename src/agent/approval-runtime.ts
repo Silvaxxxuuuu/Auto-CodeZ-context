@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { ApprovalRequest, AIToolCall, PermissionLevel } from '../ai/types';
+import type { ApprovalRequest } from '../ai/types';
 
 export class ApprovalRuntime {
   private readonly pending = new Map<string, ApprovalRequest>();
