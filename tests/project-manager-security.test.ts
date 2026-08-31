@@ -34,6 +34,24 @@ test('writeFile rejects an existing symlink target outside the workspace', async
   }
 });
 
+test('writeFile rejects a symlinked parent that points outside the workspace', async () => {
+  const workspace = await createProjectManager();
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-project-parent-outside-'));
+  try {
+    const linkedDirectory = path.join(workspace.root, 'linked-directory');
+    const outsideFile = path.join(outside, 'secret.txt');
+    await fs.writeFile(outsideFile, 'original', 'utf8');
+    await fs.symlink(outside, linkedDirectory, 'junction');
+
+    await assert.rejects(workspace.manager.writeFile(path.join(linkedDirectory, 'created.txt'), 'blocked'), /diretório simbólico fora do workspace/);
+    assert.equal(await fs.readFile(outsideFile, 'utf8'), 'original');
+    assert.equal(await fs.stat(path.join(outside, 'created.txt')).then(() => true, () => false), false);
+  } finally {
+    await workspace.cleanup();
+    await fs.rm(outside, { recursive: true, force: true });
+  }
+});
+
 test('writeFile accepts an existing regular file inside the workspace', async () => {
   const workspace = await createProjectManager();
   try {
