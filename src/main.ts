@@ -10,7 +10,7 @@ import { AnthropicAdapter } from './ai/providers/anthropic';
 import type { AIProviderConfig, ChatRecord, IntelligenceLevel, PermissionLevel, ProviderId, AIStreamEvent } from './ai/types';
 import { LocalStorage } from './core/storage';
 import { ProjectManager } from './core/project-manager';
-import { ChatManager } from './core/chat-manager';
+import { ChatManager, UNCONFIGURED_MODEL_ID, UNCONFIGURED_PROVIDER_ID } from './core/chat-manager';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import { ActivityRuntime } from './agent/activity-runtime';
 import { WorkspaceRuntime } from './agent/workspace-runtime';
@@ -102,6 +102,10 @@ async function getConfiguredProvider(providerId: ProviderId): Promise<AIProvider
 }
 
 async function validateChatInput(input: { providerId: ProviderId; model: string; projectId?: string }): Promise<void> {
+  if (input.providerId === UNCONFIGURED_PROVIDER_ID && input.model === UNCONFIGURED_MODEL_ID) {
+    if (input.projectId && !(await projectManager.list()).some((project) => project.id === input.projectId)) throw new Error('Projeto não encontrado.');
+    return;
+  }
   const config = await getConfiguredProvider(input.providerId);
   const models = await modelResolver.list(config);
   const model = modelResolver.find(models, input.model);
@@ -169,10 +173,10 @@ ipcMain.handle('providers:remove', async (_event, providerId: ProviderId) => {
   await saveProviders();
   return publicProviders();
 });
-ipcMain.handle('chat:create', async (_event, input: { providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel; projectId?: string }) => {
+ipcMain.handle('chat:create', async (_event, input: { providerId?: ProviderId; model?: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel; projectId?: string }) => {
   const value = requireObject(input, 'Dados do chat');
-  const providerId = requireIdentifier(value.providerId, 'Provider') as ProviderId;
-  const model = requireIdentifier(value.model, 'Modelo');
+  const providerId = value.providerId === undefined ? UNCONFIGURED_PROVIDER_ID : requireIdentifier(value.providerId, 'Provider') as ProviderId;
+  const model = value.model === undefined ? UNCONFIGURED_MODEL_ID : requireIdentifier(value.model, 'Modelo');
   const intelligence = requireIntelligence(value.intelligence);
   const permissionLevel = requirePermission(value.permissionLevel);
   const projectId = value.projectId === undefined ? undefined : requireIdentifier(value.projectId, 'Projeto');
@@ -198,6 +202,7 @@ ipcMain.handle('chat:update-settings', async (_event, input: { chatId: string; p
 async function getChatContext(chatId: string, taskQuery: string): Promise<{ chat: ChatRecord; config: AIProviderConfig; projectContext?: string }> {
   const chat = (await chatManager.list()).find((item) => item.id === chatId);
   if (!chat) throw new Error('Chat não encontrado.');
+  if (chat.providerId === UNCONFIGURED_PROVIDER_ID || chat.model === UNCONFIGURED_MODEL_ID) throw new Error('Configure uma IA e um modelo neste chat antes de enviar uma mensagem.');
   const config = await getConfiguredProvider(chat.providerId);
   const models = await modelResolver.list(config);
   modelResolver.find(models, chat.model);
