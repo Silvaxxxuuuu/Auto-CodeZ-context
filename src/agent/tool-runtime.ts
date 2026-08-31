@@ -24,7 +24,7 @@ const definitions: AIToolDefinition[] = [
   {
     name: 'create_file',
     description: 'Create a new UTF-8 text file inside the active workspace.',
-    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path'], additionalProperties: false },
+    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path', 'content'], additionalProperties: false },
     requiresWriteAccess: true,
     requiresApproval: true,
   },
