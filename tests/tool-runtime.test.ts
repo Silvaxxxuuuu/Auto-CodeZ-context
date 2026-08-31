@@ -42,6 +42,22 @@ test('listDefinitions returns independent definition objects', async () => {
   }
 });
 
+test('all tool schemas require every declared property for strict provider compatibility', async () => {
+  const fixture = await createToolRuntime();
+  try {
+    for (const definition of fixture.runtime.listDefinitions()) {
+      const properties = definition.parameters.properties;
+      assert.ok(properties && typeof properties === 'object');
+      const propertyNames = Object.keys(properties as Record<string, unknown>);
+      const required = Array.isArray(definition.parameters.required) ? definition.parameters.required : [];
+      assert.deepEqual([...required].sort(), [...propertyNames].sort(), definition.name);
+      assert.equal(definition.parameters.additionalProperties, false, definition.name);
+    }
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test('read_file executes without approval and returns file contents', async () => {
   const fixture = await createToolRuntime();
   try {
