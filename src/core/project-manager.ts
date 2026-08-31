@@ -18,6 +18,10 @@ function isPathInside(rootPath: string, candidatePath: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
 export class ProjectManager {
   private projects: ProjectRecord[] = [];
 
@@ -79,7 +83,7 @@ export class ProjectManager {
       if (!isPathInside(root, existingTarget)) throw new Error('Operação bloqueada: arquivo simbólico fora do workspace.');
       return candidate;
     } catch (error) {
-      if (error instanceof Error && error.message.includes('Operação bloqueada')) throw error;
+      if (!isMissingPathError(error)) throw error;
     }
 
     let parent = path.dirname(candidate);
@@ -89,18 +93,14 @@ export class ProjectManager {
         if (!isPathInside(root, realParent)) throw new Error('Operação bloqueada: diretório simbólico fora do workspace.');
         return candidate;
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Operação bloqueada')) throw error;
+        if (!isMissingPathError(error)) throw error;
         parent = path.dirname(parent);
       }
     }
 
-    try {
-      const realParent = await fs.realpath(parent);
-      if (!isPathInside(root, realParent)) throw new Error('Operação bloqueada: diretório simbólico fora do workspace.');
-      return candidate;
-    } catch {
-      throw new Error('Não foi possível validar o caminho do workspace.');
-    }
+    const realParent = await fs.realpath(parent);
+    if (!isPathInside(root, realParent)) throw new Error('Operação bloqueada: diretório simbólico fora do workspace.');
+    return candidate;
   }
 
   async scan(rootPath: string): Promise<Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>> {
@@ -150,7 +150,35 @@ export class ProjectManager {
   async writeFile(filePath: string, content: string): Promise<void> {
     if (Buffer.byteLength(content, 'utf8') > MAX_EDITOR_FILE_BYTES) throw new Error(`Conteúdo excede o limite de ${MAX_EDITOR_FILE_BYTES} bytes para o editor.`);
     const safePath = await this.resolveWritableInsideWorkspace(filePath);
-    await fs.mkdir(path.dirname(safePath), { recursive: true });
-    await fs.writeFile(safePath, content, 'utf8');
+    const parent = path.dirname(safePath);
+    await fs.mkdir(parent, { recursive: true });
+
+    const temporaryPath = path.join(parent, `.auto-codez-${crypto.randomUUID()}.tmp`);
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+    try {
+      handle = await fs.open(temporaryPath, 'wx');
+      await handle.writeFile(content, 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+
+      const destinationInfo = await fs.lstat(safePath).catch((error: unknown) => {
+        if (isMissingPathError(error)) return undefined;
+        throw error;
+      });
+      if (destinationInfo?.isSymbolicLink()) {
+        throw new Error('Operação bloqueada: arquivo simbólico fora do workspace.');
+      }
+
+      if (destinationInfo) {
+        if (!destinationInfo.isFile()) throw new Error('O caminho selecionado não é um arquivo.');
+        await fs.rm(safePath);
+      }
+
+      await fs.rename(temporaryPath, safePath);
+    } finally {
+      if (handle) await handle.close().catch(() => undefined);
+      await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+    }
   }
 }
