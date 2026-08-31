@@ -30,6 +30,9 @@ jobs:
       - name: TypeScript validation
         run: npx tsc --noEmit
 
+      - name: Core tests
+        run: npm test
+
       - name: ESLint validation
         run: npm run lint
 
