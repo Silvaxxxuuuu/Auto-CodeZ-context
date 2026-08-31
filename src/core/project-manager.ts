@@ -117,6 +117,10 @@ export class ProjectManager {
         if (ignored.has(entry.name)) continue;
         const full = path.join(safeCurrent, entry.name);
         const relativePath = path.relative(normalizedRoot, full);
+        if (entry.isSymbolicLink()) {
+          result.push({ path: full, relativePath, type: entry.isDirectory() ? 'directory' : 'file' });
+          continue;
+        }
         result.push({ path: full, relativePath, type: entry.isDirectory() ? 'directory' : 'file' });
         if (entry.isDirectory()) await visit(full);
       }
