@@ -143,13 +143,17 @@ export class OpenAIAdapter implements AIProviderAdapter {
     let content = '';
     let usage: AIResponse['usage'];
     const toolCalls = new Map<string, AIToolCall>();
+    const toolCallKeysByOutputIndex = new Map<number, string>();
     yield { type: 'start' };
 
     for await (const raw of parseSSE(response)) {
       const event = raw as {
         type?: string;
         delta?: string;
-        item?: { type?: string; call_id?: string; name?: string; arguments?: string };
+        item?: { id?: string; type?: string; call_id?: string; name?: string; arguments?: string };
+        item_id?: string;
+        output_index?: number;
+        arguments?: string;
         response?: { output_text?: string; usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number }; error?: { message?: string } };
         error?: { message?: string } | string;
       };
@@ -157,12 +161,17 @@ export class OpenAIAdapter implements AIProviderAdapter {
         content += event.delta;
         yield { type: 'delta', text: event.delta };
       }
-      if (event.type === 'response.output_item.added' && event.item?.type === 'function_call' && event.item.call_id && event.item.name) toolCalls.set(event.item.call_id, { id: event.item.call_id, name: event.item.name as AIToolCall['name'], input: {} });
-      if (event.type === 'response.function_call_arguments.done' && event.item?.call_id) {
-        const existing = toolCalls.get(event.item.call_id);
+      if (event.type === 'response.output_item.added' && event.item?.type === 'function_call' && event.item.call_id && event.item.name) {
+        const key = event.item.id || event.item.call_id;
+        toolCalls.set(key, { id: event.item.call_id, name: event.item.name as AIToolCall['name'], input: {} });
+        if (typeof event.output_index === 'number') toolCallKeysByOutputIndex.set(event.output_index, key);
+      }
+      if (event.type === 'response.function_call_arguments.done') {
+        const key = event.item_id || (typeof event.output_index === 'number' ? toolCallKeysByOutputIndex.get(event.output_index) : undefined) || event.item?.call_id;
+        const existing = key ? toolCalls.get(key) : undefined;
         if (existing) {
           try {
-            const parsed = JSON.parse(event.item.arguments || '{}');
+            const parsed = JSON.parse(event.arguments ?? event.item?.arguments ?? '{}');
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) existing.input = parsed as Record<string, unknown>;
           } catch {
             throw new Error('OpenAI retornou argumentos inválidos para uma ferramenta.');
