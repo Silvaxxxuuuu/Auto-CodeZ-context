@@ -28,8 +28,12 @@ function terminateProcessTree(child: ChildProcess): void {
     killer.unref();
     return;
   }
+  if (child.pid === undefined) {
+    child.kill('SIGTERM');
+    return;
+  }
   try {
-    process.kill(-child.pid!, 'SIGTERM');
+    process.kill(-child.pid, 'SIGTERM');
   } catch {
     child.kill('SIGTERM');
   }
