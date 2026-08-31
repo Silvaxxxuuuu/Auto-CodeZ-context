@@ -89,3 +89,18 @@ test('lists chats by most recently updated timestamp', async () => {
   const chats = await manager.list();
   assert.deepEqual(chats.map((chat) => chat.id), [older.id, newer.id]);
 });
+
+test('deletes a chat and persists the deletion', async () => {
+  const storage = new MemoryStorage();
+  const manager = createManager(storage);
+  await manager.init();
+
+  const keep = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
+  const remove = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
+
+  await manager.delete(remove.id);
+
+  assert.deepEqual((await manager.list()).map((chat) => chat.id), [keep.id]);
+  const persisted = await storage.read<ChatRecord[]>('chats.json', []);
+  assert.deepEqual(persisted.map((chat) => chat.id), [keep.id]);
+});
