@@ -20,6 +20,7 @@ declare global {
       saveProvider: (input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }) => Promise<{ providers: ProviderSummary[]; models: Model[] }>;
       removeProvider: (providerId: string) => Promise<ProviderSummary[]>;
       createChat: (input: { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }) => Promise<Chat>;
+      deleteChat: (chatId: string) => Promise<Chat[]>;
       updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
       streamChat: (input: { chatId: string; content: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
@@ -63,7 +64,7 @@ app.innerHTML = `
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Auto CodeZ</span></div>
     <div class="topbar-actions">
       <button class="top-action" data-action="new-chat">Novo chat</button>
-      <button class="top-action icon-only" data-action="settings" title="Configurações gerais" aria-label="Configurações gerais"></button>
+      <button class="top-action icon-only" data-action="ai-settings" title="Configurações de IA" aria-label="Configurações de IA"></button>
     </div>
   </header>
   <div class="body">
@@ -169,7 +170,7 @@ function renderNav(): void {
 }
 
 function chatItem(chat: Chat): string {
-  return `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-settings="${chat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button></div>`;
+  return `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-settings="${chat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button><button class="chat-delete" data-chat-delete="${chat.id}" title="Excluir chat" aria-label="Excluir chat">×</button></div>`;
 }
 
 function renderHeader(): void {
@@ -241,7 +242,7 @@ async function openGeneralSettings(): Promise<void> {
 
 async function openProviderSettings(providerId = ''): Promise<void> {
   const configured = providers.filter((provider) => provider.configured);
-  openModal(`<div class="modal-head"><div><div class="eyebrow">CONFIGURAÇÕES DE IA</div><h2>Inteligências artificiais</h2><p>Cadastre provedores, API keys e modelos.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="provider-list">${configured.map((provider) => `<div class="provider-row"><div><strong>${escapeHtml(provider.displayName)}</strong><span>API key configurada</span></div><div class="row-actions"><button data-provider-edit="${provider.id}">Configurar</button><button data-provider-remove="${provider.id}" class="danger">Remover</button></div></div>`).join('') || '<div class="empty-panel">Nenhuma IA configurada.</div>'}</div><div class="add-provider"><h3>${providerId ? 'Editar provedor' : 'Adicionar IA'}</h3><label>IA<select id="provider-id">${providers.map((provider) => `<option value="${provider.id}" ${provider.id === providerId ? 'selected' : ''}>${escapeHtml(provider.displayName)}</option>`).join('')}</select></label><label>API Key<input id="provider-key" type="password" placeholder="Cole sua API key aqui" autocomplete="off"></label><label>Modelo<input id="provider-model" type="text" placeholder="Modelo opcional"></label><button class="primary-button" id="save-provider">Testar e salvar</button></div>`);
+  openModal(`<div class="modal-head"><div><div class="eyebrow">CONFIGURAÇÕES DE IA</div><h2>Inteligências artificiais</h2><p>Cadastre provedores, API keys e modelos.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="provider-list">${providers.map((provider) => `<div class="provider-row"><div><strong>${escapeHtml(provider.displayName)}</strong><span>${provider.configured ? 'API key configurada' : 'Não configurada'}</span></div><div class="row-actions"><button data-provider-edit="${provider.id}">${provider.configured ? 'Alterar chave' : 'Configurar'}</button>${provider.configured ? `<button data-provider-remove="${provider.id}" class="danger">Remover</button>` : ''}</div></div>`).join('')}</div><div class="add-provider"><h3>${providerId ? 'Editar provedor' : 'Adicionar IA'}</h3><label>IA<select id="provider-id">${providers.map((provider) => `<option value="${provider.id}" ${provider.id === providerId ? 'selected' : ''}>${escapeHtml(provider.displayName)}</option>`).join('')}</select></label><label>API Key<input id="provider-key" type="password" placeholder="Cole sua API key aqui" autocomplete="off"></label><label>Modelo<input id="provider-model" type="text" placeholder="Modelo opcional"></label><button class="primary-button" id="save-provider">Testar e salvar</button></div>`);
 }
 
 async function openChatSettings(chat: Chat): Promise<void> {
@@ -261,6 +262,7 @@ async function newChat(projectId?: string): Promise<void> {
     pendingApprovals = [];
     streamingActivity = [];
     lastError = '';
+    executionState = 'idle';
     activePanel = projectId ? 'projects' : 'chats';
     activeProjectId = projectId;
     await refresh();
@@ -297,7 +299,11 @@ async function refreshApprovals(): Promise<void> {
 
 async function sendMessage(): Promise<void> {
   const content = prompt.value.trim();
-  if (!content || !activeChat || executionState !== 'idle' || pendingApprovals.length) return;
+  if (!content || !activeChat || (executionState !== 'idle' && executionState !== 'failed') || pendingApprovals.length) return;
+  if (executionState === 'failed') {
+    executionState = 'idle';
+    lastError = '';
+  }
   const chatId = activeChat.id;
   prompt.value = '';
   prompt.style.height = '';
@@ -345,7 +351,7 @@ async function resumeApproval(id: string, approve: boolean): Promise<void> {
       if (chat && result.messages) chat.messages = result.messages;
       if (activeChat?.id === result.chatId && result.messages) activeChat.messages = result.messages;
     }
-    pendingApprovals = result.pendingApprovalIds?.length ? await window.autoCodez.listApprovals() : await window.autoCodez.listApprovals();
+    pendingApprovals = await window.autoCodez.listApprovals();
     if (pendingApprovals.length) {
       executionState = 'waiting_approval';
       streamingActivity = ['Outras operações ainda aguardam aprovação.'];
@@ -364,17 +370,39 @@ async function resumeApproval(id: string, approve: boolean): Promise<void> {
 }
 
 async function setComposerIntelligence(level: IntelligenceLevel): Promise<void> {
-  if (!activeChat || executionState !== 'idle') return;
+  if (!activeChat || (executionState !== 'idle' && executionState !== 'failed')) return;
   const previous = composerIntelligence;
+  const previousState = executionState;
   composerIntelligence = level;
   setIntelligenceMenu(false);
   if (activeChat.intelligence === level) { renderComposer(); return; }
   try {
     activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId: activeChat.providerId, model: activeChat.model, intelligence: level, permissionLevel: activeChat.permissionLevel });
+    executionState = 'idle';
+    lastError = '';
     await refresh();
   } catch (error) {
     composerIntelligence = previous;
-    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível atualizar o perfil de raciocínio.');
+    setExecutionState(previousState === 'failed' ? 'failed' : 'failed', error instanceof Error ? error.message : 'Não foi possível atualizar o perfil de raciocínio.');
+  }
+}
+
+async function deleteChat(chatId: string): Promise<void> {
+  if (executionState === 'running' || executionState === 'waiting_approval') return;
+  if (!window.confirm('Excluir esta conversa permanentemente?')) return;
+  try {
+    await window.autoCodez.deleteChat(chatId);
+    if (activeChat?.id === chatId) {
+      activeChat = null;
+      pendingApprovals = [];
+      streamingText = '';
+      streamingActivity = [];
+      lastError = '';
+      executionState = 'idle';
+    }
+    await refresh();
+  } catch (error) {
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível excluir o chat.');
   }
 }
 
@@ -420,6 +448,12 @@ app.addEventListener('click', async (event) => {
     activePanel = panel.dataset.panel || 'chats';
     activeProjectId = undefined;
     renderNav();
+    return;
+  }
+  const deleteButton = target.closest<HTMLElement>('[data-chat-delete]');
+  if (deleteButton?.dataset.chatDelete) {
+    event.stopPropagation();
+    await deleteChat(deleteButton.dataset.chatDelete);
     return;
   }
   const settings = target.closest<HTMLElement>('[data-chat-settings]');
@@ -482,13 +516,13 @@ modalRoot.addEventListener('click', async (event) => {
     if (!apiKey.trim()) return;
     button.disabled = true;
     button.textContent = 'Validando...';
-    try { await window.autoCodez.saveProvider({ providerId, apiKey, model }); await refresh(); await openProviderSettings(); } catch (error) { button.disabled = false; button.textContent = 'Testar e salvar'; setExecutionState('failed', error instanceof Error ? error.message : 'Falha ao validar a API key.'); }
+    try { await window.autoCodez.saveProvider({ providerId, apiKey, model }); await refresh(); await openProviderSettings(providerId); } catch (error) { button.disabled = false; button.textContent = 'Testar e salvar'; setExecutionState('failed', error instanceof Error ? error.message : 'Falha ao validar a API key.'); }
     return;
   }
   if (target.id === 'chat-provider') {
     const providerId = (target as HTMLSelectElement).value;
     const select = document.querySelector<HTMLSelectElement>('#chat-model');
-    try { const nextModels = await window.autoCodez.listModels(providerId); if (select) select.innerHTML = nextModels.map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name)}</option>`).join(''); } catch { if (select) select.innerHTML = '<option value="">Não foi possível carregar os modelos</option>'; }
+    try { const nextModels = await window.autoCodez.listModels(providerId); if (select) select.innerHTML = nextModels.map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name)}</option>`).join(''); } catch (error) { if (select) select.innerHTML = `<option value="">${escapeHtml(error instanceof Error ? error.message : 'Não foi possível carregar os modelos')}</option>`; }
     return;
   }
   if (target.id === 'save-chat-settings') {
@@ -502,13 +536,15 @@ modalRoot.addEventListener('click', async (event) => {
       await openProviderSettings();
       return;
     }
-    try { activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId, model, intelligence: intelligenceLevel, permissionLevel }); composerIntelligence = activeChat.intelligence; closeModal(); await refresh(); } catch (error) { setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.'); }
+    try { activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId, model, intelligence: intelligenceLevel, permissionLevel }); composerIntelligence = activeChat.intelligence; closeModal(); executionState = 'idle'; lastError = ''; await refresh(); } catch (error) { setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.'); }
   }
 });
 
 window.autoCodez.onStreamEvent((event) => {
   if (event.type === 'start') {
-    if (executionState !== 'failed') executionState = 'running';
+    executionState = 'running';
+    lastError = '';
+    renderComposer();
     return;
   }
   if (event.type === 'delta' && event.text) {
