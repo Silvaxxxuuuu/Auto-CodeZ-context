@@ -122,7 +122,7 @@ export class GoogleAdapter implements AIProviderAdapter {
     const data = (await response.json()) as { models?: Array<{ name: string; displayName?: string; supportedGenerationMethods?: string[] }> };
     return (data.models || [])
       .filter((model) => model.supportedGenerationMethods?.includes('generateContent'))
-      .map((model) => {
+      .map((model): AIModel => {
         const id = model.name.replace(/^models\//, '');
         const thinking = isThinkingModel(id);
         return {
