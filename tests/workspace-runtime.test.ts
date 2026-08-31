@@ -103,8 +103,8 @@ test('searchFiles ignores generated and dependency directories', async () => {
   const workspace = await createWorkspace();
   try {
     await workspace.runtime.createFile('project-test', 'src/target.ts', 'content');
-    await workspace.runtime.createFile('node_modules/target.ts', 'dependency');
-    await workspace.runtime.createFile('dist/target.js', 'generated');
+    await workspace.runtime.createFile('project-test', 'node_modules/target.ts', 'dependency');
+    await workspace.runtime.createFile('project-test', 'dist/target.js', 'generated');
     const results = await workspace.runtime.searchFiles('project-test', 'target');
     assert.deepEqual(results, [path.join('src', 'target.ts')]);
   } finally {
