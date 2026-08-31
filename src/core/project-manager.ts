@@ -118,7 +118,13 @@ export class ProjectManager {
         const full = path.join(safeCurrent, entry.name);
         const relativePath = path.relative(normalizedRoot, full);
         if (entry.isSymbolicLink()) {
-          result.push({ path: full, relativePath, type: entry.isDirectory() ? 'directory' : 'file' });
+          let type: 'file' | 'directory' = 'file';
+          try {
+            type = (await fs.stat(full)).isDirectory() ? 'directory' : 'file';
+          } catch {
+            type = 'file';
+          }
+          result.push({ path: full, relativePath, type });
           continue;
         }
         result.push({ path: full, relativePath, type: entry.isDirectory() ? 'directory' : 'file' });
