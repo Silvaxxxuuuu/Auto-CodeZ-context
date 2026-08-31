@@ -6,9 +6,14 @@ import { LocalStorage } from './storage';
 
 const MAX_EDITOR_FILE_BYTES = 4 * 1024 * 1024;
 
+function normalizePathForComparison(value: string): string {
+  const resolved = path.resolve(value);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
 function isPathInside(rootPath: string, candidatePath: string): boolean {
-  const root = path.resolve(rootPath);
-  const candidate = path.resolve(candidatePath);
+  const root = normalizePathForComparison(rootPath);
+  const candidate = normalizePathForComparison(candidatePath);
   const relative = path.relative(root, candidate);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
