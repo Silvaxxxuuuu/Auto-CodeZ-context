@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": ".test-dist",
+    "rootDir": ".",
+    "sourceMap": false,
+    "noEmit": false
+  },
+  "include": [
+    "src/ai/types.ts",
+    "src/agent/permission-runtime.ts",
+    "src/agent/workspace-runtime.ts",
+    "tests/**/*.test.ts"
+  ]
+}
