@@ -17,7 +17,7 @@ async function withMockedFetch<T>(payload: unknown, action: () => Promise<T>): P
     ok: true,
     status: 200,
     json: async () => payload,
-  })) as typeof fetch;
+  })) as unknown as typeof fetch;
   try {
     return await action();
   } finally {
