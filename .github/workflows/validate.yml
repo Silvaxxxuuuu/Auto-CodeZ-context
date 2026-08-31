@@ -41,3 +41,17 @@ jobs:
 
       - name: Electron Forge package build
         run: npm run package
+
+      - name: Electron startup smoke test
+        shell: pwsh
+        env:
+          AUTO_CODEZ_SMOKE: '1'
+        run: |
+          $process = Start-Process -FilePath 'npm.cmd' -ArgumentList 'start' -PassThru -WorkingDirectory $PWD
+          if (-not $process.WaitForExit(30000)) {
+            Stop-Process -Id $process.Id -Force
+            throw 'Electron smoke test exceeded the 30 second timeout.'
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "Electron smoke test exited with code $($process.ExitCode)."
+          }
