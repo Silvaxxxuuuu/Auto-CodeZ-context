@@ -10,8 +10,7 @@
   },
   "include": [
     "src/ai/types.ts",
-    "src/agent/permission-runtime.ts",
-    "src/agent/workspace-runtime.ts",
+    "src/agent/**/*.ts",
     "tests/**/*.test.ts"
   ]
 }
