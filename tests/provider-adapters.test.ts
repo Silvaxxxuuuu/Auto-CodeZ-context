@@ -77,15 +77,15 @@ test('OpenAI adapter sends the Responses API contract and parses the response', 
   });
 });
 
-test('OpenAI adapter preserves streamed deltas and tool calls', async () => {
+test('OpenAI adapter preserves streamed deltas and real Responses tool call events', async () => {
   await withMockedFetch(async (_input, init) => {
     const body = readBody(init);
     assert.equal(body.stream, true);
     return sseResponse([
       JSON.stringify({ type: 'response.output_text.delta', delta: 'Hello ' }),
       JSON.stringify({ type: 'response.output_text.delta', delta: 'OpenAI' }),
-      JSON.stringify({ type: 'response.output_item.added', item: { type: 'function_call', call_id: 'call_1', name: 'read_file' } }),
-      JSON.stringify({ type: 'response.function_call_arguments.done', item: { call_id: 'call_1', arguments: '{"path":"README.md"}' } }),
+      JSON.stringify({ type: 'response.output_item.added', output_index: 0, item: { id: 'fc_item_1', type: 'function_call', call_id: 'call_1', name: 'read_file' } }),
+      JSON.stringify({ type: 'response.function_call_arguments.done', item_id: 'fc_item_1', output_index: 0, arguments: '{"path":"README.md"}' }),
       JSON.stringify({ type: 'response.completed', response: { usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 } } }),
       '[DONE]',
     ]);
