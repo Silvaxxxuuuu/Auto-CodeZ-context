@@ -178,6 +178,7 @@ test('Anthropic adapter reconstructs streamed tool JSON and text', async () => {
       JSON.stringify({ type: 'content_block_delta', delta: { type: 'input_json_delta', partial_json: '"README.md"}' } }),
       JSON.stringify({ type: 'content_block_stop' }),
       JSON.stringify({ type: 'message_delta', usage: { output_tokens: 4 } }),
+      JSON.stringify({ type: 'message_stop' }),
       '[DONE]',
     ]);
   }, async () => {
