@@ -107,6 +107,13 @@ async function createWindow(): Promise<void> {
   mainWindow.on('closed', () => { mainWindow = null; });
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) await mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   else await mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
+  if (process.env.AUTO_CODEZ_SMOKE === '1') {
+    const bridgeReady = await mainWindow.webContents.executeJavaScript('Boolean(window.autoCodez && typeof window.autoCodez.getState === "function")');
+    if (!bridgeReady) throw new Error('Smoke test: preload bridge não foi exposto.');
+    const uiReady = await mainWindow.webContents.executeJavaScript('Boolean(document.querySelector("#app .app-shell") && document.querySelector("#prompt") && document.querySelector("#send-button"))');
+    if (!uiReady) throw new Error('Smoke test: interface principal não foi montada.');
+    setTimeout(() => app.quit(), 250);
+  }
 }
 
 ipcMain.handle('app:get-state', async () => ({ providers: publicProviders(), chats: await chatManager.list(), projects: await projectManager.list() }));
