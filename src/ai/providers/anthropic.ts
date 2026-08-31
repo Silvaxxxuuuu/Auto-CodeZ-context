@@ -84,7 +84,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
     }, MODEL_LIST_TIMEOUT_MS);
     if (!response.ok) throw new Error(`Anthropic models request failed: ${response.status}`);
     const data = (await response.json()) as { data?: Array<{ id: string; display_name?: string }> };
-    return (data.data || []).map((model) => ({
+    return (data.data || []).map((model): AIModel => ({
       id: model.id,
       name: model.display_name || model.id,
       providerId: this.id,
