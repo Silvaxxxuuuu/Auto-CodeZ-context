@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ChatRuntime } from '../src/ai/chat-runtime';
 import { ProviderRegistry } from '../src/ai/provider-registry';
-import type { AIModel, AIProviderAdapter, AIProviderConfig, ChatRecord } from '../src/ai/types';
+import type { AIModel, AIProviderAdapter, AIProviderConfig, AIStreamEvent, ChatRecord } from '../src/ai/types';
 
 const config: AIProviderConfig = {
   id: 'mock',
@@ -31,8 +31,7 @@ const model: AIModel = {
   capabilities: ['text', 'streaming'],
 };
 
-function createRuntime(events: Parameters<NonNullable<AIProviderAdapter['stream']>>[1] extends never ? never : 'unused', stream: NonNullable<AIProviderAdapter['stream']>): ChatRuntime {
-  void events;
+function createRuntime(stream: NonNullable<AIProviderAdapter['stream']>): ChatRuntime {
   const adapter: AIProviderAdapter = {
     id: 'mock',
     displayName: 'Mock',
@@ -50,7 +49,7 @@ function createRuntime(events: Parameters<NonNullable<AIProviderAdapter['stream'
 }
 
 test('streams start, deltas and completion in provider order', async () => {
-  const runtime = createRuntime('unused', async function* () {
+  const runtime = createRuntime(async function* (): AsyncGenerator<AIStreamEvent> {
     yield { type: 'start' };
     yield { type: 'delta', text: 'res' };
     yield { type: 'delta', text: 'posta' };
@@ -66,7 +65,7 @@ test('streams start, deltas and completion in provider order', async () => {
 });
 
 test('converts provider stream failures into a terminal error event', async () => {
-  const runtime = createRuntime('unused', async function* () {
+  const runtime = createRuntime(async function* (): AsyncGenerator<AIStreamEvent> {
     yield { type: 'start' };
     yield { type: 'delta', text: 'parcial' };
     throw new Error('provider indisponível');
