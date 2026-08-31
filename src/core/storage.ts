@@ -2,6 +2,10 @@ import { app, safeStorage } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+function isMissingFile(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
 export class LocalStorage {
   private get root(): string {
     return path.join(app.getPath('userData'), 'data');
@@ -16,18 +20,47 @@ export class LocalStorage {
     return path.join(this.root, name);
   }
 
+  private temporaryFile(name: string): string {
+    return path.join(this.root, `.${name}.${crypto.randomUUID()}.tmp`);
+  }
+
   async read<T>(name: string, fallback: T): Promise<T> {
     try {
       const raw = await fs.readFile(this.file(name), 'utf8');
       return JSON.parse(raw) as T;
-    } catch {
-      return fallback;
+    } catch (error) {
+      if (isMissingFile(error) || error instanceof SyntaxError) return fallback;
+      throw error;
     }
   }
 
   async write<T>(name: string, value: T): Promise<void> {
     await fs.mkdir(this.root, { recursive: true });
-    await fs.writeFile(this.file(name), JSON.stringify(value, null, 2), 'utf8');
+    const destination = this.file(name);
+    const temporary = this.temporaryFile(name);
+    const serialized = JSON.stringify(value, null, 2);
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+    try {
+      handle = await fs.open(temporary, 'wx');
+      await handle.writeFile(serialized, 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await fs.rename(temporary, destination);
+    } finally {
+      if (handle) {
+        try {
+          await handle.close();
+        } catch {
+          // Cleanup is best-effort after a failed persistence operation.
+        }
+      }
+      try {
+        await fs.rm(temporary, { force: true });
+      } catch {
+        // Cleanup is best-effort after a failed persistence operation.
+      }
+    }
   }
 
   async readEncrypted(name: string): Promise<string | null> {
@@ -35,15 +68,39 @@ export class LocalStorage {
       const raw = await fs.readFile(this.file(name), 'utf8');
       if (!safeStorage.isEncryptionAvailable()) return null;
       return safeStorage.decryptString(Buffer.from(raw, 'base64'));
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMissingFile(error)) return null;
+      throw error;
     }
   }
 
   async writeEncrypted(name: string, value: string): Promise<void> {
     if (!safeStorage.isEncryptionAvailable()) throw new Error('Sistema de armazenamento seguro indisponível.');
     await fs.mkdir(this.root, { recursive: true });
+    const destination = this.file(name);
+    const temporary = this.temporaryFile(name);
     const encrypted = safeStorage.encryptString(value).toString('base64');
-    await fs.writeFile(this.file(name), encrypted, 'utf8');
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+    try {
+      handle = await fs.open(temporary, 'wx');
+      await handle.writeFile(encrypted, 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await fs.rename(temporary, destination);
+    } finally {
+      if (handle) {
+        try {
+          await handle.close();
+        } catch {
+          // Cleanup is best-effort after a failed persistence operation.
+        }
+      }
+      try {
+        await fs.rm(temporary, { force: true });
+      } catch {
+        // Cleanup is best-effort after a failed persistence operation.
+      }
+    }
   }
 }
