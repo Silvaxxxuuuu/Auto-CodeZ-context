@@ -11,11 +11,11 @@ const config: AIProviderConfig = {
   enabled: true,
 };
 
-function chat(model = 'test-model'): ChatRecord {
+function chat(model = 'test-model', projectId = 'project-test'): ChatRecord {
   return {
     id: 'chat-test',
     title: 'Chat Test',
-    projectId: 'project-test',
+    projectId: projectId || undefined,
     providerId: config.id,
     model,
     intelligence: 'normal',
@@ -65,6 +65,25 @@ test('send includes workspace context and tool definitions only when tools are s
   assert.equal(request.messages[0].role, 'system');
   assert.match(request.messages[0].content, /Contexto do workspace atual/);
   assert.equal(request.messages[1].content, 'Hello');
+});
+
+test('send does not expose workspace tools to a normal chat', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry);
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    {
+      name: 'read_file',
+      description: 'Read a file',
+      parameters: { type: 'object' },
+      requiresWriteAccess: false,
+      requiresApproval: false,
+    },
+  ]);
+
+  await runtime.send(config, chat('test-model', ''));
+  const request = requests[0] as { toolsEnabled: boolean; tools?: unknown[] };
+  assert.equal(request.toolsEnabled, false);
+  assert.equal(request.tools, undefined);
 });
 
 test('send disables tools for models without tool capability', async () => {
