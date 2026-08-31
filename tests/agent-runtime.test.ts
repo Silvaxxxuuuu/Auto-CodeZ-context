@@ -33,7 +33,7 @@ function chat(permissionLevel: ChatRecord['permissionLevel'] = 'ask'): ChatRecor
 }
 
 function toolCall(id: string): AIToolCall {
-  return { id, name: 'read_file', input: { path: 'src/index.ts' } };
+  return { id, name: 'write_file', input: { path: 'src/index.ts', content: 'export const value = 43;' } };
 }
 
 function adapter(responses: AIResponse[]): AIProviderAdapter {
