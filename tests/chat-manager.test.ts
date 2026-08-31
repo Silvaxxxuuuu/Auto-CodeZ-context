@@ -15,9 +15,13 @@ class MemoryStorage {
   }
 }
 
+function createManager(storage: MemoryStorage): ChatManager {
+  return new ChatManager(storage as never);
+}
+
 test('creates and persists a draft chat without an AI provider', async () => {
   const storage = new MemoryStorage();
-  const manager = new ChatManager(storage as never);
+  const manager = createManager(storage);
 
   await manager.init();
   const chat = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
@@ -28,21 +32,57 @@ test('creates and persists a draft chat without an AI provider', async () => {
   assert.deepEqual(chat.messages, []);
 
   const persisted = await storage.read<ChatRecord[]>('chats.json', []);
-  assert.equal(persisted.length, 1);
-  assert.equal(persisted[0]?.id, chat.id);
+  assert.deepEqual(persisted, [chat]);
 });
 
 test('restores an empty draft chat after reinitialization', async () => {
   const storage = new MemoryStorage();
-  const first = new ChatManager(storage as never);
+  const first = createManager(storage);
   await first.init();
   const created = await first.create({ intelligence: 'normal', permissionLevel: 'safe' });
 
-  const second = new ChatManager(storage as never);
+  const second = createManager(storage);
   await second.init();
   const chats = await second.list();
 
   assert.equal(chats.length, 1);
   assert.equal(chats[0]?.id, created.id);
-  assert.equal(chats[0]?.messages.length, 0);
+  assert.deepEqual(chats[0]?.messages, []);
+  assert.equal(chats[0]?.title, 'Novo chat');
+});
+
+test('persists messages and derives the first user message as the chat title', async () => {
+  const storage = new MemoryStorage();
+  const first = createManager(storage);
+  await first.init();
+  const created = await first.create({ intelligence: 'normal', permissionLevel: 'safe' });
+
+  const userMessage = { role: 'user' as const, content: 'Como funciona o Auto CodeZ?' };
+  await first.addMessage(created.id, userMessage);
+  await first.addMessage(created.id, { role: 'assistant', content: 'Ele conecta o chat ao projeto local.' });
+
+  const second = createManager(storage);
+  await second.init();
+  const [restored] = await second.list();
+
+  assert.ok(restored);
+  assert.equal(restored.id, created.id);
+  assert.equal(restored.title, userMessage.content);
+  assert.deepEqual(restored.messages.map(({ role, content }) => ({ role, content })), [
+    userMessage,
+    { role: 'assistant', content: 'Ele conecta o chat ao projeto local.' },
+  ]);
+});
+
+test('lists chats by most recently updated timestamp', async () => {
+  const storage = new MemoryStorage();
+  const manager = createManager(storage);
+  await manager.init();
+
+  const older = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
+  const newer = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
+  await manager.addMessage(older.id, { role: 'user', content: 'Atualizar este chat' });
+
+  const chats = await manager.list();
+  assert.deepEqual(chats.map((chat) => chat.id), [older.id, newer.id]);
 });
