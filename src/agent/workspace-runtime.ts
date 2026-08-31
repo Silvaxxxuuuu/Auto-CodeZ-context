@@ -74,7 +74,7 @@ export class WorkspaceRuntime {
   async writeFile(projectId: string, requestedPath: string, content: string): Promise<void> {
     if (Buffer.byteLength(content, 'utf8') > MAX_TEXT_FILE_BYTES) throw new Error(`Conteúdo excede o limite de ${MAX_TEXT_FILE_BYTES} bytes.`);
     const filePath = await this.resolve(projectId, requestedPath);
-    await this.assertTextFileSize(filePath);
+    await this.assertTextFileSize(filePath, true);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, content, 'utf8');
   }
