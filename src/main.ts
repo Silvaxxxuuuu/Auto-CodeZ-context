@@ -11,6 +11,7 @@ import type { AIProviderConfig, ChatRecord, IntelligenceLevel, PermissionLevel, 
 import { LocalStorage } from './core/storage';
 import { ProjectManager } from './core/project-manager';
 import { ChatManager } from './core/chat-manager';
+import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import { ActivityRuntime } from './agent/activity-runtime';
 import { WorkspaceRuntime } from './agent/workspace-runtime';
 import { ToolRuntime } from './agent/tool-runtime';
@@ -48,6 +49,21 @@ const defaultProviders: AIProviderConfig[] = [
   { id: 'google', displayName: 'Google AI', apiKey: '', enabled: false },
   { id: 'anthropic', displayName: 'Anthropic', apiKey: '', enabled: false },
 ];
+
+const intelligenceLevels = new Set<IntelligenceLevel>(['low', 'normal', 'high', 'maximum']);
+const permissionLevels = new Set<PermissionLevel>(['read-only', 'safe', 'ask', 'unrestricted']);
+
+function requireIntelligence(value: unknown): IntelligenceLevel {
+  const normalized = requireIdentifier(value, 'Inteligência');
+  if (!intelligenceLevels.has(normalized as IntelligenceLevel)) throw new Error('Inteligência inválida.');
+  return normalized as IntelligenceLevel;
+}
+
+function requirePermission(value: unknown): PermissionLevel {
+  const normalized = requireIdentifier(value, 'Permissão');
+  if (!permissionLevels.has(normalized as PermissionLevel)) throw new Error('Permissão inválida.');
+  return normalized as PermissionLevel;
+}
 
 activityRuntime.subscribe((event) => { mainWindow?.webContents.send('agent:activity', event); });
 
@@ -118,20 +134,25 @@ async function createWindow(): Promise<void> {
 
 ipcMain.handle('app:get-state', async () => ({ providers: publicProviders(), chats: await chatManager.list(), projects: await projectManager.list() }));
 ipcMain.handle('providers:list-models', async (_event, providerId: ProviderId) => {
-  const config = await getConfiguredProvider(providerId);
+  const id = requireIdentifier(providerId, 'Provider');
+  const config = await getConfiguredProvider(id as ProviderId);
   return modelResolver.list(config);
 });
 ipcMain.handle('providers:save', async (_event, input: { providerId: ProviderId; apiKey: string; model?: string; baseUrl?: string }) => {
   try {
-    const adapter = registry.get(input.providerId);
-    const existing = providerConfigs.find((item) => item.id === input.providerId);
-    const config: AIProviderConfig = { id: input.providerId, displayName: adapter.displayName, apiKey: input.apiKey.trim(), enabled: true, selectedModel: input.model, baseUrl: input.baseUrl?.trim() || undefined };
-    if (!config.apiKey) throw new Error('API key não pode estar vazia.');
+    const value = requireObject(input, 'Dados do provider');
+    const providerId = requireIdentifier(value.providerId, 'Provider') as ProviderId;
+    const apiKey = requireNonEmptyString(value.apiKey, 'API key');
+    const model = value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo');
+    const baseUrl = value.baseUrl === undefined ? undefined : requireNonEmptyString(value.baseUrl, 'URL base');
+    const adapter = registry.get(providerId);
+    const existing = providerConfigs.find((item) => item.id === providerId);
+    const config: AIProviderConfig = { id: providerId, displayName: adapter.displayName, apiKey, enabled: true, selectedModel: model, baseUrl: baseUrl || undefined };
     const models = await modelResolver.list(config, true);
     if (!models.length) throw new Error('O provider não retornou modelos utilizáveis.');
-    if (config.selectedModel && !models.some((model) => model.id === config.selectedModel)) throw new Error('O modelo selecionado não pertence aos modelos disponíveis do provider.');
+    if (config.selectedModel && !models.some((item) => item.id === config.selectedModel)) throw new Error('O modelo selecionado não pertence aos modelos disponíveis do provider.');
     if (!config.selectedModel && models[0]) config.selectedModel = models[0].id;
-    if (existing) providerConfigs = providerConfigs.map((item) => item.id === input.providerId ? config : item); else providerConfigs.push(config);
+    if (existing) providerConfigs = providerConfigs.map((item) => item.id === providerId ? config : item); else providerConfigs.push(config);
     await saveProviders();
     return { providers: publicProviders(), models };
   } catch (error) {
@@ -141,22 +162,35 @@ ipcMain.handle('providers:save', async (_event, input: { providerId: ProviderId;
   }
 });
 ipcMain.handle('providers:remove', async (_event, providerId: ProviderId) => {
-  providerConfigs = providerConfigs.filter((item) => item.id !== providerId);
-  delete providerKeys[providerId];
-  modelResolver.invalidate(providerId);
+  const id = requireIdentifier(providerId, 'Provider') as ProviderId;
+  providerConfigs = providerConfigs.filter((item) => item.id !== id);
+  delete providerKeys[id];
+  modelResolver.invalidate(id);
   await saveProviders();
   return publicProviders();
 });
 ipcMain.handle('chat:create', async (_event, input: { providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel; projectId?: string }) => {
-  await validateChatInput(input);
-  return chatManager.create(input);
+  const value = requireObject(input, 'Dados do chat');
+  const providerId = requireIdentifier(value.providerId, 'Provider') as ProviderId;
+  const model = requireIdentifier(value.model, 'Modelo');
+  const intelligence = requireIntelligence(value.intelligence);
+  const permissionLevel = requirePermission(value.permissionLevel);
+  const projectId = value.projectId === undefined ? undefined : requireIdentifier(value.projectId, 'Projeto');
+  await validateChatInput({ providerId, model, projectId });
+  return chatManager.create({ providerId, model, intelligence, permissionLevel, projectId });
 });
 ipcMain.handle('chat:update-settings', async (_event, input: { chatId: string; providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel }) => {
-  const chat = (await chatManager.list()).find((item) => item.id === input.chatId);
+  const value = requireObject(input, 'Configurações do chat');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const providerId = requireIdentifier(value.providerId, 'Provider') as ProviderId;
+  const model = requireIdentifier(value.model, 'Modelo');
+  const intelligence = requireIntelligence(value.intelligence);
+  const permissionLevel = requirePermission(value.permissionLevel);
+  const chat = (await chatManager.list()).find((item) => item.id === chatId);
   if (!chat) throw new Error('Chat não encontrado.');
   if (busyChats.has(chat.id) || agentRuntime.hasPendingForChat(chat.id)) throw new Error('Não é possível alterar as configurações durante uma operação.');
-  await validateChatInput(input);
-  const updated: ChatRecord = { ...chat, providerId: input.providerId, model: input.model, intelligence: input.intelligence, permissionLevel: input.permissionLevel };
+  await validateChatInput({ providerId, model });
+  const updated: ChatRecord = { ...chat, providerId, model, intelligence, permissionLevel };
   await chatManager.update(updated);
   return updated;
 });
@@ -172,9 +206,10 @@ async function getChatContext(chatId: string, taskQuery: string): Promise<{ chat
 }
 
 ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => {
-  const content = input.content.trim();
-  if (!content) throw new Error('A mensagem não pode estar vazia.');
-  const { chat, config, projectContext } = await getChatContext(input.chatId, content);
+  const value = requireObject(input, 'Mensagem');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const content = requireNonEmptyString(value.content, 'Mensagem');
+  const { chat, config, projectContext } = await getChatContext(chatId, content);
   beginChatRun(chat.id);
   try {
     await chatManager.addMessage(chat.id, { role: 'user', content });
@@ -189,9 +224,10 @@ ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: str
 });
 
 ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
-  const content = input.content.trim();
-  if (!content) throw new Error('A mensagem não pode estar vazia.');
-  const { chat, config, projectContext } = await getChatContext(input.chatId, content);
+  const value = requireObject(input, 'Mensagem');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const content = requireNonEmptyString(value.content, 'Mensagem');
+  const { chat, config, projectContext } = await getChatContext(chatId, content);
   beginChatRun(chat.id);
   try {
     await chatManager.addMessage(chat.id, { role: 'user', content });
@@ -210,14 +246,16 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
 ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
 ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
-  const result = await agentRuntime.resume(approvalId);
+  const id = requireIdentifier(approvalId, 'Aprovação');
+  const result = await agentRuntime.resume(id);
   const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
   if (chat) await chatManager.update({ ...chat, messages: result.messages });
   endChatRun(result.chatId);
   return result;
 });
 ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
-  const result = await agentRuntime.reject(approvalId);
+  const id = requireIdentifier(approvalId, 'Aprovação');
+  const result = await agentRuntime.reject(id);
   const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
   if (chat) await chatManager.update({ ...chat, messages: result.messages });
   endChatRun(result.chatId);
@@ -225,10 +263,9 @@ ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
 });
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => {
   try {
-    const name = input.name.trim();
-    const rootPath = input.rootPath.trim();
-    if (!name) throw new Error('O nome do projeto não pode estar vazio.');
-    if (!rootPath) throw new Error('A pasta do projeto não foi selecionada.');
+    const value = requireObject(input, 'Dados do projeto');
+    const name = requireNonEmptyString(value.name, 'Nome do projeto');
+    const rootPath = requireNonEmptyString(value.rootPath, 'Pasta do projeto');
     return await projectManager.create(name, rootPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Não foi possível criar o projeto.';
@@ -242,12 +279,18 @@ ipcMain.handle('projects:open-folder', async () => {
   if (result.canceled || !result.filePaths[0]) return null;
   return result.filePaths[0];
 });
-ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(rootPath));
-ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(filePath));
-ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => projectManager.writeFile(input.filePath, input.content));
+ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(requireNonEmptyString(rootPath, 'Pasta do projeto')));
+ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(requireNonEmptyString(filePath, 'Arquivo')));
+ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => {
+  const value = requireObject(input, 'Dados do arquivo');
+  const filePath = requireNonEmptyString(value.filePath, 'Arquivo');
+  if (typeof value.content !== 'string') throw new Error('Conteúdo do arquivo é inválido.');
+  return projectManager.writeFile(filePath, value.content);
+});
 ipcMain.handle('app:open-external', async (_event, url: string) => {
+  const rawUrl = requireNonEmptyString(url, 'URL externa');
   let parsed: URL;
-  try { parsed = new URL(url); } catch { throw new Error('URL externa inválida.'); }
+  try { parsed = new URL(rawUrl); } catch { throw new Error('URL externa inválida.'); }
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Somente URLs HTTP e HTTPS podem ser abertas.');
   await shell.openExternal(parsed.toString());
 });
