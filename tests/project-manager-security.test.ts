@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { ProjectManager } from '../src/core/project-manager';
+import { LocalStorage } from '../src/core/storage';
+
+class TestStorage extends LocalStorage {
+  async write<T>(_name: string, _value: T): Promise<void> {}
+}
+
+async function createProjectManager(): Promise<{ root: string; manager: ProjectManager; cleanup: () => Promise<void> }> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-project-'));
+  const manager = new ProjectManager(new TestStorage());
+  await manager.create('Test Project', root);
+  return { root, manager, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
+}
+
+test('writeFile rejects an existing symlink target outside the workspace', async () => {
+  const workspace = await createProjectManager();
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-project-outside-'));
+  try {
+    const outsideFile = path.join(outside, 'secret.txt');
+    const linkedFile = path.join(workspace.root, 'linked.txt');
+    await fs.writeFile(outsideFile, 'original', 'utf8');
+    await fs.symlink(outsideFile, linkedFile);
+
+    await assert.rejects(workspace.manager.writeFile(linkedFile, 'overwritten'), /arquivo simbólico fora do workspace/);
+    assert.equal(await fs.readFile(outsideFile, 'utf8'), 'original');
+  } finally {
+    await workspace.cleanup();
+    await fs.rm(outside, { recursive: true, force: true });
+  }
+});
+
+test('writeFile accepts an existing regular file inside the workspace', async () => {
+  const workspace = await createProjectManager();
+  try {
+    const filePath = path.join(workspace.root, 'safe.txt');
+    await fs.writeFile(filePath, 'before', 'utf8');
+    await workspace.manager.writeFile(filePath, 'after');
+    assert.equal(await fs.readFile(filePath, 'utf8'), 'after');
+  } finally {
+    await workspace.cleanup();
+  }
+});
