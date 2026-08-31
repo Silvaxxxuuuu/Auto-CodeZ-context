@@ -83,7 +83,7 @@ export class OpenAIAdapter implements AIProviderAdapter {
           id: model.id,
           name: model.id,
           providerId: this.id,
-          capabilities: ['text', 'streaming', 'tools', ...(supportsReasoning(model.id) ? ['reasoning'] : [])],
+          capabilities: ['text', 'streaming', 'tools', ...(supportsReasoning(model.id) ? ['reasoning'] : [])] as AIModel['capabilities'],
           reasoningLevels: levels,
         };
       });
