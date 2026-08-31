@@ -88,7 +88,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
       id: model.id,
       name: model.display_name || model.id,
       providerId: this.id,
-      capabilities: ['text', 'vision', 'streaming', 'tools', ...(supportsEffort(model.id) ? ['reasoning'] : [])],
+      capabilities: ['text', 'vision', 'streaming', 'tools', ...(supportsEffort(model.id) ? ['reasoning'] : [])] as AIModel['capabilities'],
       reasoningLevels: supportsEffort(model.id) ? ['low', 'normal', 'high', 'maximum'] : ['normal'],
     }));
   }
@@ -190,7 +190,7 @@ export class AnthropicAdapter implements AIProviderAdapter {
       if (event.type === 'message_delta' && event.usage) usage = { inputTokens: usage?.inputTokens, outputTokens: event.usage.output_tokens, totalTokens: (usage?.inputTokens || 0) + (event.usage.output_tokens || 0) };
     }
 
-    const result: AIResponse = { content, model: request.model, providerId: this.id, usage, toolCalls };
+    const result: AIResponse = { content, model: request.model, providerId: request.providerId, usage, toolCalls };
     yield { type: 'complete', response: result, usage };
   }
 }
