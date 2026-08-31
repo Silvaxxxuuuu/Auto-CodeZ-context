@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 
 function normalizeError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -21,32 +22,49 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 
 contextBridge.exposeInMainWorld('autoCodez', {
   getState: () => invoke<{ providers: unknown[]; chats: unknown[]; projects: unknown[] }>('app:get-state'),
-  listModels: (providerId: string) => invoke('providers:list-models', providerId),
+  listModels: (providerId: string) => invoke('providers:list-models', requireIdentifier(providerId, 'Provider')),
   saveProvider: (input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }) => {
-    if (!input.providerId) {
-      const error = new Error('Selecione uma IA antes de continuar.');
-      reportRendererError(error);
-      return Promise.reject(error);
-    }
-    if (!input.apiKey.trim()) {
-      const error = new Error('Informe a API key antes de testar e salvar.');
-      reportRendererError(error);
-      return Promise.reject(error);
-    }
-    return invoke('providers:save', { ...input, apiKey: input.apiKey.trim() });
+    const value = requireObject(input, 'Dados do provider');
+    const providerId = requireIdentifier(value.providerId, 'Provider');
+    const apiKey = requireNonEmptyString(value.apiKey, 'API key');
+    const model = value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo');
+    const baseUrl = value.baseUrl === undefined ? undefined : requireNonEmptyString(value.baseUrl, 'URL base');
+    return invoke('providers:save', { providerId, apiKey, model, baseUrl });
   },
-  removeProvider: (providerId: string) => invoke('providers:remove', providerId),
+  removeProvider: (providerId: string) => invoke('providers:remove', requireIdentifier(providerId, 'Provider')),
   createChat: (input: { providerId: string; model: string; intelligence: string; permissionLevel: string; projectId?: string }) => {
-    if (!input.providerId || !input.model) {
-      const error = new Error('Configure uma IA e selecione um modelo antes de criar o chat.');
-      reportRendererError(error);
-      return Promise.reject(error);
-    }
-    return invoke('chat:create', input);
+    const value = requireObject(input, 'Dados do chat');
+    const providerId = requireIdentifier(value.providerId, 'Provider');
+    const model = requireIdentifier(value.model, 'Modelo');
+    const intelligence = requireIdentifier(value.intelligence, 'Inteligência');
+    const permissionLevel = requireIdentifier(value.permissionLevel, 'Permissão');
+    const projectId = value.projectId === undefined ? undefined : requireIdentifier(value.projectId, 'Projeto');
+    return invoke('chat:create', { providerId, model, intelligence, permissionLevel, projectId });
   },
-  updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => invoke('chat:update-settings', input),
-  sendChat: (input: { chatId: string; content: string }) => invoke('chat:send', input),
-  streamChat: (input: { chatId: string; content: string }) => invoke('chat:stream', input),
+  updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => {
+    const value = requireObject(input, 'Configurações do chat');
+    return invoke('chat:update-settings', {
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      providerId: requireIdentifier(value.providerId, 'Provider'),
+      model: requireIdentifier(value.model, 'Modelo'),
+      intelligence: requireIdentifier(value.intelligence, 'Inteligência'),
+      permissionLevel: requireIdentifier(value.permissionLevel, 'Permissão'),
+    });
+  },
+  sendChat: (input: { chatId: string; content: string }) => {
+    const value = requireObject(input, 'Mensagem');
+    return invoke('chat:send', {
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      content: requireNonEmptyString(value.content, 'Mensagem'),
+    });
+  },
+  streamChat: (input: { chatId: string; content: string }) => {
+    const value = requireObject(input, 'Mensagem');
+    return invoke('chat:stream', {
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      content: requireNonEmptyString(value.content, 'Mensagem'),
+    });
+  },
   onStreamEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('chat:stream-event', handler);
@@ -54,29 +72,29 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   listTools: () => invoke('agent:list-tools'),
   listApprovals: () => invoke('agent:list-approvals'),
-  approveTool: (approvalId: string) => invoke('agent:approve', approvalId),
-  denyTool: (approvalId: string) => invoke('agent:deny', approvalId),
+  approveTool: (approvalId: string) => invoke('agent:approve', requireIdentifier(approvalId, 'Aprovação')),
+  denyTool: (approvalId: string) => invoke('agent:deny', requireIdentifier(approvalId, 'Aprovação')),
   onActivity: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('agent:activity', handler);
     return () => ipcRenderer.removeListener('agent:activity', handler);
   },
   createProject: (input: { name: string; rootPath: string }) => {
-    if (!input.name.trim()) {
-      const error = new Error('Informe um nome para o projeto.');
-      reportRendererError(error);
-      return Promise.reject(error);
-    }
-    if (!input.rootPath.trim()) {
-      const error = new Error('Selecione uma pasta para o projeto.');
-      reportRendererError(error);
-      return Promise.reject(error);
-    }
-    return invoke('projects:create', { ...input, name: input.name.trim(), rootPath: input.rootPath.trim() });
+    const value = requireObject(input, 'Dados do projeto');
+    return invoke('projects:create', {
+      name: requireNonEmptyString(value.name, 'Nome do projeto'),
+      rootPath: requireNonEmptyString(value.rootPath, 'Pasta do projeto'),
+    });
   },
   openFolder: () => invoke<string | null>('projects:open-folder'),
-  scanProject: (rootPath: string) => invoke('projects:scan', rootPath),
-  readFile: (filePath: string) => invoke('projects:read-file', filePath),
-  writeFile: (input: { filePath: string; content: string }) => invoke('projects:write-file', input),
-  openExternal: (url: string) => invoke('app:open-external', url),
+  scanProject: (rootPath: string) => invoke('projects:scan', requireNonEmptyString(rootPath, 'Pasta do projeto')),
+  readFile: (filePath: string) => invoke('projects:read-file', requireNonEmptyString(filePath, 'Arquivo')),
+  writeFile: (input: { filePath: string; content: string }) => {
+    const value = requireObject(input, 'Dados do arquivo');
+    return invoke('projects:write-file', {
+      filePath: requireNonEmptyString(value.filePath, 'Arquivo'),
+      content: typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo do arquivo é inválido.'); })(),
+    });
+  },
+  openExternal: (url: string) => invoke('app:open-external', requireNonEmptyString(url, 'URL externa')),
 });
