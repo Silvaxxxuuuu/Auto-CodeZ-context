@@ -8,8 +8,8 @@ const REQUEST_TIMEOUT_MS = 120_000;
 function reasoningLevels(model: string): AIRequest['intelligence'][] {
   const id = model.toLowerCase();
   if (/gpt-5\.6(?:-|$)/.test(id)) return ['low', 'normal', 'high', 'maximum'];
-  if (/gpt-5(?:\.1|\.0)?(?:-|$)/.test(id) || /gpt-5-(?:mini|nano|chat|codex)/.test(id)) return ['low', 'normal', 'high'];
   if (/gpt-5-pro(?:-|$)/.test(id)) return ['high'];
+  if (/gpt-5(?:\.1|\.0)?(?:-|$)/.test(id) || /gpt-5-(?:mini|nano|chat|codex)/.test(id)) return ['low', 'normal', 'high'];
   if (/^o[1-9](?:-|$)|^o[1-9]-|deep-research|codex/i.test(id)) return ['low', 'normal', 'high'];
   return ['normal'];
 }
@@ -155,7 +155,7 @@ export class OpenAIAdapter implements AIProviderAdapter {
       if (event.type === 'error') throw new Error('OpenAI retornou um erro durante o streaming.');
     }
 
-    const result: AIResponse = { content, model: request.model, providerId: this.id, usage, toolCalls: [...toolCalls.values()] };
+    const result: AIResponse = { content, model: request.model, providerId: request.providerId, usage, toolCalls: [...toolCalls.values()] };
     yield { type: 'complete', response: result, usage };
   }
 }
