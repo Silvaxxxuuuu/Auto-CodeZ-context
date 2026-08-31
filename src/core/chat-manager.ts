@@ -2,6 +2,9 @@ import crypto from 'node:crypto';
 import type { ChatRecord, AIMessage, IntelligenceLevel, PermissionLevel, ProviderId } from '../ai/types';
 import { LocalStorage } from './storage';
 
+export const UNCONFIGURED_PROVIDER_ID = 'unconfigured';
+export const UNCONFIGURED_MODEL_ID = 'unconfigured';
+
 export class ChatManager {
   private chats: ChatRecord[] = [];
 
@@ -9,17 +12,29 @@ export class ChatManager {
 
   async init(): Promise<void> {
     const stored = await this.storage.read<ChatRecord[]>('chats.json', []);
-    this.chats = stored.filter((chat) => chat.messages.length > 0);
+    this.chats = stored;
   }
 
   async list(): Promise<ChatRecord[]> {
     return [...this.chats].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  async create(input: { title?: string; projectId?: string; providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel }): Promise<ChatRecord> {
+  async create(input: { title?: string; projectId?: string; providerId?: ProviderId; model?: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel }): Promise<ChatRecord> {
     const now = Date.now();
-    const chat: ChatRecord = { id: crypto.randomUUID(), title: input.title?.trim() || 'Novo chat', projectId: input.projectId, providerId: input.providerId, model: input.model, intelligence: input.intelligence, permissionLevel: input.permissionLevel, messages: [], createdAt: now, updatedAt: now };
+    const chat: ChatRecord = {
+      id: crypto.randomUUID(),
+      title: input.title?.trim() || 'Novo chat',
+      projectId: input.projectId,
+      providerId: input.providerId || UNCONFIGURED_PROVIDER_ID,
+      model: input.model || UNCONFIGURED_MODEL_ID,
+      intelligence: input.intelligence,
+      permissionLevel: input.permissionLevel,
+      messages: [],
+      createdAt: now,
+      updatedAt: now,
+    };
     this.chats.unshift(chat);
+    await this.storage.write('chats.json', this.chats);
     return chat;
   }
 
@@ -28,8 +43,7 @@ export class ChatManager {
     if (index < 0) throw new Error('Chat não encontrado.');
     chat.updatedAt = Date.now();
     this.chats[index] = chat;
-    const persisted = this.chats.filter((item) => item.messages.length > 0);
-    await this.storage.write('chats.json', persisted);
+    await this.storage.write('chats.json', this.chats);
   }
 
   async addMessage(chatId: string, message: AIMessage): Promise<ChatRecord> {
