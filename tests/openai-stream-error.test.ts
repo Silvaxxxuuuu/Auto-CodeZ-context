@@ -18,46 +18,34 @@ const request: AIRequest = {
   toolsEnabled: false,
 };
 
-test('OpenAI stream exposes provider error details', async () => {
+async function assertStreamError(sse: string, expected: string): Promise<void> {
   const originalFetch = globalThis.fetch;
   const encoder = new TextEncoder();
   globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(encoder.encode('data: {"type":"error","error":{"message":"invalid request for test"}}\\n\\n'));
+      controller.enqueue(encoder.encode(`data: ${sse}\\n\\n`));
       controller.close();
     },
   }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 
   try {
-    const events = [];
-    for await (const event of new OpenAIAdapter().stream(config, request)) events.push(event);
-    assert.deepEqual(events.map((event) => event.type), ['start']);
-  } catch (error) {
-    assert.equal(error instanceof Error, true);
-    assert.equal((error as Error).message, 'invalid request for test');
+    await assert.rejects(
+      async () => {
+        for await (const event of new OpenAIAdapter().stream(config, request)) {
+          assert.equal(event.type, 'start');
+        }
+      },
+      (error: unknown) => error instanceof Error && error.message === expected,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
+}
+
+test('OpenAI stream exposes provider error details', async () => {
+  await assertStreamError('{"type":"error","error":{"message":"invalid request for test"}}', 'invalid request for test');
 });
 
 test('OpenAI response.failed exposes response error details', async () => {
-  const originalFetch = globalThis.fetch;
-  const encoder = new TextEncoder();
-  globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(encoder.encode('data: {"type":"response.failed","response":{"error":{"message":"failed response for test"}}}\\n\\n'));
-      controller.close();
-    },
-  }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
-
-  try {
-    const events = [];
-    for await (const event of new OpenAIAdapter().stream(config, request)) events.push(event);
-    assert.deepEqual(events.map((event) => event.type), ['start']);
-  } catch (error) {
-    assert.equal(error instanceof Error, true);
-    assert.equal((error as Error).message, 'failed response for test');
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  await assertStreamError('{"type":"response.failed","response":{"error":{"message":"failed response for test"}}}', 'failed response for test');
 });
