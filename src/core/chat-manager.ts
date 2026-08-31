@@ -7,20 +7,28 @@ export const UNCONFIGURED_MODEL_ID = 'unconfigured';
 
 export class ChatManager {
   private chats: ChatRecord[] = [];
+  private lastUpdatedAt = 0;
 
   constructor(private readonly storage: LocalStorage) {}
 
   async init(): Promise<void> {
     const stored = await this.storage.read<ChatRecord[]>('chats.json', []);
     this.chats = stored;
+    this.lastUpdatedAt = stored.reduce((latest, chat) => Math.max(latest, chat.updatedAt, chat.createdAt), 0);
   }
 
   async list(): Promise<ChatRecord[]> {
     return [...this.chats].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  async create(input: { title?: string; projectId?: string; providerId?: ProviderId; model?: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel }): Promise<ChatRecord> {
+  private nextTimestamp(): number {
     const now = Date.now();
+    this.lastUpdatedAt = Math.max(now, this.lastUpdatedAt + 1);
+    return this.lastUpdatedAt;
+  }
+
+  async create(input: { title?: string; projectId?: string; providerId?: ProviderId; model?: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel }): Promise<ChatRecord> {
+    const now = this.nextTimestamp();
     const chat: ChatRecord = {
       id: crypto.randomUUID(),
       title: input.title?.trim() || 'Novo chat',
@@ -41,7 +49,7 @@ export class ChatManager {
   async update(chat: ChatRecord): Promise<void> {
     const index = this.chats.findIndex((item) => item.id === chat.id);
     if (index < 0) throw new Error('Chat não encontrado.');
-    chat.updatedAt = Date.now();
+    chat.updatedAt = this.nextTimestamp();
     this.chats[index] = chat;
     await this.storage.write('chats.json', this.chats);
   }
