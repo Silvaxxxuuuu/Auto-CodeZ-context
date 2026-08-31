@@ -86,7 +86,10 @@ export class OpenAIAdapter implements AIProviderAdapter {
 
   async listModels(config: AIProviderConfig): Promise<AIModel[]> {
     const response = await fetchWithTimeout(`${config.baseUrl || DEFAULT_BASE_URL}/models`, { headers: { Authorization: `Bearer ${config.apiKey}` } }, MODEL_LIST_TIMEOUT_MS);
-    if (!response.ok) throw new Error(`OpenAI models request failed: ${response.status}`);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(providerErrorMessage(data, `OpenAI models request failed: ${response.status}`));
+    }
     const data = (await response.json()) as { data?: Array<{ id: string }> };
     return (data.data || [])
       .filter((model) => /^(gpt|o[1-9]|chatgpt)/i.test(model.id))
@@ -144,6 +147,7 @@ export class OpenAIAdapter implements AIProviderAdapter {
     let usage: AIResponse['usage'];
     const toolCalls = new Map<string, AIToolCall>();
     const toolCallKeysByOutputIndex = new Map<number, string>();
+    let terminal = false;
     yield { type: 'start' };
 
     for await (const raw of parseSSE(response)) {
@@ -179,11 +183,21 @@ export class OpenAIAdapter implements AIProviderAdapter {
           yield { type: 'tool_call', toolCall: existing };
         }
       }
-      if (event.type === 'response.completed' && event.response) usage = { inputTokens: event.response.usage?.input_tokens, outputTokens: event.response.usage?.output_tokens, totalTokens: event.response.usage?.total_tokens };
-      if (event.type === 'response.failed') throw new Error(providerErrorMessage(event, 'OpenAI encerrou o streaming com falha.'));
-      if (event.type === 'error') throw new Error(providerErrorMessage(event, 'OpenAI retornou um erro durante o streaming.'));
+      if (event.type === 'response.completed') {
+        terminal = true;
+        if (event.response) usage = { inputTokens: event.response.usage?.input_tokens, outputTokens: event.response.usage?.output_tokens, totalTokens: event.response.usage?.total_tokens };
+      }
+      if (event.type === 'response.failed') {
+        terminal = true;
+        throw new Error(providerErrorMessage(event, 'OpenAI encerrou o streaming com falha.'));
+      }
+      if (event.type === 'error') {
+        terminal = true;
+        throw new Error(providerErrorMessage(event, 'OpenAI retornou um erro durante o streaming.'));
+      }
     }
 
+    if (!terminal) throw new Error('OpenAI encerrou o streaming sem um evento terminal.');
     const result: AIResponse = { content, model: request.model, providerId: request.providerId, usage, toolCalls: [...toolCalls.values()] };
     yield { type: 'complete', response: result, usage };
   }
