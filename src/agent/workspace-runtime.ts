@@ -96,6 +96,7 @@ export class WorkspaceRuntime {
     const source = await this.resolve(projectId, from);
     await this.assertTextFileSize(source);
     const destination = await this.resolve(projectId, to);
+    if (await this.exists(projectId, to)) throw new Error('O destino já existe.');
     await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.rename(source, destination);
   }
