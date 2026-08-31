@@ -7,7 +7,9 @@ import { ProjectManager } from '../src/core/project-manager';
 import { LocalStorage } from '../src/core/storage';
 
 class TestStorage extends LocalStorage {
-  async write<T>(_name: string, _value: T): Promise<void> {}
+  write<T>(_name: string, _value: T): Promise<void> {
+    return Promise.resolve();
+  }
 }
 
 async function createProjectManager(): Promise<{ root: string; manager: ProjectManager; cleanup: () => Promise<void> }> {
