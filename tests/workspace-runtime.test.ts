@@ -42,6 +42,22 @@ test('resolve rejects parent traversal outside the project', async () => {
   }
 });
 
+test('resolve rejects a symlink that points outside the workspace', async () => {
+  const workspace = await createWorkspace();
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-outside-'));
+  try {
+    await fs.writeFile(path.join(outside, 'secret.txt'), 'secret');
+    await fs.symlink(outside, path.join(workspace.root, 'linked'));
+    await assert.rejects(
+      workspace.runtime.resolve('project-test', path.join('linked', 'secret.txt')),
+      /caminho fora do workspace/,
+    );
+  } finally {
+    await workspace.cleanup();
+    await fs.rm(outside, { recursive: true, force: true });
+  }
+});
+
 test('createFile does not overwrite an existing file', async () => {
   const workspace = await createWorkspace();
   try {
@@ -81,6 +97,30 @@ test('writeFile rejects content larger than the text limit before touching the f
     const large = 'a'.repeat(2 * 1024 * 1024 + 1);
     await assert.rejects(workspace.runtime.writeFile('project-test', 'large.txt', large), /excede o limite/);
     assert.equal(await workspace.runtime.exists('project-test', 'large.txt'), false);
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test('writeFile enforces the byte limit for multibyte UTF-8 content', async () => {
+  const workspace = await createWorkspace();
+  try {
+    const content = 'é'.repeat(2 * 1024 * 1024);
+    await assert.rejects(workspace.runtime.writeFile('project-test', 'utf8.txt', content), /excede o limite/);
+    assert.equal(await workspace.runtime.exists('project-test', 'utf8.txt'), false);
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test('renameFile refuses to replace an existing destination', async () => {
+  const workspace = await createWorkspace();
+  try {
+    await workspace.runtime.createFile('project-test', 'old.txt', 'old');
+    await workspace.runtime.createFile('project-test', 'new.txt', 'new');
+    await assert.rejects(workspace.runtime.renameFile('project-test', 'old.txt', 'new.txt'), /O destino já existe/);
+    assert.equal(await workspace.runtime.readFile('project-test', 'old.txt'), 'old');
+    assert.equal(await workspace.runtime.readFile('project-test', 'new.txt'), 'new');
   } finally {
     await workspace.cleanup();
   }
