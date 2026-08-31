@@ -50,7 +50,7 @@ test('command runtime requires the requested script to exist in package.json', a
   }
 });
 
-test('command runtime executes an allowed npm script without a shell wrapper', async () => {
+test('command runtime executes an allowed npm script on Windows and Unix', async () => {
   const project = await createProject();
   try {
     await fs.writeFile(path.join(project.root, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.stdout.write(\\\"auto-codez-ok\\\")"' } }));
