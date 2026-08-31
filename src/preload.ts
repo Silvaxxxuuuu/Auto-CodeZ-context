@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
     const projectId = value.projectId === undefined ? undefined : requireIdentifier(value.projectId, 'Projeto');
     return invoke('chat:create', { providerId, model, intelligence, permissionLevel, projectId });
   },
+  deleteChat: (chatId: string) => invoke('chat:delete', requireIdentifier(chatId, 'Chat')),
   updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => {
     const value = requireObject(input, 'Configurações do chat');
     return invoke('chat:update-settings', {
