@@ -35,6 +35,12 @@ function terminateProcessTree(child: ChildProcess): void {
   }
 }
 
+function commandForPlatform(manager: string, script: string): { executable: string; args: string[] } {
+  if (process.platform !== 'win32') return { executable: manager, args: ['run', script] };
+  const comspec = process.env.ComSpec ?? 'cmd.exe';
+  return { executable: comspec, args: ['/d', '/s', '/c', `${manager}.cmd run ${script}`] };
+}
+
 export class CommandRuntime {
   constructor(private readonly projects: () => Promise<ProjectRecord[]>) {}
 
@@ -54,9 +60,9 @@ export class CommandRuntime {
     const packageData = JSON.parse(await fs.readFile(packagePath, 'utf8')) as { scripts?: Record<string, string> };
     if (!packageData.scripts?.[script]) throw new Error(`O script '${script}' não existe no projeto.`);
 
-    const executable = process.platform === 'win32' ? `${manager}.cmd` : manager;
+    const { executable, args } = commandForPlatform(manager, script);
     return new Promise((resolve, reject) => {
-      const child = spawn(executable, ['run', script], {
+      const child = spawn(executable, args, {
         cwd,
         shell: false,
         windowsHide: true,
