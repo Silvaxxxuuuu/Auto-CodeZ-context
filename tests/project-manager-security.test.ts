@@ -65,3 +65,20 @@ test('writeFile accepts an existing regular file inside the workspace', async ()
     await workspace.cleanup();
   }
 });
+
+test('scan does not traverse a directory symlink outside the workspace', async () => {
+  const workspace = await createProjectManager();
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-project-scan-outside-'));
+  try {
+    await fs.writeFile(path.join(outside, 'secret.txt'), 'secret', 'utf8');
+    const linkedDirectory = path.join(workspace.root, 'external-directory');
+    await fs.symlink(outside, linkedDirectory, 'junction');
+
+    const entries = await workspace.manager.scan(workspace.root);
+    assert.equal(entries.some((entry) => entry.relativePath === path.join('external-directory', 'secret.txt')), false);
+    assert.equal(entries.some((entry) => entry.path === linkedDirectory), true);
+  } finally {
+    await workspace.cleanup();
+    await fs.rm(outside, { recursive: true, force: true });
+  }
+});
