@@ -113,7 +113,7 @@ const intelligenceMenu = document.querySelector<HTMLDivElement>('#intelligence-m
 const modalRoot = document.querySelector<HTMLDivElement>('#modal-root')!;
 
 function escapeHtml(value: string): string {
-  return value.replace(/[&<>\'\"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
 }
 
 function providerName(id: string): string {
