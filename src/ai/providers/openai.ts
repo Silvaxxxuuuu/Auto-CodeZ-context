@@ -5,11 +5,25 @@ const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const MODEL_LIST_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 
-function reasoningEffort(level: AIRequest['intelligence']): string | undefined {
-  if (level === 'normal') return undefined;
+function reasoningLevels(model: string): AIRequest['intelligence'][] {
+  const id = model.toLowerCase();
+  if (/gpt-5\.6(?:-|$)/.test(id)) return ['low', 'normal', 'high', 'maximum'];
+  if (/gpt-5(?:\.1|\.0)?(?:-|$)/.test(id) || /gpt-5-(?:mini|nano|chat|codex)/.test(id)) return ['low', 'normal', 'high'];
+  if (/gpt-5-pro(?:-|$)/.test(id)) return ['high'];
+  if (/^o[1-9](?:-|$)|^o[1-9]-|deep-research|codex/i.test(id)) return ['low', 'normal', 'high'];
+  return ['normal'];
+}
+
+function supportsReasoning(model: string): boolean {
+  return reasoningLevels(model).some((level) => level !== 'normal');
+}
+
+function reasoningEffort(level: AIRequest['intelligence'], model: string): string | undefined {
+  if (!supportsReasoning(model) || level === 'normal') return undefined;
   if (level === 'low') return 'low';
   if (level === 'high') return 'high';
-  return 'max';
+  if (level === 'maximum') return reasoningLevels(model).includes('maximum') ? 'max' : 'high';
+  return 'medium';
 }
 
 function buildInput(messages: AIMessage[]): Array<Record<string, unknown>> {
@@ -63,12 +77,21 @@ export class OpenAIAdapter implements AIProviderAdapter {
     const data = (await response.json()) as { data?: Array<{ id: string }> };
     return (data.data || [])
       .filter((model) => /^(gpt|o[1-9]|chatgpt)/i.test(model.id))
-      .map((model) => ({ id: model.id, name: model.id, providerId: this.id, capabilities: ['text', 'streaming', 'tools', 'reasoning'], reasoningLevels: ['low', 'normal', 'high', 'maximum'] }));
+      .map((model) => {
+        const levels = reasoningLevels(model.id);
+        return {
+          id: model.id,
+          name: model.id,
+          providerId: this.id,
+          capabilities: ['text', 'streaming', 'tools', ...(supportsReasoning(model.id) ? ['reasoning'] : [])],
+          reasoningLevels: levels,
+        };
+      });
   }
 
   private buildBody(request: AIRequest, stream = false): Record<string, unknown> {
     const body: Record<string, unknown> = { model: request.model, input: buildInput(request.messages) };
-    const effort = reasoningEffort(request.intelligence);
+    const effort = reasoningEffort(request.intelligence, request.model);
     if (effort) body.reasoning = { effort };
     const tools = buildTools(request);
     if (tools) body.tools = tools;
@@ -100,7 +123,7 @@ export class OpenAIAdapter implements AIProviderAdapter {
       body: JSON.stringify(this.buildBody(request, true)),
     }, REQUEST_TIMEOUT_MS);
     if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
+      const data = await response.json().catch(() => ({})) as { error?: { message?: string } };
       throw new Error(data.error?.message || `OpenAI streaming request failed: ${response.status}`);
     }
 
