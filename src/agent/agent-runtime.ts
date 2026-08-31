@@ -15,6 +15,7 @@ type PendingRun = {
   workingChat: ChatRecord;
   pendingApprovalIds: string[];
   approvalCalls: Record<string, AIToolCall>;
+  toolRounds: number;
   streamEmitter?: StreamEmitter;
 };
 
@@ -91,13 +92,13 @@ export class AgentRuntime {
       return {
         chatId: pending.chat.id,
         response: { content: '', model: pending.workingChat.model, providerId: pending.workingChat.providerId },
-        toolRounds: 0,
+        toolRounds: pending.toolRounds,
         pendingApprovalIds: [...pending.pendingApprovalIds],
         messages: [...pending.workingChat.messages],
       };
     }
-    if (pending.streamEmitter) return this.runStreamLoop(pending.config, pending.chat, pending.workingChat, pending.projectContext, pending.permission, 0, pending.streamEmitter);
-    return this.runLoop(pending.config, pending.chat, pending.workingChat, pending.projectContext, pending.permission, 0);
+    if (pending.streamEmitter) return this.runStreamLoop(pending.config, pending.chat, pending.workingChat, pending.projectContext, pending.permission, pending.toolRounds, pending.streamEmitter);
+    return this.runLoop(pending.config, pending.chat, pending.workingChat, pending.projectContext, pending.permission, pending.toolRounds);
   }
 
   private async runLoop(config: AIProviderConfig, chat: ChatRecord, workingChat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel, toolRounds: number): Promise<AgentRunResult> {
@@ -127,7 +128,7 @@ export class AgentRuntime {
       }
 
       if (pendingApprovalIds.length) {
-        const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds, approvalCalls };
+        const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds, approvalCalls, toolRounds };
         for (const approvalId of pendingApprovalIds) this.pendingRuns.set(approvalId, pendingRun);
         this.activity.emit({ type: 'action', message: 'O agente aguarda aprovação antes de continuar.', status: 'pending' });
         return { chatId: chat.id, response, toolRounds, pendingApprovalIds, messages: [...workingChat.messages] };
@@ -173,7 +174,7 @@ export class AgentRuntime {
       }
 
       if (pendingApprovalIds.length) {
-        const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds, approvalCalls, streamEmitter: emit };
+        const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds, approvalCalls, toolRounds, streamEmitter: emit };
         for (const approvalId of pendingApprovalIds) this.pendingRuns.set(approvalId, pendingRun);
         this.activity.emit({ type: 'action', message: 'O agente aguarda aprovação antes de continuar.', status: 'pending' });
         emit({ type: 'approval_required', pendingApprovalIds: [...pendingApprovalIds] });
