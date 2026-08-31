@@ -11,6 +11,7 @@
   "include": [
     "src/ai/types.ts",
     "src/agent/**/*.ts",
+    "src/core/input-validation.ts",
     "tests/**/*.test.ts"
   ]
 }
