@@ -183,6 +183,12 @@ ipcMain.handle('chat:create', async (_event, input: { providerId?: ProviderId; m
   await validateChatInput({ providerId, model, projectId });
   return chatManager.create({ providerId, model, intelligence, permissionLevel, projectId });
 });
+ipcMain.handle('chat:delete', async (_event, chatId: string) => {
+  const id = requireIdentifier(chatId, 'Chat');
+  if (busyChats.has(id) || agentRuntime.hasPendingForChat(id)) throw new Error('Não é possível excluir um chat durante uma operação.');
+  await chatManager.delete(id);
+  return chatManager.list();
+});
 ipcMain.handle('chat:update-settings', async (_event, input: { chatId: string; providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel }) => {
   const value = requireObject(input, 'Configurações do chat');
   const chatId = requireIdentifier(value.chatId, 'Chat');
@@ -193,7 +199,8 @@ ipcMain.handle('chat:update-settings', async (_event, input: { chatId: string; p
   const chat = (await chatManager.list()).find((item) => item.id === chatId);
   if (!chat) throw new Error('Chat não encontrado.');
   if (busyChats.has(chat.id) || agentRuntime.hasPendingForChat(chat.id)) throw new Error('Não é possível alterar as configurações durante uma operação.');
-  await validateChatInput({ providerId, model });
+  const providerOrModelChanged = chat.providerId !== providerId || chat.model !== model;
+  if (providerOrModelChanged) await validateChatInput({ providerId, model });
   const updated: ChatRecord = { ...chat, providerId, model, intelligence, permissionLevel };
   await chatManager.update(updated);
   return updated;
