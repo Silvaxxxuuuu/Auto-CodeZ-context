@@ -54,6 +54,13 @@ export class ChatManager {
     await this.storage.write('chats.json', this.chats);
   }
 
+  async delete(chatId: string): Promise<void> {
+    const index = this.chats.findIndex((item) => item.id === chatId);
+    if (index < 0) throw new Error('Chat não encontrado.');
+    this.chats.splice(index, 1);
+    await this.storage.write('chats.json', this.chats);
+  }
+
   async addMessage(chatId: string, message: AIMessage): Promise<ChatRecord> {
     const chat = this.chats.find((item) => item.id === chatId);
     if (!chat) throw new Error('Chat não encontrado.');
