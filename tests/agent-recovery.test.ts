@@ -85,7 +85,7 @@ test('a tool failure is recorded as a tool result and the agent continues', asyn
     { content: 'Recovered from tool failure.', model: 'test-model', providerId: config.id },
   ]);
   try {
-    const pending = await fixture.agent.run(config, makeChat(), undefined, 'unrestricted');
+    const pending = await fixture.agent.run(config, makeChat(), undefined, 'ask');
     const result = await fixture.agent.resume(pending.pendingApprovalIds[0]);
     assert.equal(result.pendingApprovalIds.length, 0);
     assert.equal(result.messages.filter((message) => message.role === 'tool').length, 1);
