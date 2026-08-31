@@ -19,14 +19,28 @@ type GoogleChunk = {
   error?: { message?: string };
 };
 
+function isGemini3Model(model: string): boolean {
+  return /(?:^|[-_])gemini-3(?:\.|-|$)/i.test(model);
+}
+
+function isGemini25Model(model: string): boolean {
+  return /(?:^|[-_])gemini-2\.5(?:\.|-|$)/i.test(model);
+}
+
 function isThinkingModel(model: string): boolean {
-  return /(?:^|[-_])gemini-(?:2\.5|3(?:\.|$))/i.test(model);
+  return isGemini3Model(model) || isGemini25Model(model);
 }
 
 function thinkingLevel(level: AIRequest['intelligence']): 'low' | 'medium' | 'high' {
   if (level === 'low') return 'low';
   if (level === 'high' || level === 'maximum') return 'high';
   return 'medium';
+}
+
+function thinkingBudget(level: AIRequest['intelligence']): number {
+  if (level === 'low') return 1024;
+  if (level === 'high' || level === 'maximum') return 24576;
+  return 8192;
 }
 
 function buildTools(request: AIRequest): Array<Record<string, unknown>> | undefined {
@@ -127,8 +141,10 @@ export class GoogleAdapter implements AIProviderAdapter {
       systemInstruction: systemMessages.length ? { parts: systemMessages.map((message) => ({ text: message.content })) } : undefined,
       contents: buildContents(request.messages),
     };
-    if (isThinkingModel(request.model)) {
+    if (isGemini3Model(request.model)) {
       body.generationConfig = { thinkingConfig: { thinkingLevel: thinkingLevel(request.intelligence) } };
+    } else if (isGemini25Model(request.model)) {
+      body.generationConfig = { thinkingConfig: { thinkingBudget: thinkingBudget(request.intelligence) } };
     }
     const tools = buildTools(request);
     if (tools) body.tools = tools;
