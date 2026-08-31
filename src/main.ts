@@ -66,7 +66,12 @@ async function loadProviders(): Promise<void> {
 async function saveProviders(): Promise<void> {
   providerKeys = {};
   for (const config of providerConfigs) if (config.apiKey) providerKeys[config.id] = config.apiKey;
-  await storage.write('providers.json', providerConfigs.map(({ apiKey: _apiKey, ...config }) => config));
+  const configsWithoutKeys = providerConfigs.map((config) => {
+    const { apiKey, ...safeConfig } = config;
+    void apiKey;
+    return safeConfig;
+  });
+  await storage.write('providers.json', configsWithoutKeys);
   await storage.writeEncrypted('provider-keys.dat', JSON.stringify(providerKeys));
 }
 
@@ -166,7 +171,8 @@ ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: str
   beginChatRun(chat.id);
   try {
     await chatManager.addMessage(chat.id, { role: 'user', content });
-    const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
+    const current = (await chatManager.list()).find((item) => item.id === chat.id);
+    if (!current) throw new Error('Chat desapareceu durante a execução.');
     const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
     await chatManager.update({ ...current, messages: result.messages });
     return { response: result.response, pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
@@ -182,7 +188,8 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
   beginChatRun(chat.id);
   try {
     await chatManager.addMessage(chat.id, { role: 'user', content });
-    const current = (await chatManager.list()).find((item) => item.id === chat.id)!;
+    const current = (await chatManager.list()).find((item) => item.id === chat.id);
+    if (!current) throw new Error('Chat desapareceu durante a execução.');
     const emit = (event: AIStreamEvent): void => { mainWindow?.webContents.send('chat:stream-event', event); };
     emit({ type: 'start' });
     const result = await agentRuntime.runStreaming(config, current, projectContext, current.permissionLevel, emit);
