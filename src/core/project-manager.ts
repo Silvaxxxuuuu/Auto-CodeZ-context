@@ -6,6 +6,13 @@ import { LocalStorage } from './storage';
 
 const MAX_EDITOR_FILE_BYTES = 4 * 1024 * 1024;
 
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const root = path.resolve(rootPath);
+  const candidate = path.resolve(candidatePath);
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 export class ProjectManager {
   private projects: ProjectRecord[] = [];
 
@@ -23,7 +30,7 @@ export class ProjectManager {
     const normalizedRoot = await fs.realpath(path.resolve(rootPath.trim()));
     const stat = await fs.stat(normalizedRoot);
     if (!stat.isDirectory()) throw new Error('O workspace precisa apontar para uma pasta.');
-    const duplicate = this.projects.find((project) => path.resolve(project.rootPath) === normalizedRoot);
+    const duplicate = this.projects.find((project) => isPathInside(project.rootPath, normalizedRoot) && isPathInside(normalizedRoot, project.rootPath));
     if (duplicate) return duplicate;
     const now = Date.now();
     const project: ProjectRecord = {
@@ -40,44 +47,30 @@ export class ProjectManager {
 
   resolveInsideWorkspace(filePath: string): string {
     const candidate = path.resolve(filePath);
-    const project = this.projects.find((item) => {
-      const root = path.resolve(item.rootPath);
-      const relative = path.relative(root, candidate);
-      return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-    });
+    const project = this.projects.find((item) => isPathInside(item.rootPath, candidate));
     if (!project) throw new Error('Operação bloqueada: arquivo fora de um workspace conhecido.');
     return candidate;
   }
 
   private async resolveExistingInsideWorkspace(filePath: string): Promise<string> {
     const candidate = this.resolveInsideWorkspace(filePath);
-    const project = this.projects.find((item) => {
-      const root = path.resolve(item.rootPath);
-      const relative = path.relative(root, candidate);
-      return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-    });
+    const project = this.projects.find((item) => isPathInside(item.rootPath, candidate));
     if (!project) throw new Error('Workspace não encontrado.');
     const root = await fs.realpath(project.rootPath);
     const realCandidate = await fs.realpath(candidate);
-    const relative = path.relative(root, realCandidate);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Operação bloqueada: caminho simbólico fora do workspace.');
+    if (!isPathInside(root, realCandidate)) throw new Error('Operação bloqueada: caminho simbólico fora do workspace.');
     return realCandidate;
   }
 
   private async resolveWritableInsideWorkspace(filePath: string): Promise<string> {
     const candidate = this.resolveInsideWorkspace(filePath);
-    const project = this.projects.find((item) => {
-      const root = path.resolve(item.rootPath);
-      const relative = path.relative(root, candidate);
-      return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-    });
+    const project = this.projects.find((item) => isPathInside(item.rootPath, candidate));
     if (!project) throw new Error('Workspace não encontrado.');
     const root = await fs.realpath(project.rootPath);
 
     try {
       const existingTarget = await fs.realpath(candidate);
-      const relative = path.relative(root, existingTarget);
-      if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Operação bloqueada: arquivo simbólico fora do workspace.');
+      if (!isPathInside(root, existingTarget)) throw new Error('Operação bloqueada: arquivo simbólico fora do workspace.');
       return candidate;
     } catch (error) {
       if (error instanceof Error && error.message.includes('Operação bloqueada')) throw error;
@@ -87,8 +80,7 @@ export class ProjectManager {
     while (parent !== path.dirname(parent)) {
       try {
         const realParent = await fs.realpath(parent);
-        const relative = path.relative(root, realParent);
-        if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Operação bloqueada: diretório simbólico fora do workspace.');
+        if (!isPathInside(root, realParent)) throw new Error('Operação bloqueada: diretório simbólico fora do workspace.');
         return candidate;
       } catch (error) {
         if (error instanceof Error && error.message.includes('Operação bloqueada')) throw error;
@@ -98,8 +90,7 @@ export class ProjectManager {
 
     try {
       const realParent = await fs.realpath(parent);
-      const relative = path.relative(root, realParent);
-      if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Operação bloqueada: diretório simbólico fora do workspace.');
+      if (!isPathInside(root, realParent)) throw new Error('Operação bloqueada: diretório simbólico fora do workspace.');
       return candidate;
     } catch {
       throw new Error('Não foi possível validar o caminho do workspace.');
@@ -108,15 +99,14 @@ export class ProjectManager {
 
   async scan(rootPath: string): Promise<Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>> {
     const normalizedRoot = await fs.realpath(path.resolve(rootPath));
-    const known = this.projects.some((project) => path.resolve(project.rootPath) === normalizedRoot);
+    const known = this.projects.some((project) => isPathInside(project.rootPath, normalizedRoot) && isPathInside(normalizedRoot, project.rootPath));
     if (!known) throw new Error('Workspace não registrado.');
     const result: Array<{ path: string; relativePath: string; type: 'file' | 'directory' }> = [];
     const ignored = new Set(['node_modules', '.git', '.vite', 'dist', 'build', 'out', 'coverage']);
 
     const visit = async (current: string): Promise<void> => {
       const safeCurrent = await fs.realpath(current);
-      const relativeCurrent = path.relative(normalizedRoot, safeCurrent);
-      if (relativeCurrent.startsWith('..') || path.isAbsolute(relativeCurrent)) throw new Error('Operação bloqueada: diretório fora do workspace.');
+      if (!isPathInside(normalizedRoot, safeCurrent)) throw new Error('Operação bloqueada: diretório fora do workspace.');
       for (const entry of await fs.readdir(safeCurrent, { withFileTypes: true })) {
         if (ignored.has(entry.name)) continue;
         const full = path.join(safeCurrent, entry.name);
