@@ -23,7 +23,7 @@ async function assertStreamError(sse: string, expected: string): Promise<void> {
   const encoder = new TextEncoder();
   globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
     start(controller) {
-      controller.enqueue(encoder.encode(`data: ${sse}\\n\\n`));
+      controller.enqueue(encoder.encode(`data: ${sse}\n\n`));
       controller.close();
     },
   }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
