@@ -29,7 +29,7 @@ export class ChatRuntime {
       adapter,
       request: {
         providerId: config.id,
-        model: chat.model,
+        model: model.id,
         messages,
         intelligence: resolution.effective,
         projectContext,
