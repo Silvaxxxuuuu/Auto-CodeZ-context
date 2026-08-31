@@ -73,6 +73,16 @@ export class ProjectManager {
     });
     if (!project) throw new Error('Workspace não encontrado.');
     const root = await fs.realpath(project.rootPath);
+
+    try {
+      const existingTarget = await fs.realpath(candidate);
+      const relative = path.relative(root, existingTarget);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Operação bloqueada: arquivo simbólico fora do workspace.');
+      return candidate;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Operação bloqueada')) throw error;
+    }
+
     let parent = path.dirname(candidate);
     while (parent !== path.dirname(parent)) {
       try {
@@ -85,6 +95,7 @@ export class ProjectManager {
         parent = path.dirname(parent);
       }
     }
+
     try {
       const realParent = await fs.realpath(parent);
       const relative = path.relative(root, realParent);
