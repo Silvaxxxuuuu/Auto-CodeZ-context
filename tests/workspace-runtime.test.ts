@@ -23,7 +23,7 @@ test('resolve accepts paths inside the project', async () => {
   const workspace = await createWorkspace();
   try {
     const resolved = await workspace.runtime.resolve('project-test', 'src/index.ts');
-    assert.equal(resolved, path.join(workspace.root, 'src', 'index.ts'));
+    assert.equal(resolved, path.resolve(workspace.root, 'src', 'index.ts'));
   } finally {
     await workspace.cleanup();
   }
