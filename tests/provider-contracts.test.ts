@@ -13,11 +13,10 @@ const config = {
 
 async function withMockedFetch<T>(payload: unknown, action: () => Promise<T>): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = (async () => ({
-    ok: true,
+  globalThis.fetch = async () => new Response(JSON.stringify(payload), {
     status: 200,
-    json: async () => payload,
-  })) as unknown as typeof fetch;
+    headers: { 'content-type': 'application/json' },
+  });
   try {
     return await action();
   } finally {
