@@ -56,7 +56,8 @@ test('denying an approval records the refusal and allows the run to finish', asy
     const pending = await fixture.agent.run(config, makeChat(), undefined, 'ask');
     const result = await fixture.agent.reject(pending.pendingApprovalIds[0]);
     assert.equal(result.pendingApprovalIds.length, 0);
-    assert.match(result.messages.at(-1)?.content || '', /recusada pelo usuário/);
+    const refusal = result.messages.find((message) => message.role === 'tool' && message.toolCallId === writeCall.id);
+    assert.equal(refusal?.content, 'Operação recusada pelo usuário.');
     assert.equal(result.response.content, 'The operation was denied.');
   } finally { await fs.rm(fixture.root, { recursive: true, force: true }); }
 });
