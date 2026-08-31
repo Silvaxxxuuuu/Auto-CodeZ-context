@@ -32,16 +32,17 @@ export class ProjectManager {
   }
 
   async create(name: string, rootPath: string): Promise<ProjectRecord> {
-    const normalizedRoot = await fs.realpath(path.resolve(rootPath.trim()));
+    const selectedRoot = path.resolve(rootPath.trim());
+    const normalizedRoot = await fs.realpath(selectedRoot);
     const stat = await fs.stat(normalizedRoot);
     if (!stat.isDirectory()) throw new Error('O workspace precisa apontar para uma pasta.');
-    const duplicate = this.projects.find((project) => isPathInside(project.rootPath, normalizedRoot) && isPathInside(normalizedRoot, project.rootPath));
+    const duplicate = this.projects.find((project) => isPathInside(project.rootPath, selectedRoot) && isPathInside(selectedRoot, project.rootPath));
     if (duplicate) return duplicate;
     const now = Date.now();
     const project: ProjectRecord = {
       id: crypto.randomUUID(),
       name: name.trim() || path.basename(normalizedRoot),
-      rootPath: normalizedRoot,
+      rootPath: selectedRoot,
       createdAt: now,
       updatedAt: now,
     };
@@ -104,7 +105,7 @@ export class ProjectManager {
 
   async scan(rootPath: string): Promise<Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>> {
     const normalizedRoot = await fs.realpath(path.resolve(rootPath));
-    const known = this.projects.some((project) => isPathInside(project.rootPath, normalizedRoot) && isPathInside(normalizedRoot, project.rootPath));
+    const known = this.projects.some((project) => isPathInside(project.rootPath, rootPath) && isPathInside(rootPath, project.rootPath));
     if (!known) throw new Error('Workspace não registrado.');
     const result: Array<{ path: string; relativePath: string; type: 'file' | 'directory' }> = [];
     const ignored = new Set(['node_modules', '.git', '.vite', 'dist', 'build', 'out', 'coverage']);
