@@ -77,7 +77,7 @@ export class OpenAIAdapter implements AIProviderAdapter {
     const data = (await response.json()) as { data?: Array<{ id: string }> };
     return (data.data || [])
       .filter((model) => /^(gpt|o[1-9]|chatgpt)/i.test(model.id))
-      .map((model) => {
+      .map((model): AIModel => {
         const levels = reasoningLevels(model.id);
         return {
           id: model.id,
