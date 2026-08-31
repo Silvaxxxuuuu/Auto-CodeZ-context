@@ -104,8 +104,9 @@ export class ProjectManager {
   }
 
   async scan(rootPath: string): Promise<Array<{ path: string; relativePath: string; type: 'file' | 'directory' }>> {
-    const normalizedRoot = await fs.realpath(path.resolve(rootPath));
-    const known = this.projects.some((project) => isPathInside(project.rootPath, rootPath) && isPathInside(rootPath, project.rootPath));
+    const displayRoot = path.resolve(rootPath);
+    const normalizedRoot = await fs.realpath(displayRoot);
+    const known = this.projects.some((project) => isPathInside(project.rootPath, displayRoot) && isPathInside(displayRoot, project.rootPath));
     if (!known) throw new Error('Workspace não registrado.');
     const result: Array<{ path: string; relativePath: string; type: 'file' | 'directory' }> = [];
     const ignored = new Set(['node_modules', '.git', '.vite', 'dist', 'build', 'out', 'coverage']);
@@ -117,17 +118,19 @@ export class ProjectManager {
         if (ignored.has(entry.name)) continue;
         const full = path.join(safeCurrent, entry.name);
         const relativePath = path.relative(normalizedRoot, full);
-        if (entry.isSymbolicLink()) {
+        const displayPath = path.join(displayRoot, relativePath);
+        const linkInfo = await fs.lstat(full);
+        if (linkInfo.isSymbolicLink()) {
           let type: 'file' | 'directory' = 'file';
           try {
             type = (await fs.stat(full)).isDirectory() ? 'directory' : 'file';
           } catch {
             type = 'file';
           }
-          result.push({ path: full, relativePath, type });
+          result.push({ path: displayPath, relativePath, type });
           continue;
         }
-        result.push({ path: full, relativePath, type: entry.isDirectory() ? 'directory' : 'file' });
+        result.push({ path: displayPath, relativePath, type: entry.isDirectory() ? 'directory' : 'file' });
         if (entry.isDirectory()) await visit(full);
       }
     };
