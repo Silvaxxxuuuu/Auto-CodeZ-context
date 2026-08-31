@@ -162,23 +162,34 @@ export class ProjectManager {
       await handle.close();
       handle = undefined;
 
-      const destinationInfo = await fs.lstat(safePath).catch((error: unknown) => {
-        if (isMissingPathError(error)) return undefined;
-        throw error;
-      });
+      let destinationInfo: Awaited<ReturnType<typeof fs.lstat>> | undefined;
+      try {
+        destinationInfo = await fs.lstat(safePath);
+      } catch (error) {
+        if (!isMissingPathError(error)) throw error;
+      }
+
       if (destinationInfo?.isSymbolicLink()) {
         throw new Error('Operação bloqueada: arquivo simbólico fora do workspace.');
       }
-
-      if (destinationInfo) {
-        if (!destinationInfo.isFile()) throw new Error('O caminho selecionado não é um arquivo.');
-        await fs.rm(safePath);
+      if (destinationInfo && !destinationInfo.isFile()) {
+        throw new Error('O caminho selecionado não é um arquivo.');
       }
 
       await fs.rename(temporaryPath, safePath);
     } finally {
-      if (handle) await handle.close().catch(() => undefined);
-      await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+      if (handle) {
+        try {
+          await handle.close();
+        } catch {
+          // Cleanup is best-effort after a failed write.
+        }
+      }
+      try {
+        await fs.rm(temporaryPath, { force: true });
+      } catch {
+        // Cleanup is best-effort after a failed write.
+      }
     }
   }
 }
