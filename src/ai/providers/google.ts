@@ -19,6 +19,16 @@ type GoogleChunk = {
   error?: { message?: string };
 };
 
+function isThinkingModel(model: string): boolean {
+  return /(?:^|[-_])gemini-(?:2\.5|3(?:\.|$))/i.test(model);
+}
+
+function thinkingLevel(level: AIRequest['intelligence']): 'low' | 'medium' | 'high' {
+  if (level === 'low') return 'low';
+  if (level === 'high' || level === 'maximum') return 'high';
+  return 'medium';
+}
+
 function buildTools(request: AIRequest): Array<Record<string, unknown>> | undefined {
   if (!request.toolsEnabled || !request.tools?.length) return undefined;
   return [{
@@ -98,13 +108,17 @@ export class GoogleAdapter implements AIProviderAdapter {
     const data = (await response.json()) as { models?: Array<{ name: string; displayName?: string; supportedGenerationMethods?: string[] }> };
     return (data.models || [])
       .filter((model) => model.supportedGenerationMethods?.includes('generateContent'))
-      .map((model) => ({
-        id: model.name.replace(/^models\//, ''),
-        name: model.displayName || model.name.replace(/^models\//, ''),
-        providerId: this.id,
-        capabilities: ['text', 'vision', 'streaming', 'tools', 'reasoning'],
-        reasoningLevels: ['low', 'normal', 'high', 'maximum'],
-      }));
+      .map((model) => {
+        const id = model.name.replace(/^models\//, '');
+        const thinking = isThinkingModel(id);
+        return {
+          id,
+          name: model.displayName || id,
+          providerId: this.id,
+          capabilities: thinking ? ['text', 'vision', 'streaming', 'tools', 'reasoning'] : ['text', 'vision', 'streaming', 'tools'],
+          reasoningLevels: thinking ? ['low', 'normal', 'high', 'maximum'] : ['normal'],
+        };
+      });
   }
 
   private buildBody(request: AIRequest): Record<string, unknown> {
@@ -113,6 +127,9 @@ export class GoogleAdapter implements AIProviderAdapter {
       systemInstruction: systemMessages.length ? { parts: systemMessages.map((message) => ({ text: message.content })) } : undefined,
       contents: buildContents(request.messages),
     };
+    if (isThinkingModel(request.model)) {
+      body.generationConfig = { thinkingConfig: { thinkingLevel: thinkingLevel(request.intelligence) } };
+    }
     const tools = buildTools(request);
     if (tools) body.tools = tools;
     return body;
@@ -151,7 +168,7 @@ export class GoogleAdapter implements AIProviderAdapter {
     }, REQUEST_TIMEOUT_MS);
 
     if (!response.ok) {
-      const data = (await response.json().catch(() => ({}))) as GoogleChunk;
+      const data = await response.json().catch(() => ({})) as GoogleChunk;
       throw new Error(data.error?.message || `Google AI streaming request failed: ${response.status}`);
     }
 
