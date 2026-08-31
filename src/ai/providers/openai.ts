@@ -67,6 +67,19 @@ function parseToolCalls(output: unknown): AIToolCall[] {
   return calls;
 }
 
+function providerErrorMessage(value: unknown, fallback: string): string {
+  if (!value || typeof value !== 'object') return fallback;
+  const error = (value as { error?: unknown }).error;
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object') {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+  const responseError = (value as { response?: { error?: { message?: unknown } } }).response?.error?.message;
+  if (typeof responseError === 'string' && responseError.trim()) return responseError;
+  return fallback;
+}
+
 export class OpenAIAdapter implements AIProviderAdapter {
   readonly id = 'openai';
   readonly displayName = 'OpenAI';
@@ -133,7 +146,13 @@ export class OpenAIAdapter implements AIProviderAdapter {
     yield { type: 'start' };
 
     for await (const raw of parseSSE(response)) {
-      const event = raw as { type?: string; delta?: string; item?: { type?: string; call_id?: string; name?: string; arguments?: string }; response?: { output_text?: string; usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number } } };
+      const event = raw as {
+        type?: string;
+        delta?: string;
+        item?: { type?: string; call_id?: string; name?: string; arguments?: string };
+        response?: { output_text?: string; usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number }; error?: { message?: string } };
+        error?: { message?: string } | string;
+      };
       if (event.type === 'response.output_text.delta' && event.delta) {
         content += event.delta;
         yield { type: 'delta', text: event.delta };
@@ -152,7 +171,8 @@ export class OpenAIAdapter implements AIProviderAdapter {
         }
       }
       if (event.type === 'response.completed' && event.response) usage = { inputTokens: event.response.usage?.input_tokens, outputTokens: event.response.usage?.output_tokens, totalTokens: event.response.usage?.total_tokens };
-      if (event.type === 'error') throw new Error('OpenAI retornou um erro durante o streaming.');
+      if (event.type === 'response.failed') throw new Error(providerErrorMessage(event, 'OpenAI encerrou o streaming com falha.'));
+      if (event.type === 'error') throw new Error(providerErrorMessage(event, 'OpenAI retornou um erro durante o streaming.'));
     }
 
     const result: AIResponse = { content, model: request.model, providerId: request.providerId, usage, toolCalls: [...toolCalls.values()] };
