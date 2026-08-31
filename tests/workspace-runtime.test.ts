@@ -33,10 +33,7 @@ test('resolve accepts paths inside the project', async () => {
 test('resolve rejects parent traversal outside the project', async () => {
   const workspace = await createWorkspace();
   try {
-    await assert.rejects(
-      workspace.runtime.resolve('project-test', path.join('..', 'outside.txt')),
-      /caminho fora do workspace/,
-    );
+    await assert.rejects(workspace.runtime.resolve('project-test', path.join('..', 'outside.txt')), /caminho fora do workspace/);
   } finally {
     await workspace.cleanup();
   }
@@ -48,13 +45,23 @@ test('resolve rejects a symlink that points outside the workspace', async () => 
   try {
     await fs.writeFile(path.join(outside, 'secret.txt'), 'secret');
     await fs.symlink(outside, path.join(workspace.root, 'linked'));
-    await assert.rejects(
-      workspace.runtime.resolve('project-test', path.join('linked', 'secret.txt')),
-      /caminho fora do workspace/,
-    );
+    await assert.rejects(workspace.runtime.resolve('project-test', path.join('linked', 'secret.txt')), /caminho fora do workspace/);
   } finally {
     await workspace.cleanup();
     await fs.rm(outside, { recursive: true, force: true });
+  }
+});
+
+test('resolve accepts a symlink whose target stays inside the workspace', async () => {
+  const workspace = await createWorkspace();
+  try {
+    await fs.mkdir(path.join(workspace.root, 'real'), { recursive: true });
+    await fs.writeFile(path.join(workspace.root, 'real', 'safe.txt'), 'safe');
+    await fs.symlink(path.join(workspace.root, 'real'), path.join(workspace.root, 'linked'));
+    const resolved = await workspace.runtime.resolve('project-test', path.join('linked', 'safe.txt'));
+    assert.equal(await fs.realpath(resolved), path.join(await fs.realpath(workspace.root), 'real', 'safe.txt'));
+  } finally {
+    await workspace.cleanup();
   }
 });
 
@@ -69,12 +76,38 @@ test('createFile does not overwrite an existing file', async () => {
   }
 });
 
+test('createFile is atomic under concurrent creation attempts', async () => {
+  const workspace = await createWorkspace();
+  try {
+    const results = await Promise.allSettled([
+      workspace.runtime.createFile('project-test', 'concurrent.txt', 'first'),
+      workspace.runtime.createFile('project-test', 'concurrent.txt', 'second'),
+    ]);
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+    assert.equal(await workspace.runtime.exists('project-test', 'concurrent.txt'), true);
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
 test('writeFile creates parent directories and persists UTF-8 content', async () => {
   const workspace = await createWorkspace();
   try {
     await workspace.runtime.writeFile('project-test', 'nested/file.txt', 'Olá, Auto CodeZ');
     assert.equal(await workspace.runtime.readFile('project-test', 'nested/file.txt'), 'Olá, Auto CodeZ');
     assert.equal(await workspace.runtime.exists('project-test', 'nested/file.txt'), true);
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test('readFile accepts a file exactly at the text limit', async () => {
+  const workspace = await createWorkspace();
+  try {
+    const content = 'a'.repeat(2 * 1024 * 1024);
+    await fs.writeFile(path.join(workspace.root, 'limit.txt'), content, 'utf8');
+    assert.equal((await workspace.runtime.readFile('project-test', 'limit.txt')).length, 2 * 1024 * 1024);
   } finally {
     await workspace.cleanup();
   }
