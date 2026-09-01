@@ -1,4 +1,6 @@
 const STYLE_ID = 'api-key-flow-polish-style';
+let managerObserver: MutationObserver | undefined;
+let managerEnhanceFrame = 0;
 
 function installStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
@@ -87,10 +89,8 @@ function installKeyIcon(): void {
   const button = document.querySelector<HTMLElement>('.api-key-rail-button');
   if (!button || button.querySelector(':scope > .ac-lucide-icon[data-api-key-icon="true"]')) return;
   const existing = button.querySelector(':scope > .ac-lucide-icon');
-  if (existing) {
-    existing.remove();
-  }
-  const key = lucideSvg(['M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 1 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z'], 'api-key-rail-icon');
+  if (existing) existing.remove();
+  const key = lucideSvg(['M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z'], 'api-key-rail-icon');
   key.dataset.apiKeyIcon = 'true';
   key.dataset.acLucideIcon = 'key-round';
   const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -122,9 +122,7 @@ function installStatus(backdrop: HTMLElement): void {
     } else if (cards.length) {
       status.innerHTML = '<strong>Nenhuma chave ativa.</strong> Selecione uma chave antes de iniciar uma conversa.';
       status.hidden = false;
-    } else {
-      status.hidden = true;
-    }
+    } else status.hidden = true;
   };
 
   new MutationObserver(update).observe(list, { childList: true, subtree: true });
@@ -135,22 +133,17 @@ function installKeyboardBehavior(backdrop: HTMLElement): void {
   if (backdrop.dataset.keyboardReady === 'true') return;
   backdrop.dataset.keyboardReady = 'true';
   backdrop.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      const form = backdrop.querySelector<HTMLFormElement>('.api-key-manager-form.open');
-      if (form) {
-        backdrop.querySelector<HTMLButtonElement>('.api-key-cancel')?.click();
-        return;
-      }
-      backdrop.querySelector<HTMLButtonElement>('.api-key-manager-close')?.click();
-    }
+    if (event.key !== 'Escape') return;
+    const form = backdrop.querySelector<HTMLFormElement>('.api-key-manager-form.open');
+    if (form) backdrop.querySelector<HTMLButtonElement>('.api-key-cancel')?.click();
+    else backdrop.querySelector<HTMLButtonElement>('.api-key-manager-close')?.click();
   });
 }
 
 function installFocusBehavior(backdrop: HTMLElement): void {
   if (backdrop.dataset.focusReady === 'true') return;
   backdrop.dataset.focusReady = 'true';
-  const close = backdrop.querySelector<HTMLButtonElement>('.api-key-manager-close');
-  close?.focus();
+  backdrop.querySelector<HTMLButtonElement>('.api-key-manager-close')?.focus();
 }
 
 function enhance(): void {
@@ -162,9 +155,26 @@ function enhance(): void {
   installStatus(backdrop);
   installKeyboardBehavior(backdrop);
   installFocusBehavior(backdrop);
+  if (managerObserver) return;
+  managerObserver = new MutationObserver(() => {
+    installActionIcons(backdrop);
+    installStatus(backdrop);
+  });
+  managerObserver.observe(backdrop, { childList: true, subtree: true });
+}
+
+function scheduleEnhance(): void {
+  if (managerEnhanceFrame) return;
+  managerEnhanceFrame = window.requestAnimationFrame(() => {
+    managerEnhanceFrame = 0;
+    enhance();
+  });
 }
 
 installStyles();
-const observer = new MutationObserver(enhance);
-observer.observe(document.body, { childList: true, subtree: true });
-enhance();
+installKeyIcon();
+document.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement;
+  if (target.closest('.api-key-rail-button')) window.setTimeout(scheduleEnhance, 0);
+});
+scheduleEnhance();
