@@ -153,6 +153,12 @@ ipcMain.handle('git:checkout', async (_event, input: { projectId: string; name: 
   const value = requireObject(input, 'Dados do checkout');
   return gitService.checkout(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Branch'));
 });
+ipcMain.handle('git:stage', async (_event, input: { projectId: string; paths: string[] }) => {
+  const value = requireObject(input, 'Dados do staging');
+  if (!Array.isArray(value.paths) || value.paths.some((item) => typeof item !== 'string')) throw new Error('Arquivos do staging inválidos.');
+  return gitService.stage(requireIdentifier(value.projectId, 'Projeto'), value.paths.map((item) => requireNonEmptyString(item, 'Arquivo')));
+});
+ipcMain.handle('git:stage-all', async (_event, projectId: string) => gitService.stageAll(requireIdentifier(projectId, 'Projeto')));
 ipcMain.handle('git:commit', async (_event, input: { projectId: string; message: string }) => {
   const value = requireObject(input, 'Dados do commit');
   return gitService.commit(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.message, 'Mensagem do commit'));
