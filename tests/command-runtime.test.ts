@@ -22,44 +22,25 @@ async function createProject(): Promise<{ root: string; runtime: CommandRuntime;
   };
 }
 
-test('command runtime rejects an unapproved package manager', async () => {
+const nodeCommand = (expression: string): string => `node -e "${expression.replaceAll('"', '\\"')}"`;
+
+test('command runtime rejects an empty command', async () => {
   const project = await createProject();
   try {
-    await assert.rejects(project.runtime.run('project-test', 'cmd', 'test'), /Gerenciador de pacotes não permitido/);
+    await assert.rejects(project.runtime.run('project-test', '   '), /comando não pode estar vazio/);
   } finally {
     await project.cleanup();
   }
 });
 
-test('command runtime rejects an unapproved script', async () => {
+test('command runtime executes an arbitrary local command in the active workspace', async () => {
   const project = await createProject();
   try {
-    await assert.rejects(project.runtime.run('project-test', 'npm', 'start'), /Script não permitido pelo runtime/);
-  } finally {
-    await project.cleanup();
-  }
-});
-
-test('command runtime requires the requested script to exist in package.json', async () => {
-  const project = await createProject();
-  try {
-    await fs.writeFile(path.join(project.root, 'package.json'), JSON.stringify({ scripts: { build: 'node -e "process.exit(0)"' } }));
-    await assert.rejects(project.runtime.run('project-test', 'npm', 'test'), /não existe no projeto/);
-  } finally {
-    await project.cleanup();
-  }
-});
-
-test('command runtime executes an allowed npm script on Windows and Unix', async () => {
-  const project = await createProject();
-  try {
-    const script = "node -e \"process.stdout.write('auto-codez-ok')\"";
-    await fs.writeFile(path.join(project.root, 'package.json'), JSON.stringify({ scripts: { test: script } }));
-    const result = await project.runtime.run('project-test', 'npm', 'test');
+    const result = await project.runtime.run('project-test', nodeCommand("process.stdout.write('auto-codez-ok')"));
     assert.equal(result.exitCode, 0);
     assert.equal(result.timedOut, false);
     assert.match(result.stdout, /auto-codez-ok/);
-    assert.equal(result.command, 'npm run test');
+    assert.match(result.command, /node -e/);
     assert.ok(result.startedAt > 0);
     assert.ok(result.finishedAt >= result.startedAt);
     assert.equal(result.durationMs, result.finishedAt - result.startedAt);
@@ -68,13 +49,21 @@ test('command runtime executes an allowed npm script on Windows and Unix', async
   }
 });
 
+test('command runtime uses the project directory as the working directory', async () => {
+  const project = await createProject();
+  try {
+    const result = await project.runtime.run('project-test', nodeCommand("process.stdout.write(process.cwd())"));
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout.trim(), new RegExp(project.root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    await project.cleanup();
+  }
+});
+
 test('command runtime streams stdout and stderr without changing the final result', async () => {
   const project = await createProject();
   try {
-    const script = "node -e \"process.stdout.write('out'); process.stderr.write('err')\"";
-    await fs.writeFile(path.join(project.root, 'package.json'), JSON.stringify({ scripts: { test: script } }));
-    const events: Array<{ stream: 'stdout' | 'stderr'; text: string }> = [];
-    const result = await project.runtime.run('project-test', 'npm', 'test', {
+    const result = await project.runtime.run('project-test', nodeCommand("process.stdout.write('out'); process.stderr.write('err')"), {
       onOutput: (event) => events.push(event),
     });
     assert.equal(result.exitCode, 0);
@@ -90,9 +79,7 @@ test('command runtime streams stdout and stderr without changing the final resul
 test('command runtime isolates observer failures from command execution', async () => {
   const project = await createProject();
   try {
-    const script = "node -e \"process.stdout.write('still-runs')\"";
-    await fs.writeFile(path.join(project.root, 'package.json'), JSON.stringify({ scripts: { test: script } }));
-    const result = await project.runtime.run('project-test', 'npm', 'test', {
+    const result = await project.runtime.run('project-test', nodeCommand("process.stdout.write('still-runs')"), {
       onOutput: () => { throw new Error('observer failed'); },
     });
     assert.equal(result.exitCode, 0);
@@ -101,3 +88,5 @@ test('command runtime isolates observer failures from command execution', async 
     await project.cleanup();
   }
 });
+
+const events: Array<{ stream: 'stdout' | 'stderr'; text: string }> = [];
