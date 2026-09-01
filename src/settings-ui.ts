@@ -145,6 +145,7 @@ document.addEventListener('click', (event) => {
   if (!target) return;
   if (target.closest('[data-action="settings"]')) {
     event.preventDefault();
+    event.stopPropagation();
     renderSettings();
     return;
   }
