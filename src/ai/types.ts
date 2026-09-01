@@ -33,6 +33,7 @@ export interface AIMessage {
   toolName?: ToolName;
   toolCalls?: AIToolCall[];
   changes?: FileDiff[];
+  diffPlan?: DiffPlan;
 }
 
 export interface AIModel {
@@ -103,6 +104,23 @@ export interface FileDiff {
   renamedFrom?: string;
 }
 
+export interface DiffSummary {
+  files: number;
+  created: number;
+  modified: number;
+  deleted: number;
+  renamed: number;
+  addedLines: number;
+  removedLines: number;
+}
+
+export interface DiffPlan {
+  id: string;
+  createdAt: number;
+  changes: FileDiff[];
+  summary: DiffSummary;
+}
+
 export interface AIToolResult {
   toolCallId: string;
   ok: boolean;
@@ -111,6 +129,7 @@ export interface AIToolResult {
   approvalId?: string;
   pendingApproval?: boolean;
   changes?: FileDiff[];
+  diffPlan?: DiffPlan;
 }
 
 export interface AIToolDefinition {
@@ -127,6 +146,7 @@ export interface ApprovalRequest {
   permissionLevel: PermissionLevel;
   toolCall: AIToolCall;
   createdAt: number;
+  diffPlan?: DiffPlan;
 }
 
 export interface AIProviderAdapter {
