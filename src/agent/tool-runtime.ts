@@ -52,6 +52,15 @@ function validateToolInput(definition: AIToolDefinition, input: Record<string, u
   }
 }
 
+function normalizeToolCall(call: AIToolCall): AIToolCall {
+  if (call.name !== 'run_command' || typeof call.input.command === 'string') return call;
+  const manager = call.input.manager;
+  const script = call.input.script;
+  if (typeof manager !== 'string' || typeof script !== 'string' || !manager.trim() || !script.trim()) return call;
+  const command = manager.trim() === 'npm' ? `${manager.trim()} run ${script.trim()}` : `${manager.trim()} ${script.trim()}`;
+  return { ...call, input: { command } };
+}
+
 const unavailableCommandRuntime = new CommandRuntime(async () => { throw new Error('O runtime de comandos não foi configurado para esta instância.'); });
 
 export class ToolRuntime {
@@ -75,28 +84,29 @@ export class ToolRuntime {
   restoreApprovals(approvals: ApprovalRequest[]): void { this.approvals.restore(approvals); }
 
   async execute(projectId: string, permission: PermissionLevel, call: AIToolCall): Promise<AIToolResult> {
-    const definition = definitions.find((item) => item.name === call.name);
-    if (!definition) return { toolCallId: call.id, ok: false, error: `Ferramenta desconhecida: ${call.name}` };
-    try { validateToolInput(definition, call.input); } catch (error) { return { toolCallId: call.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
-    const decision = this.permissions.decide(permission, call.name);
-    if (decision === 'deny') return { toolCallId: call.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
+    const normalizedCall = normalizeToolCall(call);
+    const definition = definitions.find((item) => item.name === normalizedCall.name);
+    if (!definition) return { toolCallId: normalizedCall.id, ok: false, error: `Ferramenta desconhecida: ${normalizedCall.name}` };
+    try { validateToolInput(definition, normalizedCall.input); } catch (error) { return { toolCallId: normalizedCall.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
+    const decision = this.permissions.decide(permission, normalizedCall.name);
+    if (decision === 'deny') return { toolCallId: normalizedCall.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
     if (decision === 'ask') {
       let diffPlan: DiffPlan | undefined;
-      try { diffPlan = await this.preview(projectId, call); } catch (error) {
-        this.activity.emit({ type: 'action', message: `Pré-visualização indisponível para ${call.name}: ${error instanceof Error ? error.message : String(error)}`, status: 'failed', toolCallId: call.id, toolName: call.name });
-        if (call.name === 'write_file') {
+      try { diffPlan = await this.preview(projectId, normalizedCall); } catch (error) {
+        this.activity.emit({ type: 'action', message: `Pré-visualização indisponível para ${normalizedCall.name}: ${error instanceof Error ? error.message : String(error)}`, status: 'failed', toolCallId: normalizedCall.id, toolName: normalizedCall.name });
+        if (normalizedCall.name === 'write_file') {
           try {
-            const path = this.stringValue(call.input, 'path');
-            const content = call.input.content;
+            const path = this.stringValue(normalizedCall.input, 'path');
+            const content = normalizedCall.input.content;
             if (typeof content === 'string' && !(await this.workspace.exists(projectId, path))) diffPlan = this.diffs.createPlan([this.diffs.create(path, 'created', '', content)]);
           } catch { /* keep the approval without a preview when validation itself fails */ }
         }
       }
-      const approval = this.approvals.request({ projectId, permissionLevel: permission, toolCall: call, ...(diffPlan ? { diffPlan } : {}) });
-      this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${call.name}.`, status: 'pending', toolCallId: call.id, toolName: call.name, ...(diffPlan ? { diffPlan } : {}) });
-      return { toolCallId: call.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
+      const approval = this.approvals.request({ projectId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });
+      this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${normalizedCall.name}.`, status: 'pending', toolCallId: normalizedCall.id, toolName: normalizedCall.name, ...(diffPlan ? { diffPlan } : {}) });
+      return { toolCallId: normalizedCall.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
     }
-    return this.executeNow(projectId, call);
+    return this.executeNow(projectId, normalizedCall);
   }
 
   async approve(approvalId: string): Promise<AIToolResult> {
