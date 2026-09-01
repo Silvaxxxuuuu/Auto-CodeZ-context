@@ -24,7 +24,7 @@ style.textContent = `
   width:min(920px, calc(100% - 32px));
   margin:0 auto;
   padding:0 0 10px;
-  max-height:220px;
+  max-height:360px;
   overflow:auto;
 }
 .activity-run {
@@ -54,10 +54,14 @@ style.textContent = `
 .activity-run-step-status.running { background:#d2b36f; }
 .activity-run-step-status.pending { background:#9b8ad1; }
 .activity-run-step-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:.72; }
+.activity-run-details { border-top:1px solid rgba(255,255,255,.055); padding:0 12px 9px; }
+.activity-run-details:empty { display:none; }
+.activity-run-details .activity-result-card { margin-top:7px; }
 @media (max-width:720px) {
   .activity-runs { width:calc(100% - 16px); }
   .activity-run-head { padding:9px 10px; }
   .activity-run-body { padding:6px 10px 7px; }
+  .activity-run-details { padding:0 10px 8px; }
 }
 @media (prefers-reduced-motion:reduce) {
   .activity-run { transition:none; }
@@ -98,12 +102,14 @@ function renderRun(run: RunState, container: HTMLElement): void {
     card = document.createElement('article');
     card.className = 'activity-run';
     card.dataset.runId = run.runId;
-    container.prepend(card);
   }
+  const existingDetails = card.querySelector<HTMLElement>('.activity-run-details');
+  const detailsMarkup = existingDetails ? existingDetails.outerHTML : '<div class="activity-run-details"></div>';
   const latest = run.events[run.events.length - 1];
   const elapsed = Math.max(0, (latest?.createdAt ?? Date.now()) - run.startedAt);
   const steps = run.events.slice(-6).map((event) => `<div class="activity-run-step"><span class="activity-run-step-status ${event.status}"></span><span class="activity-run-step-name">${escapeHtml(titleFor(event))}</span></div>`).join('');
-  card.innerHTML = `<div class="activity-run-head"><div class="activity-run-title"><span>Execução</span><span class="activity-run-status">${statusLabel(run.status)}</span></div><span class="activity-run-meta">${(elapsed / 1000).toFixed(1)} s</span></div><div class="activity-run-body">${steps}</div>`;
+  card.innerHTML = `<div class="activity-run-head"><div class="activity-run-title"><span>Execução</span><span class="activity-run-status">${statusLabel(run.status)}</span></div><span class="activity-run-meta">${(elapsed / 1000).toFixed(1)} s</span></div><div class="activity-run-body">${steps}</div>${detailsMarkup}`;
+  if (!card.parentElement) container.prepend(card);
   while (container.children.length > 6) container.lastElementChild?.remove();
 }
 
