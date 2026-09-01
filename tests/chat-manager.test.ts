@@ -19,7 +19,7 @@ function createManager(storage: MemoryStorage): ChatManager {
   return new ChatManager(storage as never);
 }
 
-test('creates and persists a draft chat without an AI provider', async () => {
+test('creates a temporary draft chat without an AI provider', async () => {
   const storage = new MemoryStorage();
   const manager = createManager(storage);
 
@@ -32,10 +32,10 @@ test('creates and persists a draft chat without an AI provider', async () => {
   assert.deepEqual(chat.messages, []);
 
   const persisted = await storage.read<ChatRecord[]>('chats.json', []);
-  assert.deepEqual(persisted, [chat]);
+  assert.deepEqual(persisted, []);
 });
 
-test('restores an empty draft chat after reinitialization', async () => {
+test('does not restore an empty draft chat after reinitialization', async () => {
   const storage = new MemoryStorage();
   const first = createManager(storage);
   await first.init();
@@ -45,13 +45,11 @@ test('restores an empty draft chat after reinitialization', async () => {
   await second.init();
   const chats = await second.list();
 
-  assert.equal(chats.length, 1);
-  assert.equal(chats[0]?.id, created.id);
-  assert.deepEqual(chats[0]?.messages, []);
-  assert.equal(chats[0]?.title, 'Novo chat');
+  assert.equal(chats.length, 0);
+  assert.notEqual(created.id, '');
 });
 
-test('persists messages and derives the first user message as the chat title', async () => {
+test('persists a draft when the first user message is added and derives its title', async () => {
   const storage = new MemoryStorage();
   const first = createManager(storage);
   await first.init();
@@ -81,6 +79,8 @@ test('lists chats by most recently updated timestamp', async () => {
 
   const older = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
   const newer = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
+  await manager.addMessage(older.id, { role: 'user', content: 'Persistir este chat' });
+  await manager.addMessage(newer.id, { role: 'user', content: 'Persistir este também' });
 
   assert.deepEqual((await manager.list()).map((chat) => chat.id), [newer.id, older.id]);
 
@@ -97,6 +97,8 @@ test('deletes a chat and persists the deletion', async () => {
 
   const keep = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
   const remove = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
+  await manager.addMessage(keep.id, { role: 'user', content: 'Manter este chat' });
+  await manager.addMessage(remove.id, { role: 'user', content: 'Excluir este chat' });
 
   await manager.delete(remove.id);
 
