@@ -27,6 +27,14 @@ export class GitService {
     return this.runtime.checkout(projectId, name);
   }
 
+  stage(projectId: string, paths: string[]): Promise<GitOperationResult> {
+    return this.runtime.stage(projectId, paths);
+  }
+
+  stageAll(projectId: string): Promise<GitOperationResult> {
+    return this.runtime.stageAll(projectId);
+  }
+
   commit(projectId: string, message: string): Promise<GitOperationResult> {
     return this.runtime.commit(projectId, message);
   }
