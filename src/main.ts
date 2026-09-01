@@ -94,7 +94,11 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
   const chatId = requireIdentifier(value.chatId, 'Chat');
   const content = requireNonEmptyString(value.content, 'Mensagem');
   const { chat, config, projectContext } = await getChatContext(chatId);
-  await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
+  const lastMessage = chat.messages.at(-1);
+  const isRetryOfPersistedUserMessage = lastMessage?.role === 'user' && lastMessage.content === content;
+  if (!isRetryOfPersistedUserMessage) {
+    await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
+  }
   const current = (await chatManager.list()).find((item) => item.id === chat.id);
   if (!current) throw new Error('Chat desapareceu durante a execução.');
   const emit = (event: AIStreamEvent): void => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', event); };
@@ -125,7 +129,7 @@ ipcMain.handle('git:create-branch', async (_event, input: { projectId: string; n
 ipcMain.handle('git:checkout', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados do checkout'); return gitService.checkout(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Branch')); });
 ipcMain.handle('git:stage', async (_event, input: { projectId: string; paths: string[] }) => { const value = requireObject(input, 'Dados do staging'); if (!Array.isArray(value.paths) || value.paths.some((item) => typeof item !== 'string')) throw new Error('Arquivos do staging inválidos.'); return gitService.stage(requireIdentifier(value.projectId, 'Projeto'), value.paths.map((item) => requireNonEmptyString(item, 'Arquivo'))); });
 ipcMain.handle('git:stage-all', async (_event, projectId: string) => gitService.stageAll(requireIdentifier(projectId, 'Projeto')));
-ipcMain.handle('git:commit', async (_event, input: { projectId: string; message: string }) => { const value = requireObject(input, 'Dados do commit'); return gitService.commit(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.message, 'Mensagem do commit')); });
+ipcMain.handle('git:commit', async (_event, input: { projectId: string; message: string }) => { const value = requireObject(input, 'Dados do commit'); return gitService.commit(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.message, 'Mensagem')); });
 
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => { const value = requireObject(input, 'Dados do projeto'); return projectManager.create(requireNonEmptyString(value.name, 'Nome do projeto'), requireNonEmptyString(value.rootPath, 'Pasta do projeto')); });
 ipcMain.handle('projects:open-folder', async () => { if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.'); const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] }); return result.canceled ? null : result.filePaths[0] || null; });
