@@ -216,7 +216,11 @@ async function refresh(): Promise<void> {
     providers = state.providers;
     chats = state.chats;
     projects = state.projects;
-    if (activeChat) activeChat = chats.find((chat) => chat.id === activeChat!.id) || null;
+    if (activeChat) {
+      const persistedChat = chats.find((chat) => chat.id === activeChat!.id);
+      if (persistedChat) activeChat = persistedChat;
+      else if (activeChat.messages.length > 0) activeChat = null;
+    }
     if (activeChat) composerIntelligence = activeChat.intelligence;
     renderNav();
     renderHeader();
@@ -241,7 +245,6 @@ async function openGeneralSettings(): Promise<void> {
 }
 
 async function openProviderSettings(providerId = ''): Promise<void> {
-  const configured = providers.filter((provider) => provider.configured);
   openModal(`<div class="modal-head"><div><div class="eyebrow">CONFIGURAÇÕES DE IA</div><h2>Inteligências artificiais</h2><p>Cadastre provedores, API keys e modelos.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="provider-list">${providers.map((provider) => `<div class="provider-row"><div><strong>${escapeHtml(provider.displayName)}</strong><span>${provider.configured ? 'API key configurada' : 'Não configurada'}</span></div><div class="row-actions"><button data-provider-edit="${provider.id}">${provider.configured ? 'Alterar chave' : 'Configurar'}</button>${provider.configured ? `<button data-provider-remove="${provider.id}" class="danger">Remover</button>` : ''}</div></div>`).join('')}</div><div class="add-provider"><h3>${providerId ? 'Editar provedor' : 'Adicionar IA'}</h3><label>IA<select id="provider-id">${providers.map((provider) => `<option value="${provider.id}" ${provider.id === providerId ? 'selected' : ''}>${escapeHtml(provider.displayName)}</option>`).join('')}</select></label><label>API Key<input id="provider-key" type="password" placeholder="Cole sua API key aqui" autocomplete="off"></label><label>Modelo<input id="provider-model" type="text" placeholder="Modelo opcional"></label><button class="primary-button" id="save-provider">Testar e salvar</button></div>`);
 }
 
@@ -459,7 +462,7 @@ app.addEventListener('click', async (event) => {
   const settings = target.closest<HTMLElement>('[data-chat-settings]');
   if (settings) {
     if (executionState === 'running' || executionState === 'waiting_approval') return;
-    const chat = chats.find((item) => item.id === settings.dataset.chatSettings);
+    const chat = chats.find((item) => item.id === settings.dataset.chatSettings) || (activeChat?.id === settings.dataset.chatSettings ? activeChat : undefined);
     if (chat) await openChatSettings(chat);
     return;
   }
