@@ -10,11 +10,13 @@ type GitBranch = { name: string; current: boolean; upstream?: string };
 type GitCommit = { hash: string; shortHash: string; author: string; date: string; subject: string };
 type GitOperationResult = { output: string; branch: string };
 type Project = { id: string; name: string; rootPath: string };
+type GitActivityEvent = { type: string; status: string; gitResult?: { operation: string; branch: string; output: string } };
 
 declare global {
   interface Window {
     autoCodez: {
       getState: () => Promise<{ projects: Project[] }>;
+      onActivity: (listener: (event: GitActivityEvent) => void) => () => void;
       git: {
         status: (projectId: string) => Promise<GitStatus>;
         branches: (projectId: string) => Promise<GitBranch[]>;
@@ -248,3 +250,9 @@ root.querySelector('#git-close')!.addEventListener('click', () => { root.hidden 
 window.addEventListener('focus', () => {
   if (!root.hidden) void refreshGit();
 });
+
+const unsubscribeGitActivity = window.autoCodez.onActivity((event) => {
+  if (!event.gitResult) return;
+  if (!root.hidden && selectedProjectId) void refreshGit();
+});
+window.addEventListener('beforeunload', unsubscribeGitActivity, { once: true });
