@@ -44,6 +44,7 @@ export interface AIMessage {
   changes?: FileDiff[];
   diffPlan?: DiffPlan;
   commandResult?: CommandResultSummary;
+  gitResult?: GitOperationSummary;
 }
 
 export interface AIModel {
@@ -142,6 +143,12 @@ export interface CommandResultSummary {
   durationMs: number;
 }
 
+export interface GitOperationSummary {
+  operation: 'create_branch' | 'checkout' | 'stage' | 'stage_all' | 'commit';
+  branch: string;
+  output: string;
+}
+
 export interface AIToolResult {
   toolCallId: string;
   ok: boolean;
@@ -152,6 +159,7 @@ export interface AIToolResult {
   changes?: FileDiff[];
   diffPlan?: DiffPlan;
   commandResult?: CommandResultSummary;
+  gitResult?: GitOperationSummary;
 }
 
 export interface AIToolDefinition {
@@ -222,6 +230,7 @@ export interface ActivityEvent {
   toolCallId?: string;
   toolName?: ToolName;
   commandResult?: CommandResultSummary;
+  gitResult?: GitOperationSummary;
   changes?: FileDiff[];
   diffPlan?: DiffPlan;
   error?: string;
