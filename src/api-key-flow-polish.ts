@@ -24,6 +24,9 @@ function installStyles(): void {
     .api-key-flow-status{margin:0 20px 12px;padding:9px 11px;border:1px solid #28313d;border-radius:8px;background:#11151c;color:#8c96a4;font-size:10px;line-height:1.45}
     .api-key-flow-status strong{color:#dfe5ed;font-weight:650}
     .api-key-flow-status[hidden]{display:none}
+    .api-key-edit::before,.api-key-delete::before{display:none!important;content:none!important}
+    .api-key-edit .ac-lucide-icon,.api-key-delete .ac-lucide-icon{display:block;width:15px;height:15px;min-width:15px;min-height:15px;color:currentColor;stroke:currentColor;fill:none;stroke-width:2;pointer-events:none}
+    .api-key-rail-button .ac-lucide-icon{display:block;width:17px;height:17px;min-width:17px;min-height:17px;color:currentColor;stroke:currentColor;fill:none;stroke-width:2;pointer-events:none}
     @keyframes ac-api-backdrop-in{from{opacity:0}to{opacity:1}}
     @keyframes ac-api-manager-in{from{opacity:0;transform:translateY(6px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
     @keyframes ac-api-backdrop-out{to{opacity:0}}
@@ -45,6 +48,57 @@ function installStyles(): void {
 
 function getBackdrop(): HTMLElement | null {
   return document.querySelector<HTMLElement>('.api-key-manager-backdrop');
+}
+
+function lucideSvg(paths: string[], className: string): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '24');
+  svg.setAttribute('height', '24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('ac-lucide-icon', className);
+  for (const d of paths) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+function installActionIcons(backdrop: HTMLElement): void {
+  const pencilPaths = ['M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z', 'm15 5 4 4'];
+  const trashPaths = ['M10 11v6', 'M14 11v6', 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6', 'M3 6h18', 'M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'];
+  backdrop.querySelectorAll<HTMLElement>('.api-key-edit').forEach((button) => {
+    if (button.querySelector(':scope > .ac-lucide-icon')) return;
+    button.appendChild(lucideSvg(pencilPaths, 'api-key-pencil-icon'));
+  });
+  backdrop.querySelectorAll<HTMLElement>('.api-key-delete').forEach((button) => {
+    if (button.querySelector(':scope > .ac-lucide-icon')) return;
+    button.appendChild(lucideSvg(trashPaths, 'api-key-trash-icon'));
+  });
+}
+
+function installKeyIcon(): void {
+  const button = document.querySelector<HTMLElement>('.api-key-rail-button');
+  if (!button || button.querySelector(':scope > .ac-lucide-icon[data-api-key-icon="true"]')) return;
+  const existing = button.querySelector(':scope > .ac-lucide-icon');
+  if (existing) {
+    existing.remove();
+  }
+  const key = lucideSvg(['M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z'], 'api-key-rail-icon');
+  key.dataset.apiKeyIcon = 'true';
+  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  circle.setAttribute('cx', '16.5');
+  circle.setAttribute('cy', '7.5');
+  circle.setAttribute('r', '.5');
+  circle.setAttribute('fill', 'currentColor');
+  key.appendChild(circle);
+  button.appendChild(key);
 }
 
 function installStatus(backdrop: HTMLElement): void {
@@ -100,8 +154,10 @@ function installFocusBehavior(backdrop: HTMLElement): void {
 
 function enhance(): void {
   installStyles();
+  installKeyIcon();
   const backdrop = getBackdrop();
   if (!backdrop) return;
+  installActionIcons(backdrop);
   installStatus(backdrop);
   installKeyboardBehavior(backdrop);
   installFocusBehavior(backdrop);
