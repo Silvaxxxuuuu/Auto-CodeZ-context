@@ -36,7 +36,7 @@ const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
 const commandRuntime = new CommandRuntime(() => projectManager.list());
 const toolRuntime = new ToolRuntime(workspaceRuntime, undefined, activityRuntime, approvalRuntime, commandRuntime);
 const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver, toolRuntime.listDefinitions());
-const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime);
+const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const chatManager = new ChatManager(storage);
 
 let providerConfigs: AIProviderConfig[] = [];
@@ -63,6 +63,15 @@ function requirePermission(value: unknown): PermissionLevel {
   const normalized = requireIdentifier(value, 'Permissão');
   if (!permissionLevels.has(normalized as PermissionLevel)) throw new Error('Permissão inválida.');
   return normalized as PermissionLevel;
+}
+
+function beginChatRun(chatId: string): void {
+  if (busyChats.has(chatId) || agentRuntime.hasPendingForChat(chatId)) throw new Error('Este chat já possui uma operação em andamento.');
+  busyChats.add(chatId);
+}
+
+function endChatRun(chatId: string): void {
+  if (!agentRuntime.hasPendingForChat(chatId)) busyChats.delete(chatId);
 }
 
 activityRuntime.subscribe((event) => { mainWindow?.webContents.send('agent:activity', event); });
@@ -111,15 +120,6 @@ async function validateChatInput(input: { providerId: ProviderId; model: string;
   const model = modelResolver.find(models, input.model);
   if (model.providerId !== input.providerId) throw new Error('O modelo não pertence ao provider selecionado.');
   if (input.projectId && !(await projectManager.list()).some((project) => project.id === input.projectId)) throw new Error('Projeto não encontrado.');
-}
-
-function beginChatRun(chatId: string): void {
-  if (busyChats.has(chatId) || agentRuntime.hasPendingForChat(chatId)) throw new Error('Este chat já possui uma operação em andamento.');
-  busyChats.add(chatId);
-}
-
-function endChatRun(chatId: string): void {
-  if (!agentRuntime.hasPendingForChat(chatId)) busyChats.delete(chatId);
 }
 
 async function createWindow(): Promise<void> {
@@ -307,5 +307,5 @@ ipcMain.handle('app:open-external', async (_event, url: string) => {
   await shell.openExternal(parsed.toString());
 });
 
-app.whenReady().then(async () => { await storage.init(); await loadProviders(); await projectManager.init(); await chatManager.init(); await createWindow(); app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createWindow(); }); }).catch((error) => { const message = error instanceof Error ? error.message : 'Falha ao inicializar o Auto CodeZ.'; dialog.showErrorBox('Auto CodeZ', message); app.quit(); });
+app.whenReady().then(async () => { await storage.init(); await loadProviders(); await projectManager.init(); await chatManager.init(); await agentRuntime.init(); await createWindow(); app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createWindow(); }); }).catch((error) => { const message = error instanceof Error ? error.message : 'Falha ao inicializar o Auto CodeZ.'; dialog.showErrorBox('Auto CodeZ', message); app.quit(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
