@@ -22,16 +22,23 @@ const nodeCommand = (expression: string): string => process.platform === 'win32'
   ? `node -e "${expression.replaceAll('"', '\\"')}"`
   : `node -e '${expression.replaceAll("'", "'\\''")}'`;
 
+async function waitForExit(runtime: TerminalRuntime, sessionId: string, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  let current = (await runtime.list()).find((item) => item.id === sessionId);
+  while (current?.status === 'running' && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    current = (await runtime.list()).find((item) => item.id === sessionId) ?? current;
+  }
+  assert.ok(current, 'Sessão não encontrada durante a espera.');
+  assert.notEqual(current.status, 'running', 'Processo não terminou dentro do prazo.');
+  return current;
+}
+
 test('terminal runtime starts a project-scoped process and streams output', async () => {
   const fixture = await createProject();
   try {
     const session = await fixture.runtime.start('terminal-project', nodeCommand("process.stdout.write('terminal-ok')"));
-    const deadline = Date.now() + 5000;
-    let current = session;
-    while (current.status === 'running' && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      current = (await fixture.runtime.list()).find((item) => item.id === session.id) ?? current;
-    }
+    const current = await waitForExit(fixture.runtime, session.id);
     assert.equal(current.exitCode, 0);
     assert.equal(fixture.runtime.getOutput(session.id), 'terminal-ok');
     assert.ok(fixture.events.some((event) => 'stream' in event && event.text.includes('terminal-ok')));
@@ -53,19 +60,32 @@ test('terminal runtime rejects an empty command and unknown project', async () =
   }
 });
 
-test('terminal runtime kills a running process', async () => {
+test('terminal runtime preserves killed status until the process exits', async () => {
   const fixture = await createProject();
   try {
     const command = process.platform === 'win32' ? 'ping 127.0.0.1 -n 30 > nul' : 'sleep 30';
     const session = await fixture.runtime.start('terminal-project', command);
-    fixture.runtime.kill(session.id);
-    const deadline = Date.now() + 5000;
-    let current = session;
-    while (current.status === 'running' && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      current = (await fixture.runtime.list()).find((item) => item.id === session.id) ?? current;
-    }
-    assert.notEqual(current.status, 'running');
+    const immediatelyAfterKill = fixture.runtime.kill(session.id);
+    assert.equal(immediatelyAfterKill.status, 'running');
+    const current = await waitForExit(fixture.runtime, session.id);
+    assert.equal(current.status, 'killed');
+    assert.equal(current.signal, 'SIGTERM');
+    const exitEvents = fixture.events.filter((event): event is TerminalExitEvent => 'exitCode' in event);
+    assert.equal(exitEvents.length, 1);
+  } finally {
+    fixture.runtime.dispose();
+    await fixture.cleanup();
+  }
+});
+
+test('terminal runtime keeps a failed process distinct from an intentional kill', async () => {
+  const fixture = await createProject();
+  try {
+    const session = await fixture.runtime.start('terminal-project', nodeCommand('process.exit(7)'));
+    const current = await waitForExit(fixture.runtime, session.id);
+    assert.equal(current.status, 'failed');
+    assert.equal(current.exitCode, 7);
+    assert.equal(current.signal, undefined);
   } finally {
     fixture.runtime.dispose();
     await fixture.cleanup();
