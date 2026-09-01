@@ -53,6 +53,13 @@ function requireCommitMessage(message: string): string {
   return value;
 }
 
+function requireSafePath(pathValue: string): string {
+  const value = pathValue.trim();
+  if (!value) throw new Error('Arquivo é obrigatório.');
+  if (value.includes('\0') || value.startsWith('-')) throw new Error('Caminho de arquivo inválido.');
+  return value;
+}
+
 export class GitRuntime {
   constructor(private readonly listProjects: () => Promise<ProjectRecord[]>) {}
 
@@ -123,6 +130,20 @@ export class GitRuntime {
     const branch = requireSafeBranchName(name);
     const output = await this.git(projectId, ['switch', '--', branch]);
     return { output: output.trim(), branch };
+  }
+
+  async stage(projectId: string, paths: string[]): Promise<GitOperationResult> {
+    if (!Array.isArray(paths) || paths.length === 0) throw new Error('Selecione ao menos um arquivo para adicionar ao commit.');
+    const safePaths = paths.map(requireSafePath);
+    const output = await this.git(projectId, ['add', '--', ...safePaths]);
+    const status = await this.status(projectId);
+    return { output: output.trim(), branch: status.branch };
+  }
+
+  async stageAll(projectId: string): Promise<GitOperationResult> {
+    const output = await this.git(projectId, ['add', '--all']);
+    const status = await this.status(projectId);
+    return { output: output.trim(), branch: status.branch };
   }
 
   async commit(projectId: string, message: string): Promise<GitOperationResult> {
