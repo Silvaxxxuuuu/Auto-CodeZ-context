@@ -8,7 +8,7 @@ type Chat = { id: string; title: string; projectId?: string; providerId: string;
 type Project = { id: string; name: string; rootPath: string; createdAt: number; updatedAt: number };
 type IntelligenceLevel = Chat['intelligence'];
 type PermissionLevel = Chat['permissionLevel'];
-type StreamEvent = { type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'error'; text?: string; activity?: { message: string; status: string }; toolCall?: { id: string; name: string; input: Record<string, unknown> }; pendingApprovalIds?: string[]; error?: string };
+type StreamEvent = { type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'error'; chatId?: string; text?: string; activity?: { message: string; status: string }; toolCall?: { id: string; name: string; input: Record<string, unknown> }; pendingApprovalIds?: string[]; error?: string };
 type Approval = { id: string; projectId: string; permissionLevel: string; toolCall: { id: string; name: string; input: Record<string, unknown> }; createdAt: number };
 type ExecutionState = 'idle' | 'running' | 'waiting_approval' | 'failed';
 
@@ -74,6 +74,7 @@ let pendingApprovals: Approval[] = [];
 let lastError = '';
 let retryContent = '';
 let lastSubmittedContent = '';
+let messageRenderTimer: number | null = null;
 
 app.innerHTML = `
 <div class="app-shell">
@@ -151,6 +152,14 @@ function setExecutionState(state: ExecutionState, error = ''): void {
   renderComposer();
 }
 
+function scheduleMessagesRender(): void {
+  if (messageRenderTimer !== null) return;
+  messageRenderTimer = window.setTimeout(() => {
+    messageRenderTimer = null;
+    renderMessages();
+  }, 33);
+}
+
 function setIntelligenceMenu(open: boolean): void {
   intelligenceMenuOpen = open;
   intelligenceMenu.hidden = !open;
@@ -184,7 +193,8 @@ function renderNav(): void {
 }
 
 function chatItem(chat: Chat): string {
-  return `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-rename="${chat.id}" title="Renomear chat" aria-label="Renomear chat"></button><button class="chat-delete" data-chat-delete="${chat.id}" title="Excluir chat" aria-label="Excluir chat"></button></div>`;
+  const running = activeChat?.id !== chat.id && false;
+  return `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''} ${running ? 'is-running' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-rename="${chat.id}" title="Renomear chat" aria-label="Renomear chat"></button><button class="chat-delete" data-chat-delete="${chat.id}" title="Excluir chat" aria-label="Excluir chat"></button></div>`;
 }
 
 function renderHeader(): void {
@@ -212,8 +222,9 @@ function renderMessages(): void {
   if (executionState === 'waiting_approval') activityLines.push('Aguardando sua aprovação.');
   if (lastError) activityLines.push(lastError);
   const activity = activityLines.length || pendingApprovals.length ? `<div class="activity-card"><div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line ${executionState === 'failed' ? 'error' : 'running'}">${escapeHtml(line)}</div>`).join('')}${renderApprovals()}</div>` : '';
+  const wasNearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100;
   messages.innerHTML = rendered + live + activity;
-  messages.scrollTop = messages.scrollHeight;
+  if (wasNearBottom || executionState === 'running') messages.scrollTop = messages.scrollHeight;
 }
 
 function renderComposer(): void {
@@ -245,9 +256,7 @@ async function refresh(): Promise<void> {
   }
 }
 
-function closeModal(): void {
-  modalRoot.innerHTML = '';
-}
+function closeModal(): void { modalRoot.innerHTML = ''; }
 
 function openModal(content: string): void {
   setIntelligenceMenu(false);
@@ -272,7 +281,6 @@ async function openChatSettings(chat: Chat): Promise<void> {
 }
 
 async function newChat(projectId?: string): Promise<void> {
-  if (executionState !== 'idle' && executionState !== 'failed') return;
   try {
     activeChat = await window.autoCodez.createChat({ intelligence: 'normal', permissionLevel: 'safe', projectId });
     composerIntelligence = 'normal';
@@ -320,10 +328,7 @@ async function sendMessage(contentOverride?: string, isRetry = false): Promise<v
   const content = (contentOverride ?? prompt.value).trim();
   if (!content || !activeChat || (executionState !== 'idle' && executionState !== 'failed') || pendingApprovals.length) return;
   if (isRetry && !retryContent) return;
-  if (executionState === 'failed') {
-    executionState = 'idle';
-    lastError = '';
-  }
+  if (executionState === 'failed') { executionState = 'idle'; lastError = ''; }
   const chatId = activeChat.id;
   prompt.value = '';
   prompt.style.height = '';
@@ -425,7 +430,6 @@ async function setComposerIntelligence(level: IntelligenceLevel): Promise<void> 
 }
 
 async function deleteChat(chatId: string): Promise<void> {
-  if (executionState === 'running' || executionState === 'waiting_approval') return;
   if (!window.confirm('Excluir esta conversa permanentemente?')) return;
   try {
     await window.autoCodez.deleteChat(chatId);
@@ -480,9 +484,7 @@ document.addEventListener('click', (event) => {
   if (deny?.dataset.deny) void resumeApproval(deny.dataset.deny, false);
 });
 
-window.addEventListener('auto-codez-retry-message', () => {
-  void retryLastMessage();
-});
+window.addEventListener('auto-codez-retry-message', () => { void retryLastMessage(); });
 
 app.addEventListener('click', async (event) => {
   const target = event.target as HTMLElement;
@@ -501,26 +503,28 @@ app.addEventListener('click', async (event) => {
   }
   const settings = target.closest<HTMLElement>('[data-chat-settings]');
   if (settings) {
-    if (executionState === 'running' || executionState === 'waiting_approval') return;
     const chat = chats.find((item) => item.id === settings.dataset.chatSettings) || (activeChat?.id === settings.dataset.chatSettings ? activeChat : undefined);
     if (chat) await openChatSettings(chat);
     return;
   }
   const chatButton = target.closest<HTMLElement>('[data-chat]');
   if (chatButton) {
-    if (executionState === 'running' || executionState === 'waiting_approval') return;
-    activeChat = chats.find((chat) => chat.id === chatButton.dataset.chat) || null;
+    const nextChat = chats.find((chat) => chat.id === chatButton.dataset.chat) || null;
+    if (!nextChat) return;
+    activeChat = nextChat;
     pendingApprovals = [];
     streamingText = '';
     streamingActivity = [];
     lastError = '';
     retryContent = '';
     lastSubmittedContent = '';
-    composerIntelligence = activeChat?.intelligence || 'normal';
+    executionState = 'idle';
+    composerIntelligence = activeChat.intelligence;
     renderNav();
     renderHeader();
     renderMessages();
     renderComposer();
+    void refresh();
     return;
   }
   const projectButton = target.closest<HTMLElement>('[data-project]');
@@ -575,16 +579,14 @@ modalRoot.addEventListener('click', async (event) => {
     const providerId = document.querySelector<HTMLSelectElement>('#chat-provider')?.value || activeChat.providerId;
     const model = document.querySelector<HTMLSelectElement>('#chat-model')?.value || activeChat.model;
     const permissionLevel = document.querySelector<HTMLSelectElement>('#chat-permission')?.value || activeChat.permissionLevel;
-    if (providerId === 'unconfigured' || !model) {
-      closeModal();
-      await openProviderSettings();
-      return;
-    }
+    if (providerId === 'unconfigured' || !model) { closeModal(); await openProviderSettings(); return; }
     try { activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId, model, intelligence: activeChat.intelligence, permissionLevel }); composerIntelligence = activeChat.intelligence; closeModal(); executionState = 'idle'; lastError = ''; retryContent = ''; lastSubmittedContent = ''; await refresh(); } catch (error) { setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.'); }
   }
 });
 
 window.autoCodez.onStreamEvent((event) => {
+  const eventChatId = event.chatId;
+  if (eventChatId && activeChat && eventChatId !== activeChat.id) return;
   if (event.type === 'start') {
     executionState = 'running';
     lastError = '';
@@ -593,17 +595,17 @@ window.autoCodez.onStreamEvent((event) => {
   }
   if (event.type === 'delta' && event.text) {
     streamingText += event.text;
-    renderMessages();
+    scheduleMessagesRender();
     return;
   }
   if (event.type === 'tool_call' && event.toolCall) {
     streamingActivity.push(`Solicitou ferramenta: ${event.toolCall.name}`);
-    renderMessages();
+    scheduleMessagesRender();
     return;
   }
   if (event.type === 'activity' && event.activity?.message) {
     streamingActivity.push(event.activity.message);
-    renderMessages();
+    scheduleMessagesRender();
     return;
   }
   if (event.type === 'approval_required') {
@@ -623,9 +625,9 @@ window.autoCodez.onStreamEvent((event) => {
 });
 
 window.autoCodez.onActivity((event) => {
-  if (event.message) {
+  if (event.message && executionState === 'running') {
     streamingActivity.push(event.message);
-    if (executionState === 'running') renderMessages();
+    scheduleMessagesRender();
   }
 });
 
