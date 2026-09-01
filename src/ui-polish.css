@@ -17,7 +17,6 @@
 .api-key-rail-button:focus-visible,
 .terminal-rail-button:focus-visible { outline-offset: 3px; }
 
-/* Chat hierarchy. User messages sit on the right, assistant messages remain on the left. */
 .message.user {
   align-self: flex-end;
   width: min(78%, 760px);
@@ -34,23 +33,16 @@
   color: #8f99a8;
 }
 
-.message.user .message-content {
-  text-align: left;
-}
+.message.user .message-content { text-align: left; }
 
-.message.assistant {
+.message.assistant,
+.message.tool,
+.message.system {
   align-self: flex-start;
   width: min(84%, 820px);
   margin-right: auto;
 }
 
-.message.tool,
-.message.system {
-  align-self: flex-start;
-  width: min(84%, 820px);
-}
-
-/* Chat actions. Gear and raw X are replaced with recognizable edit and trash icons. */
 .chat-settings {
   opacity: 0;
   color: #8d97a5;
@@ -97,16 +89,20 @@
 .chat-item:hover .chat-settings,
 .chat-item:hover .chat-delete,
 .chat-settings:focus-visible,
-.chat-delete:focus-visible {
-  opacity: 1;
-}
-
+.chat-delete:focus-visible,
 .chat-item:focus-within .chat-settings,
-.chat-item:focus-within .chat-delete {
-  opacity: 1;
+.chat-item:focus-within .chat-delete { opacity: 1; }
+
+.chat-settings:focus-visible,
+.chat-delete:focus-visible {
+  outline: 2px solid #586577;
+  outline-offset: 1px;
 }
 
-/* The intelligence control uses a restrained line-art brain instead of an emoji. */
+.chat-item:has(.chat-delete:hover) {
+  border-color: #332326;
+}
+
 .intelligence-brain {
   width: 16px;
   height: 16px;
@@ -118,11 +114,8 @@
 }
 
 .intelligence-button:hover .intelligence-brain,
-.intelligence-button.open .intelligence-brain {
-  color: #e1e7ee;
-}
+.intelligence-button.open .intelligence-brain { color: #e1e7ee; }
 
-/* Before the first streamed token arrives, keep the state minimal. */
 .messages:has(.activity-card):not(:has(.message.assistant.streaming)):not(:has(.approval-card)):not(:has(.activity-line.error))::after {
   content: "...";
   display: block;
@@ -135,9 +128,7 @@
   animation: auto-codez-loading-dots 1.2s steps(1, end) infinite;
 }
 
-.messages:has(.activity-card):not(:has(.message.assistant.streaming)):not(:has(.approval-card)):not(:has(.activity-line.error)) .activity-card {
-  display: none;
-}
+.messages:has(.activity-card):not(:has(.message.assistant.streaming)):not(:has(.approval-card)):not(:has(.activity-line.error)) .activity-card { display: none; }
 
 @keyframes auto-codez-loading-dots {
   0%, 33% { content: "."; }
@@ -145,16 +136,23 @@
   67%, 100% { content: "..."; }
 }
 
-/* Keep approval and error cards fully visible. */
 .activity-card:has(.approval-card),
 .activity-card:has(.activity-line.error) { display: block; }
+
+@media (max-width: 900px) {
+  .message.user { width: min(82%, 700px); }
+  .message.assistant,
+  .message.tool,
+  .message.system { width: min(88%, 760px); }
+}
 
 @media (max-width: 720px) {
   .rail-button.api-key-rail-button,
   .rail-button.terminal-rail-button { width: 36px; height: 36px; }
-
   .message.user,
   .message.assistant,
   .message.tool,
   .message.system { width: 92%; }
+  .chat-settings,
+  .chat-delete { opacity: 1; width: 30px; height: 30px; }
 }
