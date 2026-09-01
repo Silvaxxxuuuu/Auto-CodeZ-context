@@ -110,18 +110,19 @@ export class ToolRuntime {
   async approve(approvalId: string): Promise<AIToolResult> {
     const approval = this.approvals.get(approvalId);
     if (!approval) throw new Error('Aprovação não encontrada ou já processada.');
+
+    const journalResult = await this.getCompletedJournalResult(approvalId);
+    if (journalResult) {
+      this.approvals.resolve(approvalId);
+      return journalResult;
+    }
+
     try {
       await this.assertPrecondition(approval.projectId, approval.diffPlan);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.activity.failure('tool', `Aprovação ${approvalId} não pôde ser executada: ${message}`);
       return { toolCallId: approval.toolCall.id, ok: false, error: message, approvalId, pendingApproval: true, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
-    }
-
-    const journalResult = await this.getCompletedJournalResult(approvalId, approval);
-    if (journalResult) {
-      this.approvals.resolve(approvalId);
-      return journalResult;
     }
 
     const result = await this.executeNow(approval.projectId, approval.toolCall, approvalId, approval.diffPlan);
@@ -230,11 +231,10 @@ export class ToolRuntime {
     await this.persistJournal();
   }
 
-  private async getCompletedJournalResult(approvalId: string, approval: ApprovalRequest): Promise<AIToolResult | undefined> {
+  private async getCompletedJournalResult(approvalId: string): Promise<AIToolResult | undefined> {
     const entry = this.journal.get(approvalId);
     if (!entry) return undefined;
-    const completed = await this.matchesExpectedState(entry);
-    if (!completed) return undefined;
+    if (!(await this.matchesExpectedState(entry))) return undefined;
     const result = await this.buildJournalResult(entry);
     await this.finishJournal(approvalId);
     return result;
