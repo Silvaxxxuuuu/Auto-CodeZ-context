@@ -33,7 +33,6 @@ function modelScore(model: AIModel): number {
   if (/(?:deprecated|legacy|old)/i.test(id)) score -= 100;
   if (/(?:lite|nano|micro|tiny)/i.test(id)) score -= 25;
   if (/(?:mini|haiku)/i.test(id)) score -= 10;
-  if (/(?:pro|opus)/i.test(id)) score += 8;
   const versionNumbers = id.match(/(?:^|[-_.])(?:gpt|claude|gemini)?[-_.]?(\d+(?:\.\d+)?)/i);
   if (versionNumbers?.[1]) score += Number(versionNumbers[1]) * 2;
   return score;
