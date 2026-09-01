@@ -75,6 +75,8 @@ function render(): void {
   const ordered = [...runs.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_RUNS);
   container.hidden = ordered.length === 0;
   container.innerHTML = ordered.map((run) => {
+    const existingRun = container.querySelector<HTMLElement>(`[data-run-id="${CSS.escape(run.runId)}"]`);
+    const detailsMarkup = existingRun?.querySelector<HTMLElement>('.execution-run-details')?.outerHTML || '<div class="execution-run-details"></div>';
     const steps = run.steps.slice(-MAX_STEPS).map((step) => {
       const status = normalizeStatus(step.status);
       const detail = step.commandResult
@@ -84,8 +86,9 @@ function render(): void {
           : '';
       return `<div class="execution-step"><span class="execution-step-status ${statusClass(status)}"></span><span class="execution-step-label">${escapeHtml(stepLabel(step))}</span><span class="execution-step-detail">${escapeHtml(detail || statusLabel(status))}</span></div>`;
     }).join('');
-    return `<article class="execution-run ${statusClass(run.status)}" data-run-id="${escapeHtml(run.runId)}"><div class="execution-run-header"><div><div class="execution-run-kicker">Execução do agente</div><div class="execution-run-title">${escapeHtml(runTitle(run))}</div></div><span class="execution-run-status">${statusLabel(run.status)}</span></div><div class="execution-run-message">${escapeHtml(run.message)}</div><div class="execution-steps">${steps}</div></article>`;
+    return `<article class="execution-run ${statusClass(run.status)}" data-run-id="${escapeHtml(run.runId)}"><div class="execution-run-header"><div><div class="execution-run-kicker">Execução do agente</div><div class="execution-run-title">${escapeHtml(runTitle(run))}</div></div><span class="execution-run-status">${statusLabel(run.status)}</span></div><div class="execution-run-message">${escapeHtml(run.message)}</div><div class="execution-steps">${steps}</div>${detailsMarkup}</article>`;
   }).join('');
+  ordered.forEach((run) => window.dispatchEvent(new CustomEvent('auto-codez-execution-run-rendered', { detail: { runId: run.runId } })));
 }
 
 function handleActivity(value: unknown): void {
