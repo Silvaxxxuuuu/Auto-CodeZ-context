@@ -186,7 +186,7 @@ O usuário confirmou que a UI deixou de congelar.
 Commits relevantes:
 719efd604353fe4ded8b06783055c7d09b14f139 — streaming
 fd7d2295ce44db46ee856009a08d2a84d8a5f024 — execution visibility
- d0a90976316e426e280ff9450ab6642ad5c0f586 — remoção de módulo redundante
+d0a90976316e426e280ff9450ab6642ad5c0f586 — remoção de módulo redundante
 2a8603fce62b38f0534a5a7413863db58ef44791 — recovery UI
 
 Proteger contra regressões.
@@ -242,6 +242,8 @@ Composer conceitual:
 [ anexar ] [ Digite uma mensagem... ] [ Inteligência ] [ enviar ]
 
 Provider/modelo ativo deve ser identificado no cabeçalho/configuração do chat, não necessariamente no composer.
+
+A área de Perfil é o local exclusivo da interface principal para identidade da conta e contas externas vinculadas. O usuário deve poder visualizar e gerenciar ali as identidades Google, GitHub, Microsoft, Passkeys e acesso por Magic Link. Segurança permanece responsável por sessões/dispositivos/proteções; Sincronização permanece responsável por estado de sync, pendências e conflitos.
 
 ============================================================
 13. CHAT / HISTÓRICO
@@ -555,22 +557,62 @@ Devem ser:
 - não retornados em texto puro em listagens comuns.
 
 ============================================================
-27. LOGIN / RECUPERAÇÃO
+27. LOGIN / IDENTIDADES VINCULADAS / RECUPERAÇÃO
 ============================================================
 
-Métodos planejados:
+A autenticação do Auto CodeZ é passwordless-first.
+
+Métodos adotados como núcleo:
 - Google
 - GitHub
-- email + senha
+- Microsoft
+- Passkeys
 
-Google/GitHub: o provedor externo é responsável pela recuperação da identidade externa.
+Acesso por e-mail, quando necessário, usa Magic Link temporário e não senha.
 
-Email + senha: Auto CodeZ será responsável pela recuperação.
+Telefone/OTP não faz parte da arquitetura planejada.
+E-mail + senha não faz parte da arquitetura planejada.
 
-Fluxo planejado:
-problema -> assistente automático -> se não resolver, “Ainda tendo problemas com a recuperação? Fale conosco!” -> suporte/ticket/email -> verificação adequada -> recuperação manual quando aplicável.
+A conta Auto CodeZ é independente das identidades externas. Um usuário pode vincular várias identidades à mesma conta, por exemplo:
 
-A recuperação real precisa de controles de segurança e nunca pode depender apenas de informação facilmente falsificável.
+Auto CodeZ Account
+├── Google
+├── GitHub
+├── Microsoft
+├── Passkey(s)
+└── Magic Link / e-mail
+
+Essas identidades não criam contas Auto CodeZ separadas. São diferentes mecanismos para autenticar a mesma conta.
+
+A aba Perfil da interface principal é o local dedicado ao gerenciamento de identidade:
+- perfil do usuário;
+- e-mail principal;
+- contas Google vinculadas;
+- contas GitHub vinculadas;
+- contas Microsoft vinculadas;
+- Passkeys;
+- acesso por Magic Link;
+- vincular nova identidade;
+- desvincular identidade, respeitando a regra de que a conta não pode ficar sem nenhum método de recuperação/acesso válido.
+
+Segurança permanece separada e concentra:
+- dispositivos conectados;
+- sessões;
+- revogação;
+- atividade de autenticação;
+- proteções de segurança.
+
+Sincronização permanece separada e concentra:
+- estado da sincronização;
+- pendências;
+- conflitos;
+- solicitações de alteração.
+
+Google, GitHub e Microsoft são responsáveis pela recuperação de suas respectivas identidades externas. Para Magic Link, o e-mail funciona como prova temporária de acesso.
+
+Não existe fluxo planejado de recuperação por senha, pois senha não é parte do modelo principal.
+
+Qualquer recuperação excepcional da conta deve possuir controles de segurança, auditoria e verificação adequada. Suporte manual, se necessário, deve ser posterior ao fluxo automático e nunca baseado apenas em informações facilmente falsificáveis.
 
 ============================================================
 28. DISPOSITIVOS CONECTADOS
@@ -668,9 +710,13 @@ FASE 1 — ESTABILIZAÇÃO
 FASE 2 — ACCOUNT FOUNDATION
 - modelo de conta;
 - identidade;
+- identidades externas vinculadas;
 - sessões;
 - dispositivos;
-- autenticação;
+- autenticação passwordless-first;
+- Passkeys;
+- OAuth Google/GitHub/Microsoft;
+- Magic Link;
 - segurança;
 - modelo sincronizável.
 
@@ -735,7 +781,9 @@ RESOLVIDO/MELHORADO:
 - ícone de inteligência;
 - controles de chat/inteligência;
 - classificação de indisponibilidade de provider;
-- fallback de modelo configurado durante falha de discovery.
+- fallback de modelo configurado durante falha de discovery;
+- fundação inicial de Account, Device Identity, Sync Queue e Secret Vault;
+- modelo de identidades vinculadas à mesma conta.
 
 PENDENTE/VERIFICAR:
 - exibição correta de billing/quota;
@@ -745,13 +793,17 @@ PENDENTE/VERIFICAR:
 - incompatibilidades e bugs gerais;
 - execução completa de ferramentas;
 - persistência de estados;
+- UI real de Perfil/Conta;
+- autenticação OAuth;
+- Passkeys;
+- Magic Link;
+- backend/cloud de Account;
 - Settings;
 - Account/Sync;
 - secrets cloud;
 - projetos sincronizados;
 - conflitos;
-- plugins;
-- login.
+- plugins.
 
 ============================================================
 35. VALIDAÇÃO
