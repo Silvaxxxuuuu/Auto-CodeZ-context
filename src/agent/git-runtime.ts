@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { ProjectRecord } from '../ai/types';
+import type { GitOperationSummary, ProjectRecord } from '../ai/types';
 
 const execFileAsync = promisify(execFile);
 const MAX_OUTPUT = 2 * 1024 * 1024;
@@ -29,11 +29,6 @@ export interface GitCommitSummary {
   author: string;
   date: string;
   subject: string;
-}
-
-export interface GitOperationResult {
-  output: string;
-  branch: string;
 }
 
 function requireSafeBranchName(name: string): string {
@@ -120,36 +115,36 @@ export class GitRuntime {
     });
   }
 
-  async createBranch(projectId: string, name: string): Promise<GitOperationResult> {
+  async createBranch(projectId: string, name: string): Promise<GitOperationSummary> {
     const branch = requireSafeBranchName(name);
     const output = await this.git(projectId, ['switch', '-c', '--', branch]);
-    return { output: output.trim(), branch };
+    return { operation: 'create_branch', output: output.trim(), branch };
   }
 
-  async checkout(projectId: string, name: string): Promise<GitOperationResult> {
+  async checkout(projectId: string, name: string): Promise<GitOperationSummary> {
     const branch = requireSafeBranchName(name);
     const output = await this.git(projectId, ['switch', '--', branch]);
-    return { output: output.trim(), branch };
+    return { operation: 'checkout', output: output.trim(), branch };
   }
 
-  async stage(projectId: string, paths: string[]): Promise<GitOperationResult> {
+  async stage(projectId: string, paths: string[]): Promise<GitOperationSummary> {
     if (!Array.isArray(paths) || paths.length === 0) throw new Error('Selecione ao menos um arquivo para adicionar ao commit.');
     const safePaths = paths.map(requireSafePath);
     const output = await this.git(projectId, ['add', '--', ...safePaths]);
     const status = await this.status(projectId);
-    return { output: output.trim(), branch: status.branch };
+    return { operation: 'stage', output: output.trim(), branch: status.branch };
   }
 
-  async stageAll(projectId: string): Promise<GitOperationResult> {
+  async stageAll(projectId: string): Promise<GitOperationSummary> {
     const output = await this.git(projectId, ['add', '--all']);
     const status = await this.status(projectId);
-    return { output: output.trim(), branch: status.branch };
+    return { operation: 'stage_all', output: output.trim(), branch: status.branch };
   }
 
-  async commit(projectId: string, message: string): Promise<GitOperationResult> {
+  async commit(projectId: string, message: string): Promise<GitOperationSummary> {
     const commitMessage = requireCommitMessage(message);
     const output = await this.git(projectId, ['commit', '-m', commitMessage]);
     const status = await this.status(projectId);
-    return { output: output.trim(), branch: status.branch };
+    return { operation: 'commit', output: output.trim(), branch: status.branch };
   }
 }
