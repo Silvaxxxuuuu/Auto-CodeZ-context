@@ -1,4 +1,4 @@
-import type { AIProviderConfig, AIResponse, AIStreamEvent, AIToolDefinition, ChatRecord } from './types';
+import type { AIModel, AIProviderConfig, AIResponse, AIStreamEvent, AIToolDefinition, ChatRecord } from './types';
 import { ActivityRuntime } from '../agent/activity-runtime';
 import { CapabilityResolver } from './capability-resolver';
 import { IntelligenceRuntime } from './intelligence-runtime';
@@ -58,7 +58,7 @@ export class ChatRuntime {
 
   private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string) {
     const adapter = this.registry.get(config.id);
-    let model;
+    let model: AIModel;
     try {
       const availableModels = await this.models.list(config);
       model = this.models.find(availableModels, chat.model, config.id);
