@@ -1,4 +1,4 @@
-import type { GitBranch, GitCommitSummary, GitRuntime, GitStatus } from './git-runtime';
+import type { GitBranch, GitCommitSummary, GitOperationResult, GitRuntime, GitStatus } from './git-runtime';
 
 export class GitService {
   constructor(private readonly runtime: GitRuntime) {}
@@ -17,5 +17,17 @@ export class GitService {
 
   log(projectId: string, limit?: number): Promise<GitCommitSummary[]> {
     return this.runtime.log(projectId, limit);
+  }
+
+  createBranch(projectId: string, name: string): Promise<GitOperationResult> {
+    return this.runtime.createBranch(projectId, name);
+  }
+
+  checkout(projectId: string, name: string): Promise<GitOperationResult> {
+    return this.runtime.checkout(projectId, name);
+  }
+
+  commit(projectId: string, message: string): Promise<GitOperationResult> {
+    return this.runtime.commit(projectId, message);
   }
 }
