@@ -38,6 +38,12 @@ function maskApiKey(apiKey: string): string {
   return `${apiKey.slice(0, 4)}••••••••${apiKey.slice(-4)}`;
 }
 
+function requireKeySummary(keys: ProviderKeySummary[], keyId: string): ProviderKeySummary {
+  const key = keys.find((item) => item.id === keyId);
+  if (!key) throw new Error('API key não encontrada.');
+  return key;
+}
+
 export class ProviderManager {
   readonly registry: ProviderRegistry;
   private configs: AIProviderConfig[] = [];
@@ -116,7 +122,7 @@ export class ProviderManager {
     this.activeKeyIds[providerId] = key.id;
     this.syncConfigs();
     await this.persistKeys();
-    return { key: (await this.listKeys()).find((item) => item.id === key.id)!, providers: await this.list(), models: discovery.models, ...(discovery.discoveryError ? { discoveryError: discovery.discoveryError } : {}) };
+    return { key: requireKeySummary(await this.listKeys(), key.id), providers: await this.list(), models: discovery.models, ...(discovery.discoveryError ? { discoveryError: discovery.discoveryError } : {}) };
   }
 
   async renameKey(keyId: string, name: string): Promise<ProviderKeySummary> {
@@ -128,7 +134,7 @@ export class ProviderManager {
     key.name = normalized;
     key.updatedAt = Date.now();
     await this.persistKeys();
-    return (await this.listKeys()).find((item) => item.id === keyId)!;
+    return requireKeySummary(await this.listKeys(), keyId);
   }
 
   async setActiveKey(keyId: string): Promise<{ key: ProviderKeySummary; providers: ProviderSummary[] }> {
@@ -137,7 +143,7 @@ export class ProviderManager {
     this.activeKeyIds[key.providerId] = key.id;
     this.syncConfigs();
     await this.persistKeys();
-    return { key: (await this.listKeys()).find((item) => item.id === keyId)!, providers: await this.list() };
+    return { key: requireKeySummary(await this.listKeys(), keyId), providers: await this.list() };
   }
 
   async removeKey(keyId: string): Promise<{ providers: ProviderSummary[]; keys: ProviderKeySummary[] }> {
@@ -209,7 +215,10 @@ export class ProviderManager {
   }
 
   private async persistKeys(): Promise<void> {
-    const metadata: ProviderKeyState = { keys: this.keys.map(({ apiKey: _apiKey, ...key }) => key), activeKeyIds: this.activeKeyIds };
+    const metadata: ProviderKeyState = {
+      keys: this.keys.map((key) => ({ id: key.id, name: key.name, providerId: key.providerId, ...(key.baseUrl ? { baseUrl: key.baseUrl } : {}), ...(key.selectedModel ? { selectedModel: key.selectedModel } : {}), createdAt: key.createdAt, updatedAt: key.updatedAt })),
+      activeKeyIds: this.activeKeyIds
+    };
     await this.storage.write(KEY_STATE_FILE, metadata);
     await this.storage.writeEncrypted(KEY_SECURE_FILE, JSON.stringify({ keys: this.keys }));
     await this.storage.write(STATE_FILE, { configs: this.configs.map((config) => ({ ...config, apiKey: '' })) });
