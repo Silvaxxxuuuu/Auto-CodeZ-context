@@ -1,24 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GitService } from '../src/agent/git-service';
-import type { GitBranch, GitCommitSummary, GitRuntime, GitStatus } from '../src/agent/git-runtime';
+import { GitRuntime } from '../src/agent/git-runtime';
+import type { GitBranch, GitCommitSummary, GitStatus } from '../src/agent/git-runtime';
 
-class FakeGitRuntime implements GitRuntime {
-  async status(projectId: string): Promise<GitStatus> {
-    return { branch: projectId, ahead: 1, behind: 2, clean: true, files: [] };
-  }
-
-  async branches(projectId: string): Promise<GitBranch[]> {
-    return [{ name: projectId, current: true }];
-  }
-
-  async diff(projectId: string): Promise<string> {
-    return `diff:${projectId}`;
-  }
-
-  async log(projectId: string, limit?: number): Promise<GitCommitSummary[]> {
-    return [{ hash: projectId, shortHash: projectId.slice(0, 7), author: 'test', date: '2026-01-01T00:00:00Z', subject: `limit:${limit ?? 'default'}` }];
-  }
+class FakeGitRuntime extends GitRuntime {
+  constructor() { super(async () => []); }
+  override async status(projectId: string): Promise<GitStatus> { return { branch: projectId, ahead: 1, behind: 2, clean: true, files: [] }; }
+  override async branches(projectId: string): Promise<GitBranch[]> { return [{ name: projectId, current: true }]; }
+  override async diff(projectId: string): Promise<string> { return `diff:${projectId}`; }
+  override async log(projectId: string, limit?: number): Promise<GitCommitSummary[]> { return [{ hash: projectId, shortHash: projectId.slice(0, 7), author: 'test', date: '2026-01-01T00:00:00Z', subject: `limit:${limit ?? 'default'}` }]; }
 }
 
 test('GitService delegates read-only operations to GitRuntime', async () => {
