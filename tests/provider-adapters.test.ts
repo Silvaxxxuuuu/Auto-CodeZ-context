@@ -22,7 +22,7 @@ const request: AIRequest = {
   tools: [{
     name: 'read_file',
     description: 'Read a file',
-    parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+    parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false },
     requiresWriteAccess: false,
     requiresApproval: false,
   }],
@@ -107,6 +107,9 @@ test('Google adapter builds generateContent requests and parses tool calls', asy
     const body = readBody(init);
     assert.equal(body.contents instanceof Array, true);
     assert.equal(body.tools instanceof Array, true);
+    const declarations = (body.tools as Array<{ functionDeclarations?: Array<{ parameters?: Record<string, unknown> }> }>)[0]?.functionDeclarations || [];
+    assert.equal(declarations.length, 1);
+    assert.equal('additionalProperties' in (declarations[0]?.parameters || {}), false);
     return jsonResponse({
       candidates: [{ content: { parts: [{ text: 'Hello Google' }, { functionCall: { name: 'read_file', id: 'call_2', args: { path: 'README.md' } } }] } }],
       usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 4, totalTokenCount: 7 },
