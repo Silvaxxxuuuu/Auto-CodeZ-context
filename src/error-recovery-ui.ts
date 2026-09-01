@@ -46,6 +46,15 @@ function openApiKeys(): void {
   document.querySelector<HTMLButtonElement>('[data-action="ai-settings"]')?.click();
 }
 
+function openChatAiSettings(): void {
+  const providerChip = document.querySelector<HTMLButtonElement>('.provider-chip');
+  if (providerChip) {
+    providerChip.click();
+    return;
+  }
+  openApiKeys();
+}
+
 function createToast(message: string): void {
   document.querySelector('.ac-ui-toast')?.remove();
   const toast = document.createElement('div');
@@ -125,9 +134,9 @@ function syncRecovery(): void {
   activity.appendChild(panel);
   panel.querySelector<HTMLButtonElement>('[data-recovery-action]')?.addEventListener('click', () => {
     if (kind === 'authentication' || kind === 'billing') { openApiKeys(); return; }
-    if (kind === 'quota') { document.querySelector<HTMLButtonElement>('.provider-chip')?.click(); return; }
+    if (kind === 'quota') { openChatAiSettings(); return; }
     if (kind === 'rate_limit' || kind === 'network' || kind === 'server') { retryLastMessage(); return; }
-    document.querySelector<HTMLButtonElement>('[data-action="ai-settings"]')?.click();
+    openChatAiSettings();
   });
 }
 
