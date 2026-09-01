@@ -62,9 +62,11 @@ contextBridge.exposeInMainWorld('autoCodez', {
     const value = requireObject(input, 'Mensagem');
     return invoke('chat:send', { chatId: requireIdentifier(value.chatId, 'Chat'), content: requireNonEmptyString(value.content, 'Mensagem') });
   },
-  streamChat: (input: { chatId: string; content: string }) => {
+  streamChat: async (input: { chatId: string; content: string }) => {
     const value = requireObject(input, 'Mensagem');
-    return invoke('chat:stream', { chatId: requireIdentifier(value.chatId, 'Chat'), content: requireNonEmptyString(value.content, 'Mensagem') });
+    const result = await invoke<{ pendingApprovalIds: string[]; chat: unknown; error?: string }>('chat:stream', { chatId: requireIdentifier(value.chatId, 'Chat'), content: requireNonEmptyString(value.content, 'Mensagem') });
+    if (result.error) throw new Error(result.error);
+    return result;
   },
   onStreamEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
@@ -114,7 +116,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
     },
     checkout: (input: { projectId: string; name: string }) => {
       const value = requireObject(input, 'Dados do checkout');
-      return invoke('git:checkout', { projectId: requireIdentifier(value.projectId, 'Projeto'), name: requireNonEmptyString(value.name, 'Branch') });
+      return invoke('git:checkout', { projectId: requireIdentifier(value.projectId, 'Projeto'), name: requireNonEmptyString(value.name, 'Nome da branch') });
     },
     stage: (input: { projectId: string; paths: string[] }) => {
       const value = requireObject(input, 'Dados do staging');
