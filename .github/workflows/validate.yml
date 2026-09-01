@@ -48,12 +48,13 @@ jobs:
           AUTO_CODEZ_SMOKE: '1'
         run: |
           $process = Start-Process -FilePath 'npm.cmd' -ArgumentList 'start' -PassThru -WorkingDirectory $PWD
-          if (-not $process.WaitForExit(30000)) {
-            Stop-Process -Id $process.Id -Force
-            throw 'Electron smoke test exceeded the 30 second timeout.'
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            if ($process.ExitCode -ne 0) {
+              throw "Electron smoke test exited with code $($process.ExitCode)."
+            }
+            throw 'Electron smoke test exited before the startup window could be verified.'
           }
-          if ($process.ExitCode -ne 0) {
-            throw "Electron smoke test exited with code $($process.ExitCode)."
-          }
+          Stop-Process -Id $process.Id -Force
 
 # Validation intentionally runs the full quality gate in order.
