@@ -144,16 +144,12 @@ ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
   const result = await agentRuntime.resume(requireIdentifier(approvalId, 'Aprovação'));
   const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
   if (chat) await chatManager.update({ ...chat, messages: result.messages });
-  if (result.pendingApprovalIds.length) executionManager.update(result.chatId, { state: 'waiting_approval' });
-  else if (executionManager.get(result.chatId)) executionManager.update(result.chatId, { state: 'running' });
   return result;
 });
 ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
   const result = await agentRuntime.reject(requireIdentifier(approvalId, 'Aprovação'));
   const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
   if (chat) await chatManager.update({ ...chat, messages: result.messages });
-  if (result.pendingApprovalIds.length) executionManager.update(result.chatId, { state: 'waiting_approval' });
-  else if (executionManager.get(result.chatId)) executionManager.update(result.chatId, { state: 'running' });
   return result;
 });
 
@@ -168,7 +164,7 @@ ipcMain.handle('git:status', async (_event, projectId: string) => gitService.sta
 ipcMain.handle('git:branches', async (_event, projectId: string) => gitService.branches(requireIdentifier(projectId, 'Projeto')));
 ipcMain.handle('git:diff', async (_event, projectId: string) => gitService.diff(requireIdentifier(projectId, 'Projeto')));
 ipcMain.handle('git:log', async (_event, input: { projectId: string; limit?: number }) => { const value = requireObject(input, 'Dados do histórico Git'); const projectId = requireIdentifier(value.projectId, 'Projeto'); const limit = value.limit === undefined ? undefined : Number(value.limit); if (limit !== undefined && !Number.isFinite(limit)) throw new Error('Limite do histórico Git inválido.'); return gitService.log(projectId, limit); });
-ipcMain.handle('git:create-branch', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados da branch'); return gitService.createBranch(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Nome da branch')); });
+ipcMain.handle('git:create-branch', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados da branch'); return gitService.createBranch(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Nome da branch')); });
 ipcMain.handle('git:checkout', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados do checkout'); return gitService.checkout(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Nome da branch')); });
 ipcMain.handle('git:stage', async (_event, input: { projectId: string; paths: string[] }) => { const value = requireObject(input, 'Dados do staging'); if (!Array.isArray(value.paths) || value.paths.some((item) => typeof item !== 'string')) throw new Error('Arquivos do staging inválidos.'); return gitService.stage(requireIdentifier(value.projectId, 'Projeto'), value.paths.map((item) => requireNonEmptyString(item, 'Arquivo'))); });
 ipcMain.handle('git:stage-all', async (_event, projectId: string) => gitService.stageAll(requireIdentifier(projectId, 'Projeto')));
