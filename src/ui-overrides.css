@@ -1,0 +1,44 @@
+/* Auto CodeZ interface corrections. Keep these overrides isolated from the base visual system. */
+.topbar .top-action.icon-only[data-action="ai-settings"] {
+  width: auto;
+  min-width: 108px;
+  padding: 0 11px;
+  gap: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #aeb7c4;
+  position: relative;
+}
+
+.topbar .top-action.icon-only[data-action="ai-settings"]::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  flex: none;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='m19.43 12.98 1.35-1.05-1.5-2.6-1.68.7a7.6 7.6 0 0 0-1.52-.88L15.82 7h-3l-.26 2.15c-.54.23-1.05.52-1.51.88l-1.68-.7-1.5 2.6 1.35 1.05a7.3 7.3 0 0 0 0 1.76l-1.35 1.05 1.5 2.6 1.68-.7c.46.36.97.65 1.51.88l.26 2.15h3l.26-2.15c.54-.23 1.05-.52 1.51-.88l1.68.7 1.5-2.6-1.35-1.05a7.3 7.3 0 0 0 0-1.76ZM14.32 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.topbar .top-action.icon-only[data-action="ai-settings"]::after {
+  content: "IA";
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.topbar .top-action.icon-only[data-action="ai-settings"]:hover {
+  color: #edf1f6;
+}
+
+/* Keep the primary configuration entry visible on narrow layouts. */
+@media (max-width: 720px) {
+  .topbar .top-action.icon-only[data-action="ai-settings"] {
+    min-width: 38px;
+    width: 38px;
+    padding: 0;
+  }
+  .topbar .top-action.icon-only[data-action="ai-settings"]::after {
+    display: none;
+  }
+}
