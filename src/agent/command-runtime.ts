@@ -3,6 +3,15 @@ import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { ProjectRecord } from '../ai/types';
 
+export interface CommandOutputEvent {
+  stream: 'stdout' | 'stderr';
+  text: string;
+}
+
+export interface CommandRunOptions {
+  onOutput?: (event: CommandOutputEvent) => void;
+}
+
 export interface CommandResult {
   command: string;
   exitCode: number;
@@ -54,7 +63,7 @@ export class CommandRuntime {
     return project;
   }
 
-  async run(projectId: string, manager: string, script: string): Promise<CommandResult> {
+  async run(projectId: string, manager: string, script: string, options: CommandRunOptions = {}): Promise<CommandResult> {
     if (!MANAGERS.has(manager)) throw new Error('Gerenciador de pacotes não permitido.');
     if (!SAFE_SCRIPTS.has(script)) throw new Error('Script não permitido pelo runtime.');
 
@@ -82,6 +91,11 @@ export class CommandRuntime {
         const value = chunk.toString();
         if (target === 'stdout') stdout = (stdout + value).slice(-MAX_OUTPUT_CHARS);
         else stderr = (stderr + value).slice(-MAX_OUTPUT_CHARS);
+        try {
+          options.onOutput?.({ stream: target, text: value });
+        } catch {
+          // A UI observer must never be able to break the command process.
+        }
       };
       const timeout = setTimeout(() => {
         if (settled) return;
