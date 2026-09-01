@@ -2,9 +2,18 @@ import type { PermissionLevel, ToolName } from '../ai/types';
 
 export type PermissionDecision = 'allow' | 'ask' | 'deny';
 
-const readTools = new Set<ToolName>(['read_file', 'search_files']);
+const readTools = new Set<ToolName>(['read_file', 'search_files', 'git_status', 'git_diff', 'git_log', 'git_branches']);
 const safeWriteTools = new Set<ToolName>(['write_file', 'create_file']);
-const sensitiveWriteTools = new Set<ToolName>(['delete_file', 'rename_file', 'run_command']);
+const sensitiveWriteTools = new Set<ToolName>([
+  'delete_file',
+  'rename_file',
+  'run_command',
+  'git_create_branch',
+  'git_checkout',
+  'git_stage',
+  'git_stage_all',
+  'git_commit',
+]);
 
 export class PermissionRuntime {
   decide(level: PermissionLevel, tool: ToolName): PermissionDecision {
