@@ -368,4 +368,4 @@ void terminal.listSessions().then((loaded) => {
   sessions = loaded;
   const running = sessions.find((session) => session.status === 'running');
   activeSessionId = running?.id || sessions[0]?.id || '';
-}).catch(() => undefined);
+}).catch((): void => undefined);
