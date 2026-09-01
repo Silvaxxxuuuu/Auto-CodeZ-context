@@ -4,6 +4,7 @@ import { OpenAIAdapter } from './providers/openai';
 import { GoogleAdapter } from './providers/google';
 import { AnthropicAdapter } from './providers/anthropic';
 import { selectDefaultModel } from './model-selection';
+import { isAuthenticationError, normalizeProviderError } from './provider-errors';
 
 const STATE_FILE = 'providers.json';
 const SECURE_FILE = 'provider-secrets.json';
@@ -12,11 +13,6 @@ interface ProviderState { configs: AIProviderConfig[]; }
 
 function normalizeConfig(value: AIProviderConfig): AIProviderConfig {
   return { id: value.id, displayName: value.displayName, apiKey: value.apiKey, ...(value.baseUrl ? { baseUrl: value.baseUrl } : {}), ...(value.selectedModel ? { selectedModel: value.selectedModel } : {}), enabled: Boolean(value.enabled) };
-}
-
-function isAuthenticationFailure(error: unknown): boolean {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  return /(?:invalid\s+(?:api\s*)?key|api\s*key.*(?:invalid|incorrect|not\s+valid)|invalid\s+authentication|unauthorized|authentication.*failed|permission\s+denied|forbidden)/i.test(message);
 }
 
 export class ProviderManager {
@@ -56,7 +52,14 @@ export class ProviderManager {
     return { ...config };
   }
 
-  async listModels(providerId: ProviderId): Promise<import('./types').AIModel[]> { return this.registry.listModels(this.getConfig(providerId)); }
+  async listModels(providerId: ProviderId): Promise<import('./types').AIModel[]> {
+    const config = this.getConfig(providerId);
+    try {
+      return await this.registry.listModels(config);
+    } catch (error) {
+      throw normalizeProviderError(config.displayName, 'model discovery', error);
+    }
+  }
 
   async save(input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }): Promise<{ providers: ProviderSummary[]; models: import('./types').AIModel[]; discoveryError?: string }> {
     const providerId = input.providerId as ProviderId;
@@ -70,8 +73,9 @@ export class ProviderManager {
       models = await adapter.listModels(config);
       if (!models.length) discoveryError = 'O provider não retornou modelos disponíveis. A API key foi salva e a descoberta de modelos poderá ser repetida.';
     } catch (error) {
-      if (isAuthenticationFailure(error)) throw error;
-      discoveryError = error instanceof Error ? error.message : 'Não foi possível descobrir os modelos deste provider agora. A API key foi salva.';
+      const normalized = normalizeProviderError(config.displayName, 'model discovery', error);
+      if (isAuthenticationError(normalized)) throw normalized;
+      discoveryError = normalized.message || 'Não foi possível descobrir os modelos deste provider agora. A API key foi salva.';
     }
     if (config.selectedModel && models.length && !models.some((model) => model.id === config.selectedModel)) throw new Error('O modelo selecionado não está disponível para este provider.');
     if (!config.selectedModel && models.length) config.selectedModel = selectDefaultModel(providerId, models);
