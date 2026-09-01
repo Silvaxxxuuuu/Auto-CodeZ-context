@@ -7,6 +7,7 @@ export const UNCONFIGURED_MODEL_ID = 'unconfigured';
 
 export class ChatManager {
   private chats: ChatRecord[] = [];
+  private readonly persistedChatIds = new Set<string>();
   private lastUpdatedAt = 0;
 
   constructor(private readonly storage: LocalStorage) {}
@@ -14,6 +15,8 @@ export class ChatManager {
   async init(): Promise<void> {
     const stored = await this.storage.read<ChatRecord[]>('chats.json', []);
     this.chats = stored;
+    this.persistedChatIds.clear();
+    for (const chat of stored) this.persistedChatIds.add(chat.id);
     this.lastUpdatedAt = stored.reduce((latest, chat) => Math.max(latest, chat.updatedAt, chat.createdAt), 0);
   }
 
@@ -25,6 +28,10 @@ export class ChatManager {
     const now = Date.now();
     this.lastUpdatedAt = Math.max(now, this.lastUpdatedAt + 1);
     return this.lastUpdatedAt;
+  }
+
+  private async persist(): Promise<void> {
+    await this.storage.write('chats.json', this.chats.filter((chat) => this.persistedChatIds.has(chat.id)));
   }
 
   async create(input: { title?: string; projectId?: string; providerId?: ProviderId; model?: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel }): Promise<ChatRecord> {
@@ -42,7 +49,6 @@ export class ChatManager {
       updatedAt: now,
     };
     this.chats.unshift(chat);
-    await this.storage.write('chats.json', this.chats);
     return chat;
   }
 
@@ -51,14 +57,15 @@ export class ChatManager {
     if (index < 0) throw new Error('Chat não encontrado.');
     chat.updatedAt = this.nextTimestamp();
     this.chats[index] = chat;
-    await this.storage.write('chats.json', this.chats);
+    if (this.persistedChatIds.has(chat.id)) await this.persist();
   }
 
   async delete(chatId: string): Promise<void> {
     const index = this.chats.findIndex((item) => item.id === chatId);
     if (index < 0) throw new Error('Chat não encontrado.');
     this.chats.splice(index, 1);
-    await this.storage.write('chats.json', this.chats);
+    const wasPersisted = this.persistedChatIds.delete(chatId);
+    if (wasPersisted) await this.persist();
   }
 
   async addMessage(chatId: string, message: AIMessage): Promise<ChatRecord> {
@@ -66,6 +73,7 @@ export class ChatManager {
     if (!chat) throw new Error('Chat não encontrado.');
     chat.messages.push({ ...message, createdAt: message.createdAt || Date.now() });
     if (chat.title === 'Novo chat' && message.role === 'user') chat.title = message.content.slice(0, 52) || 'Novo chat';
+    if (message.role === 'user') this.persistedChatIds.add(chat.id);
     await this.update(chat);
     return chat;
   }
