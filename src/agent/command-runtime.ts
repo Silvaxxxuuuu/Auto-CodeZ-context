@@ -49,6 +49,14 @@ function terminateProcessTree(child: ChildProcess): void {
   }
 }
 
+function commandForPlatform(command: string): { executable: string; args: string[] } {
+  if (process.platform === 'win32') {
+    const comspec = process.env.ComSpec ?? 'cmd.exe';
+    return { executable: comspec, args: ['/d', '/s', '/c', command] };
+  }
+  return { executable: '/bin/sh', args: ['-lc', command] };
+}
+
 export class CommandRuntime {
   constructor(private readonly projects: () => Promise<ProjectRecord[]>) {}
 
@@ -64,12 +72,13 @@ export class CommandRuntime {
 
     const project = await this.project(projectId);
     const cwd = await fs.realpath(path.resolve(project.rootPath));
+    const { executable, args } = commandForPlatform(normalizedCommand);
     const startedAt = Date.now();
 
     return new Promise((resolve, reject) => {
-      const child = spawn(normalizedCommand, {
+      const child = spawn(executable, args, {
         cwd,
-        shell: true,
+        shell: false,
         windowsHide: true,
         detached: process.platform !== 'win32',
         env: { ...process.env, CI: process.env.CI ?? '1' },
