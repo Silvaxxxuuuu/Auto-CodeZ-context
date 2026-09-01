@@ -1,4 +1,5 @@
 const STYLE_ID = 'auto-codez-ui-polish';
+const RECOVERY_ID = 'ac-ai-recovery';
 
 function installStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
@@ -61,6 +62,13 @@ function installStyle(): void {
     .message.error,.message.system.error{border-color:#4b2b31!important;background:#171114!important}
     .message.error .message-content,.message.system.error .message-content{color:#e5b3b8}
 
+    .ac-ai-recovery{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 11px;border:1px solid #343e4b;border-radius:9px;background:#12171e;color:#dfe5ed;font:500 10px Inter,ui-sans-serif,system-ui,sans-serif;cursor:pointer;white-space:nowrap;box-shadow:0 5px 18px #0002;transition:background .14s,border-color .14s,color .14s,transform .14s}
+    .ac-ai-recovery:hover{background:#1a2029;border-color:#4a5666;color:#f3f6f9;transform:translateY(-1px)}
+    .ac-ai-recovery:focus-visible{outline:2px solid #586577;outline-offset:2px}
+    .ac-error-state{border-color:#4b3036!important;background:linear-gradient(145deg,#171317,#121014)!important}
+    .ac-error-state .activity-heading{color:#d9b2b7!important}
+    .ac-error-state .activity-line{color:#c9959c!important}
+
     @keyframes ac-backdrop-in{from{opacity:0}to{opacity:1}}
     @keyframes ac-dialog-in{from{opacity:0;transform:translateY(6px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
     @keyframes ac-form-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
@@ -68,15 +76,52 @@ function installStyle(): void {
     @media(max-width:700px){
       .message.user .message-content,.message.assistant .message-content,.message.tool .message-content{max-width:88%}
       .chat-item{padding-right:60px!important}.chat-settings{right:31px}.chat-delete{right:5px}
-      .chat-header{padding:0 16px}.chat-header h1{max-width:42vw}.header-actions{gap:4px}
+      .chat-header{padding:0 16px}.chat-header h1{max-width:42vw}.header-actions{gap:4px}.ac-ai-recovery{height:30px;padding:0 9px}
       .api-key-manager-backdrop{padding:14px}.api-key-manager{width:calc(100vw - 28px);max-height:calc(100vh - 28px);border-radius:13px}
     }
     @media(prefers-reduced-motion:reduce){
       .messages{scroll-behavior:auto}.api-key-manager-backdrop,.api-key-manager,.api-key-manager-form.open{animation:none}
-      .plugin-card,.api-key-card,.approval-card button{transition:none}.ac-thinking-dot,.message.streaming .message-label:before{animation:none}
+      .plugin-card,.api-key-card,.approval-card button,.ac-ai-recovery{transition:none}.ac-thinking-dot,.message.streaming .message-label:before{animation:none}
     }
   `;
   document.head.appendChild(style);
+}
+
+function openApiKeyManager(): void {
+  const button = document.querySelector<HTMLButtonElement>('.api-key-rail-button');
+  button?.click();
+}
+
+function syncAiRecovery(): void {
+  const header = document.querySelector<HTMLElement>('.chat-header');
+  if (!header) return;
+  const providerChip = header.querySelector<HTMLElement>('.provider-chip');
+  const providerText = providerChip?.textContent?.trim().toLowerCase() ?? '';
+  const isUnconfigured = providerText.includes('ia não configurada');
+  let recovery = header.querySelector<HTMLButtonElement>(`#${RECOVERY_ID}`);
+
+  if (!isUnconfigured) {
+    recovery?.remove();
+    return;
+  }
+
+  if (!recovery) {
+    recovery = document.createElement('button');
+    recovery.id = RECOVERY_ID;
+    recovery.className = 'ac-ai-recovery';
+    recovery.type = 'button';
+    recovery.textContent = 'Configurar IA';
+    recovery.title = 'Adicionar ou selecionar uma API key';
+    recovery.addEventListener('click', openApiKeyManager);
+    header.querySelector('.header-actions')?.prepend(recovery);
+  }
+}
+
+function syncErrorState(): void {
+  const activity = document.querySelector<HTMLElement>('#messages .activity-card');
+  if (!activity) return;
+  const hasError = Boolean(activity.querySelector('.activity-line.error'));
+  activity.classList.toggle('ac-error-state', hasError);
 }
 
 function installThinkingIndicator(attempt = 0): void {
@@ -97,23 +142,31 @@ function installThinkingIndicator(attempt = 0): void {
       activity?.classList.remove('ac-hidden-while-thinking');
       messages.querySelector('.ac-thinking')?.remove();
       document.querySelector('.composer-hint')?.classList.remove('ac-busy');
-      return;
+    } else {
+      activity?.classList.add('ac-hidden-while-thinking');
+      document.querySelector('.composer-hint')?.classList.add('ac-busy');
+      if (!messages.querySelector('.ac-thinking')) {
+        const indicator = document.createElement('article');
+        indicator.className = 'message assistant ac-thinking';
+        indicator.setAttribute('aria-label', 'A IA está respondendo');
+        indicator.innerHTML = '<span class="ac-thinking-dot"></span><span class="ac-thinking-dot"></span><span class="ac-thinking-dot"></span>';
+        messages.appendChild(indicator);
+      }
+      messages.scrollTop = messages.scrollHeight;
     }
 
-    activity?.classList.add('ac-hidden-while-thinking');
-    document.querySelector('.composer-hint')?.classList.add('ac-busy');
-
-    if (!messages.querySelector('.ac-thinking')) {
-      const indicator = document.createElement('article');
-      indicator.className = 'message assistant ac-thinking';
-      indicator.setAttribute('aria-label', 'A IA está respondendo');
-      indicator.innerHTML = '<span class="ac-thinking-dot"></span><span class="ac-thinking-dot"></span><span class="ac-thinking-dot"></span>';
-      messages.appendChild(indicator);
-    }
-    messages.scrollTop = messages.scrollHeight;
+    syncAiRecovery();
+    syncErrorState();
   });
 
   observer.observe(messages, { childList: true, subtree: true });
+
+  const headerObserver = new MutationObserver(syncAiRecovery);
+  const header = document.querySelector<HTMLElement>('.chat-header');
+  if (header) headerObserver.observe(header, { childList: true, subtree: true, characterData: true });
+
+  syncAiRecovery();
+  syncErrorState();
 }
 
 installStyle();
