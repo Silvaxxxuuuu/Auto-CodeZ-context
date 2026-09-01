@@ -64,10 +64,7 @@ async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnTyp
 ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.list(), chats: await chatManager.list(), projects: await projectManager.list() }));
 ipcMain.handle('providers:list-models', async (_event, providerId: string) => providerManager.listModels(requireIdentifier(providerId, 'Provider')));
 ipcMain.handle('providers:list-keys', async () => providerManager.listKeys());
-ipcMain.handle('providers:save-key', async (_event, input: unknown) => {
-  const value = requireObject(input, 'Dados da API key');
-  return providerManager.saveKey({ providerId: requireIdentifier(value.providerId, 'Provider'), name: requireNonEmptyString(value.name, 'Nome da API key'), apiKey: requireNonEmptyString(value.apiKey, 'API key'), model: value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo'), baseUrl: value.baseUrl === undefined ? undefined : requireNonEmptyString(value.baseUrl, 'URL base') });
-});
+ipcMain.handle('providers:save-key', async (_event, input: unknown) => { const value = requireObject(input, 'Dados da API key'); return providerManager.saveKey({ providerId: requireIdentifier(value.providerId, 'Provider'), name: requireNonEmptyString(value.name, 'Nome da API key'), apiKey: requireNonEmptyString(value.apiKey, 'API key'), model: value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo'), baseUrl: value.baseUrl === undefined ? undefined : requireNonEmptyString(value.baseUrl, 'URL base') }); });
 ipcMain.handle('providers:rename-key', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome da API key'); return providerManager.renameKey(requireIdentifier(value.keyId, 'API key'), requireNonEmptyString(value.name, 'Nome da API key')); });
 ipcMain.handle('providers:set-active-key', async (_event, keyId: string) => providerManager.setActiveKey(requireIdentifier(keyId, 'API key')));
 ipcMain.handle('providers:remove-key', async (_event, keyId: string) => providerManager.removeKey(requireIdentifier(keyId, 'API key')));
@@ -96,12 +93,12 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
   const { chat, config, projectContext } = await getChatContext(chatId);
   const lastMessage = chat.messages.at(-1);
   const isRetryOfPersistedUserMessage = lastMessage?.role === 'user' && lastMessage.content === content;
-  if (!isRetryOfPersistedUserMessage) {
-    await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
-  }
+  if (!isRetryOfPersistedUserMessage) await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
   const current = (await chatManager.list()).find((item) => item.id === chat.id);
   if (!current) throw new Error('Chat desapareceu durante a execução.');
-  const emit = (event: AIStreamEvent): void => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', event); };
+  const emit = (event: AIStreamEvent): void => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', { ...event, chatId });
+  };
   emit({ type: 'start' });
   const result = await agentRuntime.runStreaming(config, current, projectContext, current.permissionLevel, emit);
   await chatManager.update({ ...current, messages: result.messages });
