@@ -33,7 +33,7 @@ if (bridge?.onStreamEvent && !(bridge.onStreamEvent as { __autoCodezBatched?: bo
       flush();
     };
 
-    const unsubscribe = original((event) => {
+    const unsubscribe = original((event: StreamEvent) => {
       if (event.type === 'delta' && event.text) {
         queuedEvent = queuedEvent || event;
         queuedText += event.text;
