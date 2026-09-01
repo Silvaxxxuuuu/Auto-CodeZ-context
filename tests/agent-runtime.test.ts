@@ -29,6 +29,12 @@ function adapter(responses: AIResponse[], streamResponses?: AIStreamEvent[][]): 
   };
 }
 
+class MemoryStorage {
+  private readonly values = new Map<string, unknown>();
+  async read<T>(name: string, fallback: T): Promise<T> { return this.values.has(name) ? this.values.get(name) as T : fallback; }
+  async write<T>(name: string, value: T): Promise<void> { this.values.set(name, value); }
+}
+
 async function fixture(responses: AIResponse[], streamResponses?: AIStreamEvent[][]): Promise<{ root: string; agent: AgentRuntime; cleanup: () => Promise<void> }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-agent-test-'));
   await fs.mkdir(path.join(root, 'src'), { recursive: true });
@@ -101,6 +107,46 @@ test('agent stops after the global twelve-round tool limit', async () => {
   const fixtureData = await fixture(responses);
   try { await assert.rejects(fixtureData.agent.run(config, chat('unrestricted'), undefined, 'unrestricted'), /limite de ciclos de ferramentas/); }
   finally { await fixtureData.cleanup(); }
+});
+
+test('persists a recoverable cycle after a provider failure and never re-executes the completed tool', async () => {
+  const storage = new MemoryStorage();
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-agent-recovery-test-'));
+  await fs.mkdir(path.join(root, 'src'), { recursive: true });
+  const project: ProjectRecord = { id: 'project-test', name: 'Recovery Test Project', rootPath: root, createdAt: Date.now(), updatedAt: Date.now() };
+  const workspace = new WorkspaceRuntime(async () => [project]);
+  const tools = new ToolRuntime(workspace);
+  let providerCalls = 0;
+  const registry = new ProviderRegistry();
+  registry.register({
+    id: config.id,
+    displayName: config.displayName,
+    async listModels() { return [{ id: 'test-model', name: 'Test Model', providerId: config.id, capabilities: ['text', 'tools'] }]; },
+    async send() {
+      providerCalls += 1;
+      if (providerCalls === 1) return { content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('recoverable-call', 99)] };
+      throw new Error('Provider interrupted.');
+    },
+  });
+  const chatRuntime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, tools.listDefinitions());
+  const first = new AgentRuntime(chatRuntime, tools, undefined, storage);
+  const firstRun = chat('unrestricted');
+  firstRun.projectId = project.id;
+  await assert.rejects(first.run(config, firstRun, undefined, 'unrestricted'), /Provider interrupted/);
+  const target = path.join(root, 'src', 'recoverable-call.ts');
+  assert.equal(await fs.readFile(target, 'utf8'), 'export const value = 99;');
+  assert.equal(first.listRecoverableRuns().length, 1);
+
+  const secondTools = new ToolRuntime(workspace);
+  const secondChatRuntime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, secondTools.listDefinitions());
+  const second = new AgentRuntime(secondChatRuntime, secondTools, undefined, storage);
+  await second.init();
+  const recovered = second.listRecoverableRuns();
+  assert.equal(recovered.length, 1);
+  await assert.rejects(second.resumeRecovered(recovered[0].runId), /Provider interrupted/);
+  assert.equal(await fs.readFile(target, 'utf8'), 'export const value = 99;');
+  assert.equal(providerCalls, 2);
+  await fs.rm(root, { recursive: true, force: true });
 });
 
 function fixtureDataResponses(): AIResponse[] { return [{ content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('call-approval')] }, { content: 'Finished.', model: 'test-model', providerId: config.id }]; }
