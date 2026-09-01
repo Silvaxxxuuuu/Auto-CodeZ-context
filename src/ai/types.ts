@@ -23,7 +23,16 @@ export type ToolName =
   | 'delete_file'
   | 'rename_file'
   | 'search_files'
-  | 'run_command';
+  | 'run_command'
+  | 'git_status'
+  | 'git_diff'
+  | 'git_log'
+  | 'git_branches'
+  | 'git_create_branch'
+  | 'git_checkout'
+  | 'git_stage'
+  | 'git_stage_all'
+  | 'git_commit';
 
 export interface AIMessage {
   role: MessageRole;
@@ -180,40 +189,32 @@ export interface ProviderSummary {
 export interface ChatRecord {
   id: string;
   title: string;
-  projectId?: string;
   providerId: ProviderId;
   model: string;
   intelligence: IntelligenceLevel;
   permissionLevel: PermissionLevel;
+  projectId?: string;
   messages: AIMessage[];
   createdAt: number;
   updatedAt: number;
 }
 
-export interface ProjectRecord {
-  id: string;
-  name: string;
-  rootPath: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface FileChange {
-  path: string;
-  type: 'created' | 'modified' | 'deleted' | 'renamed';
-  accepted: boolean;
+export interface AIConfig {
+  providerId: ProviderId;
+  model: string;
+  intelligence: IntelligenceLevel;
 }
 
 export interface ActivityEvent {
   id: string;
-  type: 'thought' | 'action' | 'tool' | 'test' | 'build' | 'complete' | 'error';
+  type: 'test' | 'build' | 'tool' | 'action';
   message: string;
-  status: 'pending' | 'running' | 'success' | 'failed';
+  status: 'running' | 'success' | 'failed' | 'pending';
   createdAt: number;
   toolCallId?: string;
   toolName?: ToolName;
-  commandResult?: CommandResultSummary;
+  error?: string;
   changes?: FileDiff[];
   diffPlan?: DiffPlan;
-  error?: string;
+  commandResult?: CommandResultSummary;
 }
