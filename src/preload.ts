@@ -27,6 +27,13 @@ contextBridge.exposeInMainWorld('autoCodez', {
     return invoke('chat:create', { providerId, model, intelligence, permissionLevel, projectId });
   },
   deleteChat: (chatId: string) => invoke('chat:delete', requireIdentifier(chatId, 'Chat')),
+  renameChat: (input: { chatId: string; title: string }) => {
+    const value = requireObject(input, 'Dados do nome do chat');
+    return invoke('chat:rename', {
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      title: requireNonEmptyString(value.title, 'Nome do chat'),
+    });
+  },
   updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => {
     const value = requireObject(input, 'Configurações do chat');
     return invoke('chat:update-settings', {
