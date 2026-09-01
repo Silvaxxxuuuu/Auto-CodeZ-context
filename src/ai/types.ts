@@ -34,6 +34,7 @@ export interface AIMessage {
   toolCalls?: AIToolCall[];
   changes?: FileDiff[];
   diffPlan?: DiffPlan;
+  commandResult?: CommandResultSummary;
 }
 
 export interface AIModel {
