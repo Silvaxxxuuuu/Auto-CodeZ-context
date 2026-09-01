@@ -68,7 +68,9 @@ export class ProviderRequestJournal {
 
   async begin(request: AIRequest): Promise<{ requestId: string; cachedResponse?: AIResponse }> {
     const fingerprint = fingerprintRequest(request);
-    const existing = [...this.entries.values()].find((entry) => entry.fingerprint === fingerprint);
+    const existing = [...this.entries.values()]
+      .filter((entry) => entry.fingerprint === fingerprint)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (existing?.status === 'completed' && existing.response) return { requestId: existing.requestId, cachedResponse: existing.response };
     if (existing?.status === 'pending') throw new Error('Existe uma solicitação ao provider interrompida para este contexto. Recupere ou descarte a solicitação antes de tentar novamente.');
 
