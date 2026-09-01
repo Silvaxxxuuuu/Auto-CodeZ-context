@@ -18,8 +18,8 @@ export class ProviderRequestError extends Error {
 
 export function classifyProviderError(status: number, message: string): ProviderErrorKind {
   const normalized = message.toLowerCase();
+  if (status === 402 || /billing|payment required|no credits|credits remaining|insufficient funds|billing hard limit|payment method|spending limit/.test(normalized)) return 'billing';
   if (status === 401 || status === 403 || /invalid\s+(?:api\s*)?key|api\s*key.*(?:invalid|incorrect|not\s+valid)|invalid\s+authentication|unauthorized|authentication.*failed|permission\s+denied|forbidden/.test(normalized)) return 'authentication';
-  if (status === 402 || /billing|payment required|no credits|credits remaining|insufficient funds|billing hard limit/.test(normalized)) return 'billing';
   if (status === 429 || /quota|rate limit|rate_limit|too many requests|resource exhausted|free tier/.test(normalized)) return /quota|free tier|resource exhausted/.test(normalized) ? 'quota' : 'rate_limit';
   if (/network|fetch failed|timed out|timeout|socket|econn|enotfound|dns/.test(normalized)) return 'network';
   if (status >= 500) return 'server';
