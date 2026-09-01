@@ -59,10 +59,12 @@ test('provider manager preserves a key when model discovery temporarily fails', 
   const storage = new MemoryStorage();
   const manager = new ProviderManager(storage);
   manager.registry.register(adapter(async () => { throw new Error('quota exceeded'); }));
-  const result = await manager.save({ providerId: 'openai', apiKey: 'test-key' });
+  const result = await manager.save({ providerId: 'openai', apiKey: ' test-key ' });
   assert.equal(result.models.length, 0);
   assert.match(result.discoveryError || '', /quota exceeded/);
-  assert.equal((await manager.list()).find((provider) => provider.id === 'openai')?.configured, true);
+  const summary = (await manager.list()).find((provider) => provider.id === 'openai');
+  assert.equal(summary?.configured, true);
+  assert.equal(summary?.apiKeyConfigured, true);
   assert.equal(manager.getConfig('openai').apiKey, 'test-key');
 });
 
@@ -89,4 +91,15 @@ test('provider manager selects a default model after successful discovery', asyn
   const result = await manager.save({ providerId: 'openai', apiKey: 'test-key' });
   assert.equal(result.models[0].id, 'model');
   assert.equal((await manager.list()).find((provider) => provider.id === 'openai')?.selectedModel, 'model');
+});
+
+test('provider manager trims and disables restored credentials that contain only whitespace', async () => {
+  const storage = new MemoryStorage();
+  await storage.write('providers.json', { configs: [{ id: 'openai', displayName: ' OpenAI ', apiKey: '', enabled: true }] });
+  await storage.writeEncrypted('provider-secrets.json', JSON.stringify({ configs: [{ id: 'openai', displayName: ' OpenAI ', apiKey: '   ', enabled: true }] }));
+  const manager = new ProviderManager(storage);
+  await manager.init();
+  const summary = (await manager.list()).find((provider) => provider.id === 'openai');
+  assert.equal(summary?.configured, false);
+  assert.equal(summary?.apiKeyConfigured, false);
 });
