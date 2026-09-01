@@ -29,17 +29,6 @@ type ActivityEvent = {
   error?: string;
 };
 
-declare global {
-  interface Window {
-    autoCodez: {
-      onActivity: (listener: (event: ActivityEvent) => void) => () => void;
-      listApprovals: () => Promise<Approval[]>;
-      approveTool: (approvalId: string) => Promise<{ pendingApprovalIds?: string[] }>;
-      denyTool: (approvalId: string) => Promise<unknown>;
-    };
-  }
-}
-
 const style = document.createElement('style');
 style.textContent = `
 .diff-results { display:flex; flex-direction:column; gap:10px; padding:0 20px 10px; max-height:430px; overflow:auto; }
@@ -228,7 +217,7 @@ async function restorePendingApprovals(): Promise<void> {
 }
 
 function initialize(): void {
-  const unsubscribe = window.autoCodez.onActivity(renderDiff);
+  const unsubscribe = window.autoCodez.onActivity((event) => renderDiff(event as unknown as ActivityEvent));
   window.addEventListener('beforeunload', unsubscribe, { once: true });
   void restorePendingApprovals();
 }
