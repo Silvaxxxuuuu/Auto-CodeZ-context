@@ -1,4 +1,4 @@
-import type { ApprovalRequest, AIToolCall, AIToolDefinition, AIToolResult, DiffPlan, FileDiff, PermissionLevel, ToolName } from '../ai/types';
+import type { ApprovalRequest, AIToolCall, AIToolDefinition, AIToolResult, CommandResultSummary, DiffPlan, FileDiff, PermissionLevel, ToolName } from '../ai/types';
 import { ActivityRuntime } from './activity-runtime';
 import { ApprovalRuntime } from './approval-runtime';
 import { PermissionRuntime } from './permission-runtime';
@@ -16,7 +16,7 @@ const definitions: AIToolDefinition[] = [
   { name: 'run_command', description: 'Run an approved package script such as tests, build, typecheck or lint inside the active workspace.', parameters: { type: 'object', properties: { manager: { type: 'string', enum: ['npm', 'pnpm', 'yarn', 'bun'] }, script: { type: 'string', enum: ['test', 'build', 'typecheck', 'lint', 'package', 'check'] } }, required: ['manager', 'script'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
 ];
 
-interface ToolExecution { output: string; changes?: FileDiff[]; }
+interface ToolExecution { output: string; changes?: FileDiff[]; commandResult?: CommandResultSummary; }
 
 interface ToolJournalStorage {
   read<T>(name: string, fallback: T): Promise<T>;
@@ -203,7 +203,7 @@ export class ToolRuntime {
       if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);
       const execution = await this.executeAllowed(projectId, call.name, call.input);
       this.activity.success('tool', `Concluído: ${call.name}`);
-      const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, changes: execution.changes };
+      const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, changes: execution.changes, commandResult: execution.commandResult };
       if (approvalId) await this.finishJournal(approvalId);
       return result;
     } catch (error) {
@@ -318,7 +318,10 @@ export class ToolRuntime {
         return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] };
       }
       case 'search_files': return { output: JSON.stringify(await this.workspace.searchFiles(projectId, this.stringValue(input, 'query'))) };
-      case 'run_command': return { output: JSON.stringify(await this.commands.run(projectId, this.stringValue(input, 'manager'), this.stringValue(input, 'script'))) };
+      case 'run_command': {
+        const result = await this.commands.run(projectId, this.stringValue(input, 'manager'), this.stringValue(input, 'script'));
+        return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result };
+      }
     }
   }
 }
