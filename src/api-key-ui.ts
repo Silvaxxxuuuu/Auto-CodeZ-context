@@ -12,7 +12,13 @@ type ApiKeyApi = {
 const bridge = window.autoCodez as unknown as ApiKeyApi;
 
 function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
+}
+
+function queryRequired<T extends Element>(root: ParentNode, selector: string): T {
+  const element = root.querySelector<T>(selector);
+  if (!element) throw new Error(`Elemento de interface não encontrado: ${selector}`);
+  return element;
 }
 
 function closeApiKeyManager(): void {
@@ -91,13 +97,16 @@ async function openApiKeyManager(): Promise<void> {
     </section>`;
   document.body.appendChild(backdrop);
 
-  const list = backdrop.querySelector<HTMLElement>('#api-key-list')!;
-  const form = backdrop.querySelector<HTMLFormElement>('#api-key-form')!;
-  const addButton = backdrop.querySelector<HTMLButtonElement>('.api-key-manager-add')!;
-  const cancelButton = backdrop.querySelector<HTMLButtonElement>('.api-key-cancel')!;
-  const closeButton = backdrop.querySelector<HTMLButtonElement>('.api-key-manager-close')!;
-  const nameInput = backdrop.querySelector<HTMLInputElement>('#api-key-name')!;
-  const keyInput = backdrop.querySelector<HTMLInputElement>('#api-key-value')!;
+  const list = queryRequired<HTMLElement>(backdrop, '#api-key-list');
+  const form = queryRequired<HTMLFormElement>(backdrop, '#api-key-form');
+  const addButton = queryRequired<HTMLButtonElement>(backdrop, '.api-key-manager-add');
+  const cancelButton = queryRequired<HTMLButtonElement>(backdrop, '.api-key-cancel');
+  const closeButton = queryRequired<HTMLButtonElement>(backdrop, '.api-key-manager-close');
+  const nameInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-name');
+  const keyInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-value');
+  const providerInput = queryRequired<HTMLSelectElement>(backdrop, '#api-key-provider');
+  const modelInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-model');
+  const baseUrlInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-base-url');
 
   const refresh = async (): Promise<void> => { await renderApiKeys(list); };
   await refresh();
@@ -115,12 +124,12 @@ async function openApiKeyManager(): Promise<void> {
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const saveButton = form.querySelector<HTMLButtonElement>('.api-key-save')!;
-    const providerId = backdrop.querySelector<HTMLSelectElement>('#api-key-provider')!.value;
+    const saveButton = queryRequired<HTMLButtonElement>(form, '.api-key-save');
+    const providerId = providerInput.value;
     const name = nameInput.value.trim();
     const apiKey = keyInput.value.trim();
-    const model = backdrop.querySelector<HTMLInputElement>('#api-key-model')!.value.trim() || undefined;
-    const baseUrl = backdrop.querySelector<HTMLInputElement>('#api-key-base-url')!.value.trim() || undefined;
+    const model = modelInput.value.trim() || undefined;
+    const baseUrl = baseUrlInput.value.trim() || undefined;
     if (!name || !apiKey) return;
     saveButton.disabled = true;
     saveButton.textContent = 'Validando...';
@@ -141,6 +150,7 @@ async function openApiKeyManager(): Promise<void> {
     const target = event.target as HTMLElement;
     const edit = target.closest<HTMLElement>('[data-key-edit]');
     if (edit?.dataset.keyEdit) {
+      const keyId = edit.dataset.keyEdit;
       const card = edit.closest<HTMLElement>('.api-key-card');
       const title = card?.querySelector<HTMLElement>('.api-key-card-title strong');
       if (!card || !title) return;
@@ -153,7 +163,7 @@ async function openApiKeyManager(): Promise<void> {
       const save = async (): Promise<void> => {
         const name = input.value.trim();
         if (!name) { await refresh(); return; }
-        try { await bridge.renameApiKey({ keyId: edit.dataset.keyEdit!, name }); await refresh(); }
+        try { await bridge.renameApiKey({ keyId, name }); await refresh(); }
         catch (error) { window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível renomear a API key.' })); await refresh(); }
       };
       input.addEventListener('keydown', (keyEvent) => { if (keyEvent.key === 'Enter') { keyEvent.preventDefault(); void save(); } if (keyEvent.key === 'Escape') { keyEvent.preventDefault(); void refresh(); } });
