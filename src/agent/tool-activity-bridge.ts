@@ -4,6 +4,7 @@ export interface ToolActivitySnapshot {
   type: ActivityEvent['type'];
   message: string;
   status: ActivityEvent['status'];
+  runId: string;
   toolCallId: string;
   toolName: ToolName;
   result: AIToolResult;
@@ -27,20 +28,14 @@ function activityMessage(toolName: ToolName, result: AIToolResult): string {
   return `Falha: ${toolName}`;
 }
 
-export function createToolActivitySnapshot(toolCallId: string, toolName: ToolName, result: AIToolResult): ToolActivitySnapshot {
-  return {
-    type: activityType(toolName),
-    message: activityMessage(toolName, result),
-    status: activityStatus(result),
-    toolCallId,
-    toolName,
-    result,
-  };
+export function createToolActivitySnapshot(runId: string, toolCallId: string, toolName: ToolName, result: AIToolResult): ToolActivitySnapshot {
+  return { type: activityType(toolName), message: activityMessage(toolName, result), status: activityStatus(result), runId, toolCallId, toolName, result };
 }
 
 export function toActivityInput(snapshot: ToolActivitySnapshot): Omit<ActivityEvent, 'id' | 'createdAt'> {
   const { result } = snapshot;
   return {
+    runId: snapshot.runId,
     type: snapshot.type,
     message: snapshot.message,
     status: snapshot.status,
