@@ -35,7 +35,7 @@ declare global {
         getOutput: (sessionId: string) => Promise<unknown>;
         listHistory: (projectId?: string) => Promise<unknown[]>;
         clearHistory: (projectId?: string) => Promise<void>;
-        onEvent: (listener: (event: unknown) => void) => () => void;
+        onEvent: (listener: (event: unknown) => void) => void;
       };
       git: {
         status: (projectId: string) => Promise<{ branch: string; ahead: number; behind: number; clean: boolean; files: Array<{ path: string; index: string; worktree: string }> }>;
@@ -74,7 +74,9 @@ let pendingApprovals: Approval[] = [];
 let lastError = '';
 let retryContent = '';
 let lastSubmittedContent = '';
-let messageRenderTimer: number | null = null;
+let streamRenderTimer: number | null = null;
+let streamingMessageElement: HTMLElement | null = null;
+let activityElement: HTMLElement | null = null;
 
 app.innerHTML = `
 <div class="app-shell">
@@ -152,12 +154,54 @@ function setExecutionState(state: ExecutionState, error = ''): void {
   renderComposer();
 }
 
-function scheduleMessagesRender(): void {
-  if (messageRenderTimer !== null) return;
-  messageRenderTimer = window.setTimeout(() => {
-    messageRenderTimer = null;
-    renderMessages();
+function scheduleStreamRender(): void {
+  if (streamRenderTimer !== null) return;
+  streamRenderTimer = window.setTimeout(() => {
+    streamRenderTimer = null;
+    renderStreamingDom();
   }, 33);
+}
+
+function ensureStreamingMessage(): HTMLElement | null {
+  if (!activeChat || executionState !== 'running' || !streamingText) return null;
+  if (streamingMessageElement?.isConnected && streamingMessageElement.closest('#messages') === messages) return streamingMessageElement;
+  const article = document.createElement('article');
+  article.className = 'message assistant streaming';
+  article.innerHTML = `<div class="message-label">${escapeHtml(providerName(activeChat.providerId))}</div><div class="message-content"></div>`;
+  messages.appendChild(article);
+  streamingMessageElement = article;
+  return article;
+}
+
+function renderStreamingActivityDom(): void {
+  const activityLines = [...streamingActivity];
+  if (executionState === 'waiting_approval') activityLines.push('Aguardando sua aprovação.');
+  if (lastError) activityLines.push(lastError);
+  const shouldRender = activityLines.length || pendingApprovals.length;
+  if (!shouldRender) {
+    activityElement?.remove();
+    activityElement = null;
+    return;
+  }
+  if (!activityElement?.isConnected || activityElement.closest('#messages') !== messages) {
+    activityElement = document.createElement('div');
+    activityElement.className = 'activity-card';
+    messages.appendChild(activityElement);
+  }
+  activityElement.innerHTML = `<div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line ${executionState === 'failed' ? 'error' : 'running'}">${escapeHtml(line)}</div>`).join('')}${renderApprovals()}`;
+}
+
+function renderStreamingDom(): void {
+  if (!activeChat) return;
+  const wasNearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100;
+  const live = ensureStreamingMessage();
+  if (live) live.querySelector<HTMLElement>('.message-content')!.innerHTML = escapeHtml(streamingText).replace(/\n/g, '<br>');
+  else if (streamingMessageElement) {
+    streamingMessageElement.remove();
+    streamingMessageElement = null;
+  }
+  renderStreamingActivityDom();
+  if (wasNearBottom || executionState === 'running') messages.scrollTop = messages.scrollHeight;
 }
 
 function setIntelligenceMenu(open: boolean): void {
@@ -212,6 +256,8 @@ function renderApprovals(): string {
 }
 
 function renderMessages(): void {
+  streamingMessageElement = null;
+  activityElement = null;
   if (!activeChat) {
     messages.innerHTML = `<div class="welcome"><div class="welcome-mark"><span class="welcome-mark-eye"></span></div><h2>Como você quer trabalhar?</h2><p>Converse com uma IA, crie conteúdo ou abra um projeto para trabalhar em arquivos.</p><div class="welcome-grid"><button data-suggestion="Explique como o Auto CodeZ funciona.">Pergunte qualquer coisa</button><button data-suggestion="Analise meu projeto e explique a estrutura.">Analise um projeto</button><button data-suggestion="Crie uma ideia de interface moderna.">Crie conteúdo</button></div></div>`;
     return;
@@ -225,6 +271,8 @@ function renderMessages(): void {
   const wasNearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100;
   messages.innerHTML = rendered + live + activity;
   if (wasNearBottom || executionState === 'running') messages.scrollTop = messages.scrollHeight;
+  streamingMessageElement = messages.querySelector<HTMLElement>('.message.streaming');
+  activityElement = messages.querySelector<HTMLElement>('.activity-card');
 }
 
 function renderComposer(): void {
@@ -595,17 +643,17 @@ window.autoCodez.onStreamEvent((event) => {
   }
   if (event.type === 'delta' && event.text) {
     streamingText += event.text;
-    scheduleMessagesRender();
+    scheduleStreamRender();
     return;
   }
   if (event.type === 'tool_call' && event.toolCall) {
     streamingActivity.push(`Solicitou ferramenta: ${event.toolCall.name}`);
-    scheduleMessagesRender();
+    scheduleStreamRender();
     return;
   }
   if (event.type === 'activity' && event.activity?.message) {
     streamingActivity.push(event.activity.message);
-    scheduleMessagesRender();
+    scheduleStreamRender();
     return;
   }
   if (event.type === 'approval_required') {
@@ -614,8 +662,6 @@ window.autoCodez.onStreamEvent((event) => {
     return;
   }
   if (event.type === 'complete') {
-    streamingText = '';
-    renderMessages();
     return;
   }
   if (event.type === 'error' && event.error) {
@@ -627,7 +673,7 @@ window.autoCodez.onStreamEvent((event) => {
 window.autoCodez.onActivity((event) => {
   if (event.message && executionState === 'running') {
     streamingActivity.push(event.message);
-    scheduleMessagesRender();
+    scheduleStreamRender();
   }
 });
 
