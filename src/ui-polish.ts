@@ -6,18 +6,18 @@ const APP_SETTINGS_MODAL_ID = 'ac-app-settings-modal';
 type IconName = 'message-circle-plus' | 'folder' | 'blocks' | 'git-branch' | 'square-terminal' | 'key-round' | 'plus' | 'sparkles' | 'settings' | 'user-round' | 'code-2' | 'pencil' | 'trash-2' | 'chevron-down' | 'info' | 'x' | 'send';
 
 const ICON_PATHS: Record<IconName, string[]> = {
-  'message-circle-plus': ['M7.9 20A9 9 0 1 0 4 16.1L2 22Z', 'M8 12h8', 'M12 8v8'],
-  folder: ['M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z'],
-  blocks: ['M7 3H4a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1Z', 'M20 3h-3a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1Z', 'M20 16h-3a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1Z', 'M7 16H4a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1Z'],
+  'message-circle-plus': ['M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719', 'M8 12h8', 'M12 8v8'],
+  folder: ['M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'],
+  blocks: ['M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2', 'M14 2h8v8h-8z'],
   'git-branch': ['M6 3v12', 'M18 9V3', 'M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z', 'M18 3a3 3 0 1 0 0 6 3 3 0 0 0-6Z', 'M6 15c0-3 3-6 9-6'],
   'square-terminal': ['m7 11 3 3-3 3', 'm13 17 4 0', 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z'],
   'key-round': ['m15.5 7.5 3-3', 'm17 5 2 2', 'M11 14a5 5 0 1 1-1-7.9A5 5 0 0 1 11 14Z', 'M16 8l-5 5'],
   plus: ['M5 12h14', 'M12 5v14'],
   sparkles: ['m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z', 'M5 3v4', 'M19 17v4', 'M3 5h4', 'M17 19h4'],
-  settings: ['M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z', 'M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.6 1.5-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V20h-2.4v-.4a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1-1.5-1.5.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H6v-2.1h.3a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.5-1.5.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1.5 1h.3v2.1h-.3a1.7 1.7 0 0 0-1.5 1Z'],
+  settings: ['M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6'],
   'user-round': ['M20 21a8 8 0 0 0-16 0', 'M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z'],
   'code-2': ['m18 16 4-4-4-4', 'm6 8-4 4 4 4', 'm14.5 4-5 16'],
-  pencil: ['M21.174 6.812a1 1 0 0 0-1.986-.164l-.53 3.156a2 2 0 0 1-1.646 1.646l-3.156.53a1 1 0 0 0 .164 1.986h.168a2 2 0 0 1 1.986 1.986v.168a1 1 0 0 0 1.986.164l.53-3.156a2 2 0 0 1 1.646-1.646l3.156-.53a1 1 0 0 0-.164-1.986h-.168a2 2 0 0 1-1.986-1.986v-.168Z', 'm15 5 4 4'],
+  pencil: ['M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z', 'm15 5 4 4'],
   'trash-2': ['M3 6h18', 'M8 6V4h8v2', 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6', 'M10 11v6', 'M14 11v6'],
   'chevron-down': ['m6 9 6 6 6-6'],
   info: ['M12 16v-4', 'M12 8h.01', 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z'],
@@ -62,13 +62,15 @@ function installStyle(): void {
     .ac-lucide-icon{display:block;width:18px;height:18px;min-width:18px;min-height:18px;flex:0 0 18px;overflow:visible;color:currentColor;stroke:currentColor;fill:none;stroke-width:2;pointer-events:none}
     .ac-lucide-icon path,.ac-lucide-icon circle,.ac-lucide-icon line,.ac-lucide-icon polyline,.ac-lucide-icon polygon,.ac-lucide-icon rect{vector-effect:non-scaling-stroke}
     .rail-button{display:inline-flex!important;align-items:center!important;justify-content:center!important;color:inherit!important}
-    .rail-button:before,.rail-button:after,.chat-settings:before,.chat-settings:after,.chat-delete:before,.chat-delete:after,.gear:before,.gear:after,.new-chat-icon:before,.new-chat-icon:after,.new-folder-icon:before,.new-folder-icon:after,.project-folder-icon:before,.project-folder-icon:after,.plugin-card-icon:before,.plugin-card-icon:after,.attach-button:before,.attach-button:after,.send-button:before,.send-button:after,.intelligence-brain:before,.intelligence-brain:after,.provider-chevron:before,.provider-chevron:after,.intelligence-chevron:before,.intelligence-chevron:after,.modal-close:before,.modal-close:after,.info-button:before,.info-button:after,.info-card-icon:before,.info-card-icon:after,.brand-mark:before,.brand-mark:after{content:none!important;display:none!important;background:none!important;mask:none!important;-webkit-mask:none!important}
+    .rail-button:before,.rail-button:after,.chat-settings:before,.chat-settings:after,.chat-delete:before,.chat-delete:after,.gear:before,.gear:after,.new-chat-icon:before,.new-chat-icon:after,.new-folder-icon:before,.new-folder-icon:after,.project-folder-icon:before,.project-folder-icon:after,.plugin-card-icon:before,.plugin-card-icon:after,.attach-button:before,.attach-button:after,.send-button:before,.send-button:after,.intelligence-brain:before,.intelligence-brain:after,.provider-chevron:before,.provider-chevron:after,.intelligence-chevron:before,.intelligence-chevron:after,.modal-close:before,.modal-close:after,.info-button:before,.info-button:after,.info-card-icon:before,.info-card-icon:after,.brand-mark:before,.brand-mark:after,.top-action[data-action="settings"]:before,.top-action[data-action="settings"]:after{content:none!important;display:none!important;background:none!important;mask:none!important;-webkit-mask:none!important}
     .rail-button .ac-lucide-icon{width:17px;height:17px;min-width:17px;min-height:17px;flex-basis:17px}
     .new-chat-icon,.new-folder-icon,.project-folder-icon,.plugin-card-icon,.git-icon,.terminal-icon,.attach-button,.send-button,.intelligence-brain,.provider-chevron,.intelligence-chevron,.info-button,.info-card-icon,.modal-close,.chat-settings,.chat-delete,.gear,.brand-mark{display:inline-flex!important;align-items:center!important;justify-content:center!important;position:relative!important;background:none!important;-webkit-mask:none!important;mask:none!important}
     .new-chat-icon .ac-lucide-icon,.new-folder-icon .ac-lucide-icon,.project-folder-icon .ac-lucide-icon,.plugin-card-icon .ac-lucide-icon,.git-icon .ac-lucide-icon,.terminal-icon .ac-lucide-icon,.attach-button .ac-lucide-icon,.send-button .ac-lucide-icon,.intelligence-brain .ac-lucide-icon,.provider-chevron .ac-lucide-icon,.intelligence-chevron .ac-lucide-icon,.info-button .ac-lucide-icon,.info-card-icon .ac-lucide-icon,.modal-close .ac-lucide-icon,.chat-settings .ac-lucide-icon,.chat-delete .ac-lucide-icon,.gear .ac-lucide-icon,.brand-mark .ac-lucide-icon{width:16px;height:16px;min-width:16px;min-height:16px;flex:0 0 16px}
     .attach-button .ac-lucide-icon,.send-button .ac-lucide-icon{width:18px;height:18px;min-width:18px;min-height:18px;flex-basis:18px}
     .intelligence-brain .ac-lucide-icon{width:16px;height:16px;min-width:16px;min-height:16px;flex-basis:16px}
-    .provider-chevron,.intelligence-chevron{width:12px!important;height:12px!important;min-width:12px!important;min-height:12px!important;flex:0 0 12px!important}
+    .provider-chevron,.intelligence-chevron{width:16px!important;height:16px!important;min-width:16px!important;min-height:16px!important;flex:0 0 16px!important;transform:none!important;display:inline-flex!important;align-items:center!important;justify-content:center!important}
+    .provider-chevron .ac-lucide-icon,.intelligence-chevron .ac-lucide-icon{width:14px!important;height:14px!important;min-width:14px!important;min-height:14px!important;flex:0 0 14px!important}
+    .intelligence-button.open .intelligence-chevron{transform:none!important}
     .brand-mark{width:25px!important;height:25px!important;border:0!important;box-shadow:none!important;border-radius:7px!important;background:transparent!important;color:#e8edf3!important}
     .brand-mark .ac-lucide-icon{width:19px;height:19px;min-width:19px;min-height:19px;flex-basis:19px}
     .git-icon{width:17px!important;height:17px!important;border:0!important;border-radius:0!important;color:inherit!important;opacity:.9!important}
@@ -76,6 +78,8 @@ function installStyle(): void {
     #${APP_SETTINGS_ID}{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border:0;border-radius:9px;color:#aeb7c4;background:transparent;cursor:pointer}
     #${APP_SETTINGS_ID}:hover{color:#eef2f6;background:#171d26}#${APP_SETTINGS_ID} .ac-lucide-icon{width:17px;height:17px;min-width:17px;min-height:17px;flex-basis:17px}
     .chat-title-row .gear{display:none!important}
+    .send-button{display:inline-flex!important;align-items:center!important;justify-content:center!important;visibility:visible!important}
+    .send-button:disabled{opacity:.22!important}
     #${APP_SETTINGS_MODAL_ID}{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.52);padding:24px}
     #${APP_SETTINGS_MODAL_ID}[hidden]{display:none}.ac-app-settings-dialog{width:min(560px,100%);border:1px solid #2a313d;border-radius:14px;background:#10151c;color:#e8edf3;box-shadow:0 24px 70px rgba(0,0,0,.45);overflow:hidden}
     .ac-app-settings-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid #202731}.ac-app-settings-head h2{margin:0;font-size:16px;font-weight:650}
