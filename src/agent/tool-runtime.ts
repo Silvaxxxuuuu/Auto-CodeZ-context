@@ -113,7 +113,8 @@ export class ToolRuntime {
       return result;
     } catch (error) {
       this.approvals.release(approvalId);
-      throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      return { toolCallId: approval.toolCall.id, ok: false, error: message, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
     }
   }
 
