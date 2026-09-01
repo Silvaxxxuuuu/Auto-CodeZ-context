@@ -87,7 +87,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   git: {
     status: (projectId: string) => invoke('git:status', requireIdentifier(projectId, 'Projeto')),
-    branches: (projectId: string) => invoke('git:branches', requireIdentifier(projectId, 'Branch')),
+    branches: (projectId: string) => invoke('git:branches', requireIdentifier(projectId, 'Projeto')),
     diff: (projectId: string) => invoke('git:diff', requireIdentifier(projectId, 'Projeto')),
     log: (input: { projectId: string; limit?: number }) => {
       const value = requireObject(input, 'Dados do histórico Git');
@@ -100,7 +100,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
       const value = requireObject(input, 'Dados da branch');
       return invoke('git:create-branch', {
         projectId: requireIdentifier(value.projectId, 'Projeto'),
-        name: requireNonEmptyString(value.name, 'Nome da branch'),
+        name: requireNonEmptyString(value.name, 'Nome do projeto'),
       });
     },
     checkout: (input: { projectId: string; name: string }) => {
