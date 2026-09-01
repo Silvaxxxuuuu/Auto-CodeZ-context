@@ -17,6 +17,7 @@ import { ActivityRuntime } from './agent/activity-runtime';
 import { ApprovalRuntime } from './agent/approval-runtime';
 import { CommandRuntime } from './agent/command-runtime';
 import { DiffRuntime } from './agent/diff-runtime';
+import { ExecutionManager } from './execution-manager';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
 
@@ -41,6 +42,7 @@ const toolRuntime = new ToolRuntime(workspaceRuntime, permissionRuntime, activit
 toolRuntime.configureGitRuntime(gitRuntime);
 const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefined, activityRuntime, undefined, toolRuntime.listDefinitions());
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
+const executionManager = new ExecutionManager();
 let mainWindow: BrowserWindow | null = null;
 
 function sendTerminalEvent(event: unknown): void { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('terminal:event', event); }
@@ -93,19 +95,43 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
   const { chat, config, projectContext } = await getChatContext(chatId);
   const lastMessage = chat.messages.at(-1);
   const isRetryOfPersistedUserMessage = lastMessage?.role === 'user' && lastMessage.content === content;
-  if (!isRetryOfPersistedUserMessage) await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
   const current = (await chatManager.list()).find((item) => item.id === chat.id);
   if (!current) throw new Error('Chat desapareceu durante a execução.');
+
+  let execution;
+  try {
+    execution = executionManager.start(chatId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', { type: 'error', chatId, error: message });
+    return { pendingApprovalIds: [], chat: current, error: message };
+  }
+
   const emit = (event: AIStreamEvent): void => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', { ...event, chatId });
+    try {
+      if (event.type === 'approval_required') executionManager.update(chatId, { state: 'waiting_approval' });
+      else if (event.type === 'complete') executionManager.update(chatId, { state: 'completed' });
+      else if (event.type === 'error') executionManager.update(chatId, { state: 'failed', error: event.error });
+      else if (event.type === 'tool_call') executionManager.update(chatId, { state: 'running', currentTool: event.toolCall?.name });
+    } catch {
+      // Execution bookkeeping must never interrupt the provider stream.
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', { ...event, chatId, runId: execution.runId });
   };
+
   emit({ type: 'start' });
   try {
-    const result = await agentRuntime.runStreaming(config, current, projectContext, current.permissionLevel, emit);
-    await chatManager.update({ ...current, messages: result.messages });
+    if (!isRetryOfPersistedUserMessage) await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
+    const workingChat = (await chatManager.list()).find((item) => item.id === chat.id);
+    if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
+    const result = await agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit);
+    await chatManager.update({ ...workingChat, messages: result.messages });
+    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval' });
+    else if (executionManager.get(chatId)?.state === 'running') executionManager.update(chatId, { state: 'completed' });
     return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    executionManager.update(chatId, { state: 'failed', error: message });
     emit({ type: 'error', error: message });
     return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: message };
   }
@@ -114,8 +140,22 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
 ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
 ipcMain.handle('agent:list-interrupted-provider-requests', async () => chatRuntime.listInterruptedProviderRequests());
-ipcMain.handle('agent:approve', async (_event, approvalId: string) => { const result = await agentRuntime.resume(requireIdentifier(approvalId, 'Aprovação')); const chat = (await chatManager.list()).find((item) => item.id === result.chatId); if (chat) await chatManager.update({ ...chat, messages: result.messages }); return result; });
-ipcMain.handle('agent:deny', async (_event, approvalId: string) => { const result = await agentRuntime.reject(requireIdentifier(approvalId, 'Aprovação')); const chat = (await chatManager.list()).find((item) => item.id === result.chatId); if (chat) await chatManager.update({ ...chat, messages: result.messages }); return result; });
+ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
+  const result = await agentRuntime.resume(requireIdentifier(approvalId, 'Aprovação'));
+  const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+  if (chat) await chatManager.update({ ...chat, messages: result.messages });
+  if (result.pendingApprovalIds.length) executionManager.update(result.chatId, { state: 'waiting_approval' });
+  else if (executionManager.get(result.chatId)) executionManager.update(result.chatId, { state: 'running' });
+  return result;
+});
+ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
+  const result = await agentRuntime.reject(requireIdentifier(approvalId, 'Aprovação'));
+  const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+  if (chat) await chatManager.update({ ...chat, messages: result.messages });
+  if (result.pendingApprovalIds.length) executionManager.update(result.chatId, { state: 'waiting_approval' });
+  else if (executionManager.get(result.chatId)) executionManager.update(result.chatId, { state: 'running' });
+  return result;
+});
 
 ipcMain.handle('terminal:start', async (_event, input: { projectId: string; command: string }) => { const value = requireObject(input, 'Dados do terminal'); return terminalService.start(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.command, 'Comando')); });
 ipcMain.handle('terminal:kill', async (_event, sessionId: string) => terminalService.kill(requireIdentifier(sessionId, 'Sessão do terminal')));
@@ -128,8 +168,8 @@ ipcMain.handle('git:status', async (_event, projectId: string) => gitService.sta
 ipcMain.handle('git:branches', async (_event, projectId: string) => gitService.branches(requireIdentifier(projectId, 'Projeto')));
 ipcMain.handle('git:diff', async (_event, projectId: string) => gitService.diff(requireIdentifier(projectId, 'Projeto')));
 ipcMain.handle('git:log', async (_event, input: { projectId: string; limit?: number }) => { const value = requireObject(input, 'Dados do histórico Git'); const projectId = requireIdentifier(value.projectId, 'Projeto'); const limit = value.limit === undefined ? undefined : Number(value.limit); if (limit !== undefined && !Number.isFinite(limit)) throw new Error('Limite do histórico Git inválido.'); return gitService.log(projectId, limit); });
-ipcMain.handle('git:create-branch', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados da branch'); return gitService.createBranch(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Nome da branch')); });
-ipcMain.handle('git:checkout', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados do checkout'); return gitService.checkout(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Branch')); });
+ipcMain.handle('git:create-branch', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados da branch'); return gitService.createBranch(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Nome da branch')); });
+ipcMain.handle('git:checkout', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados do checkout'); return gitService.checkout(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Nome da branch')); });
 ipcMain.handle('git:stage', async (_event, input: { projectId: string; paths: string[] }) => { const value = requireObject(input, 'Dados do staging'); if (!Array.isArray(value.paths) || value.paths.some((item) => typeof item !== 'string')) throw new Error('Arquivos do staging inválidos.'); return gitService.stage(requireIdentifier(value.projectId, 'Projeto'), value.paths.map((item) => requireNonEmptyString(item, 'Arquivo'))); });
 ipcMain.handle('git:stage-all', async (_event, projectId: string) => gitService.stageAll(requireIdentifier(projectId, 'Projeto')));
 ipcMain.handle('git:commit', async (_event, input: { projectId: string; message: string }) => { const value = requireObject(input, 'Dados do commit'); return gitService.commit(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.message, 'Mensagem')); });
