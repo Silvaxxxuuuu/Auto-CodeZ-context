@@ -125,6 +125,12 @@ contextBridge.exposeInMainWorld('autoCodez', {
         name: requireNonEmptyString(value.name, 'Branch'),
       });
     },
+    stage: (input: { projectId: string; paths: string[] }) => {
+      const value = requireObject(input, 'Dados do staging');
+      if (!Array.isArray(value.paths) || value.paths.some((item) => typeof item !== 'string')) throw new Error('Arquivos do staging inválidos.');
+      return invoke('git:stage', { projectId: requireIdentifier(value.projectId, 'Projeto'), paths: value.paths.map((item) => requireNonEmptyString(item, 'Arquivo')) });
+    },
+    stageAll: (projectId: string) => invoke('git:stage-all', requireIdentifier(projectId, 'Projeto')),
     commit: (input: { projectId: string; message: string }) => {
       const value = requireObject(input, 'Dados do commit');
       return invoke('git:commit', {
