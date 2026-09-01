@@ -14,10 +14,11 @@ export class ChatManager {
 
   async init(): Promise<void> {
     const stored = await this.storage.read<ChatRecord[]>('chats.json', []);
-    this.chats = stored;
+    this.chats = stored.filter((chat) => chat.messages.length > 0);
     this.persistedChatIds.clear();
-    for (const chat of stored) this.persistedChatIds.add(chat.id);
-    this.lastUpdatedAt = stored.reduce((latest, chat) => Math.max(latest, chat.updatedAt, chat.createdAt), 0);
+    for (const chat of this.chats) this.persistedChatIds.add(chat.id);
+    this.lastUpdatedAt = this.chats.reduce((latest, chat) => Math.max(latest, chat.updatedAt, chat.createdAt), 0);
+    if (this.chats.length !== stored.length) await this.persist();
   }
 
   async list(): Promise<ChatRecord[]> {
@@ -72,8 +73,10 @@ export class ChatManager {
     const chat = this.chats.find((item) => item.id === chatId);
     if (!chat) throw new Error('Chat não encontrado.');
     chat.messages.push({ ...message, createdAt: message.createdAt || Date.now() });
-    if (chat.title === 'Novo chat' && message.role === 'user') chat.title = message.content.slice(0, 52) || 'Novo chat';
-    if (message.role === 'user') this.persistedChatIds.add(chat.id);
+    if (message.role === 'user') {
+      if (chat.title === 'Novo chat') chat.title = message.content.slice(0, 52) || 'Novo chat';
+      this.persistedChatIds.add(chat.id);
+    }
     await this.update(chat);
     return chat;
   }
