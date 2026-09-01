@@ -1,17 +1,20 @@
-/* Auto CodeZ visual pass 2. This file is intentionally isolated so the visual system stays easy to tune. */
+/* Visual system for the chat surface. Loaded after the legacy UI layers. */
 
-/* Conversation rhythm */
 .messages {
-  padding: 26px max(28px, calc((100vw - 980px) / 2)) 28px !important;
+  padding: 24px 28px 30px !important;
+  scrollbar-gutter: stable;
+  scroll-behavior: auto !important;
 }
+
 .message {
-  width: min(820px, 100%) !important;
-  margin: 0 auto 22px !important;
+  width: min(920px, 100%) !important;
+  margin: 0 auto 26px !important;
   padding: 0 !important;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
 }
+
 .message-label {
   margin: 0 0 7px !important;
   color: #687383 !important;
@@ -19,33 +22,43 @@
   line-height: 1.2 !important;
   font-weight: 600 !important;
 }
+
+.message.assistant,
+.message.tool,
+.message.system {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+}
+
 .message.assistant .message-content,
 .message.tool .message-content,
 .message.system .message-content {
-  max-width: 780px !important;
+  max-width: 860px !important;
   padding: 0 !important;
   color: #e6ebf1 !important;
   font-size: 12px !important;
-  line-height: 1.75 !important;
+  line-height: 1.72 !important;
 }
 
-/* User messages are one bubble. No second outer container. */
 .message.user {
   display: flex !important;
+  flex-direction: column !important;
   align-items: flex-end !important;
-  width: min(820px, 100%) !important;
 }
+
 .message.user .message-label {
   align-self: flex-end !important;
-  margin-right: 2px !important;
+  margin: 0 2px 6px 0 !important;
 }
+
 .message.user .message-content {
   width: fit-content !important;
-  max-width: min(620px, 82%) !important;
-  margin-left: auto !important;
-  padding: 10px 13px !important;
+  max-width: min(650px, 78%) !important;
+  margin: 0 !important;
+  padding: 9px 12px !important;
   border: 1px solid #28313d !important;
-  border-radius: 13px 13px 4px 13px !important;
+  border-radius: 12px 12px 4px 12px !important;
   background: #151a22 !important;
   color: #edf1f6 !important;
   font-size: 12px !important;
@@ -53,40 +66,43 @@
   box-shadow: none !important;
 }
 
-/* Streaming response */
 .message.streaming .message-content {
   padding: 0 !important;
 }
 
-/* Activity belongs to the conversation, and only the current activity is shown. */
+/* Activity is a single live line. It disappears when the execution ends. */
 .activity-card {
-  width: min(820px, 100%) !important;
-  margin: -2px auto 18px !important;
-  padding: 4px 0 !important;
+  width: min(920px, 100%) !important;
+  margin: -4px auto 22px !important;
+  padding: 0 !important;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
 }
+
 .activity-heading {
   display: none !important;
 }
+
 .activity-line {
   display: none !important;
   align-items: center !important;
   gap: 8px !important;
   width: fit-content !important;
-  max-width: 100% !important;
-  padding: 3px 0 !important;
-  color: #7d8795 !important;
+  max-width: min(720px, 100%) !important;
+  padding: 0 !important;
+  color: #7f8997 !important;
   font-size: 10px !important;
   line-height: 1.5 !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
 }
+
 .activity-line:last-of-type {
   display: flex !important;
 }
+
 .activity-line::before {
   content: '';
   width: 5px !important;
@@ -94,68 +110,70 @@
   flex: none !important;
   border-radius: 50% !important;
   background: currentColor !important;
-  opacity: .65 !important;
-  box-shadow: 0 0 0 3px rgba(125,135,149,.08) !important;
-  animation: ac-activity-pulse 1.25s ease-in-out infinite !important;
+  opacity: .7 !important;
+  animation: ac-live-pulse 1.2s ease-in-out infinite !important;
 }
+
 .activity-line.error {
-  color: #d48d94 !important;
+  color: #d58e96 !important;
 }
+
 .activity-line.error::before {
-  background: #d48d94 !important;
-  box-shadow: 0 0 0 3px rgba(212,141,148,.08) !important;
+  animation: none !important;
 }
-@keyframes ac-activity-pulse {
-  0%, 100% { opacity: .35; transform: scale(.9); }
+
+@keyframes ac-live-pulse {
+  0%, 100% { opacity: .35; transform: scale(.85); }
   50% { opacity: 1; transform: scale(1); }
 }
 
-/* The execution controller already has the same approval data as the chat renderer. Keep its duplicate DOM hidden. */
+/* The old execution panel duplicates information rendered inside the conversation. */
 .chat-execution {
   display: none !important;
 }
 
-/* Remove every previous pseudo-element used for loading dots. */
+/* The old thinking widget created the broken vertical three-dot indicator. */
+.ac-thinking,
 .messages::after,
 .messages:has(.activity-card)::after,
-.activity-card::after,
-.ac-thinking {
+.activity-card::after {
   display: none !important;
   content: none !important;
 }
 
-/* Empty chat state */
+/* Empty state. */
 .welcome {
-  width: min(620px, calc(100% - 48px)) !important;
+  width: min(560px, calc(100% - 48px)) !important;
   margin: 18vh auto 0 !important;
   padding: 0 !important;
   text-align: center !important;
 }
+
 .welcome-grid {
   display: none !important;
 }
+
 .welcome-mark {
   width: 42px !important;
   height: 42px !important;
-  margin: 0 auto 16px !important;
+  margin: 0 auto 15px !important;
   border: 1px solid #27303b !important;
   border-radius: 12px !important;
   background: #11161d !important;
   box-shadow: none !important;
 }
+
 .welcome h2 {
   margin: 0 !important;
   font-size: 20px !important;
   font-weight: 600 !important;
   letter-spacing: -.025em !important;
 }
-.welcome h2 {
-  font-size: 0 !important;
-}
+
 .welcome h2::after {
-  content: 'Abra um chat';
-  font-size: 20px;
+  content: none !important;
 }
+
 .welcome p {
   max-width: 440px !important;
   margin: 9px auto 0 !important;
@@ -163,19 +181,17 @@
   font-size: 11px !important;
   line-height: 1.65 !important;
 }
-.welcome p {
-  font-size: 0 !important;
-}
-.welcome p::after {
-  content: 'Selecione uma conversa na barra lateral ou crie um novo chat para começar.';
-  font-size: 11px;
+
+/* Composer and conversation now share the same 920px content rail. */
+.composer-wrap {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  padding: 9px 28px 14px !important;
 }
 
-/* Composer: one grid, one baseline. */
-.composer-wrap {
-  padding: 9px max(28px, calc((100vw - 980px) / 2)) 15px !important;
-}
 .composer {
+  width: min(920px, 100%) !important;
   display: grid !important;
   grid-template-columns: 38px minmax(0, 1fr) 1px auto 38px !important;
   align-items: center !important;
@@ -187,6 +203,7 @@
   background: #0f141a !important;
   box-shadow: 0 10px 28px rgba(0,0,0,.22) !important;
 }
+
 .attach-button,
 .send-button,
 .intelligence-control,
@@ -194,11 +211,14 @@
 .composer textarea {
   align-self: center !important;
 }
-.attach-button {
+
+.attach-button,
+.send-button {
   width: 38px !important;
   height: 38px !important;
   margin: 0 !important;
 }
+
 .composer textarea {
   width: 100% !important;
   min-width: 0 !important;
@@ -211,11 +231,13 @@
   background: transparent !important;
   line-height: 20px !important;
 }
+
 .composer-divider {
   width: 1px !important;
   height: 22px !important;
   margin: 0 8px !important;
 }
+
 .intelligence-button {
   min-width: 174px !important;
   height: 38px !important;
@@ -223,75 +245,150 @@
   padding: 0 9px !important;
   justify-content: center !important;
 }
+
 .send-button {
-  width: 38px !important;
-  height: 38px !important;
-  margin: 0 0 0 4px !important;
+  margin-left: 4px !important;
 }
+
 .composer-hint {
+  width: min(920px, 100%) !important;
   padding-top: 6px !important;
   font-size: 8px !important;
   color: #454f5d !important;
+  text-align: center !important;
 }
 
-/* Real Git icon, using the Lucide GitBranch geometry. */
+/* Real Lucide SVG geometry, used as masks so icons stay crisp at any scale. */
+.brand-mark {
+  position: relative !important;
+  width: 25px !important;
+  height: 25px !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: #e8edf3 !important;
+  box-shadow: none !important;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 16 4-4-4-4'/%3E%3Cpath d='m6 8-4 4 4 4'/%3E%3Cpath d='m14.5 4-5 16'/%3E%3C/svg%3E") center / 19px 19px no-repeat !important;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m18 16 4-4-4-4'/%3E%3Cpath d='m6 8-4 4 4 4'/%3E%3Cpath d='m14.5 4-5 16'/%3E%3C/svg%3E") center / 19px 19px no-repeat !important;
+}
+
+.brand-mark::before,
+.brand-mark::after {
+  display: none !important;
+}
+
 .git-icon {
   width: 17px !important;
   height: 17px !important;
   border: 0 !important;
   border-radius: 0 !important;
   background: currentColor !important;
-  opacity: .82 !important;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='6' cy='6' r='3'/%3E%3Ccircle cx='18' cy='18' r='3'/%3E%3Cpath d='M6 9v6a3 3 0 0 0 3 3h6'/%3E%3C/svg%3E") center / contain no-repeat !important;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='6' cy='6' r='3'/%3E%3Ccircle cx='18' cy='18' r='3'/%3E%3Cpath d='M6 9v6a3 3 0 0 0 3 3h6'/%3E%3C/svg%3E") center / contain no-repeat !important;
+  opacity: .9 !important;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 6a9 9 0 0 0-9 9V3'/%3E%3Ccircle cx='18' cy='6' r='3'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3C/svg%3E") center / contain no-repeat !important;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 6a9 9 0 0 0-9 9V3'/%3E%3Ccircle cx='18' cy='6' r='3'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3C/svg%3E") center / contain no-repeat !important;
 }
+
 .git-icon::before,
 .git-icon::after {
   display: none !important;
 }
 
-/* Cleaner header and navigation proportions. */
+.attach-button,
+.send-button,
+.intelligence-brain,
+.provider-chevron,
+.intelligence-chevron {
+  position: relative !important;
+}
+
+.attach-button {
+  font-size: 0 !important;
+  color: #7f8997 !important;
+}
+
+.attach-button::before {
+  content: '';
+  position: absolute;
+  inset: 10px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.send-button {
+  font-size: 0 !important;
+  color: #0c1117 !important;
+  background: #9ca7b5 !important;
+  border-radius: 10px !important;
+}
+
+.send-button::before {
+  content: '';
+  position: absolute;
+  inset: 10px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m22 2-7 20-4-9-9-4Z'/%3E%3Cpath d='M22 2 11 13'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m22 2-7 20-4-9-9-4Z'/%3E%3Cpath d='M22 2 11 13'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.intelligence-brain {
+  width: 16px !important;
+  height: 16px !important;
+  background: currentColor !important;
+  filter: none !important;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4 4 4 0 0 1-4-4V9a4 4 0 0 1 4-4Z'/%3E%3Cpath d='M8 9H6a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h2'/%3E%3Cpath d='M16 9h2a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-2'/%3E%3Cpath d='M9 19v2h6v-2'/%3E%3Cpath d='M12 5V3'/%3E%3C/svg%3E") center / contain no-repeat !important;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4 4 4 0 0 1-4-4V9a4 4 0 0 1 4-4Z'/%3E%3Cpath d='M8 9H6a2 2 0 0 0-2 2v1a2 2 0 0 0 2 2h2'/%3E%3Cpath d='M16 9h2a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-2'/%3E%3Cpath d='M9 19v2h6v-2'/%3E%3Cpath d='M12 5V3'/%3E%3C/svg%3E") center / contain no-repeat !important;
+}
+
 .chat-header {
   height: 68px !important;
-  padding: 0 max(28px, calc((100vw - 980px) / 2)) !important;
+  padding: 0 28px !important;
 }
+
 .chat-header h1 {
   font-size: 14px !important;
 }
+
 .chat-subtitle {
   font-size: 9px !important;
 }
+
 .nav-panel {
   width: 282px !important;
 }
+
 .chat-item.selected {
   border-color: #2b3440 !important;
   background: #151a22 !important;
   box-shadow: inset 2px 0 #7b8796 !important;
 }
 
-/* Avoid the previous face-like brand construction. */
-.brand-mark {
-  width: 25px !important;
-  height: 25px !important;
-  border-radius: 7px !important;
-  background: #e8edf3 !important;
-  box-shadow: none !important;
-}
-
 @media (max-width: 900px) {
-  .messages { padding-left: 20px !important; padding-right: 20px !important; }
-  .composer-wrap { padding-left: 20px !important; padding-right: 20px !important; }
-  .chat-header { padding-left: 20px !important; padding-right: 20px !important; }
+  .messages,
+  .composer-wrap,
+  .chat-header {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
 }
 
 @media (max-width: 720px) {
-  .composer { grid-template-columns: 36px minmax(0,1fr) 1px auto 36px !important; }
-  .intelligence-button { min-width: 42px !important; }
-  .intelligence-text,.intelligence-current { display: none !important; }
-  .message.user .message-content { max-width: 88% !important; }
+  .composer {
+    grid-template-columns: 36px minmax(0, 1fr) 1px auto 36px !important;
+  }
+  .intelligence-button {
+    min-width: 42px !important;
+  }
+  .intelligence-text,
+  .intelligence-current {
+    display: none !important;
+  }
+  .message.user .message-content {
+    max-width: 88% !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .activity-line::before { animation: none !important; }
+  .activity-line::before {
+    animation: none !important;
+  }
 }
