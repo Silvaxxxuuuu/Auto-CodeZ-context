@@ -14,7 +14,7 @@ const ICON_PATHS: Record<IconName, string[]> = {
   'key-round': ['m15.5 7.5 3-3', 'm17 5 2 2', 'M11 14a5 5 0 1 1-1-7.9A5 5 0 0 1 11 14Z', 'M16 8l-5 5'],
   plus: ['M5 12h14', 'M12 5v14'],
   sparkles: ['m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z', 'M5 3v4', 'M19 17v4', 'M3 5h4', 'M17 19h4'],
-  settings: ['M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z', 'M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.6 1.5-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V20h-2.4v-.4a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1-1.5-1.5.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H6v-2.1h.3a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.5-1.5.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V4h2.4v.4a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1 1.5 1.5-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.3v2.1h-.3a1.7 1.7 0 0 0-1.5 1Z'],
+  settings: ['M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z', 'M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.6 1.5-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V20h-2.4v-.4a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1-1.5-1.5.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H6v-2.1h.3a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 1.5-1.5.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1.5 1h.3v2.1h-.3a1.7 1.7 0 0 0-1.5 1Z'],
   'user-round': ['M20 21a8 8 0 0 0-16 0', 'M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z'],
   'code-2': ['m18 16 4-4-4-4', 'm6 8-4 4 4 4', 'm14.5 4-5 16'],
   pencil: ['M21.174 6.812a1 1 0 0 0-1.986-.164l-.53 3.156a2 2 0 0 1-1.646 1.646l-3.156.53a1 1 0 0 0 .164 1.986h.168a2 2 0 0 1 1.986 1.986v.168a1 1 0 0 0 1.986.164l.53-3.156a2 2 0 0 1 1.646-1.646l3.156-.53a1 1 0 0 0-.164-1.986h-.168a2 2 0 0 1-1.986-1.986v-.168Z', 'm15 5 4 4'],
@@ -129,8 +129,13 @@ function syncLucideIcons(): void {
   document.querySelectorAll<HTMLElement>('.rail-button').forEach(button=>{
     const panel=button.getAttribute('data-panel');
     const action=button.getAttribute('data-action');
-    const name:IconName=panel==='plugins'?'blocks':panel==='projects'?'folder':panel==='chats'?'message-circle-plus':action==='profile'?'user-round':'message-circle-plus';
-    replaceIcon(button,name,17);
+    let name: IconName | undefined;
+    if(panel==='plugins') name='blocks';
+    else if(panel==='projects') name='folder';
+    else if(panel==='chats') name='message-circle-plus';
+    else if(action==='profile') name='user-round';
+    else if(button.classList.contains('terminal-rail-button')) name='square-terminal';
+    if(name) replaceIcon(button,name,17);
   });
   document.querySelectorAll<HTMLElement>('.api-key-rail-button').forEach(button=>replaceIcon(button,'key-round'));
   document.querySelectorAll<HTMLElement>('.new-chat-icon').forEach(element=>replaceIcon(element,'message-circle-plus'));
