@@ -7,21 +7,7 @@ import { AnthropicAdapter } from './providers/anthropic';
 const STATE_FILE = 'providers.json';
 const SECURE_FILE = 'provider-secrets.json';
 
-interface ProviderState { configs: AIProviderConfig[]; }
-
-const DEFAULT_MODEL_PREFERENCES: Partial<Record<ProviderId, string[]>> = {
-  google: [
-    'gemini-3.7-flash',
-    'gemini-3.6-flash',
-    'gemini-3.5-flash',
-    'gemini-3-flash-preview',
-    'gemini-3.1-flash-lite',
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-lite',
-  ],
-};
-
-function modelScore(model: AIModel): number {
+function modelScore(model: AIModel, index: number): number {
   const id = `${model.id} ${model.name}`.toLowerCase();
   let score = 0;
   if (model.capabilities.includes('text')) score += 100;
@@ -35,14 +21,15 @@ function modelScore(model: AIModel): number {
   if (/(?:mini|haiku)/i.test(id)) score -= 10;
   const versionNumbers = id.match(/(?:^|[-_.])(?:gpt|claude|gemini)?[-_.]?(\d+(?:\.\d+)?)/i);
   if (versionNumbers?.[1]) score += Number(versionNumbers[1]) * 2;
-  return score;
+  return score - index / 1000;
 }
 
 export function selectDefaultModel(providerId: ProviderId, models: AIModel[]): string | undefined {
-  const preferred = DEFAULT_MODEL_PREFERENCES[providerId] || [];
-  const exactPreferred = preferred.find((id) => models.some((model) => model.id === id));
-  if (exactPreferred) return exactPreferred;
-  return [...models].sort((left, right) => modelScore(right) - modelScore(left))[0]?.id;
+  void providerId;
+  return models.reduce<{ model?: AIModel; score: number }>((best, candidate, index) => {
+    const score = modelScore(candidate, index);
+    return score > best.score ? { model: candidate, score } : best;
+  }, { score: Number.NEGATIVE_INFINITY }).model?.id;
 }
 
 function normalizeConfig(value: AIProviderConfig): AIProviderConfig {
