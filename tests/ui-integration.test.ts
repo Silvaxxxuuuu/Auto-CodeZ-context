@@ -15,15 +15,18 @@ test('renderer entry loads the visual refinement modules after the main renderer
   const terminalIndex = html.indexOf('/src/terminal-ui.ts');
   const renameIndex = html.indexOf('/src/chat-rename-ui.ts');
   const apiKeyIndex = html.indexOf('/src/api-key-ui.ts');
+  const routingIndex = html.indexOf('/src/api-settings-routing-ui.ts');
   const polishIndex = html.indexOf('/src/ui-polish.css');
 
   assert.notEqual(rendererIndex, -1, 'renderer entry must be present');
   assert.notEqual(terminalIndex, -1, 'terminal UI must be loaded');
   assert.notEqual(renameIndex, -1, 'chat rename UI must be loaded');
   assert.notEqual(apiKeyIndex, -1, 'API key UI must be loaded');
+  assert.notEqual(routingIndex, -1, 'API settings routing UI must be loaded');
   assert.notEqual(polishIndex, -1, 'final UI polish stylesheet must be loaded');
   assert.ok(rendererIndex < terminalIndex, 'terminal UI must run after the renderer creates the rail');
   assert.ok(terminalIndex < apiKeyIndex, 'API key UI must run after the terminal creates its rail button');
+  assert.ok(apiKeyIndex < routingIndex, 'API settings routing must run after the API key button exists');
   assert.match(html, /\/src\/ui-overrides\.css/);
 });
 
@@ -59,4 +62,13 @@ test('API key and chat rename modules target their intended existing controls', 
   assert.match(apiKeyUi, /removeApiKey/);
   assert.match(renameUi, /\[data-chat-settings\]/);
   assert.match(renameUi, /renameChat/);
+});
+
+test('legacy AI settings entry points are routed to the dedicated API key manager', async () => {
+  const routingUi = await readProjectFile('src/api-settings-routing-ui.ts');
+
+  assert.match(routingUi, /data-action="ai-settings"/);
+  assert.match(routingUi, /api-key-rail-button/);
+  assert.match(routingUi, /stopImmediatePropagation/);
+  assert.match(routingUi, /apiKeyButton\.click\(\)/);
 });
