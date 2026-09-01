@@ -18,7 +18,7 @@ import { ApprovalRuntime } from './agent/approval-runtime';
 import { CommandRuntime } from './agent/command-runtime';
 import { DiffRuntime } from './agent/diff-runtime';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
-import type { AIProviderConfig, AIStreamEvent, IntelligenceLevel } from './ai/types';
+import type { AIProviderConfig, AIStreamEvent } from './ai/types';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const storage = new LocalStorage();
@@ -40,22 +40,11 @@ const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefin
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 let mainWindow: BrowserWindow | null = null;
 
-function sendTerminalEvent(event: unknown): void {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('terminal:event', event);
-}
-
-function sendActivity(event: unknown): void {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('agent:activity', event);
-}
+function sendTerminalEvent(event: unknown): void { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('terminal:event', event); }
+function sendActivity(event: unknown): void { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('agent:activity', event); }
 
 function createWindow(): void {
-  mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 960,
-    minHeight: 680,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
-  });
+  mainWindow = new BrowserWindow({ width: 1440, height: 920, minWidth: 960, minHeight: 680, webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false } });
   void mainWindow.loadFile(path.join(__dirname, '../index.html'));
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -86,10 +75,7 @@ async function executeChat(chatId: string, content: string): Promise<{ pendingAp
   return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 }
 
-ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => {
-  const value = requireObject(input, 'Mensagem');
-  return executeChat(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.content, 'Mensagem'));
-});
+ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => { const value = requireObject(input, 'Mensagem'); return executeChat(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.content, 'Mensagem')); });
 ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
   const value = requireObject(input, 'Mensagem');
   const chatId = requireIdentifier(value.chatId, 'Chat');
@@ -108,18 +94,8 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
 ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
 ipcMain.handle('agent:list-interrupted-provider-requests', async () => chatRuntime.listInterruptedProviderRequests());
-ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
-  const result = await agentRuntime.resume(requireIdentifier(approvalId, 'Aprovação'));
-  const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
-  if (chat) await chatManager.update({ ...chat, messages: result.messages });
-  return result;
-});
-ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
-  const result = await agentRuntime.reject(requireIdentifier(approvalId, 'Aprovação'));
-  const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
-  if (chat) await chatManager.update({ ...chat, messages: result.messages });
-  return result;
-});
+ipcMain.handle('agent:approve', async (_event, approvalId: string) => { const result = await agentRuntime.resume(requireIdentifier(approvalId, 'Aprovação')); const chat = (await chatManager.list()).find((item) => item.id === result.chatId); if (chat) await chatManager.update({ ...chat, messages: result.messages }); return result; });
+ipcMain.handle('agent:deny', async (_event, approvalId: string) => { const result = await agentRuntime.reject(requireIdentifier(approvalId, 'Aprovação')); const chat = (await chatManager.list()).find((item) => item.id === result.chatId); if (chat) await chatManager.update({ ...chat, messages: result.messages }); return result; });
 
 ipcMain.handle('terminal:start', async (_event, input: { projectId: string; command: string }) => { const value = requireObject(input, 'Dados do terminal'); return terminalService.start(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.command, 'Comando')); });
 ipcMain.handle('terminal:kill', async (_event, sessionId: string) => terminalService.kill(requireIdentifier(sessionId, 'Sessão do terminal')));
@@ -156,7 +132,7 @@ app.whenReady().then(async () => {
   await chatRuntime.init();
   await toolRuntime.init();
   await agentRuntime.init();
-  activityRuntime.on((event) => sendActivity(event));
+  activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.on((event) => sendTerminalEvent(event));
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
