@@ -118,19 +118,17 @@ test('provider failure after an approved tool does not re-execute the tool', asy
 test('recovers pending approvals after runtime reconstruction', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-recovery-persisted-'));
   const storage = new MemoryStorage();
-  const responses = [
-    { content: '', model: 'test-model', providerId: config.id, toolCalls: [writeCall] },
-    { content: 'Recovered and finished.', model: 'test-model', providerId: config.id },
-  ];
+  const firstResponse: AIResponse = { content: '', model: 'test-model', providerId: config.id, toolCalls: [writeCall] };
+  const finalResponse: AIResponse = { content: 'Recovered and finished.', model: 'test-model', providerId: config.id };
   try {
     await fs.mkdir(path.join(root, 'src'), { recursive: true });
     await fs.writeFile(path.join(root, 'src', 'index.ts'), 'export const value = 1;');
-    const first = await createPersistentFixture(storage, responses, root);
+    const first = await createPersistentFixture(storage, [firstResponse], root);
     const pending = await first.run(config, makeChat(), undefined, 'ask');
     assert.equal(pending.pendingApprovalIds.length, 1);
     assert.equal(await fs.readFile(path.join(root, 'src', 'index.ts'), 'utf8'), 'export const value = 1;');
 
-    const recovered = await createPersistentFixture(storage, responses, root);
+    const recovered = await createPersistentFixture(storage, [finalResponse], root);
     const approvalId = pending.pendingApprovalIds[0];
     assert.equal(recovered.hasPendingForChat('recovery-chat'), true);
     const result = await recovered.resume(approvalId);
