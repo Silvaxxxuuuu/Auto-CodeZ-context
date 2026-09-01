@@ -8,6 +8,23 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 contextBridge.exposeInMainWorld('autoCodez', {
   getState: () => invoke<{ providers: unknown[]; chats: unknown[]; projects: unknown[] }>('app:get-state'),
   listModels: (providerId: string) => invoke('providers:list-models', requireIdentifier(providerId, 'Provider')),
+  listApiKeys: () => invoke('providers:list-keys'),
+  saveApiKey: (input: { providerId: string; name: string; apiKey: string; model?: string; baseUrl?: string }) => {
+    const value = requireObject(input, 'Dados da API key');
+    return invoke('providers:save-key', {
+      providerId: requireIdentifier(value.providerId, 'Provider'),
+      name: requireNonEmptyString(value.name, 'Nome da API key'),
+      apiKey: requireNonEmptyString(value.apiKey, 'API key'),
+      model: value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo'),
+      baseUrl: value.baseUrl === undefined ? undefined : requireNonEmptyString(value.baseUrl, 'URL base'),
+    });
+  },
+  renameApiKey: (input: { keyId: string; name: string }) => {
+    const value = requireObject(input, 'Dados do nome da API key');
+    return invoke('providers:rename-key', { keyId: requireIdentifier(value.keyId, 'API key'), name: requireNonEmptyString(value.name, 'Nome da API key') });
+  },
+  setActiveApiKey: (keyId: string) => invoke('providers:set-active-key', requireIdentifier(keyId, 'API key')),
+  removeApiKey: (keyId: string) => invoke('providers:remove-key', requireIdentifier(keyId, 'API key')),
   saveProvider: (input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }) => {
     const value = requireObject(input, 'Dados do provider');
     const providerId = requireIdentifier(value.providerId, 'Provider');
@@ -29,10 +46,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   deleteChat: (chatId: string) => invoke('chat:delete', requireIdentifier(chatId, 'Chat')),
   renameChat: (input: { chatId: string; title: string }) => {
     const value = requireObject(input, 'Dados do nome do chat');
-    return invoke('chat:rename', {
-      chatId: requireIdentifier(value.chatId, 'Chat'),
-      title: requireNonEmptyString(value.title, 'Nome do chat'),
-    });
+    return invoke('chat:rename', { chatId: requireIdentifier(value.chatId, 'Chat'), title: requireNonEmptyString(value.title, 'Nome do chat') });
   },
   updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => {
     const value = requireObject(input, 'Configurações do chat');
@@ -46,17 +60,11 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   sendChat: (input: { chatId: string; content: string }) => {
     const value = requireObject(input, 'Mensagem');
-    return invoke('chat:send', {
-      chatId: requireIdentifier(value.chatId, 'Chat'),
-      content: requireNonEmptyString(value.content, 'Mensagem'),
-    });
+    return invoke('chat:send', { chatId: requireIdentifier(value.chatId, 'Chat'), content: requireNonEmptyString(value.content, 'Mensagem') });
   },
   streamChat: (input: { chatId: string; content: string }) => {
     const value = requireObject(input, 'Mensagem');
-    return invoke('chat:stream', {
-      chatId: requireIdentifier(value.chatId, 'Chat'),
-      content: requireNonEmptyString(value.content, 'Mensagem'),
-    });
+    return invoke('chat:stream', { chatId: requireIdentifier(value.chatId, 'Chat'), content: requireNonEmptyString(value.content, 'Mensagem') });
   },
   onStreamEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
@@ -76,10 +84,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   terminal: {
     start: (input: { projectId: string; command: string }) => {
       const value = requireObject(input, 'Dados do terminal');
-      return invoke('terminal:start', {
-        projectId: requireIdentifier(value.projectId, 'Projeto'),
-        command: requireNonEmptyString(value.command, 'Comando'),
-      });
+      return invoke('terminal:start', { projectId: requireIdentifier(value.projectId, 'Projeto'), command: requireNonEmptyString(value.command, 'Comando') });
     },
     kill: (sessionId: string) => invoke('terminal:kill', requireIdentifier(sessionId, 'Sessão do terminal')),
     listSessions: () => invoke('terminal:list-sessions'),
@@ -105,17 +110,11 @@ contextBridge.exposeInMainWorld('autoCodez', {
     },
     createBranch: (input: { projectId: string; name: string }) => {
       const value = requireObject(input, 'Dados da branch');
-      return invoke('git:create-branch', {
-        projectId: requireIdentifier(value.projectId, 'Projeto'),
-        name: requireNonEmptyString(value.name, 'Nome da branch'),
-      });
+      return invoke('git:create-branch', { projectId: requireIdentifier(value.projectId, 'Projeto'), name: requireNonEmptyString(value.name, 'Nome da branch') });
     },
     checkout: (input: { projectId: string; name: string }) => {
       const value = requireObject(input, 'Dados do checkout');
-      return invoke('git:checkout', {
-        projectId: requireIdentifier(value.projectId, 'Projeto'),
-        name: requireNonEmptyString(value.name, 'Branch'),
-      });
+      return invoke('git:checkout', { projectId: requireIdentifier(value.projectId, 'Projeto'), name: requireNonEmptyString(value.name, 'Branch') });
     },
     stage: (input: { projectId: string; paths: string[] }) => {
       const value = requireObject(input, 'Dados do staging');
@@ -130,20 +129,14 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   createProject: (input: { name: string; rootPath: string }) => {
     const value = requireObject(input, 'Dados do projeto');
-    return invoke('projects:create', {
-      name: requireNonEmptyString(value.name, 'Nome do projeto'),
-      rootPath: requireNonEmptyString(value.rootPath, 'Pasta do projeto'),
-    });
+    return invoke('projects:create', { name: requireNonEmptyString(value.name, 'Nome do projeto'), rootPath: requireNonEmptyString(value.rootPath, 'Pasta do projeto') });
   },
   openFolder: () => invoke<string | null>('projects:open-folder'),
   scanProject: (rootPath: string) => invoke('projects:scan', requireNonEmptyString(rootPath, 'Pasta do projeto')),
   readFile: (filePath: string) => invoke('projects:read-file', requireNonEmptyString(filePath, 'Arquivo')),
   writeFile: (input: { filePath: string; content: string }) => {
     const value = requireObject(input, 'Dados do arquivo');
-    return invoke('projects:write-file', {
-      filePath: requireNonEmptyString(value.filePath, 'Arquivo'),
-      content: typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo de arquivo é inválido.'); })(),
-    });
+    return invoke('projects:write-file', { filePath: requireNonEmptyString(value.filePath, 'Arquivo'), content: typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo de arquivo é inválido.'); })() });
   },
   openExternal: (url: string) => invoke('app:open-external', requireNonEmptyString(url, 'URL externa')),
 });
