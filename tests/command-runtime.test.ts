@@ -60,6 +60,9 @@ test('command runtime executes an allowed npm script on Windows and Unix', async
     assert.equal(result.timedOut, false);
     assert.match(result.stdout, /auto-codez-ok/);
     assert.equal(result.command, 'npm run test');
+    assert.ok(result.startedAt > 0);
+    assert.ok(result.finishedAt >= result.startedAt);
+    assert.equal(result.durationMs, result.finishedAt - result.startedAt);
   } finally {
     await project.cleanup();
   }
