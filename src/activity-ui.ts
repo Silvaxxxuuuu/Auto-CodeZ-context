@@ -1,7 +1,10 @@
-import type { ActivityEvent, FileDiff, DiffPlan, CommandResultSummary, GitOperationSummary } from './ai/types';
+import type { ActivityEvent, FileDiff, DiffPlan, GitOperationSummary } from './ai/types';
 
 const style = document.createElement('style');
 style.textContent = `
+.execution-run-details { border-top:1px solid rgba(255,255,255,.055); padding:0 12px 9px; }
+.execution-run-details:empty { display:none; }
+.execution-run-details .activity-result-card { margin-top:7px; }
 .activity-result-card { border:1px solid rgba(255,255,255,.065); border-radius:9px; background:rgba(12,15,20,.72); overflow:hidden; }
 .activity-result-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px; }
 .activity-result-title { display:flex; align-items:center; gap:8px; min-width:0; }
@@ -24,8 +27,13 @@ style.textContent = `
 .activity-result-change-path { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .activity-result-change-details { margin-top:6px; }
 .activity-result-change-details summary { cursor:pointer; font-size:10px; opacity:.66; }
+@media (max-width:720px) {
+  .execution-run-details { padding:0 10px 8px; }
+}
 `;
 document.head.appendChild(style);
+
+const pendingDetails = new Map<string, ActivityEvent[]>();
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
@@ -55,14 +63,18 @@ function changeKindLabel(kind: FileDiff['type']): string {
   return { created: '+', modified: 'M', deleted: '-', renamed: 'R' }[kind];
 }
 
+function runIdFor(event: ActivityEvent): string {
+  return typeof event.runId === 'string' && event.runId.trim() ? event.runId : 'global';
+}
+
 function ensureRunDetails(runId: string): HTMLElement | null {
   const escapedId = CSS.escape(runId);
-  const run = document.querySelector<HTMLElement>(`.activity-run[data-run-id="${escapedId}"]`);
+  const run = document.querySelector<HTMLElement>(`.execution-run[data-run-id="${escapedId}"]`);
   if (!run) return null;
-  let details = run.querySelector<HTMLElement>('.activity-run-details');
+  let details = run.querySelector<HTMLElement>('.execution-run-details');
   if (!details) {
     details = document.createElement('div');
-    details.className = 'activity-run-details';
+    details.className = 'execution-run-details';
     run.appendChild(details);
   }
   return details;
@@ -106,17 +118,34 @@ function renderGitActivity(event: ActivityEvent, container: HTMLElement): void {
 }
 
 function renderActivity(event: ActivityEvent): void {
-  if (!event.runId || (!event.commandResult && !event.gitResult && !event.changes?.length && !event.diffPlan)) return;
-  const container = ensureRunDetails(event.runId);
-  if (!container) return;
+  if (!event.commandResult && !event.gitResult && !event.changes?.length && !event.diffPlan) return;
+  const runId = runIdFor(event);
+  const container = ensureRunDetails(runId);
+  if (!container) {
+    const pending = pendingDetails.get(runId) || [];
+    pending.push(event);
+    pendingDetails.set(runId, pending.slice(-6));
+    return;
+  }
   container.querySelector(`[data-activity-id="${CSS.escape(event.id)}"]`)?.remove();
   if (event.gitResult) renderGitActivity(event, container);
   else if (event.commandResult) renderCommandActivity(event, container);
   while (container.children.length > 6) container.lastElementChild?.remove();
 }
 
+function flushPending(runId: string): void {
+  if (!pendingDetails.has(runId)) return;
+  const events = pendingDetails.get(runId) || [];
+  pendingDetails.delete(runId);
+  events.forEach(renderActivity);
+}
+
 function initialize(): void {
   const unsubscribe = window.autoCodez.onActivity(renderActivity);
+  window.addEventListener('auto-codez-execution-run-rendered', (event) => {
+    const runId = (event as CustomEvent<{ runId?: string }>).detail?.runId;
+    if (runId) flushPending(runId);
+  });
   window.addEventListener('beforeunload', unsubscribe, { once: true });
 }
 
