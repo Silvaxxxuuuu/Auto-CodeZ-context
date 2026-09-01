@@ -88,6 +88,23 @@ test('allows an explicit new request after a failed request', async () => {
   assert.equal(journal.list().length, 2);
 });
 
+test('uses the latest request when a failed attempt is followed by a completed retry', async () => {
+  const storage = new MemoryStorage();
+  const journal = new ProviderRequestJournal(storage);
+  await journal.init();
+  const failed = await journal.begin(request);
+  await journal.fail(failed.requestId, 'timeout');
+  const retry = await journal.begin(request);
+  await journal.complete(retry.requestId, response);
+
+  const recovered = new ProviderRequestJournal(storage);
+  await recovered.init();
+  const result = await recovered.begin(request);
+
+  assert.equal(result.requestId, retry.requestId);
+  assert.deepEqual(result.cachedResponse, response);
+});
+
 test('discard removes an interrupted request', async () => {
   const storage = new MemoryStorage();
   const journal = new ProviderRequestJournal(storage);
