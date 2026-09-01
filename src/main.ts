@@ -310,5 +310,5 @@ ipcMain.handle('app:open-external', async (_event, url: string) => {
   await shell.openExternal(parsed.toString());
 });
 
-app.whenReady().then(async () => { await storage.init(); await loadProviders(); await projectManager.init(); await chatManager.init(); await toolRuntime.init(); await providerRequestJournal.init(); await chatRuntime.init(); await agentRuntime.init(); await createWindow(); app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createWindow(); }); }).catch((error) => { const message = error instanceof Error ? error.message : 'Falha ao inicializar o Auto CodeZ.'; dialog.showErrorBox('Auto CodeZ', message); app.quit(); });
+app.whenReady().then(async () => { await storage.init(); await loadProviders(); await projectManager.init(); await chatManager.init(); await toolRuntime.init(); await chatRuntime.init(); await agentRuntime.init(); await createWindow(); app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createWindow(); }); }).catch((error) => { const message = error instanceof Error ? error.message : 'Falha ao inicializar o Auto CodeZ.'; dialog.showErrorBox('Auto CodeZ', message); app.quit(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
