@@ -23,8 +23,6 @@ export interface CommandResult {
   durationMs: number;
 }
 
-const SAFE_SCRIPTS = new Set(['test', 'build', 'typecheck', 'lint', 'package', 'check']);
-const MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 const MAX_OUTPUT_CHARS = 2_000_000;
 const TIMEOUT_MS = 10 * 60 * 1000;
 const TERMINATION_GRACE_MS = 2_000;
@@ -51,10 +49,12 @@ function terminateProcessTree(child: ChildProcess): void {
   }
 }
 
-function commandForPlatform(manager: string, script: string): { executable: string; args: string[] } {
-  if (process.platform !== 'win32') return { executable: manager, args: ['run', script] };
-  const comspec = process.env.ComSpec ?? 'cmd.exe';
-  return { executable: comspec, args: ['/d', '/s', '/c', `${manager}.cmd run ${script}`] };
+function commandForPlatform(command: string): { executable: string; args: string[] } {
+  if (process.platform === 'win32') {
+    const comspec = process.env.ComSpec ?? 'cmd.exe';
+    return { executable: comspec, args: ['/d', '/s', '/c', command] };
+  }
+  return { executable: '/bin/sh', args: ['-lc', command] };
 }
 
 export class CommandRuntime {
@@ -66,31 +66,29 @@ export class CommandRuntime {
     return project;
   }
 
-  async run(projectId: string, manager: string, script: string, options: CommandRunOptions = {}): Promise<CommandResult> {
-    if (!MANAGERS.has(manager)) throw new Error('Gerenciador de pacotes não permitido.');
-    if (!SAFE_SCRIPTS.has(script)) throw new Error('Script não permitido pelo runtime.');
+  async run(projectId: string, command: string, options: CommandRunOptions = {}): Promise<CommandResult> {
+    const normalizedCommand = command.trim();
+    if (!normalizedCommand) throw new Error('O comando não pode estar vazio.');
 
     const project = await this.project(projectId);
     const cwd = await fs.realpath(path.resolve(project.rootPath));
-    const packagePath = path.join(cwd, 'package.json');
-    const packageData = JSON.parse(await fs.readFile(packagePath, 'utf8')) as { scripts?: Record<string, string> };
-    if (!packageData.scripts?.[script]) throw new Error(`O script '${script}' não existe no projeto.`);
-
-    const { executable, args } = commandForPlatform(manager, script);
+    const { executable, args } = commandForPlatform(normalizedCommand);
     const startedAt = Date.now();
+
     return new Promise((resolve, reject) => {
       const child = spawn(executable, args, {
         cwd,
         shell: false,
         windowsHide: true,
         detached: process.platform !== 'win32',
-        env: { ...process.env, CI: '1' },
+        env: { ...process.env, CI: process.env.CI ?? '1' },
       });
       let stdout = '';
       let stderr = '';
       let timedOut = false;
       let settled = false;
       let killTimer: ReturnType<typeof setTimeout> | undefined;
+
       const append = (target: 'stdout' | 'stderr', chunk: Buffer | string): void => {
         const value = chunk.toString();
         if (target === 'stdout') stdout = (stdout + value).slice(-MAX_OUTPUT_CHARS);
@@ -101,6 +99,7 @@ export class CommandRuntime {
           // A UI observer must never be able to break the command process.
         }
       };
+
       const timeout = setTimeout(() => {
         if (settled) return;
         timedOut = true;
@@ -109,6 +108,7 @@ export class CommandRuntime {
           if (!settled) child.kill('SIGKILL');
         }, TERMINATION_GRACE_MS);
       }, TIMEOUT_MS);
+
       const finish = (result: Omit<CommandResult, 'startedAt' | 'finishedAt' | 'durationMs'>): void => {
         if (settled) return;
         settled = true;
@@ -117,6 +117,7 @@ export class CommandRuntime {
         const finishedAt = Date.now();
         resolve({ ...result, startedAt, finishedAt, durationMs: Math.max(0, finishedAt - startedAt) });
       };
+
       child.stdout?.on('data', (chunk: Buffer | string) => append('stdout', chunk));
       child.stderr?.on('data', (chunk: Buffer | string) => append('stderr', chunk));
       child.on('error', (error) => {
@@ -126,7 +127,7 @@ export class CommandRuntime {
         reject(error);
       });
       child.on('close', (exitCode, signal) => finish({
-        command: `${manager} run ${script}`,
+        command: normalizedCommand,
         exitCode: exitCode ?? (signal ? 1 : 0),
         stdout,
         stderr: timedOut ? `${stderr}\nCommand timed out after ${TIMEOUT_MS / 60000} minutes.`.trim() : stderr,
