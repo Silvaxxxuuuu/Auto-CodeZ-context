@@ -21,7 +21,7 @@ function installStyle(): void {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    .chat-item .execution-indicator{display:none;align-items:center;justify-content:center;width:20px;height:20px;flex:0 0 20px;margin-right:2px;color:#7fa9ed}
+    .chat-item .execution-indicator{display:none;align-items:center;justify-content:center;width:20px;height:20px;flex:0 0 20px;margin:0;color:#7fa9ed}
     .chat-item .execution-indicator svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
     .chat-item.is-executing .execution-indicator{display:inline-flex}
     .chat-item.is-executing .execution-indicator::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 0 4px currentColor;opacity:.12}
@@ -50,7 +50,9 @@ function escapeAttribute(value: string): string {
 }
 
 function syncChatItems(): void {
-  document.querySelectorAll<HTMLElement>('.chat-item[data-chat]').forEach((item) => {
+  const nav = document.querySelector<HTMLElement>('#nav-panel');
+  if (!nav) return;
+  nav.querySelectorAll<HTMLElement>('.chat-item[data-chat]').forEach((item) => {
     const chatId = item.dataset.chat;
     if (!chatId) return;
     const snapshot = manager.get(chatId);
@@ -71,7 +73,8 @@ function syncChatItems(): void {
 }
 
 function syncComposer(): void {
-  const selected = document.querySelector<HTMLElement>('.chat-item.selected[data-chat]');
+  const nav = document.querySelector<HTMLElement>('#nav-panel');
+  const selected = nav?.querySelector<HTMLElement>('.chat-item.selected[data-chat]');
   const chatId = selected?.dataset.chat;
   const snapshot = chatId ? manager.get(chatId) : undefined;
   const busy = active(snapshot);
@@ -114,8 +117,15 @@ function handleEvent(event: StreamExecutionEvent): void {
 function initialize(): void {
   installStyle();
   if (bridge?.onStreamEvent) bridge.onStreamEvent(handleEvent);
-  const observer = new MutationObserver(syncUi);
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
+
+  // Only the navigation can affect execution-item placement/selection. Observing the
+  // whole document made every streaming DOM mutation trigger a full UI rescan.
+  const nav = document.querySelector<HTMLElement>('#nav-panel');
+  if (nav) {
+    const observer = new MutationObserver(syncUi);
+    observer.observe(nav, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
+  }
+
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey) return;
     const target = event.target as HTMLElement | null;
@@ -125,6 +135,5 @@ function initialize(): void {
   syncUi();
 }
 
-// The UI manager mirrors the authoritative main-process execution lifecycle.
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
 else initialize();
