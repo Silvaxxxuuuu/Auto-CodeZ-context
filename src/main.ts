@@ -21,6 +21,8 @@ import { ApprovalRuntime } from './agent/approval-runtime';
 import { ProjectContextRuntime } from './agent/project-context-runtime';
 import { CommandRuntime } from './agent/command-runtime';
 import { TerminalService } from './agent/terminal-service';
+import { GitRuntime } from './agent/git-runtime';
+import { GitService } from './agent/git-service';
 
 if (started) app.quit();
 
@@ -41,6 +43,7 @@ const providerRequestJournal = new ProviderRequestJournal(storage);
 const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver, toolRuntime.listDefinitions(), providerRequestJournal);
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const terminalService = new TerminalService(storage, () => projectManager.list());
+const gitService = new GitService(new GitRuntime(() => projectManager.list()));
 const chatManager = new ChatManager(storage);
 
 let providerConfigs: AIProviderConfig[] = [];
@@ -289,6 +292,17 @@ ipcMain.handle('terminal:list-sessions', async () => terminalService.listSession
 ipcMain.handle('terminal:get-output', async (_event, sessionId: string) => terminalService.getOutput(requireIdentifier(sessionId, 'Sessão do terminal')));
 ipcMain.handle('terminal:list-history', async (_event, projectId?: string) => terminalService.listHistory(projectId === undefined ? undefined : requireIdentifier(projectId, 'Projeto')));
 ipcMain.handle('terminal:clear-history', async (_event, projectId?: string) => terminalService.clearHistory(projectId === undefined ? undefined : requireIdentifier(projectId, 'Projeto')));
+
+ipcMain.handle('git:status', async (_event, projectId: string) => gitService.status(requireIdentifier(projectId, 'Projeto')));
+ipcMain.handle('git:branches', async (_event, projectId: string) => gitService.branches(requireIdentifier(projectId, 'Projeto')));
+ipcMain.handle('git:diff', async (_event, projectId: string) => gitService.diff(requireIdentifier(projectId, 'Projeto')));
+ipcMain.handle('git:log', async (_event, input: { projectId: string; limit?: number }) => {
+  const value = requireObject(input, 'Dados do histórico Git');
+  const projectId = requireIdentifier(value.projectId, 'Projeto');
+  const limit = value.limit === undefined ? undefined : Number(value.limit);
+  if (limit !== undefined && !Number.isFinite(limit)) throw new Error('Limite do histórico Git inválido.');
+  return gitService.log(projectId, limit);
+});
 
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => {
   try {
