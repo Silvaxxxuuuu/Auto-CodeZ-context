@@ -90,7 +90,7 @@ test('GitRuntime stages selected files and commits them', async () => {
     const result = await runtime.commit(repository.project.id, 'update selected file');
     assert.equal(result.branch, status.branch);
     status = await runtime.status(repository.project.id);
-    assert.equal(status.files.find((file) => file.path === 'SECOND.md')?.worktree, ' ');
+    assert.equal(status.files.find((file) => file.path === 'SECOND.md')?.worktree, 'M');
     const history = await runtime.log(repository.project.id, 2);
     assert.equal(history[0]?.subject, 'update selected file');
   } finally {
