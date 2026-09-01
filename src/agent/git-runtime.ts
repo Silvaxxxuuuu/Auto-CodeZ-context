@@ -31,6 +31,28 @@ export interface GitCommitSummary {
   subject: string;
 }
 
+export interface GitOperationResult {
+  output: string;
+  branch: string;
+}
+
+function requireSafeBranchName(name: string): string {
+  const value = name.trim();
+  if (!value) throw new Error('Nome da branch é obrigatório.');
+  if (value.length > 200) throw new Error('Nome da branch é longo demais.');
+  if (/\s/.test(value) || value.startsWith('-') || value.includes('..') || value.includes('\\') || value.includes('~') || value.includes('^') || value.includes(':') || value.includes('?') || value.includes('*') || value.includes('[')) {
+    throw new Error('Nome da branch contém caracteres inválidos.');
+  }
+  return value;
+}
+
+function requireCommitMessage(message: string): string {
+  const value = message.trim();
+  if (!value) throw new Error('Mensagem do commit é obrigatória.');
+  if (value.length > 500) throw new Error('Mensagem do commit é longa demais.');
+  return value;
+}
+
 export class GitRuntime {
   constructor(private readonly listProjects: () => Promise<ProjectRecord[]>) {}
 
@@ -89,5 +111,24 @@ export class GitRuntime {
       const [hash, shortHash, author, date, ...subject] = line.split('\t');
       return { hash, shortHash, author, date, subject: subject.join('\t') };
     });
+  }
+
+  async createBranch(projectId: string, name: string): Promise<GitOperationResult> {
+    const branch = requireSafeBranchName(name);
+    const output = await this.git(projectId, ['switch', '-c', '--', branch]);
+    return { output: output.trim(), branch };
+  }
+
+  async checkout(projectId: string, name: string): Promise<GitOperationResult> {
+    const branch = requireSafeBranchName(name);
+    const output = await this.git(projectId, ['switch', '--', branch]);
+    return { output: output.trim(), branch };
+  }
+
+  async commit(projectId: string, message: string): Promise<GitOperationResult> {
+    const commitMessage = requireCommitMessage(message);
+    const output = await this.git(projectId, ['commit', '-m', commitMessage]);
+    const status = await this.status(projectId);
+    return { output: output.trim(), branch: status.branch };
   }
 }
