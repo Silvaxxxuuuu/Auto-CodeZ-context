@@ -37,6 +37,7 @@ if (!bridge?.onActivity || !bridge.onStreamEvent || !bridge.listApprovals) throw
 
 const runs = new Map<string, RunState>();
 let pendingApprovals: Approval[] = [];
+let activeChatId = '';
 const MAX_RUNS = 6;
 const MAX_STEPS = 8;
 
@@ -155,12 +156,49 @@ async function refreshApprovals(): Promise<void> {
   render();
 }
 
+function syncChatContext(): void {
+  const selected = document.querySelector<HTMLElement>('.chat-item.selected');
+  const nextChatId = selected?.dataset.chat || '';
+  if (nextChatId === activeChatId) return;
+  activeChatId = nextChatId;
+  runs.clear();
+  pendingApprovals = [];
+  container.hidden = true;
+  container.innerHTML = '';
+  if (activeChatId) void refreshApprovals();
+}
+
+const chatContextObserver = new MutationObserver(syncChatContext);
+chatContextObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
+
 bridge.onActivity(handleActivity);
 bridge.onStreamEvent((value: unknown) => {
   if (!value || typeof value !== 'object') return;
   const event = value as { type?: string };
-  if (event.type === 'approval_required') void refreshApprovals();
-  if (event.type === 'complete' || event.type === 'error') window.setTimeout(() => void refreshApprovals(), 0);
+  const current = latestRun();
+  if (event.type === 'approval_required') {
+    void refreshApprovals();
+    return;
+  }
+  if (event.type === 'complete') {
+    if (current) {
+      current.status = 'success';
+      current.message = 'Execução concluída.';
+      current.updatedAt = Date.now();
+    }
+    pendingApprovals = [];
+    render();
+    return;
+  }
+  if (event.type === 'error') {
+    if (current) {
+      current.status = 'failed';
+      current.message = 'A execução falhou.';
+      current.updatedAt = Date.now();
+    }
+    pendingApprovals = [];
+    render();
+  }
 });
 
 document.addEventListener('click', (event) => {
@@ -168,4 +206,5 @@ document.addEventListener('click', (event) => {
   if (target.closest('[data-approve], [data-deny]')) window.setTimeout(() => void refreshApprovals(), 80);
 });
 
+syncChatContext();
 void refreshApprovals();
