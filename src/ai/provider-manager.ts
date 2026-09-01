@@ -1,4 +1,5 @@
-import type { AIProviderConfig, ProviderId, ProviderSummary } from './types';
+import crypto from 'node:crypto';
+import type { AIProviderConfig, AIProviderConfig as ProviderConfig, ProviderId, ProviderSummary } from './types';
 import { ProviderRegistry } from './provider-registry';
 import { OpenAIAdapter } from './providers/openai';
 import { GoogleAdapter } from './providers/google';
@@ -8,27 +9,40 @@ import { isAuthenticationError, normalizeProviderError } from './provider-errors
 
 const STATE_FILE = 'providers.json';
 const SECURE_FILE = 'provider-secrets.json';
+const KEY_STATE_FILE = 'provider-keys.json';
+const KEY_SECURE_FILE = 'provider-key-secrets.json';
 
 interface ProviderState { configs: AIProviderConfig[]; }
+interface ProviderKeyRecord { id: string; name: string; providerId: ProviderId; apiKey: string; baseUrl?: string; selectedModel?: string; createdAt: number; updatedAt: number; }
+interface ProviderKeyMetadata { id: string; name: string; providerId: ProviderId; baseUrl?: string; selectedModel?: string; createdAt: number; updatedAt: number; }
+interface ProviderKeyState { keys: ProviderKeyMetadata[]; activeKeyIds: Record<string, string>; }
+export interface ProviderKeySummary { id: string; name: string; providerId: ProviderId; providerName: string; maskedKey: string; selectedModel?: string; active: boolean; createdAt: number; updatedAt: number; }
 
 function normalizeConfig(value: AIProviderConfig): AIProviderConfig {
   const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
   const displayName = typeof value.displayName === 'string' && value.displayName.trim() ? value.displayName.trim() : value.id;
   const baseUrl = typeof value.baseUrl === 'string' ? value.baseUrl.trim().replace(/\/$/, '') : '';
   const selectedModel = typeof value.selectedModel === 'string' ? value.selectedModel.trim() : '';
-  return {
-    id: value.id,
-    displayName,
-    apiKey,
-    ...(baseUrl ? { baseUrl } : {}),
-    ...(selectedModel ? { selectedModel } : {}),
-    enabled: Boolean(value.enabled && apiKey),
-  };
+  return { id: value.id, displayName, apiKey, ...(baseUrl ? { baseUrl } : {}), ...(selectedModel ? { selectedModel } : {}), enabled: Boolean(value.enabled && apiKey) };
+}
+
+function normalizeKey(value: ProviderKeyRecord): ProviderKeyRecord {
+  const now = Date.now();
+  const name = typeof value.name === 'string' && value.name.trim() ? value.name.trim() : 'API Key';
+  const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
+  return { id: value.id, name: name.slice(0, 80), providerId: value.providerId, apiKey, ...(value.baseUrl?.trim() ? { baseUrl: value.baseUrl.trim().replace(/\/$/, '') } : {}), ...(value.selectedModel?.trim() ? { selectedModel: value.selectedModel.trim() } : {}), createdAt: Number.isFinite(value.createdAt) ? value.createdAt : now, updatedAt: Number.isFinite(value.updatedAt) ? value.updatedAt : now };
+}
+
+function maskApiKey(apiKey: string): string {
+  if (apiKey.length <= 8) return '••••••••';
+  return `${apiKey.slice(0, 4)}••••••••${apiKey.slice(-4)}`;
 }
 
 export class ProviderManager {
   readonly registry: ProviderRegistry;
   private configs: AIProviderConfig[] = [];
+  private keys: ProviderKeyRecord[] = [];
+  private activeKeyIds: Record<string, string> = {};
 
   constructor(private readonly storage: { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; readEncrypted(name: string): Promise<string | null>; writeEncrypted(name: string, value: string): Promise<void> }) {
     this.registry = new ProviderRegistry();
@@ -39,20 +53,49 @@ export class ProviderManager {
 
   async init(): Promise<void> {
     const metadata = await this.storage.read<ProviderState>(STATE_FILE, { configs: [] });
-    let secure: AIProviderConfig[] = [];
-    const rawSecure = await this.storage.readEncrypted(SECURE_FILE);
-    if (rawSecure) {
+    const keyMetadata = await this.storage.read<ProviderKeyState>(KEY_STATE_FILE, { keys: [], activeKeyIds: {} });
+    this.activeKeyIds = keyMetadata.activeKeyIds && typeof keyMetadata.activeKeyIds === 'object' ? { ...keyMetadata.activeKeyIds } : {};
+
+    let secureKeys: ProviderKeyRecord[] = [];
+    const rawKeySecure = await this.storage.readEncrypted(KEY_SECURE_FILE);
+    if (rawKeySecure) {
       try {
-        const parsed = JSON.parse(rawSecure) as ProviderState;
-        if (Array.isArray(parsed.configs)) secure = parsed.configs.map(normalizeConfig);
-      } catch { secure = []; }
+        const parsed = JSON.parse(rawKeySecure) as { keys?: ProviderKeyRecord[] };
+        if (Array.isArray(parsed.keys)) secureKeys = parsed.keys.map(normalizeKey).filter((key) => key.apiKey);
+      } catch { secureKeys = []; }
     }
+
+    if (!secureKeys.length) {
+      const rawLegacy = await this.storage.readEncrypted(SECURE_FILE);
+      if (rawLegacy) {
+        try {
+          const parsed = JSON.parse(rawLegacy) as ProviderState;
+          if (Array.isArray(parsed.configs)) {
+            secureKeys = parsed.configs.map((config) => normalizeKey({
+              id: `legacy-${config.id}`,
+              name: `${config.displayName} principal`,
+              providerId: config.id,
+              apiKey: config.apiKey,
+              ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
+              ...(config.selectedModel ? { selectedModel: config.selectedModel } : {}),
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            })).filter((key) => key.apiKey);
+          }
+        } catch { secureKeys = []; }
+      }
+    }
+
+    this.keys = secureKeys;
+    if (!Object.keys(this.activeKeyIds).length) {
+      for (const key of this.keys) this.activeKeyIds[key.providerId] = key.id;
+    }
+    this.syncConfigs();
+    if (this.keys.length) await this.persistKeys();
+    else await this.persist();
+
     const metadataConfigs = Array.isArray(metadata.configs) ? metadata.configs : [];
-    this.configs = metadataConfigs.map((item) => {
-      const secureConfig = secure.find((candidate) => candidate.id === item.id);
-      return normalizeConfig({ ...item, apiKey: secureConfig?.apiKey || '' });
-    });
-    await this.persist();
+    if (!this.keys.length) this.configs = metadataConfigs.map((item) => normalizeConfig({ ...item, apiKey: '' }));
   }
 
   async list(): Promise<ProviderSummary[]> { return this.registry.summaries(this.configs); }
@@ -65,40 +108,113 @@ export class ProviderManager {
 
   async listModels(providerId: ProviderId): Promise<import('./types').AIModel[]> {
     const config = this.getConfig(providerId);
-    try {
-      return await this.registry.listModels(config);
-    } catch (error) {
-      throw normalizeProviderError(config.displayName, 'model discovery', error);
-    }
+    try { return await this.registry.listModels(config); } catch (error) { throw normalizeProviderError(config.displayName, 'model discovery', error); }
   }
 
-  async save(input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }): Promise<{ providers: ProviderSummary[]; models: import('./types').AIModel[]; discoveryError?: string }> {
+  async listKeys(): Promise<ProviderKeySummary[]> {
+    return this.keys.map((key) => ({ id: key.id, name: key.name, providerId: key.providerId, providerName: this.registry.get(key.providerId).displayName, maskedKey: maskApiKey(key.apiKey), ...(key.selectedModel ? { selectedModel: key.selectedModel } : {}), active: this.activeKeyIds[key.providerId] === key.id, createdAt: key.createdAt, updatedAt: key.updatedAt }));
+  }
+
+  async saveKey(input: { providerId: string; name: string; apiKey: string; model?: string; baseUrl?: string }): Promise<{ key: ProviderKeySummary; providers: ProviderSummary[]; models: import('./types').AIModel[]; discoveryError?: string }> {
     const providerId = input.providerId as ProviderId;
     const adapter = this.registry.get(providerId);
     const apiKey = input.apiKey.trim();
+    const name = input.name.trim().replace(/\s+/g, ' ');
     if (!apiKey) throw new Error('API key é obrigatória.');
+    if (!name) throw new Error('O nome da API key é obrigatório.');
+    if (name.length > 80) throw new Error('O nome da API key deve ter no máximo 80 caracteres.');
     const config: AIProviderConfig = { id: providerId, displayName: adapter.displayName, apiKey, ...(input.baseUrl?.trim() ? { baseUrl: input.baseUrl.trim().replace(/\/$/, '') } : {}), ...(input.model?.trim() ? { selectedModel: input.model.trim() } : {}), enabled: true };
     let models: import('./types').AIModel[] = [];
     let discoveryError: string | undefined;
     try {
       models = await adapter.listModels(config);
-      if (!models.length) discoveryError = 'O provider não retornou modelos disponíveis. A API key foi salva e a descoberta de modelos poderá ser repetida.';
+      if (!models.length) discoveryError = 'O provider não retornou modelos disponíveis. A API key foi salva.';
     } catch (error) {
       const normalized = normalizeProviderError(config.displayName, 'model discovery', error);
       if (isAuthenticationError(normalized)) throw normalized;
-      discoveryError = normalized.message || 'Não foi possível descobrir os modelos deste provider agora. A API key foi salva.';
+      discoveryError = normalized.message || 'Não foi possível descobrir os modelos agora. A API key foi salva.';
     }
     if (config.selectedModel && models.length && !models.some((model) => model.id === config.selectedModel)) throw new Error('O modelo selecionado não está disponível para este provider.');
     if (!config.selectedModel && models.length) config.selectedModel = selectDefaultModel(providerId, models);
-    this.configs = [...this.configs.filter((item) => item.id !== providerId), config];
-    await this.persist();
-    return { providers: await this.list(), models, ...(discoveryError ? { discoveryError } : {}) };
+    const now = Date.now();
+    const key: ProviderKeyRecord = { id: crypto.randomUUID(), name: name.slice(0, 80), providerId, apiKey, ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}), ...(config.selectedModel ? { selectedModel: config.selectedModel } : {}), createdAt: now, updatedAt: now };
+    this.keys = [...this.keys, key];
+    this.activeKeyIds[providerId] = key.id;
+    this.syncConfigs();
+    await this.persistKeys();
+    return { key: (await this.listKeys()).find((item) => item.id === key.id)!, providers: await this.list(), models, ...(discoveryError ? { discoveryError } : {}) };
+  }
+
+  async renameKey(keyId: string, name: string): Promise<ProviderKeySummary> {
+    const key = this.keys.find((item) => item.id === keyId);
+    if (!key) throw new Error('API key não encontrada.');
+    const normalized = name.trim().replace(/\s+/g, ' ');
+    if (!normalized) throw new Error('O nome da API key é obrigatório.');
+    if (normalized.length > 80) throw new Error('O nome da API key deve ter no máximo 80 caracteres.');
+    key.name = normalized;
+    key.updatedAt = Date.now();
+    await this.persistKeys();
+    return (await this.listKeys()).find((item) => item.id === keyId)!;
+  }
+
+  async setActiveKey(keyId: string): Promise<{ key: ProviderKeySummary; providers: ProviderSummary[] }> {
+    const key = this.keys.find((item) => item.id === keyId);
+    if (!key) throw new Error('API key não encontrada.');
+    this.activeKeyIds[key.providerId] = key.id;
+    this.syncConfigs();
+    await this.persistKeys();
+    return { key: (await this.listKeys()).find((item) => item.id === keyId)!, providers: await this.list() };
+  }
+
+  async removeKey(keyId: string): Promise<{ providers: ProviderSummary[]; keys: ProviderKeySummary[] }> {
+    const key = this.keys.find((item) => item.id === keyId);
+    if (!key) throw new Error('API key não encontrada.');
+    this.keys = this.keys.filter((item) => item.id !== keyId);
+    if (this.activeKeyIds[key.providerId] === keyId) {
+      const replacement = this.keys.filter((item) => item.providerId === key.providerId).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      if (replacement) this.activeKeyIds[key.providerId] = replacement.id;
+      else delete this.activeKeyIds[key.providerId];
+    }
+    this.syncConfigs();
+    await this.persistKeys();
+    return { providers: await this.list(), keys: await this.listKeys() };
+  }
+
+  async save(input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }): Promise<{ providers: ProviderSummary[]; models: import('./types').AIModel[]; discoveryError?: string }> {
+    const active = this.keys.find((key) => key.id === this.activeKeyIds[input.providerId]);
+    if (active) {
+      const result = await this.saveKey({ ...input, name: active.name });
+      this.keys = this.keys.map((key) => key.id === active.id ? { ...result.key, apiKey: input.apiKey.trim(), createdAt: key.createdAt, updatedAt: Date.now() } as ProviderKeyRecord : key);
+      this.activeKeyIds[input.providerId] = active.id;
+      this.syncConfigs();
+      await this.persistKeys();
+      return { providers: await this.list(), models: result.models, ...(result.discoveryError ? { discoveryError: result.discoveryError } : {}) };
+    }
+    const result = await this.saveKey({ ...input, name: `${this.registry.get(input.providerId).displayName} principal` });
+    return { providers: result.providers, models: result.models, ...(result.discoveryError ? { discoveryError: result.discoveryError } : {}) };
   }
 
   async remove(providerId: ProviderId): Promise<ProviderSummary[]> {
-    this.configs = this.configs.filter((item) => item.id !== providerId);
-    await this.persist();
+    this.keys = this.keys.filter((key) => key.providerId !== providerId);
+    delete this.activeKeyIds[providerId];
+    this.syncConfigs();
+    await this.persistKeys();
     return this.list();
+  }
+
+  private syncConfigs(): void {
+    this.configs = this.registry.list().flatMap((adapter) => {
+      const key = this.keys.find((item) => item.id === this.activeKeyIds[adapter.id]);
+      return key ? [{ id: adapter.id, displayName: adapter.displayName, apiKey: key.apiKey, ...(key.baseUrl ? { baseUrl: key.baseUrl } : {}), ...(key.selectedModel ? { selectedModel: key.selectedModel } : {}), enabled: true }] : [];
+    });
+  }
+
+  private async persistKeys(): Promise<void> {
+    const metadata: ProviderKeyState = { keys: this.keys.map(({ apiKey: _apiKey, ...key }) => key), activeKeyIds: this.activeKeyIds };
+    await this.storage.write(KEY_STATE_FILE, metadata);
+    await this.storage.writeEncrypted(KEY_SECURE_FILE, JSON.stringify({ keys: this.keys }));
+    await this.storage.write(STATE_FILE, { configs: this.configs.map((config) => ({ ...config, apiKey: '' })) });
+    await this.storage.writeEncrypted(SECURE_FILE, JSON.stringify({ configs: this.configs } satisfies ProviderState));
   }
 
   private async persist(): Promise<void> {
