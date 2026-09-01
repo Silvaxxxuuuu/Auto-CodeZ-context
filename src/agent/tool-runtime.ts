@@ -121,7 +121,7 @@ export class ToolRuntime {
       await this.assertPrecondition(approval.projectId, approval.diffPlan);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.activity.failure('tool', `Aprovação ${approvalId} não pôde ser executada: ${message}`);
+      this.activity.emit({ type: 'action', message: `Aprovação ${approvalId} não pôde ser executada.`, status: 'failed', toolCallId: approval.toolCall.id, toolName: approval.toolCall.name, error: message, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) });
       return { toolCallId: approval.toolCall.id, ok: false, error: message, approvalId, pendingApproval: true, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
     }
 
@@ -215,7 +215,7 @@ export class ToolRuntime {
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.activity.emit({ type: activityType, message: `Falha em ${call.name}: ${message}`, status: 'failed', toolCallId: call.id, toolName: call.name });
+      this.activity.emit({ type: activityType, message: `Falha em ${call.name}: ${message}`, status: 'failed', toolCallId: call.id, toolName: call.name, error: message, ...(diffPlan ? { diffPlan } : {}) });
       return { toolCallId: call.id, ok: false, error: message };
     }
   }
@@ -250,11 +250,11 @@ export class ToolRuntime {
   private async buildJournalResult(entry: JournalEntry): Promise<AIToolResult> {
     const changes: FileDiff[] = [];
     for (const change of entry.diffPlan.changes) {
-      let after = change.after;
-      if (change.type !== 'deleted') after = await this.workspace.readFile(entry.projectId, change.path);
-      changes.push(this.diffs.create(change.path, change.type, change.before, after, change.renamedFrom));
+      if (change.type === 'deleted') changes.push(this.diffs.create(change.path, 'deleted', change.before, ''));
+      else if (change.type === 'renamed') changes.push(this.diffs.create(change.path, 'renamed', change.before, change.after, change.renamedFrom));
+      else changes.push(this.diffs.create(change.path, change.type, change.before, change.after));
     }
-    return { toolCallId: entry.toolCall.id, ok: true, output: 'Operação concluída após recuperação do journal.', changes };
+    return { toolCallId: entry.toolCall.id, ok: true, output: 'Operação recuperada após uma interrupção.', changes, diffPlan: entry.diffPlan };
   }
 
   private async matchesExpectedState(entry: JournalEntry): Promise<boolean> {
@@ -277,7 +277,7 @@ export class ToolRuntime {
 
   private async reconcileJournal(): Promise<void> {
     for (const [approvalId, entry] of this.journal) {
-      if (await this.matchesExpectedState(entry)) this.activity.emit({ type: 'action', message: `Operação ${approvalId} concluída durante uma interrupção anterior.`, status: 'success' });
+      if (await this.matchesExpectedState(entry)) this.activity.emit({ type: 'action', message: `Operação ${approvalId} concluída durante uma interrupção anterior.`, status: 'success', toolCallId: entry.toolCall.id, toolName: entry.toolCall.name, diffPlan: entry.diffPlan });
     }
     await this.persistJournal();
   }
