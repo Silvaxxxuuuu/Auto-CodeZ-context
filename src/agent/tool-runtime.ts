@@ -14,7 +14,7 @@ const definitions: AIToolDefinition[] = [
   { name: 'delete_file', description: 'Delete a file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'rename_file', description: 'Rename or move a file inside the active workspace.', parameters: { type: 'object', properties: { from: { type: 'string', description: 'Current workspace-relative path.' }, to: { type: 'string', description: 'Destination workspace-relative path.' } }, required: ['from', 'to'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'search_files', description: 'Search workspace file names for a text query.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'Text to search for in workspace file names.' } }, required: ['query'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
-  { name: 'run_command', description: 'Run an approved package script such as tests, build, typecheck or lint inside the active workspace.', parameters: { type: 'object', properties: { manager: { type: 'string', enum: ['npm', 'pnpm', 'yarn', 'bun'] }, script: { type: 'string', enum: ['test', 'build', 'typecheck', 'lint', 'package', 'check'] } }, required: ['manager', 'script'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'run_command', description: 'Execute a local shell command from the active workspace. In read-only mode it is blocked. In safe and ask modes it requires explicit user approval. In unrestricted mode it executes directly.', parameters: { type: 'object', properties: { command: { type: 'string', description: 'Exact local shell command to execute.' } }, required: ['command'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'git_status', description: 'Read the current Git branch and working tree status.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_diff', description: 'Read the current unstaged Git diff.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_log', description: 'Read recent Git commits from the active workspace.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Number of commits to return.' } }, required: ['limit'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -180,7 +180,7 @@ export class ToolRuntime {
   private stringValue(input: Record<string, unknown>, key: string): string { const value = input[key]; if (typeof value !== 'string' || !value.trim()) throw new Error(`Parâmetro '${key}' inválido.`); return value.trim(); }
 
   private async executeNow(projectId: string, call: AIToolCall, approvalId?: string, diffPlan?: DiffPlan): Promise<AIToolResult> {
-    const activityType = call.name === 'run_command' && typeof call.input.script === 'string' ? this.activityTypeForCommand(call.input.script) : 'tool';
+    const activityType = call.name === 'run_command' ? 'action' : 'tool';
     this.activity.start(activityType, `Executando ${call.name}`);
     try {
       if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);
@@ -213,7 +213,7 @@ export class ToolRuntime {
       case 'delete_file': { const path = this.stringValue(input, 'path'); const before = await this.workspace.readFile(projectId, path); await this.workspace.deleteFile(projectId, path); return { output: 'Arquivo excluído.', changes: [this.diffs.create(path, 'deleted', before, '')] }; }
       case 'rename_file': { const from = this.stringValue(input, 'from'); const to = this.stringValue(input, 'to'); const before = await this.workspace.readFile(projectId, from); await this.workspace.renameFile(projectId, from, to); const after = await this.workspace.readFile(projectId, to); return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] }; }
       case 'search_files': return { output: JSON.stringify(await this.workspace.searchFiles(projectId, this.stringValue(input, 'query'))) };
-      case 'run_command': { const result = await this.commands.run(projectId, this.stringValue(input, 'manager'), this.stringValue(input, 'script')); return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result }; }
+      case 'run_command': { const result = await this.commands.run(projectId, this.stringValue(input, 'command')); return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result }; }
       case 'git_status': return this.gitExecution(projectId, await this.requireGit().status(projectId));
       case 'git_diff': return this.gitExecution(projectId, await this.requireGit().diff(projectId));
       case 'git_log': return this.gitExecution(projectId, await this.requireGit().log(projectId, Number(input.limit)));
@@ -227,5 +227,4 @@ export class ToolRuntime {
   }
   private requireGit(): GitRuntime { if (!this.gitRuntime) throw new Error('O runtime Git não foi configurado para esta instância.'); return this.gitRuntime; }
   private gitExecution(_projectId: string, value: unknown): ToolExecution { return { output: typeof value === 'string' ? value : JSON.stringify(value) }; }
-  private activityTypeForCommand(script: string): 'action' | 'tool' { return script === 'test' || script === 'build' || script === 'typecheck' || script === 'lint' ? 'action' : 'tool'; }
 }
