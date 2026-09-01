@@ -58,8 +58,14 @@ export class ChatRuntime {
 
   private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string) {
     const adapter = this.registry.get(config.id);
-    const availableModels = await this.models.list(config);
-    const model = this.models.find(availableModels, chat.model);
+    let model;
+    try {
+      const availableModels = await this.models.list(config);
+      model = this.models.find(availableModels, chat.model, config.id);
+    } catch (error) {
+      model = this.models.fallbackForConfiguredModel(config, chat.model);
+      this.activity.emit({ type: 'action', message: `${adapter.displayName}: descoberta de modelos indisponível; usando o modelo já configurado (${model.id}).`, status: 'pending' });
+    }
     if (!this.capabilities.supports(model, 'text')) throw new Error('O modelo selecionado não suporta texto.');
     const resolution = this.intelligence.resolve(model, chat.intelligence);
     const systemMessages = [{ role: 'system' as const, content: AUTOCODEZ_SYSTEM_INSTRUCTIONS }];
