@@ -1,7 +1,8 @@
+import crypto from 'node:crypto';
 import type { FileDiff } from '../ai/types';
 
 const MAX_EXACT_COMPARISON_CELLS = 4_000_000;
-const MAX_DIFF_LINES = 20_000;
+const MAX_PLAN_FILES = 20_000;
 
 export interface DiffSummary {
   files: number;
@@ -23,31 +24,24 @@ export interface DiffPlan {
 function lineCounts(before: string, after: string): { addedLines: number; removedLines: number } {
   const oldLines = before ? before.split(/\r?\n/) : [];
   const newLines = after ? after.split(/\r?\n/) : [];
-
   let prefix = 0;
   while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) prefix += 1;
-
   let oldEnd = oldLines.length;
   let newEnd = newLines.length;
   while (oldEnd > prefix && newEnd > prefix && oldLines[oldEnd - 1] === newLines[newEnd - 1]) {
     oldEnd -= 1;
     newEnd -= 1;
   }
-
   const oldLength = oldEnd - prefix;
   const newLength = newEnd - prefix;
   if (oldLength === 0) return { addedLines: newLength, removedLines: 0 };
   if (newLength === 0) return { addedLines: 0, removedLines: oldLength };
-
-  if (oldLength * newLength > MAX_EXACT_COMPARISON_CELLS) {
-    return { addedLines: newLength, removedLines: oldLength };
-  }
+  if (oldLength * newLength > MAX_EXACT_COMPARISON_CELLS) return { addedLines: newLength, removedLines: oldLength };
 
   const oldSlice = oldLines.slice(prefix, oldEnd);
   const newSlice = newLines.slice(prefix, newEnd);
   const cols = oldSlice.length + 1;
   let previous = new Uint32Array(cols);
-
   for (let row = 1; row <= newSlice.length; row += 1) {
     const current = new Uint32Array(cols);
     for (let col = 1; col < cols; col += 1) {
@@ -57,7 +51,6 @@ function lineCounts(before: string, after: string): { addedLines: number; remove
     }
     previous = current;
   }
-
   const common = previous[cols - 1];
   return { addedLines: newLength - common, removedLines: oldLength - common };
 }
@@ -85,14 +78,13 @@ function summarize(changes: FileDiff[]): DiffSummary {
 
 export class DiffRuntime {
   create(path: string, type: FileDiff['type'], before: string, after: string, renamedFrom?: string): FileDiff {
-    const counts = lineCounts(before, after);
-    const change: FileDiff = { path, type, before, after, ...counts, ...(renamedFrom ? { renamedFrom } : {}) };
+    const change: FileDiff = { path, type, before, after, ...lineCounts(before, after), ...(renamedFrom ? { renamedFrom } : {}) };
     validateChange(change);
     return change;
   }
 
   createPlan(changes: FileDiff[], id = crypto.randomUUID()): DiffPlan {
-    if (changes.length > MAX_DIFF_LINES) throw new Error(`O plano de diff excede o limite de ${MAX_DIFF_LINES} arquivos.`);
+    if (changes.length > MAX_PLAN_FILES) throw new Error(`O plano de diff excede o limite de ${MAX_PLAN_FILES} arquivos.`);
     const uniquePaths = new Set<string>();
     for (const change of changes) {
       validateChange(change);
