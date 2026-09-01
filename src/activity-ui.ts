@@ -1,73 +1,29 @@
-type CommandResult = {
-  command: string;
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  startedAt: number;
-  finishedAt: number;
-  durationMs: number;
-};
-
-type GitOperationSummary = {
-  operation: 'create_branch' | 'checkout' | 'stage' | 'stage_all' | 'commit';
-  branch: string;
-  output: string;
-};
-
-type FileChange = {
-  path: string;
-  kind: 'created' | 'modified' | 'deleted' | 'renamed';
-  oldContent?: string;
-  newContent?: string;
-};
-
-type DiffPlan = {
-  id: string;
-  changes: FileChange[];
-  reason?: string;
-};
-
-type ActivityEvent = {
-  id: string;
-  type: 'thought' | 'action' | 'tool' | 'test' | 'build' | 'complete' | 'error';
-  message: string;
-  status: 'pending' | 'running' | 'success' | 'failed';
-  createdAt: number;
-  toolCallId?: string;
-  toolName?: string;
-  commandResult?: CommandResult;
-  gitResult?: GitOperationSummary;
-  changes?: FileChange[];
-  diffPlan?: DiffPlan;
-  error?: string;
-};
+import type { ActivityEvent, FileDiff, DiffPlan, CommandResultSummary, GitOperationSummary } from './ai/types';
 
 const style = document.createElement('style');
 style.textContent = `
-.activity-results { display:flex; flex-direction:column; gap:8px; padding:0 20px 10px; max-height:360px; overflow:auto; }
-.activity-result-card { border:1px solid rgba(255,255,255,.08); border-radius:10px; background:#101318; overflow:hidden; }
-.activity-result-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 11px; }
+.activity-result-card { border:1px solid rgba(255,255,255,.065); border-radius:9px; background:rgba(12,15,20,.72); overflow:hidden; }
+.activity-result-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px; }
 .activity-result-title { display:flex; align-items:center; gap:8px; min-width:0; }
-.activity-result-title strong { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.activity-result-status { font-size:11px; opacity:.72; }
-.activity-result-meta { display:flex; gap:10px; font-size:11px; opacity:.62; white-space:nowrap; }
-.activity-result-output { margin:0; padding:10px 11px; border-top:1px solid rgba(255,255,255,.06); font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; white-space:pre-wrap; overflow:auto; max-height:120px; color:#cbd1da; }
+.activity-result-title strong { font-size:11px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.activity-result-status { font-size:10px; opacity:.62; }
+.activity-result-meta { display:flex; gap:10px; font-size:10px; opacity:.56; white-space:nowrap; }
+.activity-result-output { margin:0; padding:9px 10px; border-top:1px solid rgba(255,255,255,.05); font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; white-space:pre-wrap; overflow:auto; max-height:120px; color:#cbd1da; }
 .activity-result-error { color:#f1a7a7; }
-.activity-result-dot { width:7px; height:7px; border-radius:50%; background:#7d8794; flex:0 0 auto; }
+.activity-result-dot { width:6px; height:6px; border-radius:50%; background:#7d8794; flex:0 0 auto; }
 .activity-result-dot.success { background:#72c28b; }
 .activity-result-dot.failed { background:#dc7777; }
 .activity-result-dot.running { background:#d2b36f; }
 .activity-result-dot.pending { background:#9b8ad1; }
-.activity-result-git { border-top:1px solid rgba(255,255,255,.06); padding:9px 11px; font-size:11px; }
+.activity-result-git { border-top:1px solid rgba(255,255,255,.05); padding:8px 10px; font-size:10px; }
 .activity-result-git-row { display:flex; justify-content:space-between; gap:10px; }
-.activity-result-git-label { opacity:.58; }
-.activity-result-changes { border-top:1px solid rgba(255,255,255,.06); padding:8px 11px; }
-.activity-result-change { display:flex; align-items:center; gap:8px; padding:3px 0; font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.activity-result-git-label { opacity:.52; }
+.activity-result-changes { border-top:1px solid rgba(255,255,255,.05); padding:7px 10px; }
+.activity-result-change { display:flex; align-items:center; gap:8px; padding:3px 0; font:10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 .activity-result-change-kind { width:14px; text-align:center; font-weight:700; }
 .activity-result-change-path { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.activity-result-change-details { margin-top:7px; }
-.activity-result-change-details summary { cursor:pointer; font-size:11px; opacity:.7; }
+.activity-result-change-details { margin-top:6px; }
+.activity-result-change-details summary { cursor:pointer; font-size:10px; opacity:.66; }
 `;
 document.head.appendChild(style);
 
@@ -95,35 +51,34 @@ function gitOperationLabel(operation: GitOperationSummary['operation']): string 
   return labels[operation];
 }
 
-function changeKindLabel(kind: FileChange['kind']): string {
+function changeKindLabel(kind: FileDiff['type']): string {
   return { created: '+', modified: 'M', deleted: '-', renamed: 'R' }[kind];
 }
 
-function ensureContainer(): HTMLElement | null {
-  const chatArea = document.querySelector<HTMLElement>('.chat-area');
-  const composer = document.querySelector<HTMLElement>('.composer-wrap');
-  if (!chatArea || !composer) return null;
-  let container = document.querySelector<HTMLElement>('#activity-results');
-  if (!container) {
-    container = document.createElement('section');
-    container.id = 'activity-results';
-    container.className = 'activity-results';
-    chatArea.insertBefore(container, composer);
+function ensureRunDetails(runId: string): HTMLElement | null {
+  const escapedId = CSS.escape(runId);
+  const run = document.querySelector<HTMLElement>(`.activity-run[data-run-id="${escapedId}"]`);
+  if (!run) return null;
+  let details = run.querySelector<HTMLElement>('.activity-run-details');
+  if (!details) {
+    details = document.createElement('div');
+    details.className = 'activity-run-details';
+    run.appendChild(details);
   }
-  return container;
+  return details;
 }
 
-function renderChanges(changes: FileChange[] | undefined): string {
+function renderChanges(changes: FileDiff[] | undefined): string {
   if (!changes?.length) return '';
-  const rows = changes.map((change) => `<div class="activity-result-change"><span class="activity-result-change-kind">${escapeHtml(changeKindLabel(change.kind))}</span><span class="activity-result-change-path">${escapeHtml(change.path)}</span></div>`).join('');
+  const rows = changes.map((change) => `<div class="activity-result-change"><span class="activity-result-change-kind">${escapeHtml(changeKindLabel(change.type))}</span><span class="activity-result-change-path">${escapeHtml(change.path)}</span></div>`).join('');
   return `<div class="activity-result-changes">${rows}</div>`;
 }
 
 function renderDiffPlan(plan: DiffPlan | undefined): string {
   if (!plan?.changes?.length) return '';
   const sections = plan.changes.map((change) => {
-    const before = change.oldContent ?? '';
-    const after = change.newContent ?? '';
+    const before = change.before ?? '';
+    const after = change.after ?? '';
     return `<details class="activity-result-change-details"><summary>${escapeHtml(change.path)}</summary><pre class="activity-result-output">${escapeHtml(`--- before ---\n${before}\n\n+++ after +++\n${after}`)}</pre></details>`;
   }).join('');
   return `<div class="activity-result-changes">${sections}</div>`;
@@ -151,17 +106,17 @@ function renderGitActivity(event: ActivityEvent, container: HTMLElement): void {
 }
 
 function renderActivity(event: ActivityEvent): void {
-  if (!event.commandResult && !event.gitResult && !event.changes?.length && !event.diffPlan) return;
-  const container = ensureContainer();
+  if (!event.runId || (!event.commandResult && !event.gitResult && !event.changes?.length && !event.diffPlan)) return;
+  const container = ensureRunDetails(event.runId);
   if (!container) return;
   container.querySelector(`[data-activity-id="${CSS.escape(event.id)}"]`)?.remove();
   if (event.gitResult) renderGitActivity(event, container);
   else if (event.commandResult) renderCommandActivity(event, container);
-  while (container.children.length > 8) container.lastElementChild?.remove();
+  while (container.children.length > 6) container.lastElementChild?.remove();
 }
 
 function initialize(): void {
-  const unsubscribe = window.autoCodez.onActivity((event) => renderActivity(event as unknown as ActivityEvent));
+  const unsubscribe = window.autoCodez.onActivity(renderActivity);
   window.addEventListener('beforeunload', unsubscribe, { once: true });
 }
 
