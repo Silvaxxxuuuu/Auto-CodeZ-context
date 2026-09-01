@@ -17,7 +17,7 @@ const definitions: AIToolDefinition[] = [
   { name: 'run_command', description: 'Run an approved package script such as tests, build, typecheck or lint inside the active workspace.', parameters: { type: 'object', properties: { manager: { type: 'string', enum: ['npm', 'pnpm', 'yarn', 'bun'] }, script: { type: 'string', enum: ['test', 'build', 'typecheck', 'lint', 'package', 'check'] } }, required: ['manager', 'script'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'git_status', description: 'Read the current Git branch and working tree status.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_diff', description: 'Read the current unstaged Git diff.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
-  { name: 'git_log', description: 'Read recent Git commits from the active workspace.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Number of commits to return.' } }, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'git_log', description: 'Read recent Git commits from the active workspace.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Number of commits to return.' } }, required: ['limit'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_branches', description: 'List local Git branches from the active workspace.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_create_branch', description: 'Create and switch to a new Git branch. This operation requires user approval.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'New branch name.' } }, required: ['name'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'git_checkout', description: 'Switch the active workspace to an existing Git branch. This operation requires user approval.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Existing branch name.' } }, required: ['name'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
@@ -27,20 +27,8 @@ const definitions: AIToolDefinition[] = [
 ];
 
 interface ToolExecution { output: string; changes?: FileDiff[]; commandResult?: CommandResultSummary; }
-
-interface ToolJournalStorage {
-  read<T>(name: string, fallback: T): Promise<T>;
-  write<T>(name: string, value: T): Promise<void>;
-}
-
-type JournalEntry = {
-  approvalId: string;
-  projectId: string;
-  toolCall: AIToolCall;
-  diffPlan: DiffPlan;
-  status: 'executing';
-};
-
+interface ToolJournalStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
+type JournalEntry = { approvalId: string; projectId: string; toolCall: AIToolCall; diffPlan: DiffPlan; status: 'executing'; };
 const JOURNAL_FILE = 'tool-execution-journal.json';
 
 function validateToolInput(definition: AIToolDefinition, input: Record<string, unknown>): void {
@@ -64,39 +52,24 @@ function validateToolInput(definition: AIToolDefinition, input: Record<string, u
   }
 }
 
-const unavailableCommandRuntime = new CommandRuntime(async () => {
-  throw new Error('O runtime de comandos não foi configurado para esta instância.');
-});
+const unavailableCommandRuntime = new CommandRuntime(async () => { throw new Error('O runtime de comandos não foi configurado para esta instância.'); });
 
 export class ToolRuntime {
   private readonly journal = new Map<string, JournalEntry>();
   private journalWrite: Promise<void> = Promise.resolve();
   private gitRuntime?: GitRuntime;
 
-  constructor(
-    private readonly workspace: WorkspaceRuntime,
-    private readonly permissions = new PermissionRuntime(),
-    private readonly activity = new ActivityRuntime(),
-    private readonly approvals = new ApprovalRuntime(),
-    private readonly commands: CommandRuntime = unavailableCommandRuntime,
-    private readonly diffs = new DiffRuntime(),
-    private readonly journalStorage?: ToolJournalStorage,
-  ) {}
+  constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage) {}
 
   configureGitRuntime(runtime: GitRuntime): void { this.gitRuntime = runtime; }
-
   async init(): Promise<void> {
     if (!this.journalStorage) return;
     const stored = await this.journalStorage.read<JournalEntry[]>(JOURNAL_FILE, []);
     this.journal.clear();
     if (!Array.isArray(stored)) return;
-    for (const entry of stored) {
-      if (!entry?.approvalId || !entry.projectId || !entry.toolCall?.id || !entry.diffPlan?.changes?.length) continue;
-      this.journal.set(entry.approvalId, entry);
-    }
+    for (const entry of stored) if (entry?.approvalId && entry.projectId && entry.toolCall?.id && entry.diffPlan?.changes?.length) this.journal.set(entry.approvalId, entry);
     await this.reconcileJournal();
   }
-
   listDefinitions(): AIToolDefinition[] { return definitions.map((definition) => ({ ...definition, parameters: { ...definition.parameters } })); }
   listApprovals(): ApprovalRequest[] { return this.approvals.list(); }
   restoreApprovals(approvals: ApprovalRequest[]): void { this.approvals.restore(approvals); }
@@ -104,53 +77,44 @@ export class ToolRuntime {
   async execute(projectId: string, permission: PermissionLevel, call: AIToolCall): Promise<AIToolResult> {
     const definition = definitions.find((item) => item.name === call.name);
     if (!definition) return { toolCallId: call.id, ok: false, error: `Ferramenta desconhecida: ${call.name}` };
-    try { validateToolInput(definition, call.input); }
-    catch (error) { return { toolCallId: call.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
-
+    try { validateToolInput(definition, call.input); } catch (error) { return { toolCallId: call.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
     const decision = this.permissions.decide(permission, call.name);
     if (decision === 'deny') return { toolCallId: call.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
-
     if (decision === 'ask') {
-      try {
-        const diffPlan = await this.preview(projectId, call);
-        const approval = this.approvals.request({ projectId, permissionLevel: permission, toolCall: call, ...(diffPlan ? { diffPlan } : {}) });
-        this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${call.name}.`, status: 'pending', toolCallId: call.id, toolName: call.name, ...(diffPlan ? { diffPlan } : {}) });
-        return { toolCallId: call.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
-      } catch (error) {
-        return { toolCallId: call.id, ok: false, error: error instanceof Error ? error.message : String(error) };
+      let diffPlan: DiffPlan | undefined;
+      try { diffPlan = await this.preview(projectId, call); } catch (error) {
+        this.activity.emit({ type: 'action', message: `Pré-visualização indisponível para ${call.name}: ${error instanceof Error ? error.message : String(error)}`, status: 'failed', toolCallId: call.id, toolName: call.name });
       }
+      const approval = this.approvals.request({ projectId, permissionLevel: permission, toolCall: call, ...(diffPlan ? { diffPlan } : {}) });
+      this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${call.name}.`, status: 'pending', toolCallId: call.id, toolName: call.name, ...(diffPlan ? { diffPlan } : {}) });
+      return { toolCallId: call.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
     }
     return this.executeNow(projectId, call);
   }
 
   async approve(approvalId: string): Promise<AIToolResult> {
-    const approval = this.approvals.get(approvalId);
-    if (!approval) throw new Error('Aprovação não encontrada ou já processada.');
-
+    const approval = this.approvals.claim(approvalId);
     const journalResult = await this.getCompletedJournalResult(approvalId);
     if (journalResult) {
       this.approvals.resolve(approvalId);
       return journalResult;
     }
-
     try {
       await this.assertPrecondition(approval.projectId, approval.diffPlan);
+      const result = await this.executeNow(approval.projectId, approval.toolCall, approvalId, approval.diffPlan);
+      if (result.ok) this.approvals.resolve(approvalId);
+      else this.approvals.release(approvalId);
+      return result.ok ? result : { ...result, approvalId, pendingApproval: true, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.activity.emit({ type: 'action', message: `Aprovação ${approvalId} não pôde ser executada.`, status: 'failed', toolCallId: approval.toolCall.id, toolName: approval.toolCall.name, error: message, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) });
-      return { toolCallId: approval.toolCall.id, ok: false, error: message, approvalId, pendingApproval: true, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
+      this.approvals.release(approvalId);
+      throw error;
     }
-
-    const result = await this.executeNow(approval.projectId, approval.toolCall, approvalId, approval.diffPlan);
-    if (result.ok) this.approvals.resolve(approvalId);
-    else return { ...result, approvalId, pendingApproval: true, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
-    return result;
   }
 
   deny(approvalId: string): boolean {
-    if (!this.approvals.get(approvalId)) return false;
-    this.approvals.resolve(approvalId);
-    this.activity.emit({ type: 'action', message: 'Operação recusada pelo usuário.', status: 'failed' });
+    const approval = this.approvals.claim(approvalId);
+    this.approvals.resolve(approval.id);
+    this.activity.emit({ type: 'action', message: 'Operação recusada pelo usuário.', status: 'failed', toolCallId: approval.toolCall.id, toolName: approval.toolCall.name });
     return true;
   }
 
@@ -182,8 +146,7 @@ export class ToolRuntime {
         if (await this.workspace.exists(projectId, to)) throw new Error('O destino da renomeação já existe.');
         return this.diffs.createPlan([this.diffs.create(to, 'renamed', before, before, from)]);
       }
-      default:
-        return undefined;
+      default: return undefined;
     }
   }
 
@@ -207,17 +170,7 @@ export class ToolRuntime {
     }
   }
 
-  private stringValue(input: Record<string, unknown>, key: string): string {
-    const value = input[key];
-    if (typeof value !== 'string' || !value.trim()) throw new Error(`Parâmetro '${key}' inválido.`);
-    return value;
-  }
-
-  private activityTypeForCommand(script?: string): 'test' | 'build' | 'tool' {
-    if (script === 'test') return 'test';
-    if (script === 'build' || script === 'package') return 'build';
-    return 'tool';
-  }
+  private stringValue(input: Record<string, unknown>, key: string): string { const value = input[key]; if (typeof value !== 'string' || !value.trim()) throw new Error(`Parâmetro '${key}' inválido.`); return value.trim(); }
 
   private async executeNow(projectId: string, call: AIToolCall, approvalId?: string, diffPlan?: DiffPlan): Promise<AIToolResult> {
     const activityType = call.name === 'run_command' && typeof call.input.script === 'string' ? this.activityTypeForCommand(call.input.script) : 'tool';
@@ -236,138 +189,36 @@ export class ToolRuntime {
     }
   }
 
-  private isMutation(name: ToolName): boolean {
-    return name === 'write_file' || name === 'create_file' || name === 'delete_file' || name === 'rename_file';
-  }
-
-  private async beginJournal(approvalId: string, projectId: string, toolCall: AIToolCall, diffPlan: DiffPlan): Promise<void> {
-    if (!this.journalStorage) return;
-    if (!this.journal.has(approvalId)) {
-      this.journal.set(approvalId, { approvalId, projectId, toolCall, diffPlan, status: 'executing' });
-      await this.persistJournal();
-    }
-  }
-
-  private async finishJournal(approvalId: string): Promise<void> {
-    if (!this.journalStorage) return;
-    this.journal.delete(approvalId);
-    await this.persistJournal();
-  }
-
-  private async getCompletedJournalResult(approvalId: string): Promise<AIToolResult | undefined> {
-    const entry = this.journal.get(approvalId);
-    if (!entry) return undefined;
-    if (!(await this.matchesExpectedState(entry))) return undefined;
-    const result = await this.buildJournalResult(entry);
-    await this.finishJournal(approvalId);
-    return result;
-  }
-
-  private async buildJournalResult(entry: JournalEntry): Promise<AIToolResult> {
-    const changes: FileDiff[] = [];
-    for (const change of entry.diffPlan.changes) {
-      if (change.type === 'deleted') changes.push(this.diffs.create(change.path, 'deleted', change.before, ''));
-      else if (change.type === 'renamed') changes.push(this.diffs.create(change.path, 'renamed', change.before, change.after, change.renamedFrom));
-      else changes.push(this.diffs.create(change.path, change.type, change.before, change.after));
-    }
-    return { toolCallId: entry.toolCall.id, ok: true, output: 'Operação recuperada após uma interrupção.', changes, diffPlan: entry.diffPlan };
-  }
-
-  private async matchesExpectedState(entry: JournalEntry): Promise<boolean> {
-    for (const change of entry.diffPlan.changes) {
-      if (change.type === 'deleted') {
-        if (await this.workspace.exists(entry.projectId, change.path)) return false;
-        continue;
-      }
-      if (change.type === 'renamed') {
-        const from = change.renamedFrom;
-        if (!from || await this.workspace.exists(entry.projectId, from) || !(await this.workspace.exists(entry.projectId, change.path))) return false;
-        if (await this.workspace.readFile(entry.projectId, change.path) !== change.after) return false;
-        continue;
-      }
-      if (!(await this.workspace.exists(entry.projectId, change.path))) return false;
-      if (await this.workspace.readFile(entry.projectId, change.path) !== change.after) return false;
-    }
-    return true;
-  }
-
-  private async reconcileJournal(): Promise<void> {
-    for (const [approvalId, entry] of this.journal) {
-      if (await this.matchesExpectedState(entry)) this.activity.emit({ type: 'action', message: `Operação ${approvalId} concluída durante uma interrupção anterior.`, status: 'success', toolCallId: entry.toolCall.id, toolName: entry.toolCall.name, diffPlan: entry.diffPlan });
-    }
-    await this.persistJournal();
-  }
-
-  private async persistJournal(): Promise<void> {
-    if (!this.journalStorage) return;
-    const snapshot = [...this.journal.values()];
-    const write = this.journalWrite.then(() => this.journalStorage!.write(JOURNAL_FILE, snapshot));
-    this.journalWrite = write.catch((): void => undefined);
-    await write;
-  }
+  private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'delete_file' || name === 'rename_file'; }
+  private async beginJournal(approvalId: string, projectId: string, toolCall: AIToolCall, diffPlan: DiffPlan): Promise<void> { if (!this.journalStorage) return; if (!this.journal.has(approvalId)) { this.journal.set(approvalId, { approvalId, projectId, toolCall, diffPlan, status: 'executing' }); await this.persistJournal(); } }
+  private async finishJournal(approvalId: string): Promise<void> { if (!this.journalStorage) return; this.journal.delete(approvalId); await this.persistJournal(); }
+  private async getCompletedJournalResult(approvalId: string): Promise<AIToolResult | undefined> { const entry = this.journal.get(approvalId); if (!entry) return undefined; if (!(await this.matchesExpectedState(entry))) return undefined; const result = await this.buildJournalResult(entry); await this.finishJournal(approvalId); return result; }
+  private async buildJournalResult(entry: JournalEntry): Promise<AIToolResult> { const changes: FileDiff[] = []; for (const change of entry.diffPlan.changes) { if (change.type === 'deleted') changes.push(this.diffs.create(change.path, 'deleted', change.before, '')); else if (change.type === 'renamed') changes.push(this.diffs.create(change.path, 'renamed', change.before, change.after, change.renamedFrom)); else changes.push(this.diffs.create(change.path, change.type, change.before, change.after)); } return { toolCallId: entry.toolCall.id, ok: true, output: 'Operação recuperada após uma interrupção.', changes, diffPlan: entry.diffPlan }; }
+  private async matchesExpectedState(entry: JournalEntry): Promise<boolean> { for (const change of entry.diffPlan.changes) { if (change.type === 'deleted') { if (await this.workspace.exists(entry.projectId, change.path)) return false; continue; } if (change.type === 'renamed') { const from = change.renamedFrom; if (!from || await this.workspace.exists(entry.projectId, from) || !(await this.workspace.exists(entry.projectId, change.path))) return false; if (await this.workspace.readFile(entry.projectId, change.path) !== change.after) return false; continue; } if (!(await this.workspace.exists(entry.projectId, change.path))) return false; if (await this.workspace.readFile(entry.projectId, change.path) !== change.after) return false; } return true; }
+  private async reconcileJournal(): Promise<void> { for (const [approvalId, entry] of this.journal) if (await this.matchesExpectedState(entry)) this.activity.emit({ type: 'action', message: `Operação ${approvalId} concluída durante uma interrupção anterior.`, status: 'success', toolCallId: entry.toolCall.id, toolName: entry.toolCall.name, diffPlan: entry.diffPlan }); await this.persistJournal(); }
+  private async persistJournal(): Promise<void> { if (!this.journalStorage) return; const snapshot = [...this.journal.values()]; const write = this.journalWrite.then(() => this.journalStorage!.write(JOURNAL_FILE, snapshot)); this.journalWrite = write.catch(() => {}); await write; }
 
   private async executeAllowed(projectId: string, name: ToolName, input: Record<string, unknown>): Promise<ToolExecution> {
     switch (name) {
       case 'read_file': return { output: await this.workspace.readFile(projectId, this.stringValue(input, 'path')) };
-      case 'write_file': {
-        const path = this.stringValue(input, 'path');
-        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.');
-        const before = await this.workspace.readFile(projectId, path);
-        const content = input.content;
-        if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido.");
-        await this.workspace.writeFile(projectId, path, content);
-        const after = await this.workspace.readFile(projectId, path);
-        return { output: 'Arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, after)] };
-      }
-      case 'create_file': {
-        const path = this.stringValue(input, 'path');
-        const content = String(input.content ?? '');
-        await this.workspace.createFile(projectId, path, content);
-        const after = await this.workspace.readFile(projectId, path);
-        return { output: 'Arquivo criado.', changes: [this.diffs.create(path, 'created', '', after)] };
-      }
-      case 'delete_file': {
-        const path = this.stringValue(input, 'path');
-        const before = await this.workspace.readFile(projectId, path);
-        await this.workspace.deleteFile(projectId, path);
-        return { output: 'Arquivo excluído.', changes: [this.diffs.create(path, 'deleted', before, '')] };
-      }
-      case 'rename_file': {
-        const from = this.stringValue(input, 'from');
-        const to = this.stringValue(input, 'to');
-        const before = await this.workspace.readFile(projectId, from);
-        await this.workspace.renameFile(projectId, from, to);
-        const after = await this.workspace.readFile(projectId, to);
-        return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] };
-      }
+      case 'write_file': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.'); const before = await this.workspace.readFile(projectId, path); const content = input.content; if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido."); await this.workspace.writeFile(projectId, path, content); const after = await this.workspace.readFile(projectId, path); return { output: 'Arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, after)] }; }
+      case 'create_file': { const path = this.stringValue(input, 'path'); const content = String(input.content ?? ''); await this.workspace.createFile(projectId, path, content); const after = await this.workspace.readFile(projectId, path); return { output: 'Arquivo criado.', changes: [this.diffs.create(path, 'created', '', after)] }; }
+      case 'delete_file': { const path = this.stringValue(input, 'path'); const before = await this.workspace.readFile(projectId, path); await this.workspace.deleteFile(projectId, path); return { output: 'Arquivo excluído.', changes: [this.diffs.create(path, 'deleted', before, '')] }; }
+      case 'rename_file': { const from = this.stringValue(input, 'from'); const to = this.stringValue(input, 'to'); const before = await this.workspace.readFile(projectId, from); await this.workspace.renameFile(projectId, from, to); const after = await this.workspace.readFile(projectId, to); return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] }; }
       case 'search_files': return { output: JSON.stringify(await this.workspace.searchFiles(projectId, this.stringValue(input, 'query'))) };
-      case 'run_command': {
-        const result = await this.commands.run(projectId, this.stringValue(input, 'manager'), this.stringValue(input, 'script'));
-        return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result };
-      }
+      case 'run_command': { const result = await this.commands.run(projectId, this.stringValue(input, 'manager'), this.stringValue(input, 'script')); return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result }; }
       case 'git_status': return this.gitExecution(projectId, await this.requireGit().status(projectId));
       case 'git_diff': return this.gitExecution(projectId, await this.requireGit().diff(projectId));
-      case 'git_log': return this.gitExecution(projectId, await this.requireGit().log(projectId, input.limit === undefined ? undefined : Number(input.limit)));
+      case 'git_log': return this.gitExecution(projectId, await this.requireGit().log(projectId, Number(input.limit)));
       case 'git_branches': return this.gitExecution(projectId, await this.requireGit().branches(projectId));
       case 'git_create_branch': return this.gitExecution(projectId, await this.requireGit().createBranch(projectId, this.stringValue(input, 'name')));
       case 'git_checkout': return this.gitExecution(projectId, await this.requireGit().checkout(projectId, this.stringValue(input, 'name')));
-      case 'git_stage': {
-        const paths = input.paths;
-        if (!Array.isArray(paths) || paths.length === 0 || paths.some((item) => typeof item !== 'string' || !item.trim())) throw new Error("Parâmetro 'paths' inválido.");
-        return this.gitExecution(projectId, await this.requireGit().stage(projectId, paths));
-      }
+      case 'git_stage': { const paths = input.paths; if (!Array.isArray(paths) || paths.length === 0 || paths.some((item) => typeof item !== 'string' || !item.trim())) throw new Error("Parâmetro 'paths' inválido."); return this.gitExecution(projectId, await this.requireGit().stage(projectId, paths)); }
       case 'git_stage_all': return this.gitExecution(projectId, await this.requireGit().stageAll(projectId));
       case 'git_commit': return this.gitExecution(projectId, await this.requireGit().commit(projectId, this.stringValue(input, 'message')));
     }
   }
-
-  private requireGit(): GitRuntime {
-    if (!this.gitRuntime) throw new Error('O runtime Git não foi configurado para esta instância.');
-    return this.gitRuntime;
-  }
-
-  private gitExecution(_projectId: string, value: unknown): ToolExecution {
-    if (typeof value === 'string') return { output: value };
-    return { output: JSON.stringify(value) };
-  }
+  private requireGit(): GitRuntime { if (!this.gitRuntime) throw new Error('O runtime Git não foi configurado para esta instância.'); return this.gitRuntime; }
+  private gitExecution(_projectId: string, value: unknown): ToolExecution { return { output: typeof value === 'string' ? value : JSON.stringify(value) }; }
+  private activityTypeForCommand(script: string): 'action' | 'tool' { return script === 'test' || script === 'build' || script === 'typecheck' || script === 'lint' ? 'action' : 'tool'; }
 }
