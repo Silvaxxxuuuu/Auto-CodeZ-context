@@ -61,10 +61,24 @@ export class TerminalRuntime {
     return project;
   }
 
+  private pruneFinishedSessions(): void {
+    if (this.sessions.size < MAX_SESSIONS) return;
+    const finished = [...this.sessions.entries()]
+      .filter(([, entry]) => entry.session.status !== 'running')
+      .sort(([, left], [, right]) => (left.session.finishedAt ?? left.session.startedAt) - (right.session.finishedAt ?? right.session.startedAt));
+
+    while (this.sessions.size >= MAX_SESSIONS && finished.length > 0) {
+      const [id] = finished.shift()!;
+      this.sessions.delete(id);
+    }
+  }
+
   async start(projectId: string, command: string): Promise<TerminalSession> {
     const normalizedCommand = command.trim();
     if (!normalizedCommand) throw new Error('Comando vazio.');
     if (normalizedCommand.length > 20_000) throw new Error('Comando excede o limite permitido.');
+
+    this.pruneFinishedSessions();
     if (this.sessions.size >= MAX_SESSIONS) throw new Error('Limite de sessões do terminal atingido.');
 
     const project = await this.project(projectId);
@@ -93,7 +107,7 @@ export class TerminalRuntime {
       if (session.finishedAt !== undefined) return;
       session.status = entry.killRequested ? 'killed' : 'failed';
       session.finishedAt = Date.now();
-      session.exitCode = entry.killRequested ? 1 : 1;
+      session.exitCode = 1;
       session.signal = entry.killRequested ? 'SIGTERM' : error.message;
       try { this.emit({ sessionId: id, exitCode: session.exitCode, signal: session.signal }); } catch { /* observers are isolated */ }
     });
