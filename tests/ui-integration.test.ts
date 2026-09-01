@@ -15,11 +15,13 @@ test('renderer entry loads the visual refinement modules after the main renderer
   const terminalIndex = html.indexOf('/src/terminal-ui.ts');
   const renameIndex = html.indexOf('/src/chat-rename-ui.ts');
   const apiKeyIndex = html.indexOf('/src/api-key-ui.ts');
+  const polishIndex = html.indexOf('/src/ui-polish.css');
 
   assert.notEqual(rendererIndex, -1, 'renderer entry must be present');
   assert.notEqual(terminalIndex, -1, 'terminal UI must be loaded');
   assert.notEqual(renameIndex, -1, 'chat rename UI must be loaded');
   assert.notEqual(apiKeyIndex, -1, 'API key UI must be loaded');
+  assert.notEqual(polishIndex, -1, 'final UI polish stylesheet must be loaded');
   assert.ok(rendererIndex < terminalIndex, 'terminal UI must run after the renderer creates the rail');
   assert.ok(terminalIndex < apiKeyIndex, 'API key UI must run after the terminal creates its rail button');
   assert.match(html, /\/src\/ui-overrides\.css/);
@@ -35,6 +37,15 @@ test('UI overrides contain the core interaction refinements', async () => {
   assert.match(css, /\.intelligence-brain/);
   assert.match(css, /typing-dots/);
   assert.match(css, /\.topbar\s*\{\s*display:\s*none/);
+});
+
+test('rail polish provides dedicated key and terminal iconography', async () => {
+  const css = await readProjectFile('src/ui-polish.css');
+
+  assert.match(css, /\.rail-button\.api-key-rail-button::before/);
+  assert.match(css, /\.rail-button\.terminal-rail-button::before/);
+  assert.match(css, /mask-image:/);
+  assert.match(css, /viewBox='0 0 24 24'/);
 });
 
 test('API key and chat rename modules target their intended existing controls', async () => {
