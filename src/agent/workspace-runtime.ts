@@ -55,6 +55,11 @@ export class WorkspaceRuntime {
     }
   }
 
+  private async assertRegularFile(filePath: string): Promise<void> {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) throw new Error('A operação exige um arquivo regular.');
+  }
+
   private async assertTextFileSize(filePath: string, allowMissing = false): Promise<void> {
     try {
       const stat = await fs.stat(filePath);
@@ -67,6 +72,7 @@ export class WorkspaceRuntime {
 
   async readFile(projectId: string, requestedPath: string): Promise<string> {
     const filePath = await this.resolve(projectId, requestedPath);
+    await this.assertRegularFile(filePath);
     await this.assertTextFileSize(filePath);
     return fs.readFile(filePath, 'utf8');
   }
@@ -74,6 +80,7 @@ export class WorkspaceRuntime {
   async writeFile(projectId: string, requestedPath: string, content: string): Promise<void> {
     if (Buffer.byteLength(content, 'utf8') > MAX_TEXT_FILE_BYTES) throw new Error(`Conteúdo excede o limite de ${MAX_TEXT_FILE_BYTES} bytes.`);
     const filePath = await this.resolve(projectId, requestedPath);
+    await this.assertRegularFile(filePath);
     await this.assertTextFileSize(filePath, true);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, content, 'utf8');
@@ -88,12 +95,14 @@ export class WorkspaceRuntime {
 
   async deleteFile(projectId: string, requestedPath: string): Promise<void> {
     const filePath = await this.resolve(projectId, requestedPath);
+    await this.assertRegularFile(filePath);
     await this.assertTextFileSize(filePath);
     await fs.rm(filePath, { force: false });
   }
 
   async renameFile(projectId: string, from: string, to: string): Promise<void> {
     const source = await this.resolve(projectId, from);
+    await this.assertRegularFile(source);
     await this.assertTextFileSize(source);
     const destination = await this.resolve(projectId, to);
     if (await this.exists(projectId, to)) throw new Error('O destino já existe.');
