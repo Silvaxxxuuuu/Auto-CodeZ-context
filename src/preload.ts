@@ -111,6 +111,27 @@ contextBridge.exposeInMainWorld('autoCodez', {
       if (limit !== undefined && !Number.isFinite(limit)) throw new Error('Limite do histórico Git inválido.');
       return invoke('git:log', { projectId, limit });
     },
+    createBranch: (input: { projectId: string; name: string }) => {
+      const value = requireObject(input, 'Dados da branch');
+      return invoke('git:create-branch', {
+        projectId: requireIdentifier(value.projectId, 'Projeto'),
+        name: requireNonEmptyString(value.name, 'Nome da branch'),
+      });
+    },
+    checkout: (input: { projectId: string; name: string }) => {
+      const value = requireObject(input, 'Dados do checkout');
+      return invoke('git:checkout', {
+        projectId: requireIdentifier(value.projectId, 'Projeto'),
+        name: requireNonEmptyString(value.name, 'Branch'),
+      });
+    },
+    commit: (input: { projectId: string; message: string }) => {
+      const value = requireObject(input, 'Dados do commit');
+      return invoke('git:commit', {
+        projectId: requireIdentifier(value.projectId, 'Projeto'),
+        message: requireNonEmptyString(value.message, 'Mensagem do commit'),
+      });
+    },
   },
   createProject: (input: { name: string; rootPath: string }) => {
     const value = requireObject(input, 'Dados do projeto');
