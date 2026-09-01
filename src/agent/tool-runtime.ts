@@ -84,6 +84,13 @@ export class ToolRuntime {
       let diffPlan: DiffPlan | undefined;
       try { diffPlan = await this.preview(projectId, call); } catch (error) {
         this.activity.emit({ type: 'action', message: `Pré-visualização indisponível para ${call.name}: ${error instanceof Error ? error.message : String(error)}`, status: 'failed', toolCallId: call.id, toolName: call.name });
+        if (call.name === 'write_file') {
+          try {
+            const path = this.stringValue(call.input, 'path');
+            const content = call.input.content;
+            if (typeof content === 'string' && !(await this.workspace.exists(projectId, path))) diffPlan = this.diffs.createPlan([this.diffs.create(path, 'created', '', content)]);
+          } catch { /* keep the approval without a preview when validation itself fails */ }
+        }
       }
       const approval = this.approvals.request({ projectId, permissionLevel: permission, toolCall: call, ...(diffPlan ? { diffPlan } : {}) });
       this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${call.name}.`, status: 'pending', toolCallId: call.id, toolName: call.name, ...(diffPlan ? { diffPlan } : {}) });
@@ -103,8 +110,8 @@ export class ToolRuntime {
       await this.assertPrecondition(approval.projectId, approval.diffPlan);
       const result = await this.executeNow(approval.projectId, approval.toolCall, approvalId, approval.diffPlan);
       if (result.ok) this.approvals.resolve(approvalId);
-      else this.approvals.release(approvalId);
-      return result.ok ? result : { ...result, approvalId, pendingApproval: true, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
+      else this.approvals.resolve(approvalId);
+      return result;
     } catch (error) {
       this.approvals.release(approvalId);
       throw error;
@@ -212,7 +219,7 @@ export class ToolRuntime {
       case 'git_log': return this.gitExecution(projectId, await this.requireGit().log(projectId, Number(input.limit)));
       case 'git_branches': return this.gitExecution(projectId, await this.requireGit().branches(projectId));
       case 'git_create_branch': return this.gitExecution(projectId, await this.requireGit().createBranch(projectId, this.stringValue(input, 'name')));
-      case 'git_checkout': return this.gitExecution(projectId, await this.requireGit().checkout(projectId, this.stringValue(input, 'name')));
+      case 'git_checkout': return this.gitExecution(projectId, await this.requireGit().checkout(projectId, this.stringValue(input, 'name'));
       case 'git_stage': { const paths = input.paths; if (!Array.isArray(paths) || paths.length === 0 || paths.some((item) => typeof item !== 'string' || !item.trim())) throw new Error("Parâmetro 'paths' inválido."); return this.gitExecution(projectId, await this.requireGit().stage(projectId, paths)); }
       case 'git_stage_all': return this.gitExecution(projectId, await this.requireGit().stageAll(projectId));
       case 'git_commit': return this.gitExecution(projectId, await this.requireGit().commit(projectId, this.stringValue(input, 'message')));
