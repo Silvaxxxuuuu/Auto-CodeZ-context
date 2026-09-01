@@ -49,11 +49,11 @@ export function formatProviderError(error: unknown): string {
   if (!(error instanceof ProviderRequestError)) return error instanceof Error ? error.message : String(error);
   const prefix = `${error.provider}:`;
   switch (error.kind) {
-    case 'authentication': return `${prefix} a API key foi recusada. Verifique a chave nas configurações de IA.`;
-    case 'billing': return `${prefix} a conta não possui créditos ou faturamento disponível para esta solicitação. A API key continua salva.`;
-    case 'quota': return `${prefix} a cota disponível para este modelo foi atingida. A API key continua salva.`;
+    case 'authentication': return `${prefix} a API key foi recusada. Abra Configurações de IA para verificar ou trocar a chave.`;
+    case 'billing': return `${prefix} não há créditos ou faturamento disponível para esta solicitação. Sua API key continua salva. Abra Configurações de IA para usar outra chave.`;
+    case 'quota': return `${prefix} a cota disponível para este modelo foi atingida. Sua API key continua salva. Tente outro modelo ou outra chave em Configurações de IA.`;
     case 'rate_limit': return `${prefix} o limite de requisições foi atingido. Aguarde e tente novamente.`;
-    case 'server': return `${prefix} o serviço do provider apresentou um erro temporário. Tente novamente.`;
+    case 'server': return `${prefix} o serviço apresentou um erro temporário. Tente novamente.`;
     case 'network': return `${prefix} não foi possível alcançar o serviço. Verifique a conexão e tente novamente.`;
     case 'invalid_request': return `${prefix} a solicitação foi recusada. ${error.message}`;
     default: return `${prefix} ${error.message}`;
