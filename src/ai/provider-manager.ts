@@ -7,6 +7,8 @@ import { AnthropicAdapter } from './providers/anthropic';
 const STATE_FILE = 'providers.json';
 const SECURE_FILE = 'provider-secrets.json';
 
+interface ProviderState { configs: AIProviderConfig[]; }
+
 function modelScore(model: AIModel, index: number): number {
   const id = `${model.id} ${model.name}`.toLowerCase();
   let score = 0;
