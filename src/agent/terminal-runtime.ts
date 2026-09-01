@@ -28,6 +28,13 @@ export interface TerminalSession {
   status: 'running' | 'exited' | 'failed' | 'killed';
 }
 
+interface SessionEntry {
+  session: TerminalSession;
+  child: ChildProcess;
+  output: string;
+  killRequested: boolean;
+}
+
 const MAX_SESSIONS = 50;
 const MAX_OUTPUT_CHARS = 2_000_000;
 
@@ -40,7 +47,7 @@ function shellForPlatform(command: string): { executable: string; args: string[]
 }
 
 export class TerminalRuntime {
-  private readonly sessions = new Map<string, { session: TerminalSession; child: ChildProcess; output: string }>();
+  private readonly sessions = new Map<string, SessionEntry>();
 
   constructor(private readonly projects: () => Promise<ProjectRecord[]>, private readonly emit: (event: TerminalOutputEvent | TerminalExitEvent) => void) {}
 
@@ -65,8 +72,14 @@ export class TerminalRuntime {
     const { executable, args } = shellForPlatform(normalizedCommand);
     const id = crypto.randomUUID();
     const session: TerminalSession = { id, projectId, command: normalizedCommand, cwd, startedAt: Date.now(), status: 'running' };
-    const child = spawn(executable, args, { cwd, shell: false, windowsHide: true, detached: process.platform !== 'win32', env: { ...process.env } });
-    const entry = { session, child, output: '' };
+    const child = spawn(executable, args, {
+      cwd,
+      shell: false,
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+      env: { ...process.env },
+    });
+    const entry: SessionEntry = { session, child, output: '', killRequested: false };
     this.sessions.set(id, entry);
 
     const append = (stream: 'stdout' | 'stderr', chunk: Buffer | string): void => {
@@ -77,18 +90,19 @@ export class TerminalRuntime {
     child.stdout?.on('data', (chunk: Buffer | string) => append('stdout', chunk));
     child.stderr?.on('data', (chunk: Buffer | string) => append('stderr', chunk));
     child.once('error', (error) => {
-      session.status = 'failed';
+      if (session.finishedAt !== undefined) return;
+      session.status = entry.killRequested ? 'killed' : 'failed';
       session.finishedAt = Date.now();
-      session.exitCode = 1;
-      try { this.emit({ sessionId: id, exitCode: 1, signal: error.message }); } catch { /* observers are isolated */ }
+      session.exitCode = entry.killRequested ? 1 : 1;
+      session.signal = entry.killRequested ? 'SIGTERM' : error.message;
+      try { this.emit({ sessionId: id, exitCode: session.exitCode, signal: session.signal }); } catch { /* observers are isolated */ }
     });
     child.once('close', (exitCode, signal) => {
-      if (session.finishedAt) return;
+      if (session.finishedAt !== undefined) return;
       session.finishedAt = Date.now();
       session.exitCode = exitCode ?? 1;
-      session.signal = signal ?? undefined;
-      session.status = session.exitCode === 0 ? 'exited' : 'failed';
-      if (signal) session.status = 'killed';
+      session.signal = signal ?? (entry.killRequested ? 'SIGTERM' : undefined);
+      session.status = entry.killRequested || Boolean(signal) ? 'killed' : session.exitCode === 0 ? 'exited' : 'failed';
       try { this.emit({ sessionId: id, exitCode: session.exitCode, signal: session.signal }); } catch { /* observers are isolated */ }
     });
 
@@ -99,6 +113,7 @@ export class TerminalRuntime {
     const entry = this.sessions.get(sessionId);
     if (!entry) throw new Error('Sessão do terminal não encontrada.');
     if (entry.session.status !== 'running') return { ...entry.session };
+    entry.killRequested = true;
     if (process.platform === 'win32' && entry.child.pid) {
       const killer = spawn('taskkill.exe', ['/PID', String(entry.child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore', shell: false });
       killer.unref();
@@ -107,7 +122,6 @@ export class TerminalRuntime {
     } else {
       entry.child.kill('SIGTERM');
     }
-    entry.session.status = 'killed';
     return { ...entry.session };
   }
 
@@ -116,9 +130,10 @@ export class TerminalRuntime {
   }
 
   dispose(): void {
-    for (const { child, session } of this.sessions.values()) {
-      if (session.status === 'running') {
-        try { child.kill('SIGTERM'); } catch { /* process already gone */ }
+    for (const entry of this.sessions.values()) {
+      if (entry.session.status === 'running') {
+        entry.killRequested = true;
+        try { entry.child.kill('SIGTERM'); } catch { /* process already gone */ }
       }
     }
     this.sessions.clear();
