@@ -28,6 +28,21 @@ declare global {
       approveTool: (approvalId: string) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
       denyTool: (approvalId: string) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
       onActivity: (listener: (event: { message?: string; status?: string }) => void) => () => void;
+      terminal: {
+        start: (input: { projectId: string; command: string }) => Promise<unknown>;
+        kill: (sessionId: string) => Promise<unknown>;
+        listSessions: () => Promise<unknown[]>;
+        getOutput: (sessionId: string) => Promise<unknown>;
+        listHistory: (projectId?: string) => Promise<unknown[]>;
+        clearHistory: (projectId?: string) => Promise<void>;
+        onEvent: (listener: (event: unknown) => void) => () => void;
+      };
+      git: {
+        status: (projectId: string) => Promise<{ branch: string; ahead: number; behind: number; clean: boolean; files: Array<{ path: string; index: string; worktree: string }> }>;
+        branches: (projectId: string) => Promise<Array<{ name: string; current: boolean; upstream?: string }>>;
+        diff: (projectId: string) => Promise<string>;
+        log: (input: { projectId: string; limit?: number }) => Promise<Array<{ hash: string; shortHash: string; author: string; date: string; subject: string }>>;
+      };
       createProject: (input: { name: string; rootPath: string }) => Promise<Project>;
       openFolder: () => Promise<string | null>;
     };
