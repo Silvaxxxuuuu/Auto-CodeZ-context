@@ -31,10 +31,10 @@ const model: AIModel = {
   capabilities: ['text', 'streaming'],
 };
 
-function createRuntime(stream: NonNullable<AIProviderAdapter['stream']>): ChatRuntime {
+function createRuntime(stream: NonNullable<AIProviderAdapter['stream']>, displayName = 'Mock'): ChatRuntime {
   const adapter: AIProviderAdapter = {
     id: 'mock',
-    displayName: 'Mock',
+    displayName,
     async listModels(): Promise<AIModel[]> {
       return [model];
     },
@@ -79,5 +79,31 @@ test('converts provider stream failures into a terminal error event', async () =
   }
 
   assert.deepEqual(received, ['start', 'delta', 'error']);
-  assert.equal(terminalError, 'provider indisponível');
+  assert.equal(terminalError, 'Mock: provider indisponível');
+});
+
+test('formats quota failures without binding the runtime to a specific provider', async () => {
+  const runtime = createRuntime(async function* (): AsyncGenerator<AIStreamEvent> {
+    yield { type: 'start' };
+    throw new Error('You exceeded your current quota.');
+  }, 'Google AI');
+
+  const events: AIStreamEvent[] = [];
+  for await (const event of runtime.stream({ ...config, displayName: 'Google AI' }, chat)) events.push(event);
+
+  const error = events.find((event) => event.type === 'error')?.error || '';
+  assert.match(error, /Google AI:.*cota.*API key continua salva/i);
+});
+
+test('formats billing failures without exposing provider billing internals', async () => {
+  const runtime = createRuntime(async function* (): AsyncGenerator<AIStreamEvent> {
+    yield { type: 'start' };
+    throw new Error('You have no credits remaining.');
+  }, 'OpenAI');
+
+  const events: AIStreamEvent[] = [];
+  for await (const event of runtime.stream({ ...config, displayName: 'OpenAI' }, chat)) events.push(event);
+
+  const error = events.find((event) => event.type === 'error')?.error || '';
+  assert.match(error, /OpenAI:.*créditos.*API key continua salva/i);
 });
