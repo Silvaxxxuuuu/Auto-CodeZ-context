@@ -4,8 +4,11 @@ import { ModelResolver } from '../src/ai/model-resolver';
 import { ProviderRegistry } from '../src/ai/provider-registry';
 import type { AIModel, AIProviderConfig } from '../src/ai/types';
 
-test('resolves the first available model for legacy unconfigured sentinels', async () => {
-  const models: AIModel[] = [{ id: 'model-default', name: 'Default', providerId: 'openai', capabilities: ['text'] }];
+test('resolves legacy unconfigured sentinels through the shared model ranking', async () => {
+  const models: AIModel[] = [
+    { id: 'model-basic', name: 'Basic', providerId: 'openai', capabilities: ['text'] },
+    { id: 'model-default', name: 'Default', providerId: 'openai', capabilities: ['text', 'streaming', 'tools'] },
+  ];
   const registry = new ProviderRegistry();
   registry.register({
     id: 'openai',
@@ -17,8 +20,8 @@ test('resolves the first available model for legacy unconfigured sentinels', asy
   const config: AIProviderConfig = { id: 'openai', displayName: 'OpenAI', apiKey: 'test', enabled: true };
   const available = await resolver.list(config);
 
-  assert.deepEqual(resolver.find(available, 'unconfigured'), models[0]);
-  assert.deepEqual(resolver.find(available, 'Unconfigured'), models[0]);
+  assert.deepEqual(resolver.find(available, 'unconfigured'), models[1]);
+  assert.deepEqual(resolver.find(available, 'Unconfigured'), models[1]);
 });
 
 test('still rejects unknown configured model ids', () => {
