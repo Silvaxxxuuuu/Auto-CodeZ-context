@@ -1,38 +1,14 @@
-import type { AIModel, AIProviderConfig, ProviderId, ProviderSummary } from './types';
+import type { AIProviderConfig, ProviderId, ProviderSummary } from './types';
 import { ProviderRegistry } from './provider-registry';
 import { OpenAIAdapter } from './providers/openai';
 import { GoogleAdapter } from './providers/google';
 import { AnthropicAdapter } from './providers/anthropic';
+import { selectDefaultModel } from './model-selection';
 
 const STATE_FILE = 'providers.json';
 const SECURE_FILE = 'provider-secrets.json';
 
 interface ProviderState { configs: AIProviderConfig[]; }
-
-function modelScore(model: AIModel, index: number): number {
-  const id = `${model.id} ${model.name}`.toLowerCase();
-  let score = 0;
-  if (model.capabilities.includes('text')) score += 100;
-  if (model.capabilities.includes('tools')) score += 80;
-  if (model.capabilities.includes('streaming')) score += 40;
-  if (model.capabilities.includes('reasoning')) score += 20;
-  if (model.capabilities.includes('vision')) score += 10;
-  if (/(?:^|[-_.])(?:preview|experimental|exp|beta|alpha)(?:[-_.]|$)/i.test(id)) score -= 35;
-  if (/(?:deprecated|legacy|old)/i.test(id)) score -= 100;
-  if (/(?:lite|nano|micro|tiny)/i.test(id)) score -= 25;
-  if (/(?:mini|haiku)/i.test(id)) score -= 10;
-  const versionNumbers = id.match(/(?:^|[-_.])(?:gpt|claude|gemini)?[-_.]?(\d+(?:\.\d+)?)/i);
-  if (versionNumbers?.[1]) score += Number(versionNumbers[1]) * 2;
-  return score - index / 1000;
-}
-
-export function selectDefaultModel(providerId: ProviderId, models: AIModel[]): string | undefined {
-  void providerId;
-  return models.reduce<{ model?: AIModel; score: number }>((best, candidate, index) => {
-    const score = modelScore(candidate, index);
-    return score > best.score ? { model: candidate, score } : best;
-  }, { score: Number.NEGATIVE_INFINITY }).model?.id;
-}
 
 function normalizeConfig(value: AIProviderConfig): AIProviderConfig {
   return { id: value.id, displayName: value.displayName, apiKey: value.apiKey, ...(value.baseUrl ? { baseUrl: value.baseUrl } : {}), ...(value.selectedModel ? { selectedModel: value.selectedModel } : {}), enabled: Boolean(value.enabled) };
@@ -75,9 +51,9 @@ export class ProviderManager {
     return { ...config };
   }
 
-  async listModels(providerId: ProviderId): Promise<AIModel[]> { return this.registry.listModels(this.getConfig(providerId)); }
+  async listModels(providerId: ProviderId): Promise<import('./types').AIModel[]> { return this.registry.listModels(this.getConfig(providerId)); }
 
-  async save(input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }): Promise<{ providers: ProviderSummary[]; models: AIModel[] }> {
+  async save(input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }): Promise<{ providers: ProviderSummary[]; models: import('./types').AIModel[] }> {
     const providerId = input.providerId as ProviderId;
     const adapter = this.registry.get(providerId);
     const apiKey = input.apiKey.trim();
@@ -103,3 +79,5 @@ export class ProviderManager {
     await this.storage.writeEncrypted(SECURE_FILE, JSON.stringify({ configs: this.configs } satisfies ProviderState));
   }
 }
+
+export { selectDefaultModel } from './model-selection';
