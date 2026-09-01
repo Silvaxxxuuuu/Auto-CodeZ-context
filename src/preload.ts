@@ -1,23 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string' && error.trim()) return error.trim();
-  return 'Operação falhou.';
-}
-
-function reportRendererError(error: unknown): void {
-  window.alert(`Auto CodeZ\n\n${normalizeError(error)}`);
-}
-
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
-  try {
-    return await ipcRenderer.invoke(channel, ...args) as T;
-  } catch (error) {
-    reportRendererError(error);
-    throw error;
-  }
+  return await ipcRenderer.invoke(channel, ...args) as T;
 }
 
 contextBridge.exposeInMainWorld('autoCodez', {
@@ -133,10 +118,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
     stageAll: (projectId: string) => invoke('git:stage-all', requireIdentifier(projectId, 'Projeto')),
     commit: (input: { projectId: string; message: string }) => {
       const value = requireObject(input, 'Dados do commit');
-      return invoke('git:commit', {
-        projectId: requireIdentifier(value.projectId, 'Projeto'),
-        message: requireNonEmptyString(value.message, 'Mensagem do commit'),
-      });
+      return invoke('git:stage-all', requireIdentifier(projectId, 'Projeto'));
     },
   },
   createProject: (input: { name: string; rootPath: string }) => {
@@ -153,7 +135,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
     const value = requireObject(input, 'Dados do arquivo');
     return invoke('projects:write-file', {
       filePath: requireNonEmptyString(value.filePath, 'Arquivo'),
-      content: typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo do arquivo é inválido.'); })(),
+      content: typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo de arquivo é inválido.'); })(),
     });
   },
   openExternal: (url: string) => invoke('app:open-external', requireNonEmptyString(url, 'URL externa')),
