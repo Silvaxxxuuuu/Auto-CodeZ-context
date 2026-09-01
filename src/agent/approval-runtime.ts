@@ -25,6 +25,14 @@ export class ApprovalRuntime {
     return approval;
   }
 
+  restore(approvals: ApprovalRequest[]): void {
+    this.pending.clear();
+    for (const approval of approvals) {
+      if (!approval.id || !approval.projectId || !approval.toolCall?.id || !approval.toolCall?.name || !approval.createdAt) continue;
+      this.pending.set(approval.id, approval);
+    }
+  }
+
   clear(): void {
     this.pending.clear();
   }
