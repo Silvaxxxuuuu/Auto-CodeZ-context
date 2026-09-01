@@ -52,7 +52,7 @@ function renderProfile(): void {
             <span>Não conectada</span>
             <small>Conecte uma identidade para sincronizar sua conta entre dispositivos.</small>
           </div>
-          <span class="profile-status profile-status-neutral">Offline</span>
+          <span class="profile-status profile-status-neutral">Não conectada</span>
         </section>
 
         <div class="profile-grid">
