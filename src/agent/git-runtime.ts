@@ -15,8 +15,36 @@ function requireSafePath(pathValue: string): string { const value = pathValue.tr
 
 export class GitRuntime {
   constructor(private readonly listProjects: () => Promise<ProjectRecord[]>) {}
-  private async root(projectId: string): Promise<string> { const project = (await this.listProjects()).find((item) => item.id === projectId); if (!project) throw new Error('Projeto não encontrado.'); return project.rootPath; }
-  private async git(projectId: string, args: string[]): Promise<string> { const cwd = await this.root(projectId); try { const result = await execFileAsync('git', args, { cwd, windowsHide: true, maxBuffer: MAX_OUTPUT }); return result.stdout; } catch (error) { const stderr = error && typeof error === 'object' && 'stderr' in error && typeof error.stderr === 'string' ? error.stderr.trim() : ''; throw new Error(stderr || (error instanceof Error ? error.message : 'Falha ao executar Git.')); } }
+  private async projectRoot(projectId: string): Promise<string> {
+    const project = (await this.listProjects()).find((item) => item.id === projectId);
+    if (!project) throw new Error('Projeto não encontrado.');
+    return project.rootPath;
+  }
+  private async repoRoot(projectId: string): Promise<string> {
+    const cwd = await this.projectRoot(projectId);
+    try {
+      const result = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd, windowsHide: true, maxBuffer: 64 * 1024 });
+      const root = result.stdout.trim();
+      if (!root) throw new Error('O Git não retornou a raiz do repositório.');
+      return root;
+    } catch (error) {
+      const stderr = error && typeof error === 'object' && 'stderr' in error && typeof error.stderr === 'string' ? error.stderr.trim() : '';
+      if (/not a git repository/i.test(stderr) || /not a git repository/i.test(error instanceof Error ? error.message : '')) {
+        throw new Error(`A pasta do projeto não é um repositório Git: ${cwd}`);
+      }
+      throw new Error(stderr || (error instanceof Error ? error.message : 'Não foi possível localizar a raiz do repositório Git.'));
+    }
+  }
+  private async git(projectId: string, args: string[]): Promise<string> {
+    const cwd = await this.repoRoot(projectId);
+    try {
+      const result = await execFileAsync('git', args, { cwd, windowsHide: true, maxBuffer: MAX_OUTPUT });
+      return result.stdout;
+    } catch (error) {
+      const stderr = error && typeof error === 'object' && 'stderr' in error && typeof error.stderr === 'string' ? error.stderr.trim() : '';
+      throw new Error(stderr || (error instanceof Error ? error.message : 'Falha ao executar Git.'));
+    }
+  }
   async status(projectId: string): Promise<GitStatus> {
     const output = await this.git(projectId, ['status', '--porcelain=v1', '-b']);
     const lines = output.split(/\r?\n/).filter(Boolean);
