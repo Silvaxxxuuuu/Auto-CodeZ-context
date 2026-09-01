@@ -12,11 +12,11 @@ if (bridge?.onStreamEvent && !(bridge.onStreamEvent as { __autoCodezBatched?: bo
   const batched = (listener: (event: StreamEvent) => void): (() => void) => {
     let queuedText = '';
     let queuedEvent: StreamEvent | null = null;
-    let frame = 0;
+    let timer = 0;
     let disposed = false;
 
     const flush = (): void => {
-      frame = 0;
+      timer = 0;
       if (disposed || !queuedEvent) return;
       const event = queuedEvent;
       const text = queuedText;
@@ -26,9 +26,9 @@ if (bridge?.onStreamEvent && !(bridge.onStreamEvent as { __autoCodezBatched?: bo
     };
 
     const flushNow = (): void => {
-      if (frame) {
-        window.cancelAnimationFrame(frame);
-        frame = 0;
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = 0;
       }
       flush();
     };
@@ -37,7 +37,7 @@ if (bridge?.onStreamEvent && !(bridge.onStreamEvent as { __autoCodezBatched?: bo
       if (event.type === 'delta' && event.text) {
         queuedEvent = queuedEvent || event;
         queuedText += event.text;
-        if (!frame) frame = window.requestAnimationFrame(flush);
+        if (!timer) timer = window.setTimeout(flush, 33);
         return;
       }
 
