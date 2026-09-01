@@ -4,6 +4,7 @@ import started from 'electron-squirrel-startup';
 import { ProviderRegistry } from './ai/provider-registry';
 import { ChatRuntime } from './ai/chat-runtime';
 import { ModelResolver } from './ai/model-resolver';
+import { ProviderRequestJournal } from './ai/provider-request-journal';
 import { OpenAIAdapter } from './ai/providers/openai';
 import { GoogleAdapter } from './ai/providers/google';
 import { AnthropicAdapter } from './ai/providers/anthropic';
@@ -35,7 +36,8 @@ const projectContextRuntime = new ProjectContextRuntime(projectManager);
 const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
 const commandRuntime = new CommandRuntime(() => projectManager.list());
 const toolRuntime = new ToolRuntime(workspaceRuntime, undefined, activityRuntime, approvalRuntime, commandRuntime, undefined, storage);
-const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver, toolRuntime.listDefinitions());
+const providerRequestJournal = new ProviderRequestJournal(storage);
+const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver, toolRuntime.listDefinitions(), providerRequestJournal);
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const chatManager = new ChatManager(storage);
 
@@ -257,6 +259,7 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
 ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
+ipcMain.handle('agent:list-interrupted-provider-requests', async () => chatRuntime.listInterruptedProviderRequests());
 ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
   const id = requireIdentifier(approvalId, 'Aprovação');
   const result = await agentRuntime.resume(id);
@@ -307,5 +310,5 @@ ipcMain.handle('app:open-external', async (_event, url: string) => {
   await shell.openExternal(parsed.toString());
 });
 
-app.whenReady().then(async () => { await storage.init(); await loadProviders(); await projectManager.init(); await chatManager.init(); await toolRuntime.init(); await agentRuntime.init(); await createWindow(); app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createWindow(); }); }).catch((error) => { const message = error instanceof Error ? error.message : 'Falha ao inicializar o Auto CodeZ.'; dialog.showErrorBox('Auto CodeZ', message); app.quit(); });
+app.whenReady().then(async () => { await storage.init(); await loadProviders(); await projectManager.init(); await chatManager.init(); await toolRuntime.init(); await providerRequestJournal.init(); await chatRuntime.init(); await agentRuntime.init(); await createWindow(); app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createWindow(); }); }).catch((error) => { const message = error instanceof Error ? error.message : 'Falha ao inicializar o Auto CodeZ.'; dialog.showErrorBox('Auto CodeZ', message); app.quit(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
