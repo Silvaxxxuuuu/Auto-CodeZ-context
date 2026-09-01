@@ -64,3 +64,37 @@ test('command runtime executes an allowed npm script on Windows and Unix', async
     await project.cleanup();
   }
 });
+
+test('command runtime streams stdout and stderr without changing the final result', async () => {
+  const project = await createProject();
+  try {
+    const script = "node -e \"process.stdout.write('out'); process.stderr.write('err')\"";
+    await fs.writeFile(path.join(project.root, 'package.json'), JSON.stringify({ scripts: { test: script } }));
+    const events: Array<{ stream: 'stdout' | 'stderr'; text: string }> = [];
+    const result = await project.runtime.run('project-test', 'npm', 'test', {
+      onOutput: (event) => events.push(event),
+    });
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /out/);
+    assert.match(result.stderr, /err/);
+    assert.ok(events.some((event) => event.stream === 'stdout' && event.text.includes('out')));
+    assert.ok(events.some((event) => event.stream === 'stderr' && event.text.includes('err')));
+  } finally {
+    await project.cleanup();
+  }
+});
+
+test('command runtime isolates observer failures from command execution', async () => {
+  const project = await createProject();
+  try {
+    const script = "node -e \"process.stdout.write('still-runs')\"";
+    await fs.writeFile(path.join(project.root, 'package.json'), JSON.stringify({ scripts: { test: script } }));
+    const result = await project.runtime.run('project-test', 'npm', 'test', {
+      onOutput: () => { throw new Error('observer failed'); },
+    });
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /still-runs/);
+  } finally {
+    await project.cleanup();
+  }
+});
