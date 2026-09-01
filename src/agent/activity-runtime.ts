@@ -13,7 +13,13 @@ export class ActivityRuntime {
 
   emit(input: Omit<ActivityEvent, 'id' | 'createdAt'>): ActivityEvent {
     const event: ActivityEvent = { ...input, id: crypto.randomUUID(), createdAt: Date.now() };
-    for (const listener of this.listeners) listener(event);
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch {
+        // Activity observers must never interrupt the operation they observe.
+      }
+    }
     return event;
   }
 
