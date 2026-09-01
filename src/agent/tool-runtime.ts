@@ -76,15 +76,17 @@ export class ToolRuntime {
   }
 
   async approve(approvalId: string): Promise<AIToolResult> {
-    const approval = this.approvals.resolve(approvalId);
+    const approval = this.approvals.get(approvalId);
+    if (!approval) throw new Error('Aprovação não encontrada ou já processada.');
     try {
       await this.assertPrecondition(approval.projectId, approval.diffPlan);
-      return await this.executeNow(approval.projectId, approval.toolCall);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.activity.failure('tool', `Aprovação ${approvalId} não pôde ser executada: ${message}`);
-      return { toolCallId: approval.toolCall.id, ok: false, error: message, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
+      return { toolCallId: approval.toolCall.id, ok: false, error: message, approvalId, pendingApproval: true, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
     }
+    this.approvals.resolve(approvalId);
+    return this.executeNow(approval.projectId, approval.toolCall);
   }
 
   deny(approvalId: string): boolean {
