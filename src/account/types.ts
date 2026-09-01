@@ -2,14 +2,39 @@ export type AccountId = string;
 export type DeviceId = string;
 export type SessionId = string;
 export type SyncOperationId = string;
+export type IdentityId = string;
 
-export type IdentityProvider = 'email' | 'google' | 'github';
+/**
+ * Ways a user can authenticate to the same Auto CodeZ account.
+ *
+ * Password-based accounts and SMS/phone OTP are intentionally not part of the
+ * product authentication model. E-mail access is passwordless through a
+ * temporary magic link.
+ */
+export type IdentityProvider =
+  | 'google'
+  | 'github'
+  | 'microsoft'
+  | 'passkey'
+  | 'magic_link';
+
+export interface LinkedIdentity {
+  id: IdentityId;
+  provider: IdentityProvider;
+  providerAccountId: string;
+  email?: string;
+  displayName?: string;
+  avatarUrl?: string;
+  linkedAt: number;
+  lastUsedAt?: number;
+}
 
 export interface AccountProfile {
   id: AccountId;
   email: string;
   displayName: string;
   avatarUrl?: string;
+  identities: LinkedIdentity[];
   createdAt: number;
   updatedAt: number;
 }
