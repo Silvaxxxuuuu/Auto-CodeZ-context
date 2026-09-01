@@ -5,13 +5,15 @@ import path from 'node:path';
 import test from 'node:test';
 import { ToolRuntime } from '../src/agent/tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
+import { CommandRuntime } from '../src/agent/command-runtime';
 import type { AIToolCall, ProjectRecord } from '../src/ai/types';
 
-async function createToolRuntime(): Promise<{ root: string; runtime: ToolRuntime; cleanup: () => Promise<void> }> {
+async function createToolRuntime(commandRuntime?: CommandRuntime): Promise<{ root: string; runtime: ToolRuntime; cleanup: () => Promise<void> }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-tool-test-'));
   const project: ProjectRecord = { id: 'project-test', name: 'Tool Test Project', rootPath: root, createdAt: Date.now(), updatedAt: Date.now() };
   const workspace = new WorkspaceRuntime(async () => [project]);
-  return { root, runtime: new ToolRuntime(workspace), cleanup: () => fs.rm(root, { recursive: true, force: true }) };
+  const commands = commandRuntime ?? new CommandRuntime(async () => [project]);
+  return { root, runtime: new ToolRuntime(workspace, undefined, undefined, undefined, commands), cleanup: () => fs.rm(root, { recursive: true, force: true }) };
 }
 
 function call(id: string, name: AIToolCall['name'], input: Record<string, unknown>): AIToolCall { return { id, name, input }; }
@@ -135,12 +137,30 @@ test('read-only permission denies write tools', async () => {
 test('run_command fails closed when no command runtime is configured', async () => {
   const fixture = await createToolRuntime();
   try {
-    const pending = await fixture.runtime.execute('project-test', 'ask', call('call-8', 'run_command', { manager: 'npm', script: 'test' }));
+    const workspaceOnly = new ToolRuntime(new WorkspaceRuntime(async () => [{ id: 'project-test', name: 'Tool Test Project', rootPath: fixture.root, createdAt: Date.now(), updatedAt: Date.now() }]));
+    const pending = await workspaceOnly.execute('project-test', 'ask', call('call-8', 'run_command', { manager: 'npm', script: 'test' }));
     assert.equal(pending.pendingApproval, true);
     assert.ok(pending.approvalId);
     assert.equal(pending.diffPlan, undefined);
-    const result = await fixture.runtime.approve(pending.approvalId!);
+    const result = await workspaceOnly.approve(pending.approvalId!);
     assert.equal(result.ok, false);
     assert.match(result.error ?? '', /runtime de comandos não foi configurado/i);
+  } finally { await fixture.cleanup(); }
+});
+
+test('run_command returns a structured command result', async () => {
+  const fixture = await createToolRuntime();
+  try {
+    await fs.writeFile(path.join(fixture.root, 'package.json'), JSON.stringify({ scripts: { test: "node -e \"process.stdout.write('command-result-ok')\"" } }));
+    const pending = await fixture.runtime.execute('project-test', 'ask', call('call-9', 'run_command', { manager: 'npm', script: 'test' }));
+    assert.equal(pending.pendingApproval, true);
+    assert.ok(pending.approvalId);
+    const result = await fixture.runtime.approve(pending.approvalId!);
+    assert.equal(result.ok, true);
+    assert.equal(result.commandResult?.exitCode, 0);
+    assert.match(result.commandResult?.stdout ?? '', /command-result-ok/);
+    assert.ok((result.commandResult?.durationMs ?? -1) >= 0);
+    assert.ok((result.commandResult?.finishedAt ?? 0) >= (result.commandResult?.startedAt ?? 1));
+    assert.equal(result.commandResult?.command, 'npm run test');
   } finally { await fixture.cleanup(); }
 });
