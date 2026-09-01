@@ -215,4 +215,5 @@ export interface ActivityEvent {
   commandResult?: CommandResultSummary;
   changes?: FileDiff[];
   diffPlan?: DiffPlan;
+  error?: string;
 }
