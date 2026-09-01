@@ -60,10 +60,11 @@ async function createFixture(responses: AIResponse[], failAfter = Number.POSITIV
 async function createPersistentFixture(storage: MemoryStorage, responses: AIResponse[], root: string): Promise<AgentRuntime> {
   const project: ProjectRecord = { id: 'recovery-project', name: 'Recovery Project', rootPath: root, createdAt: Date.now(), updatedAt: Date.now() };
   const workspace = new WorkspaceRuntime(async () => [project]);
-  const tools = new ToolRuntime(workspace);
+  const tools = new ToolRuntime(workspace, undefined, undefined, undefined, undefined, undefined, storage);
   const registry = new ProviderRegistry();
   registry.register(makeAdapter(responses));
   const chatRuntime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, tools.listDefinitions());
+  await tools.init();
   const agent = new AgentRuntime(chatRuntime, tools, undefined, storage);
   await agent.init();
   return agent;
@@ -137,6 +138,33 @@ test('recovers pending approvals after runtime reconstruction', async () => {
     assert.equal(result.response.content, 'Recovered and finished.');
     assert.equal(await fs.readFile(path.join(root, 'src', 'index.ts'), 'utf8'), 'export const value = 2;');
     assert.equal(recovered.hasPendingForChat('recovery-chat'), false);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('recovers an already-applied mutation from the write-ahead journal without executing it twice', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-journal-recovery-'));
+  const storage = new MemoryStorage();
+  const firstResponse: AIResponse = { content: '', model: 'test-model', providerId: config.id, toolCalls: [writeCall] };
+  try {
+    await fs.mkdir(path.join(root, 'src'), { recursive: true });
+    await fs.writeFile(path.join(root, 'src', 'index.ts'), 'export const value = 1;');
+    const first = await createPersistentFixture(storage, [firstResponse], root);
+    const pending = await first.run(config, makeChat(), undefined, 'ask');
+    assert.equal(pending.pendingApprovalIds.length, 1);
+    const approvals = await storage.read<any[]>('agent-runs.json', []);
+    const approval = approvals.approvals[0];
+    assert.ok(approval?.diffPlan);
+
+    await fs.writeFile(path.join(root, 'src', 'index.ts'), 'export const value = 2;');
+    await storage.write('tool-execution-journal.json', [{ approvalId: approval.id, projectId: 'recovery-project', toolCall: writeCall, diffPlan: approval.diffPlan, status: 'executing' }]);
+
+    const recovered = await createPersistentFixture(storage, [{ content: 'Journal recovery complete.', model: 'test-model', providerId: config.id }], root);
+    const result = await recovered.resume(approval.id);
+
+    assert.equal(result.pendingApprovalIds.length, 0);
+    assert.equal(result.response.content, 'Journal recovery complete.');
+    assert.equal(await fs.readFile(path.join(root, 'src', 'index.ts'), 'utf8'), 'export const value = 2;');
+    assert.deepEqual(await storage.read('tool-execution-journal.json', []), []);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
