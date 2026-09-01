@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { AIMessage, AIProviderConfig, AIResponse, AIStreamEvent, AIToolCall, ApprovalRequest, ChatRecord, PermissionLevel } from '../ai/types';
 import { ActivityRuntime } from './activity-runtime';
 import { ToolRuntime } from './tool-runtime';
@@ -13,6 +14,7 @@ export interface AgentStateStorage {
 }
 
 type PendingRun = {
+  runId: string;
   config: AIProviderConfig;
   chat: ChatRecord;
   projectContext?: string;
@@ -25,6 +27,7 @@ type PendingRun = {
 };
 
 interface PersistedPendingRun {
+  runId: string;
   config: AIProviderConfig;
   chat: ChatRecord;
   projectContext?: string;
@@ -36,7 +39,7 @@ interface PersistedPendingRun {
 }
 
 interface PersistedAgentState {
-  version: 1;
+  version: 2;
   runs: PersistedPendingRun[];
   approvals: ApprovalRequest[];
 }
@@ -51,6 +54,7 @@ export interface AgentRunResult {
 
 export class AgentRuntime {
   private readonly pendingRuns = new Map<string, PendingRun>();
+  private readonly recoverableRuns = new Map<string, PendingRun>();
   private persistenceWrite: Promise<void> = Promise.resolve();
 
   constructor(
@@ -62,16 +66,22 @@ export class AgentRuntime {
 
   async init(): Promise<void> {
     if (!this.storage) return;
-    const state = await this.storage.read<PersistedAgentState>(STATE_FILE, { version: 1, runs: [], approvals: [] });
-    if (!state || state.version !== 1 || !Array.isArray(state.runs) || !Array.isArray(state.approvals)) return;
-    this.tools.restoreApprovals(state.approvals);
+    const stored = await this.storage.read<PersistedAgentState | { version: 1; runs: PersistedPendingRun[]; approvals: ApprovalRequest[] }>(STATE_FILE, { version: 2, runs: [], approvals: [] });
+    if (!stored || !Array.isArray(stored.runs) || !Array.isArray(stored.approvals)) return;
+    this.tools.restoreApprovals(stored.approvals);
     this.pendingRuns.clear();
-    for (const run of state.runs) {
-      if (!run.chat?.id || !Array.isArray(run.pendingApprovalIds) || !run.pendingApprovalIds.length) continue;
-      const validIds = run.pendingApprovalIds.filter((id) => Boolean(run.approvalCalls?.[id]) && Boolean(this.tools.listApprovals().find((approval) => approval.id === id)));
-      if (!validIds.length) continue;
-      const pending: PendingRun = { ...run, pendingApprovalIds: validIds };
-      for (const id of validIds) this.pendingRuns.set(id, pending);
+    this.recoverableRuns.clear();
+    const approvals = this.tools.listApprovals();
+    for (const run of stored.runs) {
+      if (!run.chat?.id || !Array.isArray(run.pendingApprovalIds) || !Array.isArray(run.workingChat?.messages)) continue;
+      const runId = run.runId || crypto.randomUUID();
+      const validIds = run.pendingApprovalIds.filter((id) => Boolean(run.approvalCalls?.[id]) && Boolean(approvals.find((approval) => approval.id === id)));
+      const pending: PendingRun = { ...run, runId, pendingApprovalIds: validIds };
+      if (validIds.length) {
+        for (const id of validIds) this.pendingRuns.set(id, pending);
+      } else {
+        this.recoverableRuns.set(runId, pending);
+      }
     }
     await this.persist();
   }
@@ -81,14 +91,33 @@ export class AgentRuntime {
     return false;
   }
 
+  listRecoverableRuns(): Array<{ runId: string; chatId: string; toolRounds: number }> {
+    return [...this.recoverableRuns.values()].map((run) => ({ runId: run.runId, chatId: run.chat.id, toolRounds: run.toolRounds }));
+  }
+
   async run(config: AIProviderConfig, chat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel): Promise<AgentRunResult> {
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
-    return this.runLoop(config, chat, workingChat, projectContext, permission, 0);
+    const runId = crypto.randomUUID();
+    const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0 };
+    this.recoverableRuns.set(runId, run);
+    await this.persist();
+    return this.runLoop(run);
   }
 
   async runStreaming(config: AIProviderConfig, chat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel, emit: StreamEmitter): Promise<AgentRunResult> {
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
-    return this.runStreamLoop(config, chat, workingChat, projectContext, permission, 0, emit);
+    const runId = crypto.randomUUID();
+    const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0, streamEmitter: emit };
+    this.recoverableRuns.set(runId, run);
+    await this.persist();
+    return this.runStreamLoop(run);
+  }
+
+  async resumeRecovered(runId: string): Promise<AgentRunResult> {
+    const run = this.recoverableRuns.get(runId);
+    if (!run) throw new Error('Execução recuperável não encontrada.');
+    if (run.pendingApprovalIds.length) throw new Error('A execução ainda possui aprovações pendentes.');
+    return run.streamEmitter ? this.runStreamLoop(run) : this.runLoop(run);
   }
 
   async resume(approvalId: string): Promise<AgentRunResult> {
@@ -130,16 +159,20 @@ export class AgentRuntime {
       await this.persist();
       return { chatId: pending.chat.id, response: { content: '', model: pending.workingChat.model, providerId: pending.workingChat.providerId }, toolRounds: pending.toolRounds, pendingApprovalIds: [...pending.pendingApprovalIds], messages: [...pending.workingChat.messages] };
     }
+    this.recoverableRuns.set(pending.runId, pending);
     await this.persist();
-    if (pending.streamEmitter) return this.runStreamLoop(pending.config, pending.chat, pending.workingChat, pending.projectContext, pending.permission, pending.toolRounds, pending.streamEmitter);
-    return this.runLoop(pending.config, pending.chat, pending.workingChat, pending.projectContext, pending.permission, pending.toolRounds);
+    return pending.streamEmitter ? this.runStreamLoop(pending) : this.runLoop(pending);
   }
 
   private async persist(): Promise<void> {
     if (!this.storage) return;
+    const uniqueRuns = new Map<string, PendingRun>();
+    for (const run of this.recoverableRuns.values()) uniqueRuns.set(run.runId, run);
+    for (const run of this.pendingRuns.values()) uniqueRuns.set(run.runId, run);
     const state: PersistedAgentState = {
-      version: 1,
-      runs: [...new Set(this.pendingRuns.values())].map((run) => ({
+      version: 2,
+      runs: [...uniqueRuns.values()].map((run) => ({
+        runId: run.runId,
         config: run.config,
         chat: run.chat,
         projectContext: run.projectContext,
@@ -161,41 +194,52 @@ export class AgentRuntime {
     chat.messages.push({ role: 'tool', content, toolCallId: call.id, toolName: call.name, changes: result.changes, diffPlan: result.diffPlan, createdAt: Date.now() });
   }
 
-  private async runLoop(config: AIProviderConfig, chat: ChatRecord, workingChat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel, toolRounds: number): Promise<AgentRunResult> {
-    while (toolRounds < MAX_TOOL_ROUNDS) {
-      const response = await this.chatRuntime.send(config, workingChat, projectContext);
+  private async runLoop(run: PendingRun): Promise<AgentRunResult> {
+    while (run.toolRounds < MAX_TOOL_ROUNDS) {
+      const response = await this.chatRuntime.send(run.config, run.workingChat, run.projectContext);
       if (!response.toolCalls?.length) {
-        workingChat.messages.push({ role: 'assistant', content: response.content, createdAt: Date.now() });
-        return { chatId: chat.id, response, toolRounds, pendingApprovalIds: [], messages: [...workingChat.messages] };
+        run.workingChat.messages.push({ role: 'assistant', content: response.content, createdAt: Date.now() });
+        this.recoverableRuns.delete(run.runId);
+        await this.persist();
+        return { chatId: run.chat.id, response, toolRounds: run.toolRounds, pendingApprovalIds: [], messages: [...run.workingChat.messages] };
       }
-      if (!workingChat.projectId) throw new Error('Uma ferramenta foi solicitada sem um projeto ativo.');
-      toolRounds += 1;
+      if (!run.workingChat.projectId) throw new Error('Uma ferramenta foi solicitada sem um projeto ativo.');
+      run.toolRounds += 1;
       this.activity.emit({ type: 'tool', message: `Executando ${response.toolCalls.length} ferramenta(s).`, status: 'running' });
-      workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, createdAt: Date.now() });
+      run.workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, createdAt: Date.now() });
+      await this.persist();
       const pendingApprovalIds: string[] = [];
       const approvalCalls: Record<string, AIToolCall> = {};
       for (const call of response.toolCalls) {
-        const result = await this.tools.execute(workingChat.projectId, permission, call);
-        this.appendToolResult(workingChat, call, result);
+        const result = await this.tools.execute(run.workingChat.projectId, run.permission, call);
+        this.appendToolResult(run.workingChat, call, result);
         if (result.pendingApproval && result.approvalId) { pendingApprovalIds.push(result.approvalId); approvalCalls[result.approvalId] = call; }
+        await this.persist();
       }
       if (pendingApprovalIds.length) {
-        const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds, approvalCalls, toolRounds };
-        for (const approvalId of pendingApprovalIds) this.pendingRuns.set(approvalId, pendingRun);
+        run.pendingApprovalIds = pendingApprovalIds;
+        run.approvalCalls = approvalCalls;
+        this.recoverableRuns.delete(run.runId);
+        for (const approvalId of pendingApprovalIds) this.pendingRuns.set(approvalId, run);
         this.activity.emit({ type: 'action', message: 'O agente aguarda aprovação antes de continuar.', status: 'pending' });
         await this.persist();
-        return { chatId: chat.id, response, toolRounds, pendingApprovalIds, messages: [...workingChat.messages] };
+        return { chatId: run.chat.id, response, toolRounds: run.toolRounds, pendingApprovalIds, messages: [...run.workingChat.messages] };
       }
-      this.activity.success('tool', `Ciclo de ferramentas ${toolRounds} concluído.`);
+      this.activity.success('tool', `Ciclo de ferramentas ${run.toolRounds} concluído.`);
+      await this.persist();
     }
+    this.recoverableRuns.delete(run.runId);
+    await this.persist();
     throw new Error('O agente atingiu o limite de ciclos de ferramentas.');
   }
 
-  private async runStreamLoop(config: AIProviderConfig, chat: ChatRecord, workingChat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel, toolRounds: number, emit: StreamEmitter): Promise<AgentRunResult> {
-    while (toolRounds < MAX_TOOL_ROUNDS) {
+  private async runStreamLoop(run: PendingRun): Promise<AgentRunResult> {
+    const emit = run.streamEmitter;
+    if (!emit) throw new Error('Emitter de streaming não configurado.');
+    while (run.toolRounds < MAX_TOOL_ROUNDS) {
       let response: AIResponse | undefined;
       let streamError: string | undefined;
-      for await (const event of this.chatRuntime.stream(config, workingChat, projectContext)) {
+      for await (const event of this.chatRuntime.stream(run.config, run.workingChat, run.projectContext)) {
         if (event.type === 'complete' && event.response) response = event.response;
         if (event.type === 'error') streamError = event.error || 'Erro durante o streaming.';
         emit(event);
@@ -203,30 +247,39 @@ export class AgentRuntime {
       if (streamError) throw new Error(streamError);
       if (!response) throw new Error('O provider encerrou o streaming sem uma resposta final.');
       if (!response.toolCalls?.length) {
-        workingChat.messages.push({ role: 'assistant', content: response.content, createdAt: Date.now() });
-        return { chatId: chat.id, response, toolRounds, pendingApprovalIds: [], messages: [...workingChat.messages] };
+        run.workingChat.messages.push({ role: 'assistant', content: response.content, createdAt: Date.now() });
+        this.recoverableRuns.delete(run.runId);
+        await this.persist();
+        return { chatId: run.chat.id, response, toolRounds: run.toolRounds, pendingApprovalIds: [], messages: [...run.workingChat.messages] };
       }
-      if (!workingChat.projectId) throw new Error('Uma ferramenta foi solicitada sem um projeto ativo.');
-      toolRounds += 1;
-      workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, createdAt: Date.now() });
+      if (!run.workingChat.projectId) throw new Error('Uma ferramenta foi solicitada sem um projeto ativo.');
+      run.toolRounds += 1;
+      run.workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, createdAt: Date.now() });
+      await this.persist();
       const pendingApprovalIds: string[] = [];
       const approvalCalls: Record<string, AIToolCall> = {};
       for (const call of response.toolCalls) {
-        const result = await this.tools.execute(workingChat.projectId, permission, call);
-        this.appendToolResult(workingChat, call, result);
+        const result = await this.tools.execute(run.workingChat.projectId, run.permission, call);
+        this.appendToolResult(run.workingChat, call, result);
         if (result.pendingApproval && result.approvalId) { pendingApprovalIds.push(result.approvalId); approvalCalls[result.approvalId] = call; }
         else emit({ type: 'activity', activity: { id: `tool_${Date.now()}`, type: 'tool', message: result.ok ? `Concluído: ${call.name}` : `Falha: ${call.name}`, status: result.ok ? 'success' : 'failed', createdAt: Date.now() } });
+        await this.persist();
       }
       if (pendingApprovalIds.length) {
-        const pendingRun: PendingRun = { config, chat, projectContext, permission, workingChat, pendingApprovalIds, approvalCalls, toolRounds, streamEmitter: emit };
-        for (const approvalId of pendingApprovalIds) this.pendingRuns.set(approvalId, pendingRun);
+        run.pendingApprovalIds = pendingApprovalIds;
+        run.approvalCalls = approvalCalls;
+        this.recoverableRuns.delete(run.runId);
+        for (const approvalId of pendingApprovalIds) this.pendingRuns.set(approvalId, run);
         this.activity.emit({ type: 'action', message: 'O agente aguarda aprovação antes de continuar.', status: 'pending' });
         emit({ type: 'approval_required', pendingApprovalIds: [...pendingApprovalIds] });
         await this.persist();
-        return { chatId: chat.id, response, toolRounds, pendingApprovalIds, messages: [...workingChat.messages] };
+        return { chatId: run.chat.id, response, toolRounds: run.toolRounds, pendingApprovalIds, messages: [...run.workingChat.messages] };
       }
-      this.activity.success('tool', `Ciclo de ferramentas ${toolRounds} concluído.`);
+      this.activity.success('tool', `Ciclo de ferramentas ${run.toolRounds} concluído.`);
+      await this.persist();
     }
+    this.recoverableRuns.delete(run.runId);
+    await this.persist();
     throw new Error('O agente atingiu o limite de ciclos de ferramentas.');
   }
 }
