@@ -2,6 +2,8 @@ type RenameApi = {
   renameChat: (input: { chatId: string; title: string }) => Promise<{ id: string; title: string }>;
 };
 
+type ChatState = { chats: Array<{ id: string; title: string }> };
+
 const bridge = window.autoCodez as unknown as RenameApi;
 
 function escapeHtml(value: string): string {
@@ -47,6 +49,11 @@ async function renameChat(chatId: string, currentTitle: string, item: HTMLElemen
       const activeCopy = activeItem?.querySelector<HTMLElement>('.chat-item-copy > span:first-child');
       if (activeCopy) activeCopy.textContent = updated.title;
       if (headerTitle && activeItem?.classList.contains('selected')) headerTitle.textContent = updated.title;
+
+      const stateWindow = window as unknown as { __autoCodeZChatState?: ChatState };
+      const state = stateWindow.__autoCodeZChatState;
+      const localChat = state?.chats.find((chat) => chat.id === chatId);
+      if (localChat) localChat.title = updated.title;
     } catch (error) {
       restore(currentTitle);
       window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível renomear o chat.' }));
