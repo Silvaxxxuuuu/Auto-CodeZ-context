@@ -38,6 +38,7 @@ const terminal = bridge.terminal;
 
 const style = document.createElement('style');
 style.textContent = `
+.terminal-rail-button:before{mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm2.2 4.1 3 2.9-3 2.9 1 1 4-3.9-4-3.9-1 1Zm6.1 5.9h5.2v1.5h-5.2V15Z'/%3E%3C/svg%3E")}
 .terminal-panel{display:none;flex:none;height:300px;min-height:180px;border-top:1px solid #202631;background:#080a0e;color:#d9dee7;flex-direction:column;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}
 .terminal-panel.open{display:flex}
 .terminal-toolbar{height:38px;flex:none;display:flex;align-items:center;gap:7px;padding:0 10px;border-bottom:1px solid #202631;background:#0d1016}
