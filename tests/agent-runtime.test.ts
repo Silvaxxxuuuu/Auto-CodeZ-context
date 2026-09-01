@@ -56,7 +56,7 @@ test('run returns a normal response without tools', async () => {
 
 test('run preserves the tool round count across an approval resume', async () => {
   const fixtureData = await fixture(fixtureDataResponses());
-  try { const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask'); assert.equal(pending.toolRounds, 1); assert.equal(pending.pendingApprovalIds.length, 1); const resumed = await fixtureData.agent.resume(pending.pendingApprovalIds[0]); assert.equal(resumed.toolRounds, 1); assert.equal(resumed.pendingApprovalIds.length, 0); assert.equal(resumed.response.content, 'Finished.'); assert.equal(resumed.messages.filter((message) => message.role === 'tool').length, 2); }
+  try { const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask'); assert.equal(pending.toolRounds, 1); assert.equal(pending.pendingApprovalIds.length, 1); const resumed = await fixtureData.agent.resume(pending.pendingApprovalIds[0]); assert.equal(resumed.toolRounds, 1); assert.equal(resumed.pendingApprovalIds.length, 0); assert.equal(resumed.response.content, 'Finished.'); assert.equal(resumed.messages.filter((message) => message.role === 'tool').length, 1); }
   finally { await fixtureData.cleanup(); }
 });
 
@@ -117,6 +117,7 @@ test('persists a recoverable cycle after a provider failure and never re-execute
   const workspace = new WorkspaceRuntime(async () => [project]);
   const tools = new ToolRuntime(workspace);
   let providerCalls = 0;
+  const recoveryCall: AIToolCall = { id: 'recoverable-call', name: 'create_file', input: { path: 'src/recoverable-call.ts', content: 'export const value = 99;' } };
   const registry = new ProviderRegistry();
   registry.register({
     id: config.id,
@@ -124,7 +125,7 @@ test('persists a recoverable cycle after a provider failure and never re-execute
     async listModels() { return [{ id: 'test-model', name: 'Test Model', providerId: config.id, capabilities: ['text', 'tools'] }]; },
     async send() {
       providerCalls += 1;
-      if (providerCalls === 1) return { content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('recoverable-call', 99)] };
+      if (providerCalls === 1) return { content: '', model: 'test-model', providerId: config.id, toolCalls: [recoveryCall] };
       throw new Error('Provider interrupted.');
     },
   });
