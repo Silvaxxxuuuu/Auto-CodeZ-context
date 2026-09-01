@@ -62,11 +62,11 @@ async function renameChat(chatId: string, currentTitle: string, item: HTMLElemen
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
-  const button = target.closest<HTMLElement>('[data-chat-settings]');
+  const button = target.closest<HTMLElement>('[data-chat-rename]');
   if (!button) return;
   const item = button.closest<HTMLElement>('.chat-item');
   if (!item) return;
-  const chatId = button.dataset.chatSettings;
+  const chatId = button.dataset.chatRename;
   const title = item.querySelector<HTMLElement>('.chat-item-copy > span:first-child')?.textContent?.trim();
   if (!chatId || !title) return;
   event.preventDefault();
