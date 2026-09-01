@@ -116,6 +116,12 @@ function initialize(): void {
   if (bridge?.onStreamEvent) bridge.onStreamEvent(handleEvent);
   const observer = new MutationObserver(syncUi);
   observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    const target = event.target as HTMLElement | null;
+    if (!(target instanceof HTMLTextAreaElement) || target.id !== 'prompt') return;
+    if (target.dataset.executionLocked === 'true') event.preventDefault();
+  }, true);
   syncUi();
 }
 
