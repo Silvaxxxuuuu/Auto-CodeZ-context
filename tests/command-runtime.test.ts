@@ -54,7 +54,7 @@ test('command runtime uses the project directory as the working directory', asyn
   try {
     const result = await project.runtime.run('project-test', nodeCommand("process.stdout.write(process.cwd())"));
     assert.equal(result.exitCode, 0);
-    assert.match(result.stdout.trim(), new RegExp(project.root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.equal(result.stdout.trim(), project.root);
   } finally {
     await project.cleanup();
   }
