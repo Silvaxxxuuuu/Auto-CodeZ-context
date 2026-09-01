@@ -1,25 +1,8 @@
 import crypto from 'node:crypto';
-import type { FileDiff } from '../ai/types';
+import type { DiffPlan, DiffSummary, FileDiff } from '../ai/types';
 
 const MAX_EXACT_COMPARISON_CELLS = 4_000_000;
 const MAX_PLAN_FILES = 20_000;
-
-export interface DiffSummary {
-  files: number;
-  created: number;
-  modified: number;
-  deleted: number;
-  renamed: number;
-  addedLines: number;
-  removedLines: number;
-}
-
-export interface DiffPlan {
-  id: string;
-  createdAt: number;
-  changes: FileDiff[];
-  summary: DiffSummary;
-}
 
 function lineCounts(before: string, after: string): { addedLines: number; removedLines: number } {
   const oldLines = before ? before.split(/\r?\n/) : [];
