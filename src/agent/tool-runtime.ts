@@ -88,13 +88,17 @@ function validateToolInput(definition: AIToolDefinition, input: Record<string, u
   }
 }
 
+const unavailableCommandRuntime = new CommandRuntime(async () => {
+  throw new Error('O runtime de comandos não foi configurado para esta instância.');
+});
+
 export class ToolRuntime {
   constructor(
     private readonly workspace: WorkspaceRuntime,
     private readonly permissions = new PermissionRuntime(),
     private readonly activity = new ActivityRuntime(),
     private readonly approvals = new ApprovalRuntime(),
-    private readonly commands = new CommandRuntime(async () => []),
+    private readonly commands: CommandRuntime = unavailableCommandRuntime,
     private readonly diffs = new DiffRuntime(),
   ) {}
 
@@ -127,7 +131,7 @@ export class ToolRuntime {
   deny(approvalId: string): boolean {
     if (!this.approvals.get(approvalId)) return false;
     this.approvals.resolve(approvalId);
-    this.activity.emit({ type: 'action', message: 'Operação recusada pelo usuário.', status: 'success' });
+    this.activity.emit({ type: 'action', message: 'Operação recusada pelo usuário.', status: 'failed' });
     return true;
   }
 
