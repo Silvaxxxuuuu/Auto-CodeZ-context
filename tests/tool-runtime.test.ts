@@ -158,3 +158,21 @@ test('read-only permission denies write tools', async () => {
     await fixture.cleanup();
   }
 });
+
+test('run_command fails closed when no command runtime is configured', async () => {
+  const fixture = await createToolRuntime();
+  try {
+    const pending = await fixture.runtime.execute('project-test', 'ask', call('call-7', 'run_command', {
+      manager: 'npm',
+      script: 'test',
+    }));
+    assert.equal(pending.pendingApproval, true);
+    assert.ok(pending.approvalId);
+
+    const result = await fixture.runtime.approve(pending.approvalId!);
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? '', /runtime de comandos não foi configurado/i);
+  } finally {
+    await fixture.cleanup();
+  }
+});
