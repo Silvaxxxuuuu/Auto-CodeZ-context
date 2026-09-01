@@ -1,0 +1,7 @@
+.chat-execution .execution-run.execution-status-success,
+.chat-execution .execution-run.execution-status-failed {
+  display: none !important;
+}
+.chat-execution:not(:has(.execution-run.execution-status-running)):not(:has(.execution-run.execution-status-pending)) {
+  display: none !important;
+}
