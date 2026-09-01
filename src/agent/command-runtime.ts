@@ -18,6 +18,9 @@ export interface CommandResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  startedAt: number;
+  finishedAt: number;
+  durationMs: number;
 }
 
 const SAFE_SCRIPTS = new Set(['test', 'build', 'typecheck', 'lint', 'package', 'check']);
@@ -74,6 +77,7 @@ export class CommandRuntime {
     if (!packageData.scripts?.[script]) throw new Error(`O script '${script}' não existe no projeto.`);
 
     const { executable, args } = commandForPlatform(manager, script);
+    const startedAt = Date.now();
     return new Promise((resolve, reject) => {
       const child = spawn(executable, args, {
         cwd,
@@ -105,12 +109,13 @@ export class CommandRuntime {
           if (!settled) child.kill('SIGKILL');
         }, TERMINATION_GRACE_MS);
       }, TIMEOUT_MS);
-      const finish = (result: CommandResult): void => {
+      const finish = (result: Omit<CommandResult, 'startedAt' | 'finishedAt' | 'durationMs'>): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
         if (killTimer) clearTimeout(killTimer);
-        resolve(result);
+        const finishedAt = Date.now();
+        resolve({ ...result, startedAt, finishedAt, durationMs: Math.max(0, finishedAt - startedAt) });
       };
       child.stdout?.on('data', (chunk: Buffer | string) => append('stdout', chunk));
       child.stderr?.on('data', (chunk: Buffer | string) => append('stderr', chunk));
