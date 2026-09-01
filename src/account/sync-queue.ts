@@ -82,7 +82,7 @@ export class SyncQueue {
       const current = await this.storage.read<QueueState>(STORAGE_FILE, []);
       await this.storage.write(STORAGE_FILE, mutator(current));
     });
-    this.mutation = operation.catch(() => undefined);
+    this.mutation = operation.catch((): void => undefined);
     await operation;
   }
 }
