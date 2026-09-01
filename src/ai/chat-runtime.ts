@@ -5,6 +5,7 @@ import { IntelligenceRuntime } from './intelligence-runtime';
 import { ModelResolver } from './model-resolver';
 import { ProviderRegistry } from './provider-registry';
 import { ProviderRequestJournal } from './provider-request-journal';
+import { formatProviderError, normalizeProviderError } from './provider-errors';
 
 export class ChatRuntime {
   constructor(
@@ -68,14 +69,15 @@ export class ChatRuntime {
         this.activity.success('complete', 'Resposta recebida.');
         return response;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await this.requestJournal.fail(journal.requestId, message);
-        throw error;
+        const normalized = normalizeProviderError(adapter.displayName, 'request', error);
+        await this.requestJournal.fail(journal.requestId, normalized.message);
+        throw normalized;
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const normalized = normalizeProviderError(config.displayName, 'request', error);
+      const message = formatProviderError(normalized);
       this.activity.failure('error', message);
-      throw error;
+      throw new Error(message);
     }
   }
 
@@ -117,13 +119,15 @@ export class ChatRuntime {
         this.activity.success('complete', 'Resposta recebida.');
       } catch (error) {
         if (!completed) {
-          const message = error instanceof Error ? error.message : String(error);
-          await this.requestJournal.fail(journal.requestId, message);
+          const normalized = normalizeProviderError(adapter.displayName, 'stream', error);
+          await this.requestJournal.fail(journal.requestId, normalized.message);
+          throw normalized;
         }
         throw error;
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const normalized = normalizeProviderError(config.displayName, 'stream', error);
+      const message = formatProviderError(normalized);
       this.activity.failure('error', message);
       yield { type: 'error', error: message };
     }
