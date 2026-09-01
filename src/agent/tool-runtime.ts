@@ -1,4 +1,4 @@
-import type { ApprovalRequest, AIToolCall, AIToolDefinition, AIToolResult, FileDiff, PermissionLevel, ToolName } from '../ai/types';
+import type { ApprovalRequest, AIToolCall, AIToolDefinition, AIToolResult, DiffPlan, FileDiff, PermissionLevel, ToolName } from '../ai/types';
 import { ActivityRuntime } from './activity-runtime';
 import { ApprovalRuntime } from './approval-runtime';
 import { PermissionRuntime } from './permission-runtime';
@@ -7,78 +7,26 @@ import { CommandRuntime } from './command-runtime';
 import { DiffRuntime } from './diff-runtime';
 
 const definitions: AIToolDefinition[] = [
-  {
-    name: 'read_file',
-    description: 'Read a UTF-8 text file inside the active workspace.',
-    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false },
-    requiresWriteAccess: false,
-    requiresApproval: false,
-  },
-  {
-    name: 'write_file',
-    description: 'Replace the contents of an existing UTF-8 text file inside the active workspace.',
-    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Complete replacement file contents.' } }, required: ['path', 'content'], additionalProperties: false },
-    requiresWriteAccess: true,
-    requiresApproval: true,
-  },
-  {
-    name: 'create_file',
-    description: 'Create a new UTF-8 text file inside the active workspace.',
-    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path', 'content'], additionalProperties: false },
-    requiresWriteAccess: true,
-    requiresApproval: true,
-  },
-  {
-    name: 'delete_file',
-    description: 'Delete a file inside the active workspace.',
-    parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false },
-    requiresWriteAccess: true,
-    requiresApproval: true,
-  },
-  {
-    name: 'rename_file',
-    description: 'Rename or move a file inside the active workspace.',
-    parameters: { type: 'object', properties: { from: { type: 'string', description: 'Current workspace-relative path.' }, to: { type: 'string', description: 'Destination workspace-relative path.' } }, required: ['from', 'to'], additionalProperties: false },
-    requiresWriteAccess: true,
-    requiresApproval: true,
-  },
-  {
-    name: 'search_files',
-    description: 'Search workspace file names for a text query.',
-    parameters: { type: 'object', properties: { query: { type: 'string', description: 'Text to search for in workspace file names.' } }, required: ['query'], additionalProperties: false },
-    requiresWriteAccess: false,
-    requiresApproval: false,
-  },
-  {
-    name: 'run_command',
-    description: 'Run an approved package script such as tests, build, typecheck or lint inside the active workspace.',
-    parameters: { type: 'object', properties: { manager: { type: 'string', enum: ['npm', 'pnpm', 'yarn', 'bun'] }, script: { type: 'string', enum: ['test', 'build', 'typecheck', 'lint', 'package', 'check'] } }, required: ['manager', 'script'], additionalProperties: false },
-    requiresWriteAccess: false,
-    requiresApproval: true,
-  },
+  { name: 'read_file', description: 'Read a UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'write_file', description: 'Replace the contents of an existing UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Complete replacement file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'create_file', description: 'Create a new UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'delete_file', description: 'Delete a file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'rename_file', description: 'Rename or move a file inside the active workspace.', parameters: { type: 'object', properties: { from: { type: 'string', description: 'Current workspace-relative path.' }, to: { type: 'string', description: 'Destination workspace-relative path.' } }, required: ['from', 'to'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'search_files', description: 'Search workspace file names for a text query.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'Text to search for in workspace file names.' } }, required: ['query'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'run_command', description: 'Run an approved package script such as tests, build, typecheck or lint inside the active workspace.', parameters: { type: 'object', properties: { manager: { type: 'string', enum: ['npm', 'pnpm', 'yarn', 'bun'] }, script: { type: 'string', enum: ['test', 'build', 'typecheck', 'lint', 'package', 'check'] } }, required: ['manager', 'script'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
 ];
 
-interface ToolExecution {
-  output: string;
-  changes?: FileDiff[];
-}
+interface ToolExecution { output: string; changes?: FileDiff[]; }
 
 function validateToolInput(definition: AIToolDefinition, input: Record<string, unknown>): void {
   const schema = definition.parameters;
   if (schema.type !== 'object' || !input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`Entrada inválida para ${definition.name}.`);
-
   const required = Array.isArray(schema.required) ? schema.required : [];
-  for (const key of required) {
-    if (!(key in input)) throw new Error(`Parâmetro obrigatório ausente: '${key}'.`);
-  }
-
+  for (const key of required) if (!(key in input)) throw new Error(`Parâmetro obrigatório ausente: '${key}'.`);
   if (schema.additionalProperties === false) {
     const properties = schema.properties && typeof schema.properties === 'object' ? Object.keys(schema.properties as Record<string, unknown>) : [];
-    for (const key of Object.keys(input)) {
-      if (!properties.includes(key)) throw new Error(`Parâmetro não permitido: '${key}'.`);
-    }
+    for (const key of Object.keys(input)) if (!properties.includes(key)) throw new Error(`Parâmetro não permitido: '${key}'.`);
   }
-
   const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties as Record<string, Record<string, unknown>> : {};
   for (const [key, value] of Object.entries(input)) {
     const property = properties[key];
@@ -108,24 +56,35 @@ export class ToolRuntime {
   async execute(projectId: string, permission: PermissionLevel, call: AIToolCall): Promise<AIToolResult> {
     const definition = definitions.find((item) => item.name === call.name);
     if (!definition) return { toolCallId: call.id, ok: false, error: `Ferramenta desconhecida: ${call.name}` };
-    try {
-      validateToolInput(definition, call.input);
-    } catch (error) {
-      return { toolCallId: call.id, ok: false, error: error instanceof Error ? error.message : String(error) };
-    }
+    try { validateToolInput(definition, call.input); }
+    catch (error) { return { toolCallId: call.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
+
     const decision = this.permissions.decide(permission, call.name);
     if (decision === 'deny') return { toolCallId: call.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
+
     if (decision === 'ask') {
-      const approval = this.approvals.request({ projectId, permissionLevel: permission, toolCall: call });
-      this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${call.name}.`, status: 'pending' });
-      return { toolCallId: call.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true };
+      try {
+        const diffPlan = await this.preview(projectId, call);
+        const approval = this.approvals.request({ projectId, permissionLevel: permission, toolCall: call, ...(diffPlan ? { diffPlan } : {}) });
+        this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${call.name}.`, status: 'pending' });
+        return { toolCallId: call.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
+      } catch (error) {
+        return { toolCallId: call.id, ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
     }
     return this.executeNow(projectId, call);
   }
 
   async approve(approvalId: string): Promise<AIToolResult> {
     const approval = this.approvals.resolve(approvalId);
-    return this.executeNow(approval.projectId, approval.toolCall);
+    try {
+      await this.assertPrecondition(approval.projectId, approval.diffPlan);
+      return await this.executeNow(approval.projectId, approval.toolCall);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.activity.failure('tool', `Aprovação ${approvalId} não pôde ser executada: ${message}`);
+      return { toolCallId: approval.toolCall.id, ok: false, error: message, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
+    }
   }
 
   deny(approvalId: string): boolean {
@@ -133,6 +92,65 @@ export class ToolRuntime {
     this.approvals.resolve(approvalId);
     this.activity.emit({ type: 'action', message: 'Operação recusada pelo usuário.', status: 'failed' });
     return true;
+  }
+
+  private async preview(projectId: string, call: AIToolCall): Promise<DiffPlan | undefined> {
+    switch (call.name) {
+      case 'write_file': {
+        const path = this.stringValue(call.input, 'path');
+        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.');
+        const before = await this.workspace.readFile(projectId, path);
+        const content = call.input.content;
+        if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido.");
+        return this.diffs.createPlan([this.diffs.create(path, 'modified', before, content)]);
+      }
+      case 'create_file': {
+        const path = this.stringValue(call.input, 'path');
+        if (await this.workspace.exists(projectId, path)) throw new Error('O arquivo já existe. Use write_file para substituí-lo.');
+        const content = String(call.input.content ?? '');
+        return this.diffs.createPlan([this.diffs.create(path, 'created', '', content)]);
+      }
+      case 'delete_file': {
+        const path = this.stringValue(call.input, 'path');
+        const before = await this.workspace.readFile(projectId, path);
+        return this.diffs.createPlan([this.diffs.create(path, 'deleted', before, '')]);
+      }
+      case 'rename_file': {
+        const from = this.stringValue(call.input, 'from');
+        const to = this.stringValue(call.input, 'to');
+        const before = await this.workspace.readFile(projectId, from);
+        if (await this.workspace.exists(projectId, to)) throw new Error('O destino da renomeação já existe.');
+        return this.diffs.createPlan([this.diffs.create(to, 'renamed', before, before, from)]);
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  private async assertPrecondition(projectId: string, plan?: DiffPlan): Promise<void> {
+    if (!plan) return;
+    for (const change of plan.changes) {
+      if (change.type === 'created') {
+        if (await this.workspace.exists(projectId, change.path)) throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
+        continue;
+      }
+      if (change.type === 'renamed') {
+        const from = change.renamedFrom;
+        if (!from || !(await this.workspace.exists(projectId, from)) || await this.workspace.exists(projectId, change.path)) throw new Error(`A renomeação de '${from || '?'}' para '${change.path}' não corresponde mais ao estado aprovado.`);
+        const current = await this.workspace.readFile(projectId, from);
+        if (current !== change.before) throw new Error(`O arquivo '${from}' mudou desde a aprovação.`);
+        continue;
+      }
+      if (!(await this.workspace.exists(projectId, change.path))) throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
+      const current = await this.workspace.readFile(projectId, change.path);
+      if (current !== change.before) throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
+    }
+  }
+
+  private stringValue(input: Record<string, unknown>, key: string): string {
+    const value = input[key];
+    if (typeof value !== 'string' || !value.trim()) throw new Error(`Parâmetro '${key}' inválido.`);
+    return value;
   }
 
   private async executeNow(projectId: string, call: AIToolCall): Promise<AIToolResult> {
@@ -149,50 +167,41 @@ export class ToolRuntime {
   }
 
   private async executeAllowed(projectId: string, name: ToolName, input: Record<string, unknown>): Promise<ToolExecution> {
-    const stringValue = (key: string): string => {
-      const value = input[key];
-      if (typeof value !== 'string' || !value.trim()) throw new Error(`Parâmetro '${key}' inválido.`);
-      return value;
-    };
-
     switch (name) {
-      case 'read_file':
-        return { output: await this.workspace.readFile(projectId, stringValue('path')) };
+      case 'read_file': return { output: await this.workspace.readFile(projectId, this.stringValue(input, 'path')) };
       case 'write_file': {
-        const requestedPath = stringValue('path');
-        if (!(await this.workspace.exists(projectId, requestedPath))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.');
-        const before = await this.workspace.readFile(projectId, requestedPath);
+        const path = this.stringValue(input, 'path');
+        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.');
+        const before = await this.workspace.readFile(projectId, path);
         const content = input.content;
         if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido.");
-        await this.workspace.writeFile(projectId, requestedPath, content);
-        const after = await this.workspace.readFile(projectId, requestedPath);
-        return { output: 'Arquivo atualizado.', changes: [this.diffs.create(requestedPath, 'modified', before, after)] };
+        await this.workspace.writeFile(projectId, path, content);
+        const after = await this.workspace.readFile(projectId, path);
+        return { output: 'Arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, after)] };
       }
       case 'create_file': {
-        const requestedPath = stringValue('path');
+        const path = this.stringValue(input, 'path');
         const content = String(input.content ?? '');
-        await this.workspace.createFile(projectId, requestedPath, content);
-        const after = await this.workspace.readFile(projectId, requestedPath);
-        return { output: 'Arquivo criado.', changes: [this.diffs.create(requestedPath, 'created', '', after)] };
+        await this.workspace.createFile(projectId, path, content);
+        const after = await this.workspace.readFile(projectId, path);
+        return { output: 'Arquivo criado.', changes: [this.diffs.create(path, 'created', '', after)] };
       }
       case 'delete_file': {
-        const requestedPath = stringValue('path');
-        const before = await this.workspace.readFile(projectId, requestedPath);
-        await this.workspace.deleteFile(projectId, requestedPath);
-        return { output: 'Arquivo excluído.', changes: [this.diffs.create(requestedPath, 'deleted', before, '')] };
+        const path = this.stringValue(input, 'path');
+        const before = await this.workspace.readFile(projectId, path);
+        await this.workspace.deleteFile(projectId, path);
+        return { output: 'Arquivo excluído.', changes: [this.diffs.create(path, 'deleted', before, '')] };
       }
       case 'rename_file': {
-        const from = stringValue('from');
-        const to = stringValue('to');
+        const from = this.stringValue(input, 'from');
+        const to = this.stringValue(input, 'to');
         const before = await this.workspace.readFile(projectId, from);
         await this.workspace.renameFile(projectId, from, to);
         const after = await this.workspace.readFile(projectId, to);
         return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] };
       }
-      case 'search_files':
-        return { output: JSON.stringify(await this.workspace.searchFiles(projectId, stringValue('query'))) };
-      case 'run_command':
-        return { output: JSON.stringify(await this.commands.run(projectId, stringValue('manager'), stringValue('script'))) };
+      case 'search_files': return { output: JSON.stringify(await this.workspace.searchFiles(projectId, this.stringValue(input, 'query'))) };
+      case 'run_command': return { output: JSON.stringify(await this.commands.run(projectId, this.stringValue(input, 'manager'), this.stringValue(input, 'script'))) };
     }
   }
 }
