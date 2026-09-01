@@ -22,7 +22,7 @@ async function createProject(): Promise<{ root: string; runtime: CommandRuntime;
   };
 }
 
-const nodeCommand = (expression: string): string => `node -e "${expression.replaceAll('"', '\\"')}"`;
+const nodeCommand = (expression: string): string => `node -e "${expression}"`;
 
 test('command runtime rejects an empty command', async () => {
   const project = await createProject();
@@ -63,6 +63,7 @@ test('command runtime uses the project directory as the working directory', asyn
 test('command runtime streams stdout and stderr without changing the final result', async () => {
   const project = await createProject();
   try {
+    const events: Array<{ stream: 'stdout' | 'stderr'; text: string }> = [];
     const result = await project.runtime.run('project-test', nodeCommand("process.stdout.write('out'); process.stderr.write('err')"), {
       onOutput: (event) => events.push(event),
     });
@@ -88,5 +89,3 @@ test('command runtime isolates observer failures from command execution', async 
     await project.cleanup();
   }
 });
-
-const events: Array<{ stream: 'stdout' | 'stderr'; text: string }> = [];
