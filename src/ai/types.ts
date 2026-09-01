@@ -189,32 +189,40 @@ export interface ProviderSummary {
 export interface ChatRecord {
   id: string;
   title: string;
+  projectId?: string;
   providerId: ProviderId;
   model: string;
   intelligence: IntelligenceLevel;
   permissionLevel: PermissionLevel;
-  projectId?: string;
   messages: AIMessage[];
   createdAt: number;
   updatedAt: number;
 }
 
-export interface AIConfig {
-  providerId: ProviderId;
-  model: string;
-  intelligence: IntelligenceLevel;
+export interface ProjectRecord {
+  id: string;
+  name: string;
+  rootPath: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface FileChange {
+  path: string;
+  type: 'created' | 'modified' | 'deleted' | 'renamed';
+  accepted: boolean;
 }
 
 export interface ActivityEvent {
   id: string;
-  type: 'test' | 'build' | 'tool' | 'action';
+  type: 'thought' | 'action' | 'tool' | 'test' | 'build' | 'complete' | 'error';
   message: string;
-  status: 'running' | 'success' | 'failed' | 'pending';
+  status: 'pending' | 'running' | 'success' | 'failed';
   createdAt: number;
   toolCallId?: string;
   toolName?: ToolName;
-  error?: string;
+  commandResult?: CommandResultSummary;
   changes?: FileDiff[];
   diffPlan?: DiffPlan;
-  commandResult?: CommandResultSummary;
+  error?: string;
 }
