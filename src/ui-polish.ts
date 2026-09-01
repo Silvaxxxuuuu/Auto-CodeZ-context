@@ -12,7 +12,7 @@ const ICON_PATHS: Record<IconName, string[]> = {
   blocks: ['M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2', 'M14 2h8v8h-8z'],
   'git-branch': ['M6 3v12', 'M18 9V3', 'M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z', 'M18 3a3 3 0 1 0 0 6 3 3 0 0 0-6Z', 'M6 15c0-3 3-6 9-6'],
   'square-terminal': ['m7 11 3 3-3 3', 'm13 17 4 0', 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z'],
-  'key-round': ['M15.5 7.5 19 4', 'M17 6l2 2', 'M11 14a5 5 0 1 1-1-7.9A5 5 0 0 1 11 14Z', 'M16 8l-5 5'],
+  'key-round': ['M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z'],
   plus: ['M5 12h14', 'M12 5v14'],
   sparkles: ['m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z', 'M5 3v4', 'M19 17v4', 'M3 5h4', 'M17 19h4'],
   settings: ['M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6'],
@@ -54,8 +54,8 @@ function installStyle(): void {
   style.id = STYLE_ID;
   style.textContent = `
     .chat-item{position:relative;padding-right:64px!important}
-    .chat-settings,.chat-delete{width:26px!important;height:26px!important;position:absolute;top:50%;transform:translateY(-50%);margin:0!important;border:0!important;border-radius:7px!important;background:transparent!important;font-size:0!important;opacity:0!important}
-    .chat-settings{right:34px;color:#aeb7c4!important}.chat-delete{right:7px;color:#c76f78!important}
+    .chat-settings,.chat-delete{width:26px!important;height:26px!important;position:absolute!important;top:50%!important;left:auto!important;margin:0!important;border:0!important;border-radius:7px!important;background:transparent!important;font-size:0!important;opacity:0!important;transform:translateY(-50%)!important;z-index:3!important;display:inline-flex!important;align-items:center!important;justify-content:center!important}
+    .chat-settings{right:36px!important;inset-inline-end:36px!important;color:#aeb7c4!important}.chat-delete{right:8px!important;inset-inline-end:8px!important;color:#c76f78!important}
     .chat-item:hover .chat-settings,.chat-item:hover .chat-delete,.chat-settings:focus-visible,.chat-delete:focus-visible{opacity:1!important}
     .message.streaming .message-label{display:flex;align-items:center;gap:7px}.message.streaming .message-label:before{content:"";width:6px;height:6px;border-radius:50%;background:#aeb9c8;box-shadow:0 0 0 4px #aeb9c812;animation:ac-pulse 1.2s ease-in-out infinite}
     .composer-hint.ac-busy{opacity:.35}.chat-header{position:relative}.chat-header h1{max-width:min(48vw,520px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.header-actions{align-items:center}
@@ -73,9 +73,9 @@ function installStyle(): void {
     .provider-chevron,.intelligence-chevron{width:16px!important;height:16px!important;min-width:16px!important;min-height:16px!important;flex:0 0 16px!important;transform:none!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;border:0!important}
     .provider-chevron .ac-lucide-icon,.intelligence-chevron .ac-lucide-icon{width:14px!important;height:14px!important;min-width:14px!important;min-height:14px!important;flex:0 0 14px!important}
     .intelligence-button.open .intelligence-chevron{transform:none!important}
-    .api-key-rail-button{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:38px!important;height:38px!important;border:0!important;background:transparent!important;position:relative!important;color:#626c7b!important}
-    .api-key-rail-button:hover{background:#151a22!important;color:#dce3ec!important}
-    .api-key-rail-button .ac-lucide-icon{width:17px!important;height:17px!important;min-width:17px!important;min-height:17px!important;flex:0 0 17px!important}
+    .api-key-rail-button{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:38px!important;height:38px!important;border:0!important;background:transparent!important;position:relative!important;color:#aeb7c4!important}
+    .api-key-rail-button:hover{background:#151a22!important;color:#eef2f6!important}
+    .api-key-rail-button .ac-lucide-icon{width:17px!important;height:17px!important;min-width:17px!important;min-height:17px!important;flex:0 0 17px!important;color:currentColor!important;stroke:currentColor!important;opacity:1!important}
     .send-button{display:inline-flex!important;align-items:center!important;justify-content:center!important;visibility:visible!important;width:36px!important;height:36px!important;min-width:36px!important;min-height:36px!important;color:#dfe6ef!important}
     .send-button .ac-lucide-icon{opacity:1!important;visibility:visible!important}
     .send-button:disabled{opacity:.42!important}
@@ -214,11 +214,16 @@ function initialize(): void {
   removeReasoningProfileFromChatSettings();
   const header=document.querySelector<HTMLElement>('.chat-header');
   if(header)new MutationObserver(()=>{syncAiRecovery();removeDuplicateChatGear();syncLucideIcons();}).observe(header,{childList:true,subtree:true,characterData:true});
+  const nav=document.querySelector<HTMLElement>('#nav-panel');
+  if(nav)new MutationObserver(()=>syncLucideIcons()).observe(nav,{childList:true,subtree:true});
+  const intelligenceButton=document.querySelector<HTMLElement>('#intelligence-button');
+  if(intelligenceButton)new MutationObserver(()=>syncLucideIcons()).observe(intelligenceButton,{attributes:true,attributeFilter:['class']});
   const messages=document.querySelector<HTMLElement>('#messages');
   if(messages)new MutationObserver(syncErrorState).observe(messages,{childList:true,subtree:true});
   const modalRoot=document.querySelector<HTMLElement>('#modal-root');
   if(modalRoot)new MutationObserver(()=>{removeReasoningProfileFromChatSettings();syncLucideIcons();}).observe(modalRoot,{childList:true,subtree:true,characterData:true});
-  new MutationObserver(()=>{ensureAppSettingsButton();syncLucideIcons();}).observe(document.body,{childList:true,subtree:true});
+  const rightRail=document.querySelector<HTMLElement>('#right-rail');
+  if(rightRail)new MutationObserver(()=>syncLucideIcons()).observe(rightRail,{childList:true,subtree:true});
 }
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialize,{once:true}); else initialize();
