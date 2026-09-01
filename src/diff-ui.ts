@@ -26,6 +26,7 @@ type ActivityEvent = {
   toolName?: string;
   changes?: DiffChange[];
   diffPlan?: DiffPlan;
+  error?: string;
 };
 
 declare global {
@@ -48,6 +49,7 @@ style.textContent = `
 .diff-card-title strong { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .diff-card-status { font-size:11px; opacity:.68; }
 .diff-card-summary { display:flex; gap:9px; font-size:11px; opacity:.68; white-space:nowrap; }
+.diff-card-error { padding:8px 12px; border-bottom:1px solid rgba(255,255,255,.06); font-size:11px; line-height:1.45; color:#e0a5a5; background:rgba(180,60,60,.08); }
 .diff-card-actions { display:flex; gap:6px; padding:9px 12px; border-top:1px solid rgba(255,255,255,.06); }
 .diff-card-actions button { border:1px solid rgba(255,255,255,.1); border-radius:6px; background:#181c23; color:#d8dde5; padding:5px 9px; font:inherit; cursor:pointer; }
 .diff-card-actions button:hover { background:#20252e; }
@@ -101,10 +103,20 @@ function statusLabel(status: ActivityEvent['status']): string {
   return status === 'pending' ? 'Aguardando aprovação' : status === 'running' ? 'Aplicando' : status === 'success' ? 'Aplicado' : 'Falhou';
 }
 
-function setStatus(card: HTMLElement, status: ActivityEvent['status']): void {
+function setStatus(card: HTMLElement, status: ActivityEvent['status'], error?: string): void {
   const label = card.querySelector<HTMLElement>('.diff-card-status');
   if (label) label.textContent = statusLabel(status);
   card.dataset.status = status;
+  const currentError = card.querySelector<HTMLElement>('.diff-card-error');
+  if (currentError) currentError.remove();
+  if (error) {
+    const element = document.createElement('div');
+    element.className = 'diff-card-error';
+    element.textContent = error;
+    const actions = card.querySelector('.diff-card-actions');
+    if (actions) card.insertBefore(element, actions);
+    else card.append(element);
+  }
 }
 
 async function findApprovalId(toolCallId: string): Promise<string | undefined> {
@@ -120,7 +132,8 @@ function renderDiff(event: ActivityEvent): void {
   const changes = plan?.changes || event.changes || [];
   const existing = event.toolCallId ? container.querySelector<HTMLElement>(`[data-tool-call-id="${CSS.escape(event.toolCallId)}"]`) : null;
   if (existing) {
-    setStatus(existing, event.status);
+    setStatus(existing, event.status, event.error);
+    if (event.status === 'pending' && event.error) ensureApprovalActions(existing, event.toolCallId!);
     return;
   }
   const card = document.createElement('article');
@@ -128,11 +141,16 @@ function renderDiff(event: ActivityEvent): void {
   card.dataset.activityId = event.id;
   if (event.toolCallId) card.dataset.toolCallId = event.toolCallId;
   card.dataset.status = event.status;
-  const summary = plan?.summary;
-  card.innerHTML = `<div class="diff-card-head"><div class="diff-card-title"><strong>${escapeHtml(event.message)}</strong><span class="diff-card-status">${statusLabel(event.status)}</span></div>${summary ? `<div class="diff-card-summary"><span>${summary.files} arquivo(s)</span><span>+${summary.addedLines}</span><span>-${summary.removedLines}</span></div>` : ''}</div>${changes.length ? changes.map(renderChange).join('') : '<div class="diff-empty">Nenhuma alteração para exibir.</div>'}`;
+  card.innerHTML = `<div class="diff-card-head"><div class="diff-card-title"><strong>${escapeHtml(event.message)}</strong><span class="diff-card-status">${statusLabel(event.status)}</span></div>${plan?.summary ? `<div class="diff-card-summary"><span>${plan.summary.files} arquivo(s)</span><span>+${plan.summary.addedLines}</span><span>-${plan.summary.removedLines}</span></div>` : ''}</div>${changes.length ? changes.map(renderChange).join('') : '<div class="diff-empty">Nenhuma alteração para exibir.</div>'}`;
+  if (event.error) setStatus(card, event.status, event.error);
   if (event.status === 'pending' && event.toolCallId) addApprovalActions(card, event.toolCallId);
   container.prepend(card);
   while (container.children.length > 8) container.lastElementChild?.remove();
+}
+
+function ensureApprovalActions(card: HTMLElement, toolCallId: string): void {
+  if (card.querySelector('.diff-card-actions')) return;
+  addApprovalActions(card, toolCallId);
 }
 
 function addApprovalActions(card: HTMLElement, toolCallId: string): void {
@@ -140,7 +158,7 @@ function addApprovalActions(card: HTMLElement, toolCallId: string): void {
   actions.className = 'diff-card-actions';
   const approve = document.createElement('button');
   approve.type = 'button';
-  approve.textContent = 'Aprovar';
+  approve.textContent = 'Tentar novamente';
   const deny = document.createElement('button');
   deny.type = 'button';
   deny.textContent = 'Recusar';
@@ -156,16 +174,16 @@ function addApprovalActions(card: HTMLElement, toolCallId: string): void {
         setStatus(card, 'pending');
         approve.disabled = false;
         deny.disabled = false;
-        approve.textContent = 'Aprovar';
+        approve.textContent = 'Tentar novamente';
       } else {
         setStatus(card, 'success');
         actions.remove();
       }
-    } catch {
-      setStatus(card, 'failed');
+    } catch (error) {
+      setStatus(card, 'failed', error instanceof Error ? error.message : 'Não foi possível executar a alteração.');
       approve.disabled = false;
       deny.disabled = false;
-      approve.textContent = 'Aprovar';
+      approve.textContent = 'Tentar novamente';
     }
   });
   deny.addEventListener('click', async () => {
@@ -175,7 +193,7 @@ function addApprovalActions(card: HTMLElement, toolCallId: string): void {
       const approvalId = await findApprovalId(toolCallId);
       if (!approvalId) throw new Error('Aprovação não encontrada.');
       await window.autoCodez.denyTool(approvalId);
-      setStatus(card, 'failed');
+      setStatus(card, 'failed', 'Operação recusada pelo usuário.');
       actions.remove();
     } catch {
       approve.disabled = false;
