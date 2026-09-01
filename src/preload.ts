@@ -100,6 +100,18 @@ contextBridge.exposeInMainWorld('autoCodez', {
       return () => ipcRenderer.removeListener('terminal:event', handler);
     },
   },
+  git: {
+    status: (projectId: string) => invoke('git:status', requireIdentifier(projectId, 'Projeto')),
+    branches: (projectId: string) => invoke('git:branches', requireIdentifier(projectId, 'Projeto')),
+    diff: (projectId: string) => invoke('git:diff', requireIdentifier(projectId, 'Projeto')),
+    log: (input: { projectId: string; limit?: number }) => {
+      const value = requireObject(input, 'Dados do histórico Git');
+      const projectId = requireIdentifier(value.projectId, 'Projeto');
+      const limit = value.limit === undefined ? undefined : Number(value.limit);
+      if (limit !== undefined && !Number.isFinite(limit)) throw new Error('Limite do histórico Git inválido.');
+      return invoke('git:log', { projectId, limit });
+    },
+  },
   createProject: (input: { name: string; rootPath: string }) => {
     const value = requireObject(input, 'Dados do projeto');
     return invoke('projects:create', {
