@@ -8,7 +8,7 @@ import { ProjectManager } from './project/project-manager';
 import { ToolRuntime } from './agent/tool-runtime';
 import { AgentRuntime } from './agent/agent-runtime';
 import { ChatRuntime } from './ai/chat-runtime';
-import { TerminalService } from './agent/terminal-service';
+import { TerminalService, type TerminalEvent } from './agent/terminal-service';
 import { GitRuntime } from './agent/git-runtime';
 import { GitService } from './agent/git-service';
 import { WorkspaceRuntime } from './agent/workspace-runtime';
@@ -133,7 +133,7 @@ app.whenReady().then(async () => {
   await toolRuntime.init();
   await agentRuntime.init();
   activityRuntime.subscribe((event) => sendActivity(event));
-  terminalService.on((event) => sendTerminalEvent(event));
+  terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
