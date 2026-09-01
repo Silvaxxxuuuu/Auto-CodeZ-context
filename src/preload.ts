@@ -81,6 +81,25 @@ contextBridge.exposeInMainWorld('autoCodez', {
     ipcRenderer.on('agent:activity', handler);
     return () => ipcRenderer.removeListener('agent:activity', handler);
   },
+  terminal: {
+    start: (input: { projectId: string; command: string }) => {
+      const value = requireObject(input, 'Dados do terminal');
+      return invoke('terminal:start', {
+        projectId: requireIdentifier(value.projectId, 'Projeto'),
+        command: requireNonEmptyString(value.command, 'Comando'),
+      });
+    },
+    kill: (sessionId: string) => invoke('terminal:kill', requireIdentifier(sessionId, 'Sessão do terminal')),
+    listSessions: () => invoke('terminal:list-sessions'),
+    getOutput: (sessionId: string) => invoke('terminal:get-output', requireIdentifier(sessionId, 'Sessão do terminal')),
+    listHistory: (projectId?: string) => invoke('terminal:list-history', projectId === undefined ? undefined : requireIdentifier(projectId, 'Projeto')),
+    clearHistory: (projectId?: string) => invoke('terminal:clear-history', projectId === undefined ? undefined : requireIdentifier(projectId, 'Projeto')),
+    onEvent: (listener: (event: unknown) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+      ipcRenderer.on('terminal:event', handler);
+      return () => ipcRenderer.removeListener('terminal:event', handler);
+    },
+  },
   createProject: (input: { name: string; rootPath: string }) => {
     const value = requireObject(input, 'Dados do projeto');
     return invoke('projects:create', {
