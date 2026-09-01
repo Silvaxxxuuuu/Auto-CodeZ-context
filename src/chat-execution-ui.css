@@ -30,11 +30,82 @@
 .execution-status-pending { color:#e6b95c; }
 .execution-status-running { color:#7fa9ed; }
 
+.execution-approval {
+  border-top:1px solid var(--border-color, rgba(255,255,255,.07));
+  padding:11px 13px 13px;
+}
+.execution-approval-head {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  margin-bottom:9px;
+  font-size:10px;
+  font-weight:600;
+  color:#e7d9b5;
+}
+.execution-approval-status-dot {
+  width:6px;
+  height:6px;
+  flex:none;
+  border-radius:50%;
+  background:#e6b95c;
+  box-shadow:0 0 0 3px rgba(230,185,92,.08);
+}
+.execution-approval-item {
+  border:1px solid rgba(230,185,92,.14);
+  border-radius:9px;
+  background:rgba(230,185,92,.035);
+  overflow:hidden;
+}
+.execution-approval-item + .execution-approval-item { margin-top:8px; }
+.execution-approval-tool {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:10px;
+}
+.execution-approval-icon {
+  width:18px;
+  height:18px;
+  flex:none;
+  border:1px solid rgba(230,185,92,.34);
+  border-radius:6px;
+  position:relative;
+}
+.execution-approval-icon:before {
+  content:"";
+  position:absolute;
+  width:5px;
+  height:5px;
+  left:5px;
+  top:5px;
+  border:1px solid currentColor;
+  border-radius:50%;
+}
+.execution-approval-label { font-size:9px; opacity:.55; margin-bottom:2px; }
+.execution-approval-tool strong { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+.execution-approval-input {
+  margin:0;
+  padding:9px 10px;
+  border-top:1px solid rgba(255,255,255,.05);
+  border-bottom:1px solid rgba(255,255,255,.05);
+  font:10px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:#bfc6d0;
+  white-space:pre-wrap;
+  overflow:auto;
+  max-height:150px;
+}
+.execution-approval-actions { display:flex; gap:7px; padding:9px 10px; }
+.execution-approval-actions button { flex:1; min-height:30px; }
+.messages .activity-card:has(.approval-card) { display:none; }
+
 @media (max-width:720px) {
   .chat-execution { width:calc(100% - 16px); }
   .execution-run-header { padding:11px 11px 7px; }
   .execution-step { grid-template-columns:8px minmax(0,1fr); padding:7px 11px; }
   .execution-step-detail { grid-column:2; }
+  .execution-approval { padding:10px 11px 11px; }
+  .execution-approval-actions { flex-direction:column; }
 }
 
 @media (prefers-reduced-motion:reduce) {
