@@ -20,6 +20,7 @@ import { AgentRuntime } from './agent/agent-runtime';
 import { ApprovalRuntime } from './agent/approval-runtime';
 import { ProjectContextRuntime } from './agent/project-context-runtime';
 import { CommandRuntime } from './agent/command-runtime';
+import { TerminalService } from './agent/terminal-service';
 
 if (started) app.quit();
 
@@ -39,6 +40,7 @@ const toolRuntime = new ToolRuntime(workspaceRuntime, undefined, activityRuntime
 const providerRequestJournal = new ProviderRequestJournal(storage);
 const chatRuntime = new ChatRuntime(registry, undefined, undefined, activityRuntime, modelResolver, toolRuntime.listDefinitions(), providerRequestJournal);
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
+const terminalService = new TerminalService(storage, () => projectManager.list());
 const chatManager = new ChatManager(storage);
 
 let providerConfigs: AIProviderConfig[] = [];
@@ -77,6 +79,7 @@ function endChatRun(chatId: string): void {
 }
 
 activityRuntime.subscribe((event) => { mainWindow?.webContents.send('agent:activity', event); });
+terminalService.subscribe((event) => { mainWindow?.webContents.send('terminal:event', event); });
 
 async function loadProviders(): Promise<void> {
   providerConfigs = await storage.read<AIProviderConfig[]>('providers.json', defaultProviders);
@@ -276,6 +279,17 @@ ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
   endChatRun(result.chatId);
   return result;
 });
+
+ipcMain.handle('terminal:start', async (_event, input: { projectId: string; command: string }) => {
+  const value = requireObject(input, 'Dados do terminal');
+  return terminalService.start(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.command, 'Comando'));
+});
+ipcMain.handle('terminal:kill', async (_event, sessionId: string) => terminalService.kill(requireIdentifier(sessionId, 'Sessão do terminal')));
+ipcMain.handle('terminal:list-sessions', async () => terminalService.listSessions());
+ipcMain.handle('terminal:get-output', async (_event, sessionId: string) => terminalService.getOutput(requireIdentifier(sessionId, 'Sessão do terminal')));
+ipcMain.handle('terminal:list-history', async (_event, projectId?: string) => terminalService.listHistory(projectId === undefined ? undefined : requireIdentifier(projectId, 'Projeto')));
+ipcMain.handle('terminal:clear-history', async (_event, projectId?: string) => terminalService.clearHistory(projectId === undefined ? undefined : requireIdentifier(projectId, 'Projeto')));
+
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => {
   try {
     const value = requireObject(input, 'Dados do projeto');
@@ -310,5 +324,5 @@ ipcMain.handle('app:open-external', async (_event, url: string) => {
   await shell.openExternal(parsed.toString());
 });
 
-app.whenReady().then(async () => { await storage.init(); await loadProviders(); await projectManager.init(); await chatManager.init(); await toolRuntime.init(); await chatRuntime.init(); await agentRuntime.init(); await createWindow(); app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createWindow(); }); }).catch((error) => { const message = error instanceof Error ? error.message : 'Falha ao inicializar o Auto CodeZ.'; dialog.showErrorBox('Auto CodeZ', message); app.quit(); });
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.whenReady().then(async () => { await storage.init(); await loadProviders(); await projectManager.init(); await chatManager.init(); await toolRuntime.init(); await terminalService.init(); await chatRuntime.init(); await agentRuntime.init(); await createWindow(); app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createWindow(); }); }).catch((error) => { const message = error instanceof Error ? error.message : 'Falha ao inicializar o Auto CodeZ.'; dialog.showErrorBox('Auto CodeZ', message); app.quit(); });
+app.on('window-all-closed', () => { terminalService.dispose(); if (process.platform !== 'darwin') app.quit(); });
