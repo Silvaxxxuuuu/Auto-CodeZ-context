@@ -130,7 +130,7 @@ export class AgentRuntime {
       await this.persist();
       return { chatId: pending.chat.id, response: { content: '', model: pending.workingChat.model, providerId: pending.workingChat.providerId }, toolRounds: pending.toolRounds, pendingApprovalIds: [approvalId], messages: [...pending.workingChat.messages] };
     }
-    pending.workingChat.messages.push({ role: 'tool', content: result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`, toolCallId: result.toolCallId, toolName: call.name, changes: result.changes, diffPlan: result.diffPlan, createdAt: Date.now() });
+    pending.workingChat.messages.push({ role: 'tool', content: result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`, toolCallId: result.toolCallId, toolName: call.name, changes: result.changes, diffPlan: result.diffPlan, commandResult: result.commandResult, createdAt: Date.now() });
     if (pending.streamEmitter) pending.streamEmitter({ type: 'activity', activity: { id: `approval_${Date.now()}`, type: 'tool', message: `Aprovado: ${call.name}`, status: result.ok ? 'success' : 'failed', createdAt: Date.now() } });
     return this.finishApproval(pending, approvalId);
   }
@@ -191,7 +191,7 @@ export class AgentRuntime {
 
   private appendToolResult(chat: ChatRecord, call: AIToolCall, result: Awaited<ReturnType<ToolRuntime['execute']>>): void {
     const content = result.pendingApproval ? 'Operação aguardando aprovação do usuário.' : result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`;
-    chat.messages.push({ role: 'tool', content, toolCallId: call.id, toolName: call.name, changes: result.changes, diffPlan: result.diffPlan, createdAt: Date.now() });
+    chat.messages.push({ role: 'tool', content, toolCallId: call.id, toolName: call.name, changes: result.changes, diffPlan: result.diffPlan, commandResult: result.commandResult, createdAt: Date.now() });
   }
 
   private async runLoop(run: PendingRun): Promise<AgentRunResult> {
