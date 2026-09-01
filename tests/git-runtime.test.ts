@@ -107,3 +107,36 @@ test('GitRuntime stages all changes and rejects unsafe branch and path input', a
   try {
     await fs.writeFile(path.join(repository.root, 'README.md'), '# All\n', 'utf8');
     await fs.writeFile(path.join(repository.root, 'SECOND.md'), '# All\n', 'utf8');
+    const runtime = new GitRuntime(async () => [repository.project]);
+    await runtime.stageAll(repository.project.id);
+    const status = await runtime.status(repository.project.id);
+    assert.equal(status.files.every((file) => file.index.trim()), true);
+    await assert.rejects(() => runtime.stage(repository.project.id, []), /ao menos um arquivo/);
+    await assert.rejects(() => runtime.stage(repository.project.id, ['-bad']), /Caminho de arquivo inválido/);
+    await assert.rejects(() => runtime.createBranch(repository.project.id, 'bad name'), /caracteres inválidos/);
+    await assert.rejects(() => runtime.createBranch(repository.project.id, '-bad'), /caracteres inválidos/);
+  } finally {
+    await fs.rm(repository.root, { recursive: true, force: true });
+  }
+});
+
+test('GitRuntime commits staged changes and preserves the branch', async () => {
+  const repository = await makeRepository();
+  try {
+    await fs.writeFile(path.join(repository.root, 'README.md'), '# Committed\n', 'utf8');
+    execFileSync('git', ['add', 'README.md'], { cwd: repository.root });
+    const runtime = new GitRuntime(async () => [repository.project]);
+    const result = await runtime.commit(repository.project.id, 'update README');
+    assert.equal(result.branch, (await runtime.status(repository.project.id)).branch);
+    const history = await runtime.log(repository.project.id, 2);
+    assert.equal(history[0]?.subject, 'update README');
+    await assert.rejects(() => runtime.commit(repository.project.id, '   '), /Mensagem do commit é obrigatória/);
+  } finally {
+    await fs.rm(repository.root, { recursive: true, force: true });
+  }
+});
+
+test('GitRuntime rejects unknown projects', async () => {
+  const runtime = new GitRuntime(async () => []);
+  await assert.rejects(() => runtime.status('missing'), /Projeto não encontrado/);
+});
