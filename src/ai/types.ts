@@ -210,4 +210,9 @@ export interface ActivityEvent {
   message: string;
   status: 'pending' | 'running' | 'success' | 'failed';
   createdAt: number;
+  toolCallId?: string;
+  toolName?: ToolName;
+  commandResult?: CommandResultSummary;
+  changes?: FileDiff[];
+  diffPlan?: DiffPlan;
 }
