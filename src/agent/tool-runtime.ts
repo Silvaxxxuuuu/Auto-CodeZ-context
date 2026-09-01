@@ -52,6 +52,7 @@ export class ToolRuntime {
 
   listDefinitions(): AIToolDefinition[] { return definitions.map((definition) => ({ ...definition, parameters: { ...definition.parameters } })); }
   listApprovals(): ApprovalRequest[] { return this.approvals.list(); }
+  restoreApprovals(approvals: ApprovalRequest[]): void { this.approvals.restore(approvals); }
 
   async execute(projectId: string, permission: PermissionLevel, call: AIToolCall): Promise<AIToolResult> {
     const definition = definitions.find((item) => item.name === call.name);
