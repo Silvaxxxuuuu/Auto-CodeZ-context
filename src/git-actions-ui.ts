@@ -6,7 +6,7 @@ type GitMutationApi = {
   };
 };
 
-const api = (window as Window & { autoCodez: GitMutationApi }).autoCodez;
+const api = (window as unknown as { autoCodez: GitMutationApi }).autoCodez;
 
 const style = document.createElement('style');
 style.textContent = `
