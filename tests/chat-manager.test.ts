@@ -49,6 +49,40 @@ test('does not restore an empty draft chat after reinitialization', async () => 
   assert.notEqual(created.id, '');
 });
 
+test('purges legacy empty chats during initialization', async () => {
+  const storage = new MemoryStorage();
+  const legacyEmpty: ChatRecord = {
+    id: 'legacy-empty',
+    title: 'Novo chat',
+    providerId: UNCONFIGURED_PROVIDER_ID,
+    model: UNCONFIGURED_MODEL_ID,
+    intelligence: 'normal',
+    permissionLevel: 'safe',
+    messages: [],
+    createdAt: 1,
+    updatedAt: 2,
+  };
+  const persistedChat: ChatRecord = {
+    id: 'persisted-chat',
+    title: 'Persistido',
+    providerId: 'mock',
+    model: 'mock-model',
+    intelligence: 'normal',
+    permissionLevel: 'safe',
+    messages: [{ role: 'user', content: 'Olá', createdAt: 3 }],
+    createdAt: 1,
+    updatedAt: 3,
+  };
+  await storage.write('chats.json', [legacyEmpty, persistedChat]);
+
+  const manager = createManager(storage);
+  await manager.init();
+
+  assert.deepEqual((await manager.list()).map((chat) => chat.id), ['persisted-chat']);
+  const persisted = await storage.read<ChatRecord[]>('chats.json', []);
+  assert.deepEqual(persisted.map((chat) => chat.id), ['persisted-chat']);
+});
+
 test('persists a draft when the first user message is added and derives its title', async () => {
   const storage = new MemoryStorage();
   const first = createManager(storage);
