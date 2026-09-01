@@ -121,6 +121,17 @@ export interface DiffPlan {
   summary: DiffSummary;
 }
 
+export interface CommandResultSummary {
+  command: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  startedAt: number;
+  finishedAt: number;
+  durationMs: number;
+}
+
 export interface AIToolResult {
   toolCallId: string;
   ok: boolean;
@@ -130,6 +141,7 @@ export interface AIToolResult {
   pendingApproval?: boolean;
   changes?: FileDiff[];
   diffPlan?: DiffPlan;
+  commandResult?: CommandResultSummary;
 }
 
 export interface AIToolDefinition {
