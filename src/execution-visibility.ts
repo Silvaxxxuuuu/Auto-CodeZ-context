@@ -125,5 +125,6 @@ function initialize(): void {
   syncUi();
 }
 
+// The UI manager mirrors the authoritative main-process execution lifecycle.
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
 else initialize();
