@@ -1,5 +1,7 @@
 const STYLE_ID = 'auto-codez-error-recovery-ui';
 const PANEL_ID = 'auto-codez-error-recovery';
+let lastRecoverySignature = '';
+let recoveryFrame = 0;
 
 function installStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
@@ -100,11 +102,21 @@ function syncWelcome(): void {
 function syncRecovery(): void {
   syncWelcome();
   const activity = document.querySelector<HTMLElement>('#messages .activity-card');
+  const error = activity?.querySelector<HTMLElement>('.activity-line.error');
+  const errorText = error?.textContent?.trim() || '';
+  if (!errorText) {
+    lastRecoverySignature = '';
+    document.querySelector(`#${PANEL_ID}`)?.remove();
+    return;
+  }
+
+  const kind = classify(errorText);
+  const signature = `${kind}:${errorText}`;
+  if (signature === lastRecoverySignature && document.getElementById(PANEL_ID)) return;
+  lastRecoverySignature = signature;
+
   document.querySelector(`#${PANEL_ID}`)?.remove();
   if (!activity) return;
-  const error = activity.querySelector<HTMLElement>('.activity-line.error');
-  if (!error) return;
-  const kind = classify(error.textContent || '');
   const copy = recoveryCopy(kind);
   const panel = document.createElement('div');
   panel.id = PANEL_ID;
@@ -119,17 +131,25 @@ function syncRecovery(): void {
   });
 }
 
+function scheduleRecoverySync(): void {
+  if (recoveryFrame) return;
+  recoveryFrame = window.requestAnimationFrame(() => {
+    recoveryFrame = 0;
+    syncRecovery();
+  });
+}
+
 window.addEventListener('auto-codez-ui-error', (event) => {
   const detail = (event as CustomEvent<string>).detail;
   if (detail) createToast(detail);
 });
 
 installStyles();
-const observer = new MutationObserver(syncRecovery);
+const observer = new MutationObserver(scheduleRecoverySync);
 const start = (): void => {
   const messages = document.querySelector('#messages');
   if (!messages) { window.setTimeout(start, 50); return; }
   observer.observe(messages, { childList: true, subtree: true });
-  syncRecovery();
+  scheduleRecoverySync();
 };
 start();
