@@ -10,11 +10,14 @@ test('classifies quota errors independently of provider', () => {
 test('classifies billing errors independently of provider', () => {
   assert.equal(classifyProviderError(402, 'payment required'), 'billing');
   assert.equal(classifyProviderError(0, 'You have no credits remaining'), 'billing');
+  assert.equal(classifyProviderError(403, 'Billing hard limit reached'), 'billing');
+  assert.equal(classifyProviderError(403, 'Payment method required'), 'billing');
 });
 
 test('classifies authentication and rate limit failures', () => {
   assert.equal(classifyProviderError(401, 'Unauthorized'), 'authentication');
   assert.equal(classifyProviderError(0, 'Invalid API key'), 'authentication');
+  assert.equal(classifyProviderError(403, 'Forbidden'), 'authentication');
   assert.equal(classifyProviderError(429, 'Too many requests'), 'rate_limit');
 });
 
