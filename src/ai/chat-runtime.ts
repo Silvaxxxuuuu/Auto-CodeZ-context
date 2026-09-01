@@ -94,25 +94,32 @@ export class ChatRuntime {
         return;
       }
 
+      let completed = false;
       try {
         if (adapter.stream) {
           for await (const event of adapter.stream(config, request)) {
             if (event.type === 'activity' && event.activity) this.activity.emit(event.activity);
-            if (event.type === 'complete' && event.response) await this.requestJournal.complete(journal.requestId, event.response);
-            if (event.type === 'error') await this.requestJournal.fail(journal.requestId, event.error || 'Erro durante o streaming.');
+            if (event.type === 'complete' && event.response) {
+              await this.requestJournal.complete(journal.requestId, event.response);
+              completed = true;
+            }
+            if (event.type === 'error' && !completed) await this.requestJournal.fail(journal.requestId, event.error || 'Erro durante o streaming.');
             yield event;
           }
         } else {
           const response = await adapter.send(config, request);
           await this.requestJournal.complete(journal.requestId, response);
+          completed = true;
           yield { type: 'start' };
           if (response.content) yield { type: 'delta', text: response.content };
           yield { type: 'complete', response, usage: response.usage };
         }
         this.activity.success('complete', 'Resposta recebida.');
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await this.requestJournal.fail(journal.requestId, message);
+        if (!completed) {
+          const message = error instanceof Error ? error.message : String(error);
+          await this.requestJournal.fail(journal.requestId, message);
+        }
         throw error;
       }
     } catch (error) {
