@@ -1,5 +1,4 @@
 type RenameApi = {
-  getState: () => Promise<{ chats: Array<{ id: string; title: string }> }>;
   renameChat: (input: { chatId: string; title: string }) => Promise<{ id: string; title: string }>;
 };
 
@@ -13,48 +12,43 @@ async function renameChat(chatId: string, currentTitle: string, item: HTMLElemen
   const copy = item.querySelector<HTMLElement>('.chat-item-copy');
   if (!copy) return;
 
+  const provider = copy.querySelector('small')?.textContent || '';
   const input = document.createElement('input');
   input.className = 'chat-rename-input';
   input.type = 'text';
   input.value = currentTitle;
   input.maxLength = 80;
   input.setAttribute('aria-label', 'Novo nome do chat');
-
   copy.replaceChildren(input);
   input.focus();
   input.select();
 
   let finished = false;
+  const restore = (title: string): void => {
+    copy.innerHTML = `<span>${escapeHtml(title)}</span><small>${escapeHtml(provider)}</small>`;
+  };
   const finish = async (save: boolean): Promise<void> => {
     if (finished) return;
     finished = true;
     if (!save) {
-      copy.innerHTML = `<span>${escapeHtml(currentTitle)}</span>`;
+      restore(currentTitle);
       return;
     }
     const title = input.value.trim().replace(/\s+/g, ' ');
     if (!title || title === currentTitle) {
-      copy.innerHTML = `<span>${escapeHtml(currentTitle)}</span>`;
+      restore(currentTitle);
       return;
     }
     try {
       const updated = await bridge.renameChat({ chatId, title });
-      copy.innerHTML = `<span>${escapeHtml(updated.title)}</span><small>${escapeHtml((await bridge.getState()).chats.find((chat) => chat.id === chatId)?.title ? '' : '')}</small>`;
+      restore(updated.title);
       const headerTitle = document.querySelector<HTMLElement>('.chat-header h1');
       const activeItem = document.querySelector<HTMLElement>(`.chat-item[data-chat="${CSS.escape(chatId)}"]`);
-      if (activeItem) {
-        const activeCopy = activeItem.querySelector<HTMLElement>('.chat-item-copy > span:first-child');
-        if (activeCopy) activeCopy.textContent = updated.title;
-      }
-      if (headerTitle) headerTitle.textContent = updated.title;
-      const state = await bridge.getState();
-      const provider = state.chats.find((chat) => chat.id === chatId);
-      if (provider) {
-        const small = copy.querySelector('small');
-        if (small) small.textContent = '';
-      }
+      const activeCopy = activeItem?.querySelector<HTMLElement>('.chat-item-copy > span:first-child');
+      if (activeCopy) activeCopy.textContent = updated.title;
+      if (headerTitle && activeItem?.classList.contains('selected')) headerTitle.textContent = updated.title;
     } catch (error) {
-      copy.innerHTML = `<span>${escapeHtml(currentTitle)}</span>`;
+      restore(currentTitle);
       window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível renomear o chat.' }));
     }
   };
@@ -69,7 +63,7 @@ async function renameChat(chatId: string, currentTitle: string, item: HTMLElemen
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
   const button = target.closest<HTMLElement>('[data-chat-settings]');
-  if (!button || button.hasAttribute('data-chat-settings-gear')) return;
+  if (!button) return;
   const item = button.closest<HTMLElement>('.chat-item');
   if (!item) return;
   const chatId = button.dataset.chatSettings;
