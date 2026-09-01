@@ -140,3 +140,23 @@ test('GitRuntime rejects unknown projects', async () => {
   const runtime = new GitRuntime(async () => []);
   await assert.rejects(() => runtime.status('missing'), /Projeto não encontrado/);
 });
+
+test('GitRuntime rejects a workspace outside a Git repository', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-no-git-'));
+  try {
+    const project: ProjectRecord = {
+      id: 'non-git-project',
+      name: 'Non Git',
+      rootPath: root,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const runtime = new GitRuntime(async () => [project]);
+    await assert.rejects(
+      () => runtime.status(project.id),
+      /A pasta do projeto não é um repositório Git:/,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
