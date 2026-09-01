@@ -203,7 +203,9 @@ bridge.onStreamEvent((value: unknown) => {
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
-  if (target.closest('[data-approve], [data-deny]')) window.setTimeout(() => void refreshApprovals(), 80);
+  if (target.closest('[data-approve], [data-deny]')) {
+    window.setTimeout((): void => { void refreshApprovals(); }, 80);
+  }
 });
 
 syncChatContext();
