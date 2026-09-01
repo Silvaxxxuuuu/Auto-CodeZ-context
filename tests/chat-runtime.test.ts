@@ -64,7 +64,9 @@ test('send includes workspace context and tool definitions only when tools are s
   assert.equal(request.projectContext, 'src/index.ts contains the current implementation.');
   assert.equal(request.messages[0].role, 'system');
   assert.match(request.messages[0].content, /Contexto do workspace atual/);
-  assert.equal(request.messages[1].content, 'Hello');
+  assert.equal(request.messages[1].role, 'system');
+  assert.match(request.messages[1].content, /src\/index\.ts contains the current implementation/);
+  assert.equal(request.messages[2].content, 'Hello');
 });
 
 test('send does not expose workspace tools to a normal chat', async () => {
