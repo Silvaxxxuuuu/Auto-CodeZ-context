@@ -30,7 +30,51 @@ function installStyle(): void {
     .activity-card.ac-hidden-while-thinking{display:none!important}
     .composer-hint{transition:opacity .18s}.composer-hint.ac-busy{opacity:.35}
     .intelligence-brain{filter:saturate(0)!important}
-    @media(max-width:700px){.message.user .message-content,.message.assistant .message-content,.message.tool .message-content{max-width:88%}.chat-item{padding-right:60px!important}.chat-settings{right:31px}.chat-delete{right:5px}}
+
+    .chat-header{position:relative}
+    .chat-header h1{max-width:min(48vw,520px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .header-actions{align-items:center}
+    .messages{scrollbar-gutter:stable both-edges;scroll-behavior:smooth}
+    .empty-panel{margin:8px 2px;padding:18px 12px!important;border:1px solid #1b212b;border-radius:10px;background:#0f1319;color:#6d7785!important}
+    .empty-panel:empty{display:none}
+    .plugin-card{transition:border-color .16s,background .16s,transform .16s}
+    .plugin-card:hover{border-color:#303845;background:linear-gradient(145deg,#131820,#0f1319);transform:translateY(-1px)}
+
+    .api-key-manager-backdrop{animation:ac-backdrop-in .16s ease-out}
+    .api-key-manager{animation:ac-dialog-in .18s ease-out}
+    .api-key-manager-head{min-height:76px}
+    .api-key-manager-toolbar{min-height:54px}
+    .api-key-card{transition:border-color .16s,background .16s,transform .16s,box-shadow .16s}
+    .api-key-card:hover{border-color:#303845;background:#131820;transform:translateY(-1px);box-shadow:0 8px 24px #0003}
+    .api-key-card.active{box-shadow:inset 2px 0 #8f9baa}
+    .api-key-empty{margin:8px 0;border:1px dashed #252d38;border-radius:10px;background:#0f1319}
+    .api-key-manager-form.open{animation:ac-form-in .16s ease-out}
+    .api-key-field input::placeholder{color:#4f5967}
+    .api-key-field input:focus,.api-key-field select:focus{box-shadow:0 0 0 3px #56647622}
+    .api-key-save:not(:disabled):hover{background:#f0f3f7;border-color:#707d8d}
+    .api-key-cancel:hover{background:#171c24;color:#e4e9ef}
+
+    .approval-card{border-color:#353d49!important;background:linear-gradient(145deg,#141922,#10141a)!important;box-shadow:0 10px 32px #0003}
+    .approval-card button{transition:background .14s,border-color .14s,color .14s,transform .14s}
+    .approval-card button:hover{transform:translateY(-1px)}
+    .activity-card{transition:opacity .16s,transform .16s}
+    .message.error,.message.system.error{border-color:#4b2b31!important;background:#171114!important}
+    .message.error .message-content,.message.system.error .message-content{color:#e5b3b8}
+
+    @keyframes ac-backdrop-in{from{opacity:0}to{opacity:1}}
+    @keyframes ac-dialog-in{from{opacity:0;transform:translateY(6px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+    @keyframes ac-form-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+
+    @media(max-width:700px){
+      .message.user .message-content,.message.assistant .message-content,.message.tool .message-content{max-width:88%}
+      .chat-item{padding-right:60px!important}.chat-settings{right:31px}.chat-delete{right:5px}
+      .chat-header{padding:0 16px}.chat-header h1{max-width:42vw}.header-actions{gap:4px}
+      .api-key-manager-backdrop{padding:14px}.api-key-manager{width:calc(100vw - 28px);max-height:calc(100vh - 28px);border-radius:13px}
+    }
+    @media(prefers-reduced-motion:reduce){
+      .messages{scroll-behavior:auto}.api-key-manager-backdrop,.api-key-manager,.api-key-manager-form.open{animation:none}
+      .plugin-card,.api-key-card,.approval-card button{transition:none}.ac-thinking-dot,.message.streaming .message-label:before{animation:none}
+    }
   `;
   document.head.appendChild(style);
 }
