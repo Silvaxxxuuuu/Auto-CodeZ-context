@@ -80,6 +80,7 @@ export class CommandRuntime {
         cwd,
         shell: false,
         windowsHide: true,
+        windowsVerbatimArguments: process.platform === 'win32',
         detached: process.platform !== 'win32',
         env: { ...process.env, CI: process.env.CI ?? '1' },
       });
