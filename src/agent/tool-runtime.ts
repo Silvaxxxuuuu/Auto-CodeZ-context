@@ -98,7 +98,7 @@ export class ToolRuntime {
       try {
         const diffPlan = await this.preview(projectId, call);
         const approval = this.approvals.request({ projectId, permissionLevel: permission, toolCall: call, ...(diffPlan ? { diffPlan } : {}) });
-        this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${call.name}.`, status: 'pending' });
+        this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${call.name}.`, status: 'pending', toolCallId: call.id, toolName: call.name, ...(diffPlan ? { diffPlan } : {}) });
         return { toolCallId: call.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
       } catch (error) {
         return { toolCallId: call.id, ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -197,18 +197,25 @@ export class ToolRuntime {
     return value;
   }
 
+  private activityTypeForCommand(script?: string): 'test' | 'build' | 'tool' {
+    if (script === 'test') return 'test';
+    if (script === 'build' || script === 'package') return 'build';
+    return 'tool';
+  }
+
   private async executeNow(projectId: string, call: AIToolCall, approvalId?: string, diffPlan?: DiffPlan): Promise<AIToolResult> {
-    this.activity.start('tool', `Executando ${call.name}`);
+    const activityType = call.name === 'run_command' && typeof call.input.script === 'string' ? this.activityTypeForCommand(call.input.script) : 'tool';
+    this.activity.start(activityType, `Executando ${call.name}`);
     try {
       if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);
       const execution = await this.executeAllowed(projectId, call.name, call.input);
-      this.activity.success('tool', `Concluído: ${call.name}`);
       const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, changes: execution.changes, commandResult: execution.commandResult };
+      this.activity.emit({ type: activityType, message: `Concluído: ${call.name}`, status: 'success', toolCallId: call.id, toolName: call.name, ...(execution.commandResult ? { commandResult: execution.commandResult } : {}), ...(execution.changes ? { changes: execution.changes } : {}), ...(diffPlan ? { diffPlan } : {}) });
       if (approvalId) await this.finishJournal(approvalId);
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.activity.failure('tool', `Falha em ${call.name}: ${message}`);
+      this.activity.emit({ type: activityType, message: `Falha em ${call.name}: ${message}`, status: 'failed', toolCallId: call.id, toolName: call.name });
       return { toolCallId: call.id, ok: false, error: message };
     }
   }
