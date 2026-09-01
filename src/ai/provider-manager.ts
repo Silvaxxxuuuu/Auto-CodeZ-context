@@ -12,7 +12,18 @@ const SECURE_FILE = 'provider-secrets.json';
 interface ProviderState { configs: AIProviderConfig[]; }
 
 function normalizeConfig(value: AIProviderConfig): AIProviderConfig {
-  return { id: value.id, displayName: value.displayName, apiKey: value.apiKey, ...(value.baseUrl ? { baseUrl: value.baseUrl } : {}), ...(value.selectedModel ? { selectedModel: value.selectedModel } : {}), enabled: Boolean(value.enabled) };
+  const apiKey = typeof value.apiKey === 'string' ? value.apiKey.trim() : '';
+  const displayName = typeof value.displayName === 'string' && value.displayName.trim() ? value.displayName.trim() : value.id;
+  const baseUrl = typeof value.baseUrl === 'string' ? value.baseUrl.trim().replace(/\/$/, '') : '';
+  const selectedModel = typeof value.selectedModel === 'string' ? value.selectedModel.trim() : '';
+  return {
+    id: value.id,
+    displayName,
+    apiKey,
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(selectedModel ? { selectedModel } : {}),
+    enabled: Boolean(value.enabled && apiKey),
+  };
 }
 
 export class ProviderManager {
