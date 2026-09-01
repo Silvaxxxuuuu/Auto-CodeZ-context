@@ -13,6 +13,7 @@ export default defineConfig({
           tags: [
             { tag: 'script', attrs: { type: 'module', src: '/src/terminal-ui.ts' }, injectTo: 'body' },
             { tag: 'script', attrs: { type: 'module', src: '/src/api-key-ui.ts' }, injectTo: 'body' },
+            { tag: 'script', attrs: { type: 'module', src: '/src/ui-polish.ts' }, injectTo: 'body' },
           ],
         };
       },
