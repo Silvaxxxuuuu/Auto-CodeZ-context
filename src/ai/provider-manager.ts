@@ -21,9 +21,29 @@ const DEFAULT_MODEL_PREFERENCES: Partial<Record<ProviderId, string[]>> = {
   ],
 };
 
+function modelScore(model: AIModel): number {
+  const id = `${model.id} ${model.name}`.toLowerCase();
+  let score = 0;
+  if (model.capabilities.includes('text')) score += 100;
+  if (model.capabilities.includes('tools')) score += 80;
+  if (model.capabilities.includes('streaming')) score += 40;
+  if (model.capabilities.includes('reasoning')) score += 20;
+  if (model.capabilities.includes('vision')) score += 10;
+  if (/(?:^|[-_.])(?:preview|experimental|exp|beta|alpha)(?:[-_.]|$)/i.test(id)) score -= 35;
+  if (/(?:deprecated|legacy|old)/i.test(id)) score -= 100;
+  if (/(?:lite|nano|micro|tiny)/i.test(id)) score -= 25;
+  if (/(?:mini|haiku)/i.test(id)) score -= 10;
+  if (/(?:pro|opus)/i.test(id)) score += 8;
+  const versionNumbers = id.match(/(?:^|[-_.])(?:gpt|claude|gemini)?[-_.]?(\d+(?:\.\d+)?)/i);
+  if (versionNumbers?.[1]) score += Number(versionNumbers[1]) * 2;
+  return score;
+}
+
 export function selectDefaultModel(providerId: ProviderId, models: AIModel[]): string | undefined {
   const preferred = DEFAULT_MODEL_PREFERENCES[providerId] || [];
-  return preferred.find((id) => models.some((model) => model.id === id)) || models[0]?.id;
+  const exactPreferred = preferred.find((id) => models.some((model) => model.id === id));
+  if (exactPreferred) return exactPreferred;
+  return [...models].sort((left, right) => modelScore(right) - modelScore(left))[0]?.id;
 }
 
 function normalizeConfig(value: AIProviderConfig): AIProviderConfig {
