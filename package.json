@@ -11,13 +11,11 @@
     "make": "electron-forge make",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node --test .test-dist/tests/*.test.js"
   },
   "keywords": ["ai", "electron", "typescript", "workspace", "agents"],
-  "author": {
-    "name": "Auto CodeZ"
-  },
+  "author": { "name": "Auto CodeZ" },
   "license": "MIT",
   "devDependencies": {
     "@electron-forge/cli": "^7.11.2",
@@ -34,8 +32,6 @@
     "@typescript-eslint/parser": "^5.62.0",
     "electron": "44.0.0",
     "eslint": "^8.57.1",
-    "eslint-plugin-import": "^2.32.0",
-    "typescript": "^5.7.3",
     "vite": "^5.4.21"
   },
   "dependencies": {
