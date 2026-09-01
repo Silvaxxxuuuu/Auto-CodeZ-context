@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "src/activity-ui.ts",
+    "src/activity-run-ui.ts",
+    "src/diff-ui.ts",
+    "src/git-ui.ts",
+    "tests/**/*.test.ts"
+  ]
+}
