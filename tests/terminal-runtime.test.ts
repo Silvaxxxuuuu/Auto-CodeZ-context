@@ -91,3 +91,28 @@ test('terminal runtime keeps a failed process distinct from an intentional kill'
     await fixture.cleanup();
   }
 });
+
+test('terminal runtime prunes the oldest completed sessions before rejecting new work', async () => {
+  const fixture = await createProject();
+  try {
+    const completed: string[] = [];
+    for (let index = 0; index < 50; index += 1) {
+      const session = await fixture.runtime.start('terminal-project', nodeCommand(`process.stdout.write('${index}')`));
+      completed.push(session.id);
+      await waitForExit(fixture.runtime, session.id);
+    }
+
+    assert.equal((await fixture.runtime.list()).length, 50);
+
+    const replacement = await fixture.runtime.start('terminal-project', nodeCommand("process.stdout.write('replacement')"));
+    await waitForExit(fixture.runtime, replacement.id);
+
+    const sessions = await fixture.runtime.list();
+    assert.equal(sessions.length, 50);
+    assert.equal(sessions.some((session) => session.id === completed[0]), false);
+    assert.equal(sessions.some((session) => session.id === replacement.id), true);
+  } finally {
+    fixture.runtime.dispose();
+    await fixture.cleanup();
+  }
+});
