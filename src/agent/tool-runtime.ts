@@ -5,6 +5,7 @@ import { PermissionRuntime } from './permission-runtime';
 import { WorkspaceRuntime } from './workspace-runtime';
 import { CommandRuntime } from './command-runtime';
 import { DiffRuntime } from './diff-runtime';
+import { GitRuntime } from './git-runtime';
 
 const definitions: AIToolDefinition[] = [
   { name: 'read_file', description: 'Read a UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -14,6 +15,15 @@ const definitions: AIToolDefinition[] = [
   { name: 'rename_file', description: 'Rename or move a file inside the active workspace.', parameters: { type: 'object', properties: { from: { type: 'string', description: 'Current workspace-relative path.' }, to: { type: 'string', description: 'Destination workspace-relative path.' } }, required: ['from', 'to'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'search_files', description: 'Search workspace file names for a text query.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'Text to search for in workspace file names.' } }, required: ['query'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'run_command', description: 'Run an approved package script such as tests, build, typecheck or lint inside the active workspace.', parameters: { type: 'object', properties: { manager: { type: 'string', enum: ['npm', 'pnpm', 'yarn', 'bun'] }, script: { type: 'string', enum: ['test', 'build', 'typecheck', 'lint', 'package', 'check'] } }, required: ['manager', 'script'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'git_status', description: 'Read the current Git branch and working tree status.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'git_diff', description: 'Read the current unstaged Git diff.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'git_log', description: 'Read recent Git commits from the active workspace.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Number of commits to return.' } }, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'git_branches', description: 'List local Git branches from the active workspace.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'git_create_branch', description: 'Create and switch to a new Git branch. This operation requires user approval.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'New branch name.' } }, required: ['name'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'git_checkout', description: 'Switch the active workspace to an existing Git branch. This operation requires user approval.', parameters: { type: 'object', properties: { name: { type: 'string', description: 'Existing branch name.' } }, required: ['name'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'git_stage', description: 'Stage selected workspace files for a Git commit. This operation requires user approval.', parameters: { type: 'object', properties: { paths: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative paths to stage.' } }, required: ['paths'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'git_stage_all', description: 'Stage all Git changes in the active workspace. This operation requires user approval.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'git_commit', description: 'Create a Git commit from the currently staged changes. This operation requires user approval.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Commit message.' } }, required: ['message'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
 ];
 
 interface ToolExecution { output: string; changes?: FileDiff[]; commandResult?: CommandResultSummary; }
@@ -47,6 +57,9 @@ function validateToolInput(definition: AIToolDefinition, input: Record<string, u
     const property = properties[key];
     if (!property) continue;
     if (property.type === 'string' && typeof value !== 'string') throw new Error(`Parâmetro '${key}' deve ser texto.`);
+    if (property.type === 'number' && (typeof value !== 'number' || !Number.isFinite(value))) throw new Error(`Parâmetro '${key}' deve ser número.`);
+    if (property.type === 'array' && !Array.isArray(value)) throw new Error(`Parâmetro '${key}' deve ser uma lista.`);
+    if (property.type === 'array' && Array.isArray(value) && value.some((item) => typeof item !== 'string')) throw new Error(`Parâmetro '${key}' deve conter somente textos.`);
     if (Array.isArray(property.enum) && !property.enum.includes(value)) throw new Error(`Valor inválido para '${key}'.`);
   }
 }
@@ -58,6 +71,7 @@ const unavailableCommandRuntime = new CommandRuntime(async () => {
 export class ToolRuntime {
   private readonly journal = new Map<string, JournalEntry>();
   private journalWrite: Promise<void> = Promise.resolve();
+  private gitRuntime?: GitRuntime;
 
   constructor(
     private readonly workspace: WorkspaceRuntime,
@@ -68,6 +82,8 @@ export class ToolRuntime {
     private readonly diffs = new DiffRuntime(),
     private readonly journalStorage?: ToolJournalStorage,
   ) {}
+
+  configureGitRuntime(runtime: GitRuntime): void { this.gitRuntime = runtime; }
 
   async init(): Promise<void> {
     if (!this.journalStorage) return;
@@ -329,6 +345,29 @@ export class ToolRuntime {
         const result = await this.commands.run(projectId, this.stringValue(input, 'manager'), this.stringValue(input, 'script'));
         return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result };
       }
+      case 'git_status': return this.gitExecution(projectId, await this.requireGit().status(projectId));
+      case 'git_diff': return this.gitExecution(projectId, await this.requireGit().diff(projectId));
+      case 'git_log': return this.gitExecution(projectId, await this.requireGit().log(projectId, input.limit === undefined ? undefined : Number(input.limit)));
+      case 'git_branches': return this.gitExecution(projectId, await this.requireGit().branches(projectId));
+      case 'git_create_branch': return this.gitExecution(projectId, await this.requireGit().createBranch(projectId, this.stringValue(input, 'name')));
+      case 'git_checkout': return this.gitExecution(projectId, await this.requireGit().checkout(projectId, this.stringValue(input, 'name')));
+      case 'git_stage': {
+        const paths = input.paths;
+        if (!Array.isArray(paths) || paths.length === 0 || paths.some((item) => typeof item !== 'string' || !item.trim())) throw new Error("Parâmetro 'paths' inválido.");
+        return this.gitExecution(projectId, await this.requireGit().stage(projectId, paths));
+      }
+      case 'git_stage_all': return this.gitExecution(projectId, await this.requireGit().stageAll(projectId));
+      case 'git_commit': return this.gitExecution(projectId, await this.requireGit().commit(projectId, this.stringValue(input, 'message')));
     }
+  }
+
+  private requireGit(): GitRuntime {
+    if (!this.gitRuntime) throw new Error('O runtime Git não foi configurado para esta instância.');
+    return this.gitRuntime;
+  }
+
+  private gitExecution(_projectId: string, value: unknown): ToolExecution {
+    if (typeof value === 'string') return { output: value };
+    return { output: JSON.stringify(value) };
   }
 }
