@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { AIProviderConfig, AIProviderConfig as ProviderConfig, ProviderId, ProviderSummary } from './types';
+import type { AIProviderConfig, ProviderId, ProviderSummary } from './types';
 import { ProviderRegistry } from './provider-registry';
 import { OpenAIAdapter } from './providers/openai';
 import { GoogleAdapter } from './providers/google';
@@ -55,7 +55,6 @@ export class ProviderManager {
     const metadata = await this.storage.read<ProviderState>(STATE_FILE, { configs: [] });
     const keyMetadata = await this.storage.read<ProviderKeyState>(KEY_STATE_FILE, { keys: [], activeKeyIds: {} });
     this.activeKeyIds = keyMetadata.activeKeyIds && typeof keyMetadata.activeKeyIds === 'object' ? { ...keyMetadata.activeKeyIds } : {};
-
     let secureKeys: ProviderKeyRecord[] = [];
     const rawKeySecure = await this.storage.readEncrypted(KEY_SECURE_FILE);
     if (rawKeySecure) {
@@ -64,38 +63,24 @@ export class ProviderManager {
         if (Array.isArray(parsed.keys)) secureKeys = parsed.keys.map(normalizeKey).filter((key) => key.apiKey);
       } catch { secureKeys = []; }
     }
-
     if (!secureKeys.length) {
       const rawLegacy = await this.storage.readEncrypted(SECURE_FILE);
       if (rawLegacy) {
         try {
           const parsed = JSON.parse(rawLegacy) as ProviderState;
-          if (Array.isArray(parsed.configs)) {
-            secureKeys = parsed.configs.map((config) => normalizeKey({
-              id: `legacy-${config.id}`,
-              name: `${config.displayName} principal`,
-              providerId: config.id,
-              apiKey: config.apiKey,
-              ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
-              ...(config.selectedModel ? { selectedModel: config.selectedModel } : {}),
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-            })).filter((key) => key.apiKey);
-          }
+          if (Array.isArray(parsed.configs)) secureKeys = parsed.configs.map((config) => normalizeKey({ id: `legacy-${config.id}`, name: `${config.displayName} principal`, providerId: config.id, apiKey: config.apiKey, ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}), ...(config.selectedModel ? { selectedModel: config.selectedModel } : {}), createdAt: Date.now(), updatedAt: Date.now() })).filter((key) => key.apiKey);
         } catch { secureKeys = []; }
       }
     }
-
     this.keys = secureKeys;
-    if (!Object.keys(this.activeKeyIds).length) {
-      for (const key of this.keys) this.activeKeyIds[key.providerId] = key.id;
-    }
+    if (!Object.keys(this.activeKeyIds).length) for (const key of this.keys) this.activeKeyIds[key.providerId] = key.id;
     this.syncConfigs();
     if (this.keys.length) await this.persistKeys();
-    else await this.persist();
-
-    const metadataConfigs = Array.isArray(metadata.configs) ? metadata.configs : [];
-    if (!this.keys.length) this.configs = metadataConfigs.map((item) => normalizeConfig({ ...item, apiKey: '' }));
+    else {
+      const metadataConfigs = Array.isArray(metadata.configs) ? metadata.configs : [];
+      this.configs = metadataConfigs.map((item) => normalizeConfig({ ...item, apiKey: '' }));
+      await this.persist();
+    }
   }
 
   async list(): Promise<ProviderSummary[]> { return this.registry.summaries(this.configs); }
@@ -124,25 +109,14 @@ export class ProviderManager {
     if (!name) throw new Error('O nome da API key é obrigatório.');
     if (name.length > 80) throw new Error('O nome da API key deve ter no máximo 80 caracteres.');
     const config: AIProviderConfig = { id: providerId, displayName: adapter.displayName, apiKey, ...(input.baseUrl?.trim() ? { baseUrl: input.baseUrl.trim().replace(/\/$/, '') } : {}), ...(input.model?.trim() ? { selectedModel: input.model.trim() } : {}), enabled: true };
-    let models: import('./types').AIModel[] = [];
-    let discoveryError: string | undefined;
-    try {
-      models = await adapter.listModels(config);
-      if (!models.length) discoveryError = 'O provider não retornou modelos disponíveis. A API key foi salva.';
-    } catch (error) {
-      const normalized = normalizeProviderError(config.displayName, 'model discovery', error);
-      if (isAuthenticationError(normalized)) throw normalized;
-      discoveryError = normalized.message || 'Não foi possível descobrir os modelos agora. A API key foi salva.';
-    }
-    if (config.selectedModel && models.length && !models.some((model) => model.id === config.selectedModel)) throw new Error('O modelo selecionado não está disponível para este provider.');
-    if (!config.selectedModel && models.length) config.selectedModel = selectDefaultModel(providerId, models);
+    const discovery = await this.discover(config);
     const now = Date.now();
     const key: ProviderKeyRecord = { id: crypto.randomUUID(), name: name.slice(0, 80), providerId, apiKey, ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}), ...(config.selectedModel ? { selectedModel: config.selectedModel } : {}), createdAt: now, updatedAt: now };
     this.keys = [...this.keys, key];
     this.activeKeyIds[providerId] = key.id;
     this.syncConfigs();
     await this.persistKeys();
-    return { key: (await this.listKeys()).find((item) => item.id === key.id)!, providers: await this.list(), models, ...(discoveryError ? { discoveryError } : {}) };
+    return { key: (await this.listKeys()).find((item) => item.id === key.id)!, providers: await this.list(), models: discovery.models, ...(discovery.discoveryError ? { discoveryError: discovery.discoveryError } : {}) };
   }
 
   async renameKey(keyId: string, name: string): Promise<ProviderKeySummary> {
@@ -181,17 +155,25 @@ export class ProviderManager {
   }
 
   async save(input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }): Promise<{ providers: ProviderSummary[]; models: import('./types').AIModel[]; discoveryError?: string }> {
-    const active = this.keys.find((key) => key.id === this.activeKeyIds[input.providerId]);
+    const providerId = input.providerId as ProviderId;
+    const adapter = this.registry.get(providerId);
+    const apiKey = input.apiKey.trim();
+    const active = this.keys.find((key) => key.id === this.activeKeyIds[providerId]);
+    const config: AIProviderConfig = { id: providerId, displayName: adapter.displayName, apiKey, ...(input.baseUrl?.trim() ? { baseUrl: input.baseUrl.trim().replace(/\/$/, '') } : {}), ...(input.model?.trim() ? { selectedModel: input.model.trim() } : {}), enabled: true };
+    const discovery = await this.discover(config);
     if (active) {
-      const result = await this.saveKey({ ...input, name: active.name });
-      this.keys = this.keys.map((key) => key.id === active.id ? { ...result.key, apiKey: input.apiKey.trim(), createdAt: key.createdAt, updatedAt: Date.now() } as ProviderKeyRecord : key);
-      this.activeKeyIds[input.providerId] = active.id;
-      this.syncConfigs();
-      await this.persistKeys();
-      return { providers: await this.list(), models: result.models, ...(result.discoveryError ? { discoveryError: result.discoveryError } : {}) };
+      active.apiKey = apiKey;
+      active.baseUrl = config.baseUrl;
+      active.selectedModel = config.selectedModel;
+      active.updatedAt = Date.now();
+    } else {
+      const key: ProviderKeyRecord = { id: crypto.randomUUID(), name: `${adapter.displayName} principal`, providerId, apiKey, ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}), ...(config.selectedModel ? { selectedModel: config.selectedModel } : {}), createdAt: Date.now(), updatedAt: Date.now() };
+      this.keys = [...this.keys, key];
+      this.activeKeyIds[providerId] = key.id;
     }
-    const result = await this.saveKey({ ...input, name: `${this.registry.get(input.providerId).displayName} principal` });
-    return { providers: result.providers, models: result.models, ...(result.discoveryError ? { discoveryError: result.discoveryError } : {}) };
+    this.syncConfigs();
+    await this.persistKeys();
+    return { providers: await this.list(), models: discovery.models, ...(discovery.discoveryError ? { discoveryError: discovery.discoveryError } : {}) };
   }
 
   async remove(providerId: ProviderId): Promise<ProviderSummary[]> {
@@ -200,6 +182,23 @@ export class ProviderManager {
     this.syncConfigs();
     await this.persistKeys();
     return this.list();
+  }
+
+  private async discover(config: AIProviderConfig): Promise<{ models: import('./types').AIModel[]; discoveryError?: string }> {
+    let models: import('./types').AIModel[] = [];
+    let discoveryError: string | undefined;
+    const adapter = this.registry.get(config.id);
+    try {
+      models = await adapter.listModels(config);
+      if (!models.length) discoveryError = 'O provider não retornou modelos disponíveis. A API key foi salva.';
+    } catch (error) {
+      const normalized = normalizeProviderError(config.displayName, 'model discovery', error);
+      if (isAuthenticationError(normalized)) throw normalized;
+      discoveryError = normalized.message || 'Não foi possível descobrir os modelos agora. A API key foi salva.';
+    }
+    if (config.selectedModel && models.length && !models.some((model) => model.id === config.selectedModel)) throw new Error('O modelo selecionado não está disponível para este provider.');
+    if (!config.selectedModel && models.length) config.selectedModel = selectDefaultModel(config.id, models);
+    return { models, ...(discoveryError ? { discoveryError } : {}) };
   }
 
   private syncConfigs(): void {
