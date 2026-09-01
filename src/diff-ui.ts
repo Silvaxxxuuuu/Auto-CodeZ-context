@@ -15,7 +15,7 @@ type DiffPlan = {
   summary: { files: number; created: number; modified: number; deleted: number; renamed: number; addedLines: number; removedLines: number };
 };
 
-type Approval = { id: string; toolCall: { id: string }; };
+type Approval = { id: string; projectId: string; toolCall: { id: string; name: string }; createdAt: number; diffPlan?: DiffPlan };
 type ActivityEvent = {
   id: string;
   type: 'thought' | 'action' | 'tool' | 'test' | 'build' | 'complete' | 'error';
@@ -33,7 +33,7 @@ declare global {
     autoCodez: {
       onActivity: (listener: (event: ActivityEvent) => void) => () => void;
       listApprovals: () => Promise<Approval[]>;
-      approveTool: (approvalId: string) => Promise<unknown>;
+      approveTool: (approvalId: string) => Promise<{ pendingApprovalIds?: string[] }>;
       denyTool: (approvalId: string) => Promise<unknown>;
     };
   }
@@ -112,20 +112,13 @@ async function findApprovalId(toolCallId: string): Promise<string | undefined> {
   return approvals.find((approval) => approval.toolCall.id === toolCallId)?.id;
 }
 
-async function refreshApprovalState(card: HTMLElement, toolCallId: string): Promise<void> {
-  const approvalId = await findApprovalId(toolCallId);
-  if (!approvalId && card.dataset.status === 'pending') {
-    setStatus(card, 'running');
-  }
-}
-
 function renderDiff(event: ActivityEvent): void {
   const plan = event.diffPlan;
   if (!plan && !event.changes?.length) return;
   const container = ensureContainer();
   if (!container) return;
   const changes = plan?.changes || event.changes || [];
-  const existing = container.querySelector<HTMLElement>(`[data-tool-call-id="${CSS.escape(event.toolCallId || '')}"]`);
+  const existing = event.toolCallId ? container.querySelector<HTMLElement>(`[data-tool-call-id="${CSS.escape(event.toolCallId)}"]`) : null;
   if (existing) {
     setStatus(existing, event.status);
     return;
@@ -137,64 +130,89 @@ function renderDiff(event: ActivityEvent): void {
   card.dataset.status = event.status;
   const summary = plan?.summary;
   card.innerHTML = `<div class="diff-card-head"><div class="diff-card-title"><strong>${escapeHtml(event.message)}</strong><span class="diff-card-status">${statusLabel(event.status)}</span></div>${summary ? `<div class="diff-card-summary"><span>${summary.files} arquivo(s)</span><span>+${summary.addedLines}</span><span>-${summary.removedLines}</span></div>` : ''}</div>${changes.length ? changes.map(renderChange).join('') : '<div class="diff-empty">Nenhuma alteração para exibir.</div>'}`;
-  if (event.status === 'pending' && event.toolCallId) {
-    const actions = document.createElement('div');
-    actions.className = 'diff-card-actions';
-    const approve = document.createElement('button');
-    approve.type = 'button';
-    approve.textContent = 'Aprovar';
-    const deny = document.createElement('button');
-    deny.type = 'button';
-    deny.textContent = 'Recusar';
-    approve.addEventListener('click', async () => {
-      approve.disabled = true;
-      deny.disabled = true;
-      approve.textContent = 'Aplicando...';
-      try {
-        const approvalId = await findApprovalId(event.toolCallId!);
-        if (!approvalId) throw new Error('Aprovação não encontrada.');
-        const result = await window.autoCodez.approveTool(approvalId) as { pendingApprovalIds?: string[] };
-        if (result.pendingApprovalIds?.length) {
-          setStatus(card, 'pending');
-          approve.disabled = false;
-          deny.disabled = false;
-          approve.textContent = 'Aprovar';
-        } else {
-          setStatus(card, 'success');
-          actions.remove();
-        }
-      } catch {
-        setStatus(card, 'failed');
+  if (event.status === 'pending' && event.toolCallId) addApprovalActions(card, event.toolCallId);
+  container.prepend(card);
+  while (container.children.length > 8) container.lastElementChild?.remove();
+}
+
+function addApprovalActions(card: HTMLElement, toolCallId: string): void {
+  const actions = document.createElement('div');
+  actions.className = 'diff-card-actions';
+  const approve = document.createElement('button');
+  approve.type = 'button';
+  approve.textContent = 'Aprovar';
+  const deny = document.createElement('button');
+  deny.type = 'button';
+  deny.textContent = 'Recusar';
+  approve.addEventListener('click', async () => {
+    approve.disabled = true;
+    deny.disabled = true;
+    approve.textContent = 'Aplicando...';
+    try {
+      const approvalId = await findApprovalId(toolCallId);
+      if (!approvalId) throw new Error('Aprovação não encontrada.');
+      const result = await window.autoCodez.approveTool(approvalId);
+      if (result.pendingApprovalIds?.length) {
+        setStatus(card, 'pending');
         approve.disabled = false;
         deny.disabled = false;
         approve.textContent = 'Aprovar';
-      }
-    });
-    deny.addEventListener('click', async () => {
-      approve.disabled = true;
-      deny.disabled = true;
-      try {
-        const approvalId = await findApprovalId(event.toolCallId!);
-        if (!approvalId) throw new Error('Aprovação não encontrada.');
-        await window.autoCodez.denyTool(approvalId);
-        setStatus(card, 'failed');
+      } else {
+        setStatus(card, 'success');
         actions.remove();
-      } catch {
-        approve.disabled = false;
-        deny.disabled = false;
       }
-    });
-    actions.append(approve, deny);
-    card.append(actions);
-    void refreshApprovalState(card, event.toolCallId);
+    } catch {
+      setStatus(card, 'failed');
+      approve.disabled = false;
+      deny.disabled = false;
+      approve.textContent = 'Aprovar';
+    }
+  });
+  deny.addEventListener('click', async () => {
+    approve.disabled = true;
+    deny.disabled = true;
+    try {
+      const approvalId = await findApprovalId(toolCallId);
+      if (!approvalId) throw new Error('Aprovação não encontrada.');
+      await window.autoCodez.denyTool(approvalId);
+      setStatus(card, 'failed');
+      actions.remove();
+    } catch {
+      approve.disabled = false;
+      deny.disabled = false;
+    }
+  });
+  actions.append(approve, deny);
+  card.append(actions);
+}
+
+function renderRecoveredApproval(approval: Approval): void {
+  if (!approval.diffPlan) return;
+  renderDiff({
+    id: `recovered_${approval.id}`,
+    type: 'action',
+    message: `Alteração pendente: ${approval.toolCall.name}`,
+    status: 'pending',
+    createdAt: approval.createdAt,
+    toolCallId: approval.toolCall.id,
+    toolName: approval.toolCall.name,
+    diffPlan: approval.diffPlan,
+  });
+}
+
+async function restorePendingApprovals(): Promise<void> {
+  try {
+    const approvals = await window.autoCodez.listApprovals();
+    approvals.filter((approval) => approval.diffPlan).sort((a, b) => a.createdAt - b.createdAt).forEach(renderRecoveredApproval);
+  } catch {
+    // A recuperação visual não deve interromper a interface principal.
   }
-  container.prepend(card);
-  while (container.children.length > 8) container.lastElementChild?.remove();
 }
 
 function initialize(): void {
   const unsubscribe = window.autoCodez.onActivity(renderDiff);
   window.addEventListener('beforeunload', unsubscribe, { once: true });
+  void restorePendingApprovals();
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
