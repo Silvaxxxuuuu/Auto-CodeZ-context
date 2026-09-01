@@ -63,6 +63,37 @@ test('GitRuntime lists branches and commit history without mutating the reposito
   }
 });
 
+test('GitRuntime creates and checks out a branch', async () => {
+  const repository = await makeRepository();
+  try {
+    const runtime = new GitRuntime(async () => [repository.project]);
+    const created = await runtime.createBranch(repository.project.id, 'feature/test-branch');
+    assert.equal(created.branch, 'feature/test-branch');
+    assert.equal((await runtime.status(repository.project.id)).branch, 'feature/test-branch');
+    const branches = await runtime.branches(repository.project.id);
+    assert.ok(branches.some((branch) => branch.name === 'feature/test-branch' && branch.current));
+  } finally {
+    await fs.rm(repository.root, { recursive: true, force: true });
+  }
+});
+
+test('GitRuntime commits staged changes and rejects unsafe branch names', async () => {
+  const repository = await makeRepository();
+  try {
+    await fs.writeFile(path.join(repository.root, 'README.md'), '# Committed\n', 'utf8');
+    execFileSync('git', ['add', 'README.md'], { cwd: repository.root });
+    const runtime = new GitRuntime(async () => [repository.project]);
+    const result = await runtime.commit(repository.project.id, 'update README');
+    assert.equal(result.branch, (await runtime.status(repository.project.id)).branch);
+    const history = await runtime.log(repository.project.id, 2);
+    assert.equal(history[0]?.subject, 'update README');
+    await assert.rejects(() => runtime.createBranch(repository.project.id, 'bad name'), /caracteres inválidos/);
+    await assert.rejects(() => runtime.createBranch(repository.project.id, '-bad'), /caracteres inválidos/);
+  } finally {
+    await fs.rm(repository.root, { recursive: true, force: true });
+  }
+});
+
 test('GitRuntime rejects unknown projects', async () => {
   const runtime = new GitRuntime(async () => []);
   await assert.rejects(() => runtime.status('missing'), /Projeto não encontrado/);
