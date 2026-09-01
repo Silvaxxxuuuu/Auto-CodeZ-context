@@ -78,16 +78,7 @@ function recoveryCopy(kind: ReturnType<typeof classify>): { title: string; descr
 }
 
 function retryLastMessage(): void {
-  const userMessages = [...document.querySelectorAll<HTMLElement>('#messages .message.user .message-content')];
-  const last = userMessages.at(-1);
-  if (!last) { createToast('Não há uma mensagem anterior para reenviar.'); return; }
-  const prompt = document.querySelector<HTMLTextAreaElement>('#prompt');
-  const send = document.querySelector<HTMLButtonElement>('#send-button');
-  if (!prompt || !send) return;
-  prompt.value = last.innerText.trim();
-  prompt.dispatchEvent(new Event('input', { bubbles: true }));
-  if (!send.disabled) send.click();
-  else createToast('Aguarde a operação atual terminar antes de reenviar.');
+  window.dispatchEvent(new CustomEvent('auto-codez-retry-message'));
 }
 
 function syncWelcome(): void {
