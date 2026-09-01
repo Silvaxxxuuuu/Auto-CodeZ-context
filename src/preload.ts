@@ -87,7 +87,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   git: {
     status: (projectId: string) => invoke('git:status', requireIdentifier(projectId, 'Projeto')),
-    branches: (projectId: string) => invoke('git:branches', requireIdentifier(projectId, 'Projeto')),
+    branches: (projectId: string) => invoke('git:branches', requireIdentifier(projectId, 'Branch')),
     diff: (projectId: string) => invoke('git:diff', requireIdentifier(projectId, 'Projeto')),
     log: (input: { projectId: string; limit?: number }) => {
       const value = requireObject(input, 'Dados do histórico Git');
@@ -118,7 +118,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
     stageAll: (projectId: string) => invoke('git:stage-all', requireIdentifier(projectId, 'Projeto')),
     commit: (input: { projectId: string; message: string }) => {
       const value = requireObject(input, 'Dados do commit');
-      return invoke('git:stage-all', requireIdentifier(projectId, 'Projeto'));
+      return invoke('git:commit', { projectId: requireIdentifier(value.projectId, 'Projeto'), message: requireNonEmptyString(value.message, 'Mensagem do commit') });
     },
   },
   createProject: (input: { name: string; rootPath: string }) => {
