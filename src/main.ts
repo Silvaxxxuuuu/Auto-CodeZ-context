@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
+import { app, dialog, ipcMain, Menu, shell, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalStorage } from './core/storage';
@@ -73,7 +73,7 @@ ipcMain.handle('providers:remove', async (_event, providerId: string) => provide
 ipcMain.handle('chat:create', async (_event, input: unknown) => chatManager.create(requireObject(input, 'Dados do chat') as { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }));
 ipcMain.handle('chat:delete', async (_event, chatId: string) => chatManager.remove(requireIdentifier(chatId, 'Chat')));
 ipcMain.handle('chat:rename', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome do chat'); return chatManager.rename(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.title, 'Nome do chat')); });
-ipcMain.handle('chat:update-settings', async (_event, input: unknown) => chatManager.updateSettings(requireObject(input, 'Configurações do chat') as { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }));
+ipcMain.handle('chat:update-settings', async (_event, input: unknown) => chatManager.updateSettings(requireObject(input, 'Configurações do chat') as { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string });
 
 async function executeChat(chatId: string, content: string): Promise<{ pendingApprovalIds: string[]; chat: Awaited<ReturnType<ChatManager['list']>>[number] | undefined }> {
   const { chat, config, projectContext } = await getChatContext(chatId);
@@ -100,9 +100,15 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', { ...event, chatId });
   };
   emit({ type: 'start' });
-  const result = await agentRuntime.runStreaming(config, current, projectContext, current.permissionLevel, emit);
-  await chatManager.update({ ...current, messages: result.messages });
-  return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  try {
+    const result = await agentRuntime.runStreaming(config, current, projectContext, current.permissionLevel, emit);
+    await chatManager.update({ ...current, messages: result.messages });
+    return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    emit({ type: 'error', error: message });
+    return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: message };
+  }
 });
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
@@ -135,7 +141,7 @@ ipcMain.handle('projects:delete', async (_event, projectId: string) => projectMa
 ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(requireNonEmptyString(rootPath, 'Pasta do projeto')));
 ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(requireNonEmptyString(filePath, 'Arquivo')));
 ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => { const value = requireObject(input, 'Dados do arquivo'); await projectManager.writeFile(requireNonEmptyString(value.filePath, 'Arquivo'), typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo de arquivo é inválido.'); })()); return { ok: true }; });
-ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(requireNonEmptyString(url, 'URL')));
+ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(requireNonEmptyString(url, 'URL externa')));
 
 app.whenReady().then(async () => {
   await storage.init();
