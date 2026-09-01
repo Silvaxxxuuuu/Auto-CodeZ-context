@@ -94,7 +94,7 @@ function render(): void {
   container.innerHTML = ordered.map((run) => {
     const existingRun = container.querySelector<HTMLElement>(`[data-run-id="${CSS.escape(run.runId)}"]`);
     const detailsMarkup = existingRun?.querySelector<HTMLElement>('.execution-run-details')?.outerHTML || '<div class="execution-run-details"></div>';
-    const approvalMarkup = existingRun?.querySelector<HTMLElement>('.execution-approval')?.outerHTML || (latestRun()?.runId === run.runId ? approvalMarkupForCurrentRun() : '');
+    const approvalMarkupForRun = pendingApprovals.length && latestRun()?.runId === run.runId ? approvalMarkup(pendingApprovals) : '';
     const steps = run.steps.slice(-MAX_STEPS).map((step) => {
       const status = normalizeStatus(step.status);
       const detail = step.commandResult
@@ -104,16 +104,12 @@ function render(): void {
           : '';
       return `<div class="execution-step"><span class="execution-step-status ${statusClass(status)}"></span><span class="execution-step-label">${escapeHtml(stepLabel(step))}</span><span class="execution-step-detail">${escapeHtml(detail || statusLabel(status))}</span></div>`;
     }).join('');
-    return `<article class="execution-run ${statusClass(run.status)}" data-run-id="${escapeHtml(run.runId)}"><div class="execution-run-header"><div><div class="execution-run-kicker">Execução do agente</div><div class="execution-run-title">${escapeHtml(runTitle(run))}</div></div><span class="execution-run-status">${statusLabel(run.status)}</span></div><div class="execution-run-message">${escapeHtml(run.message)}</div><div class="execution-steps">${steps}</div>${detailsMarkup}${approvalMarkup}</article>`;
+    return `<article class="execution-run ${statusClass(run.status)}" data-run-id="${escapeHtml(run.runId)}"><div class="execution-run-header"><div><div class="execution-run-kicker">Execução do agente</div><div class="execution-run-title">${escapeHtml(runTitle(run))}</div></div><span class="execution-run-status">${statusLabel(run.status)}</span></div><div class="execution-run-message">${escapeHtml(run.message)}</div><div class="execution-steps">${steps}</div>${detailsMarkup}${approvalMarkupForRun}</article>`;
   }).join('');
   if (pendingApprovals.length && !ordered.length) {
     container.innerHTML = `<article class="execution-run execution-status-pending" data-run-id="approval"><div class="execution-run-header"><div><div class="execution-run-kicker">Execução do agente</div><div class="execution-run-title">Operação em espera</div></div><span class="execution-run-status">Aguardando aprovação</span></div>${approvalMarkup(pendingApprovals)}</article>`;
   }
   ordered.forEach((run) => window.dispatchEvent(new CustomEvent('auto-codez-execution-run-rendered', { detail: { runId: run.runId } })));
-}
-
-function approvalMarkupForCurrentRun(): string {
-  return approvalMarkup(pendingApprovals);
 }
 
 function handleActivity(value: unknown): void {
