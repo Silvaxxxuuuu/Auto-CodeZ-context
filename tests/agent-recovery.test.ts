@@ -8,7 +8,7 @@ import { ToolRuntime } from '../src/agent/tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 import { ChatRuntime } from '../src/ai/chat-runtime';
 import { ProviderRegistry } from '../src/ai/provider-registry';
-import type { AIProviderAdapter, AIProviderConfig, AIResponse, ChatRecord, ProjectRecord } from '../src/ai/types';
+import type { AIProviderAdapter, AIProviderConfig, AIResponse, ApprovalRequest, ChatRecord, ProjectRecord } from '../src/ai/types';
 
 class MemoryStorage {
   private readonly values = new Map<string, unknown>();
@@ -151,8 +151,8 @@ test('recovers an already-applied mutation from the write-ahead journal without 
     const first = await createPersistentFixture(storage, [firstResponse], root);
     const pending = await first.run(config, makeChat(), undefined, 'ask');
     assert.equal(pending.pendingApprovalIds.length, 1);
-    const approvals = await storage.read<any[]>('agent-runs.json', []);
-    const approval = approvals.approvals[0];
+    const state = await storage.read<{ approvals: ApprovalRequest[] }>('agent-runs.json', { approvals: [] });
+    const approval = state.approvals[0];
     assert.ok(approval?.diffPlan);
 
     await fs.writeFile(path.join(root, 'src', 'index.ts'), 'export const value = 2;');
