@@ -72,6 +72,8 @@ let streamingText = '';
 let streamingActivity: string[] = [];
 let pendingApprovals: Approval[] = [];
 let lastError = '';
+let retryContent = '';
+let lastSubmittedContent = '';
 
 app.innerHTML = `
 <div class="app-shell">
@@ -280,6 +282,8 @@ async function newChat(projectId?: string): Promise<void> {
     pendingApprovals = [];
     streamingActivity = [];
     lastError = '';
+    retryContent = '';
+    lastSubmittedContent = '';
     executionState = 'idle';
     activePanel = projectId ? 'projects' : 'chats';
     activeProjectId = projectId;
@@ -315,9 +319,10 @@ async function refreshApprovals(): Promise<void> {
   }
 }
 
-async function sendMessage(): Promise<void> {
-  const content = prompt.value.trim();
+async function sendMessage(contentOverride?: string, isRetry = false): Promise<void> {
+  const content = (contentOverride ?? prompt.value).trim();
   if (!content || !activeChat || (executionState !== 'idle' && executionState !== 'failed') || pendingApprovals.length) return;
+  if (isRetry && !retryContent) return;
   if (executionState === 'failed') {
     executionState = 'idle';
     lastError = '';
@@ -328,7 +333,11 @@ async function sendMessage(): Promise<void> {
   streamingText = '';
   streamingActivity = [`Enviando para ${providerName(activeChat.providerId)}`];
   lastError = '';
-  activeChat.messages = [...activeChat.messages, { role: 'user', content, createdAt: Date.now() }];
+  lastSubmittedContent = content;
+  if (!isRetry) {
+    retryContent = '';
+    activeChat.messages = [...activeChat.messages, { role: 'user', content, createdAt: Date.now() }];
+  }
   setExecutionState('running');
   try {
     const result = await window.autoCodez.streamChat({ chatId, content });
@@ -344,11 +353,20 @@ async function sendMessage(): Promise<void> {
       executionState = 'idle';
       streamingText = '';
       streamingActivity = [];
+      retryContent = '';
+      lastSubmittedContent = '';
       await refresh();
     }
   } catch (error) {
+    retryContent = content;
     setExecutionState('failed', error instanceof Error ? error.message : 'Falha ao enviar mensagem.');
   }
+}
+
+async function retryLastMessage(): Promise<void> {
+  if (!activeChat || executionState !== 'failed' || pendingApprovals.length || !retryContent) return;
+  const content = retryContent;
+  await sendMessage(content, true);
 }
 
 async function resumeApproval(id: string, approve: boolean): Promise<void> {
@@ -379,6 +397,8 @@ async function resumeApproval(id: string, approve: boolean): Promise<void> {
       executionState = 'idle';
       streamingText = '';
       streamingActivity = [];
+      retryContent = '';
+      lastSubmittedContent = '';
       await refresh();
     }
   } catch (error) {
@@ -398,6 +418,8 @@ async function setComposerIntelligence(level: IntelligenceLevel): Promise<void> 
     activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId: activeChat.providerId, model: activeChat.model, intelligence: level, permissionLevel: activeChat.permissionLevel });
     executionState = 'idle';
     lastError = '';
+    retryContent = '';
+    lastSubmittedContent = '';
     await refresh();
   } catch (error) {
     composerIntelligence = previous;
@@ -416,6 +438,8 @@ async function deleteChat(chatId: string): Promise<void> {
       streamingText = '';
       streamingActivity = [];
       lastError = '';
+      retryContent = '';
+      lastSubmittedContent = '';
       executionState = 'idle';
     }
     await refresh();
@@ -459,6 +483,10 @@ document.addEventListener('click', (event) => {
   if (deny?.dataset.deny) void resumeApproval(deny.dataset.deny, false);
 });
 
+window.addEventListener('auto-codez-retry-message', () => {
+  void retryLastMessage();
+});
+
 app.addEventListener('click', async (event) => {
   const target = event.target as HTMLElement;
   const panel = target.closest<HTMLElement>('[data-panel]');
@@ -489,6 +517,8 @@ app.addEventListener('click', async (event) => {
     streamingText = '';
     streamingActivity = [];
     lastError = '';
+    retryContent = '';
+    lastSubmittedContent = '';
     composerIntelligence = activeChat?.intelligence || 'normal';
     renderNav();
     renderHeader();
@@ -554,7 +584,7 @@ modalRoot.addEventListener('click', async (event) => {
       await openProviderSettings();
       return;
     }
-    try { activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId, model, intelligence: intelligenceLevel, permissionLevel }); composerIntelligence = activeChat.intelligence; closeModal(); executionState = 'idle'; lastError = ''; await refresh(); } catch (error) { setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.'); }
+    try { activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId, model, intelligence: intelligenceLevel, permissionLevel }); composerIntelligence = activeChat.intelligence; closeModal(); executionState = 'idle'; lastError = ''; retryContent = ''; lastSubmittedContent = ''; await refresh(); } catch (error) { setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.'); }
   }
 });
 
@@ -591,6 +621,7 @@ window.autoCodez.onStreamEvent((event) => {
     return;
   }
   if (event.type === 'error' && event.error) {
+    retryContent = lastSubmittedContent;
     setExecutionState('failed', event.error);
   }
 });
@@ -603,9 +634,13 @@ window.autoCodez.onActivity((event) => {
 });
 
 window.addEventListener('error', (event) => {
-  if (executionState === 'running' || executionState === 'waiting_approval') setExecutionState('failed', event.error instanceof Error ? event.error.message : event.message || 'Erro inesperado no renderer.');
+  if (executionState === 'running' || executionState === 'waiting_approval') {
+    retryContent = lastSubmittedContent;
+    setExecutionState('failed', event.error instanceof Error ? event.error.message : event.message || 'Erro inesperado no renderer.');
+  }
 });
 window.addEventListener('unhandledrejection', (event) => {
+  retryContent = lastSubmittedContent;
   setExecutionState('failed', event.reason instanceof Error ? event.reason.message : String(event.reason || 'Operação rejeitada.'));
 });
 
