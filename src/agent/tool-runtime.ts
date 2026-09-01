@@ -18,6 +18,21 @@ const definitions: AIToolDefinition[] = [
 
 interface ToolExecution { output: string; changes?: FileDiff[]; }
 
+interface ToolJournalStorage {
+  read<T>(name: string, fallback: T): Promise<T>;
+  write<T>(name: string, value: T): Promise<void>;
+}
+
+type JournalEntry = {
+  approvalId: string;
+  projectId: string;
+  toolCall: AIToolCall;
+  diffPlan: DiffPlan;
+  status: 'executing';
+};
+
+const JOURNAL_FILE = 'tool-execution-journal.json';
+
 function validateToolInput(definition: AIToolDefinition, input: Record<string, unknown>): void {
   const schema = definition.parameters;
   if (schema.type !== 'object' || !input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`Entrada inválida para ${definition.name}.`);
@@ -41,6 +56,9 @@ const unavailableCommandRuntime = new CommandRuntime(async () => {
 });
 
 export class ToolRuntime {
+  private readonly journal = new Map<string, JournalEntry>();
+  private journalWrite: Promise<void> = Promise.resolve();
+
   constructor(
     private readonly workspace: WorkspaceRuntime,
     private readonly permissions = new PermissionRuntime(),
@@ -48,7 +66,20 @@ export class ToolRuntime {
     private readonly approvals = new ApprovalRuntime(),
     private readonly commands: CommandRuntime = unavailableCommandRuntime,
     private readonly diffs = new DiffRuntime(),
+    private readonly journalStorage?: ToolJournalStorage,
   ) {}
+
+  async init(): Promise<void> {
+    if (!this.journalStorage) return;
+    const stored = await this.journalStorage.read<JournalEntry[]>(JOURNAL_FILE, []);
+    this.journal.clear();
+    if (!Array.isArray(stored)) return;
+    for (const entry of stored) {
+      if (!entry?.approvalId || !entry.projectId || !entry.toolCall?.id || !entry.diffPlan?.changes?.length) continue;
+      this.journal.set(entry.approvalId, entry);
+    }
+    await this.reconcileJournal();
+  }
 
   listDefinitions(): AIToolDefinition[] { return definitions.map((definition) => ({ ...definition, parameters: { ...definition.parameters } })); }
   listApprovals(): ApprovalRequest[] { return this.approvals.list(); }
@@ -86,8 +117,17 @@ export class ToolRuntime {
       this.activity.failure('tool', `Aprovação ${approvalId} não pôde ser executada: ${message}`);
       return { toolCallId: approval.toolCall.id, ok: false, error: message, approvalId, pendingApproval: true, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
     }
-    this.approvals.resolve(approvalId);
-    return this.executeNow(approval.projectId, approval.toolCall);
+
+    const journalResult = await this.getCompletedJournalResult(approvalId, approval);
+    if (journalResult) {
+      this.approvals.resolve(approvalId);
+      return journalResult;
+    }
+
+    const result = await this.executeNow(approval.projectId, approval.toolCall, approvalId, approval.diffPlan);
+    if (result.ok) this.approvals.resolve(approvalId);
+    else return { ...result, approvalId, pendingApproval: true, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
+    return result;
   }
 
   deny(approvalId: string): boolean {
@@ -156,17 +196,91 @@ export class ToolRuntime {
     return value;
   }
 
-  private async executeNow(projectId: string, call: AIToolCall): Promise<AIToolResult> {
+  private async executeNow(projectId: string, call: AIToolCall, approvalId?: string, diffPlan?: DiffPlan): Promise<AIToolResult> {
     this.activity.start('tool', `Executando ${call.name}`);
     try {
+      if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);
       const execution = await this.executeAllowed(projectId, call.name, call.input);
       this.activity.success('tool', `Concluído: ${call.name}`);
-      return { toolCallId: call.id, ok: true, output: execution.output, changes: execution.changes };
+      const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, changes: execution.changes };
+      if (approvalId) await this.finishJournal(approvalId);
+      return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.activity.failure('tool', `Falha em ${call.name}: ${message}`);
       return { toolCallId: call.id, ok: false, error: message };
     }
+  }
+
+  private isMutation(name: ToolName): boolean {
+    return name === 'write_file' || name === 'create_file' || name === 'delete_file' || name === 'rename_file';
+  }
+
+  private async beginJournal(approvalId: string, projectId: string, toolCall: AIToolCall, diffPlan: DiffPlan): Promise<void> {
+    if (!this.journalStorage) return;
+    if (!this.journal.has(approvalId)) {
+      this.journal.set(approvalId, { approvalId, projectId, toolCall, diffPlan, status: 'executing' });
+      await this.persistJournal();
+    }
+  }
+
+  private async finishJournal(approvalId: string): Promise<void> {
+    if (!this.journalStorage) return;
+    this.journal.delete(approvalId);
+    await this.persistJournal();
+  }
+
+  private async getCompletedJournalResult(approvalId: string, approval: ApprovalRequest): Promise<AIToolResult | undefined> {
+    const entry = this.journal.get(approvalId);
+    if (!entry) return undefined;
+    const completed = await this.matchesExpectedState(entry);
+    if (!completed) return undefined;
+    const result = await this.buildJournalResult(entry);
+    await this.finishJournal(approvalId);
+    return result;
+  }
+
+  private async buildJournalResult(entry: JournalEntry): Promise<AIToolResult> {
+    const changes: FileDiff[] = [];
+    for (const change of entry.diffPlan.changes) {
+      let after = change.after;
+      if (change.type !== 'deleted') after = await this.workspace.readFile(entry.projectId, change.path);
+      changes.push(this.diffs.create(change.path, change.type, change.before, after, change.renamedFrom));
+    }
+    return { toolCallId: entry.toolCall.id, ok: true, output: 'Operação concluída após recuperação do journal.', changes };
+  }
+
+  private async matchesExpectedState(entry: JournalEntry): Promise<boolean> {
+    for (const change of entry.diffPlan.changes) {
+      if (change.type === 'deleted') {
+        if (await this.workspace.exists(entry.projectId, change.path)) return false;
+        continue;
+      }
+      if (change.type === 'renamed') {
+        const from = change.renamedFrom;
+        if (!from || await this.workspace.exists(entry.projectId, from) || !(await this.workspace.exists(entry.projectId, change.path))) return false;
+        if (await this.workspace.readFile(entry.projectId, change.path) !== change.after) return false;
+        continue;
+      }
+      if (!(await this.workspace.exists(entry.projectId, change.path))) return false;
+      if (await this.workspace.readFile(entry.projectId, change.path) !== change.after) return false;
+    }
+    return true;
+  }
+
+  private async reconcileJournal(): Promise<void> {
+    for (const [approvalId, entry] of this.journal) {
+      if (await this.matchesExpectedState(entry)) this.activity.emit({ type: 'action', message: `Operação ${approvalId} concluída durante uma interrupção anterior.`, status: 'success' });
+    }
+    await this.persistJournal();
+  }
+
+  private async persistJournal(): Promise<void> {
+    if (!this.journalStorage) return;
+    const snapshot = [...this.journal.values()];
+    const write = this.journalWrite.then(() => this.journalStorage!.write(JOURNAL_FILE, snapshot));
+    this.journalWrite = write.catch(() => undefined);
+    await write;
   }
 
   private async executeAllowed(projectId: string, name: ToolName, input: Record<string, unknown>): Promise<ToolExecution> {
