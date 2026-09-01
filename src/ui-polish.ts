@@ -35,16 +35,21 @@ function installStyle(): void {
   document.head.appendChild(style);
 }
 
-function installThinkingIndicator(): void {
+function installThinkingIndicator(attempt = 0): void {
   const messages = document.querySelector<HTMLElement>('#messages');
-  if (!messages) return;
+  if (!messages) {
+    if (attempt < 20) window.setTimeout(() => installThinkingIndicator(attempt + 1), 50);
+    return;
+  }
 
   const observer = new MutationObserver(() => {
-    const running = Boolean(document.querySelector('.send-button:disabled'));
+    const sendButton = document.querySelector<HTMLButtonElement>('.send-button');
+    const busy = Boolean(sendButton?.disabled);
     const activity = messages.querySelector<HTMLElement>('.activity-card');
+    const approval = messages.querySelector<HTMLElement>('.approval-card');
     const live = messages.querySelector<HTMLElement>('.message.streaming');
 
-    if (!running || live) {
+    if (!busy || live || approval) {
       activity?.classList.remove('ac-hidden-while-thinking');
       messages.querySelector('.ac-thinking')?.remove();
       document.querySelector('.composer-hint')?.classList.remove('ac-busy');
