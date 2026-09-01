@@ -18,6 +18,7 @@ function installStyles(): void {
     .welcome-grid button{min-height:54px;padding:10px 12px;border:1px solid #272e37;border-radius:10px;background:#10141a;color:#aeb7c2;font:500 10px Inter,ui-sans-serif,system-ui,sans-serif;text-align:left;cursor:pointer;transition:background .14s,border-color .14s,transform .14s}
     .welcome-grid button:hover{background:#161b22;border-color:#3c4652;transform:translateY(-1px)}
     .welcome-grid button:focus-visible{outline:2px solid #586577;outline-offset:2px}
+    .activity-card .activity-line.error{display:flex!important;}
     .ac-recovery-panel{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:10px;padding:11px 12px;border:1px solid #3a2b30;border-radius:9px;background:#111318}
     .ac-recovery-copy{min-width:0;display:flex;flex-direction:column;gap:3px}
     .ac-recovery-copy strong{font-size:10px;font-weight:650;color:#dfe4eb}
