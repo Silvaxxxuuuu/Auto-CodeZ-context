@@ -23,6 +23,7 @@ const gitRuntime = new GitRuntime(() => projectManager.list());
 const gitService = new GitService(gitRuntime);
 const terminalService = new TerminalService(storage, projectManager);
 const toolRuntime = new ToolRuntime(projectManager, storage, terminalService);
+toolRuntime.configureGitRuntime(gitRuntime);
 const chatRuntime = new ChatRuntime(storage, providerManager);
 const agentRuntime = new AgentRuntime(providerManager, toolRuntime, chatRuntime, storage, projectManager);
 let mainWindow: BrowserWindow | null = null;
@@ -178,25 +179,20 @@ ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath
 });
 ipcMain.handle('projects:open-folder', async () => {
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.');
-  const result = await dialog.showOpenDialog(mainWindow, { title: 'Escolha a pasta do projeto', buttonLabel: 'Selecionar pasta', properties: ['openDirectory', 'createDirectory'] });
-  if (result.canceled || !result.filePaths[0]) return null;
-  return result.filePaths[0];
+  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] });
+  return result.canceled ? undefined : result.filePaths[0];
 });
-ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(requireNonEmptyString(rootPath, 'Pasta do projeto')));
-ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(requireNonEmptyString(filePath, 'Arquivo')));
-ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => {
-  const value = requireObject(input, 'Dados do arquivo');
-  const filePath = requireNonEmptyString(value.filePath, 'Arquivo');
-  if (typeof value.content !== 'string') throw new Error('Conteúdo do arquivo é inválido.');
-  return projectManager.writeFile(filePath, value.content);
-});
-ipcMain.handle('app:open-external', async (_event, url: string) => {
-  const rawUrl = requireNonEmptyString(url, 'URL externa');
-  let parsed: URL;
-  try { parsed = new URL(rawUrl); } catch { throw new Error('URL externa inválida.'); }
-  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Somente URLs HTTP e HTTPS podem ser abertas.');
-  await shell.openExternal(parsed.toString());
+ipcMain.handle('projects:list', async () => projectManager.list());
+ipcMain.handle('projects:delete', async (_event, projectId: string) => projectManager.remove(requireIdentifier(projectId, 'Projeto')));
+ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(requireNonEmptyString(url, 'URL')));
+
+app.whenReady().then(async () => {
+  await loadProviders();
+  await toolRuntime.init();
+  createWindow();
+  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.whenReady().then(async () => { await storage.init(); await loadProviders(); await projectManager.init(); await chatManager.init(); await toolRuntime.init(); await terminalService.init(); await chatRuntime.init(); await agentRuntime.init(); await createWindow(); app.on('activate', async () => { if (BrowserWindow.getAllWindows().length === 0) await createWindow(); }); }).catch((error) => { const message = error instanceof Error ? error.message : 'Falha ao inicializar o Auto CodeZ.'; dialog.showErrorBox('Auto CodeZ', message); app.quit(); });
-app.on('window-all-closed', () => { terminalService.dispose(); if (process.platform !== 'darwin') app.quit(); });
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
