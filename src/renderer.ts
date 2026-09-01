@@ -1,3382 +1,597 @@
 import './index.css';
-import * as monaco from 'monaco-editor';
 
-import {
-  createAiSession,
-  type AiProviderId,
-} from './core/ai-session';
-
-type ProjectFile = {
-  name: string;
-  path: string;
-  relativePath: string;
-  type: 'file' | 'directory';
-};
-
-type OpenFolderResult = {
-  path: string;
-  files: ProjectFile[];
-} | null;
-
-type ReadFileResult = {
-  success: boolean;
-  content?: string;
-  error?: string;
-};
-
-type WriteFileResult = {
-  success: boolean;
-  error?: string;
-};
-
-type ExternalAiResult = {
-  success: boolean;
-  error?: string;
-};
-
-type ClipboardResult = {
-  success: boolean;
-  content?: string;
-  error?: string;
-};
-
-type AiControl = {
-  type?: string;
-  name?: string;
-  role?: string;
-  value?: string;
-  enabled?: boolean;
-  controlType?: string;
-  className?: string;
-  framework?: string;
-  processId?: number;
-  offscreen?: boolean;
-};
-
-type AiWindow = {
-  title: string;
-  processId?: number;
-  className?: string;
-  framework?: string;
-  controls: AiControl[];
-};
-
-type InspectExternalAiResult = {
-  success: boolean;
-  running: boolean;
-  provider?: string;
-  windows?: AiWindow[];
-  error?: string;
-};
-
-type OpenTab = {
-  path: string;
-  name: string;
-  relativePath: string;
-  content: string;
-  originalContent: string;
-  modified: boolean;
-  model: monaco.editor.ITextModel;
-};
-
-type PendingProposal = {
-  tabPath: string;
-  originalContent: string;
-  proposedContent: string;
-  originalModel: monaco.editor.ITextModel;
-  proposedModel: monaco.editor.ITextModel;
-};
-
-type AiProvider = {
-  id: AiProviderId;
-  name: string;
-};
+type ProviderSummary = { id: string; displayName: string; configured: boolean; selectedModel?: string; model?: string; apiKeyConfigured: boolean };
+type Model = { id: string; name: string; providerId: string; capabilities: string[]; reasoningLevels?: string[] };
+type Change = { path: string; type: string; before: string; after: string; addedLines: number; removedLines: number };
+type Message = { role: 'user' | 'assistant' | 'system' | 'tool'; content: string; createdAt?: number; toolCallId?: string; toolName?: string; changes?: Change[] };
+type Chat = { id: string; title: string; projectId?: string; providerId: string; model: string; intelligence: 'low' | 'normal' | 'high' | 'maximum'; permissionLevel: 'read-only' | 'safe' | 'ask' | 'unrestricted'; messages: Message[]; createdAt: number; updatedAt: number };
+type Project = { id: string; name: string; rootPath: string; createdAt: number; updatedAt: number };
+type IntelligenceLevel = Chat['intelligence'];
+type PermissionLevel = Chat['permissionLevel'];
+type StreamEvent = { type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'error'; text?: string; activity?: { message: string; status: string }; toolCall?: { id: string; name: string; input: Record<string, unknown> }; pendingApprovalIds?: string[]; error?: string };
+type Approval = { id: string; projectId: string; permissionLevel: string; toolCall: { id: string; name: string; input: Record<string, unknown> }; createdAt: number };
+type ExecutionState = 'idle' | 'running' | 'waiting_approval' | 'failed';
 
 declare global {
   interface Window {
     autoCodez: {
-      createAiSession: (
-  request: {
-    provider:
-      | 'chatgpt'
-      | 'claude'
-      | 'gemini';
-    request: string;
-    projectRoot: string;
-    activeFile: {
-      path: string;
-      relativePath: string;
-      name: string;
-      content: string;
-    };
-    files: {
-      path: string;
-      relativePath: string;
-      name: string;
-      content: string;
-    }[];
-  },
-) => Promise<{
-  success: boolean;
-  sessionId?: string;
-  state?:
-    | 'idle'
-    | 'preparing'
-    | 'waiting'
-    | 'receiving'
-    | 'completed'
-    | 'failed'
-    | 'cancelled';
-  error?: string;
-}>;
-
-cancelAiSession: (
-  sessionId: string,
-) => Promise<{
-  success: boolean;
-  error?: string;
-}>;
-
-onAiSessionState: (
-  callback: (
-    state: {
-      sessionId: string;
-      state:
-        | 'idle'
-        | 'preparing'
-        | 'waiting'
-        | 'receiving'
-        | 'completed'
-        | 'failed'
-        | 'cancelled';
-    },
-  ) => void,
-) => () => void;
-
-      sendAiRequest: (
-  request: {
-    provider:
-      | 'chatgpt'
-      | 'claude'
-      | 'gemini';
-    prompt: string;
-    timeoutMs?: number;
-  },
-) => Promise<{
-  success: boolean;
-  response?: {
-    provider:
-      | 'chatgpt'
-      | 'claude'
-      | 'gemini';
-    content: string;
-    receivedAt: number;
-  };
-  error?: string;
-}>;
-      inspectExternalAi: (
-        provider: string,
-      ) => Promise<InspectExternalAiResult>;
-
-      openFolder: () => Promise<OpenFolderResult>;
-
-      readFile: (
-        filePath: string,
-      ) => Promise<ReadFileResult>;
-
-      writeFile: (
-        filePath: string,
-        content: string,
-      ) => Promise<WriteFileResult>;
-
-      openExternalAi: (
-        provider: string,
-      ) => Promise<ExternalAiResult>;
-
-      writeClipboard: (
-        text: string,
-      ) => Promise<ClipboardResult>;
-
-      readClipboard: () => Promise<ClipboardResult>;
-
-      buildProjectContext: (
-        input: {
-          projectRoot: string;
-          request: string;
-          activeFile: string | null;
-          files: Array<{
-            path: string;
-            relativePath: string;
-            name: string;
-            content: string;
-          }>;
-        },
-      ) => Promise<{
-        success: boolean;
-        context?: {
-          projectRoot: string;
-          request: string;
-          activeFile: string | null;
-          files: Array<{
-            path: string;
-            relativePath: string;
-            name: string;
-            extension: string;
-            content: string;
-            size: number;
-            score: number;
-            selected: boolean;
-          }>;
-          totalFiles: number;
-          selectedFiles: number;
-          totalCharacters: number;
-        };
-        serialized?: string;
-        error?: string;
-      }>;
+      getState: () => Promise<{ providers: ProviderSummary[]; chats: Chat[]; projects: Project[] }>;
+      listModels: (providerId: string) => Promise<Model[]>;
+      saveProvider: (input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }) => Promise<{ providers: ProviderSummary[]; models: Model[] }>;
+      removeProvider: (providerId: string) => Promise<ProviderSummary[]>;
+      createChat: (input: { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }) => Promise<Chat>;
+      deleteChat: (chatId: string) => Promise<Chat[]>;
+      updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
+      streamChat: (input: { chatId: string; content: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
+      onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
+      listApprovals: () => Promise<Approval[]>;
+      approveTool: (approvalId: string) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
+      denyTool: (approvalId: string) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
+      onActivity: (listener: (event: { message?: string; status?: string }) => void) => () => void;
+      createProject: (input: { name: string; rootPath: string }) => Promise<Project>;
+      openFolder: () => Promise<string | null>;
     };
   }
 }
 
-const aiProviders: AiProvider[] = [
-  {
-    id: 'chatgpt',
-    name: 'ChatGPT',
-  },
-  {
-    id: 'claude',
-    name: 'Claude',
-  },
-  {
-    id: 'gemini',
-    name: 'Gemini',
-  },
+const intelligence: ReadonlyArray<[IntelligenceLevel, string, string]> = [
+  ['low', 'Baixo', 'Respostas rápidas, com menor esforço'],
+  ['normal', 'Normal', 'Equilíbrio entre qualidade, velocidade e custo'],
+  ['high', 'Alto', 'Mais esforço e contexto quando disponível'],
+  ['maximum', 'Máximo', 'Maior esforço permitido pelo modelo'],
 ];
 
-const app =
-  document.querySelector<HTMLDivElement>(
-    '#app',
-  );
+const app = document.querySelector<HTMLDivElement>('#app');
+if (!app) throw new Error('Elemento #app não encontrado.');
 
-if (!app) {
-  throw new Error(
-    'Elemento #app não encontrado.',
-  );
-}
-
-const storedProvider =
-  window.localStorage.getItem(
-    'auto-codez-ai-provider',
-  ) as AiProviderId | null;
-
-let selectedAiProvider: AiProviderId | null =
-  aiProviders.some(
-    (provider) =>
-      provider.id === storedProvider,
-  )
-    ? storedProvider
-    : null;
+let providers: ProviderSummary[] = [];
+let chats: Chat[] = [];
+let projects: Project[] = [];
+let activeChat: Chat | null = null;
+let activePanel = 'chats';
+let activeProjectId: string | undefined;
+let composerIntelligence: IntelligenceLevel = 'normal';
+let intelligenceMenuOpen = false;
+let executionState: ExecutionState = 'idle';
+let streamingText = '';
+let streamingActivity: string[] = [];
+let pendingApprovals: Approval[] = [];
+let lastError = '';
 
 app.innerHTML = `
-  <div class="app">
-    <header class="topbar">
-      <div class="topbar-left">
-        <button
-          id="file-menu"
-          class="file-menu"
-          type="button"
-        >
-          File
-        </button>
-
-        <div
-          class="future-brand-mark"
-          aria-hidden="true"
-        ></div>
-      </div>
-
-      <div class="topbar-center">
-        <span id="project-name">
-          Nenhum projeto aberto
-        </span>
-      </div>
-
-      <div class="topbar-actions">
-        <button
-          id="save-button"
-          class="save-button"
-          type="button"
-          disabled
-        >
-          Salvar
-        </button>
-
-        <button
-          class="icon-button"
-          type="button"
-          title="Configurações"
-        >
-          Configurações
-        </button>
-      </div>
-    </header>
-
-    <main class="workspace">
-      <aside class="sidebar">
-        <div class="sidebar-section project-section">
-          <div class="section-title">
-            PROJETO
-          </div>
-
-          <button
-            id="open-folder"
-            class="open-folder"
-            type="button"
-          >
-            <span>Abrir pasta</span>
-          </button>
-        </div>
-
-        <div class="sidebar-section files-section">
-          <div class="section-title">
-            ARQUIVOS
-          </div>
-
-          <div
-            id="file-list"
-            class="file-list"
-          >
-            <div class="empty-files">
-              Abra uma pasta para começar.
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      <section class="content">
-        <div
-          id="tabs"
-          class="tabs"
-        ></div>
-
-        <div class="editor-header">
-          <span id="current-file">
-            Nenhum arquivo selecionado
-          </span>
-        </div>
-
-        <div
-          id="proposal-bar"
-          class="proposal-bar"
-        >
-          <div class="proposal-info">
-            <span class="proposal-dot"></span>
-
-            <span>
-              Alteração proposta
-            </span>
-          </div>
-
-          <div class="proposal-actions">
-            <button
-              id="reject-proposal"
-              class="proposal-button reject"
-              type="button"
-            >
-              Rejeitar
+<div class="app-shell">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Auto CodeZ</span></div>
+    <div class="topbar-actions">
+      <button class="top-action" data-action="new-chat">Novo chat</button>
+      <button class="top-action icon-only" data-action="ai-settings" title="Configurações de IA" aria-label="Configurações de IA"></button>
+    </div>
+  </header>
+  <div class="body">
+    <aside class="rail">
+      <button class="rail-button active" data-panel="chats" title="Chats" aria-label="Chats"></button>
+      <button class="rail-button" data-panel="projects" title="Projetos" aria-label="Projetos"></button>
+      <button class="rail-button" data-panel="plugins" title="Plugins" aria-label="Plugins"></button>
+      <div class="rail-spacer"></div>
+      <button class="rail-button" data-action="profile" title="Perfil" aria-label="Perfil"></button>
+    </aside>
+    <aside class="nav-panel" id="nav-panel"></aside>
+    <main class="chat-area">
+      <section class="chat-header" id="chat-header"></section>
+      <section class="messages" id="messages"></section>
+      <section class="composer-wrap">
+        <div class="composer">
+          <button class="attach-button" data-action="attachments" title="Anexar conteúdo" aria-label="Anexar conteúdo"></button>
+          <textarea id="prompt" rows="1" placeholder="Digite uma mensagem..." aria-label="Mensagem"></textarea>
+          <div class="composer-divider" aria-hidden="true"></div>
+          <div class="intelligence-control">
+            <button class="intelligence-button" id="intelligence-button" aria-haspopup="menu" aria-expanded="false">
+              <span class="intelligence-brain" aria-hidden="true"></span>
+              <span class="intelligence-text">Raciocínio</span>
+              <span class="intelligence-current">Normal</span>
+              <span class="intelligence-chevron" aria-hidden="true"></span>
             </button>
-
-            <button
-              id="accept-proposal"
-              class="proposal-button accept"
-              type="button"
-            >
-              Aceitar
-            </button>
+            <div class="intelligence-menu" id="intelligence-menu" role="menu" hidden></div>
           </div>
+          <button class="send-button" id="send-button" title="Enviar" aria-label="Enviar"></button>
         </div>
-
-        <div
-          id="editor"
-          class="editor"
-        >
-          <div class="editor-empty">
-            <div class="editor-empty-icon">
-              { }
-            </div>
-
-            <div>
-              Selecione um arquivo
-            </div>
-          </div>
-        </div>
-
-        <div class="composer-area">
-          <div class="composer">
-            <div
-              id="ai-selector"
-              class="ai-selector"
-            >
-              <button
-                id="ai-selector-button"
-                class="ai-selector-button"
-                type="button"
-                aria-haspopup="menu"
-                aria-expanded="false"
-                title="Selecionar IA"
-              >
-                <span class="ai-label">
-                  AI
-                </span>
-
-                <span class="ai-chevron">
-                  <svg
-                    viewBox="0 0 16 16"
-                    width="12"
-                    height="12"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M4 6L8 10L12 6"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                  </svg>
-                </span>
-              </button>
-
-              <div
-                id="ai-menu"
-                class="ai-menu"
-                role="menu"
-              >
-                <div class="ai-menu-title">
-                  Selecionar IA
-                </div>
-
-                <div
-                  id="ai-options"
-                  class="ai-options"
-                ></div>
-              </div>
-            </div>
-
-            <div class="composer-divider"></div>
-
-            <textarea
-              id="prompt"
-              placeholder="Descreva o que você quer fazer..."
-              rows="1"
-            ></textarea>
-
-            <button
-              id="send"
-              class="send-button"
-              title="Enviar"
-              type="button"
-            >
-              <svg
-                viewBox="0 0 20 20"
-                width="18"
-                height="18"
-                aria-hidden="true"
-              >
-                <path
-                  d="M10 15V5M5.5 9.5L10 5L14.5 9.5"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.8"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-          </div>
-
-          <div class="composer-info">
-            Auto CodeZ está trabalhando localmente neste projeto.
-          </div>
-        </div>
+        <div class="composer-hint">A IA selecionada neste chat trabalha dentro das permissões configuradas.</div>
       </section>
     </main>
-
-    <div
-      id="status"
-      class="status"
-    ></div>
+    <aside class="right-rail" id="right-rail"></aside>
   </div>
+</div>
+<div class="modal-root" id="modal-root"></div>
 `;
 
-const openFolderButton =
-  document.querySelector<HTMLButtonElement>(
-    '#open-folder',
-  );
+const navPanel = document.querySelector<HTMLDivElement>('#nav-panel')!;
+const chatHeader = document.querySelector<HTMLElement>('#chat-header')!;
+const messages = document.querySelector<HTMLElement>('#messages')!;
+const prompt = document.querySelector<HTMLTextAreaElement>('#prompt')!;
+const sendButton = document.querySelector<HTMLButtonElement>('#send-button')!;
+const intelligenceButton = document.querySelector<HTMLButtonElement>('#intelligence-button')!;
+const intelligenceMenu = document.querySelector<HTMLDivElement>('#intelligence-menu')!;
+const modalRoot = document.querySelector<HTMLDivElement>('#modal-root')!;
 
-const projectName =
-  document.querySelector<HTMLSpanElement>(
-    '#project-name',
-  );
-
-const fileList =
-  document.querySelector<HTMLDivElement>(
-    '#file-list',
-  );
-
-const editor =
-  document.querySelector<HTMLDivElement>(
-    '#editor',
-  );
-
-const currentFile =
-  document.querySelector<HTMLSpanElement>(
-    '#current-file',
-  );
-
-const tabs =
-  document.querySelector<HTMLDivElement>(
-    '#tabs',
-  );
-
-const prompt =
-  document.querySelector<HTMLTextAreaElement>(
-    '#prompt',
-  );
-
-const sendButton =
-  document.querySelector<HTMLButtonElement>(
-    '#send',
-  );
-
-const saveButton =
-  document.querySelector<HTMLButtonElement>(
-    '#save-button',
-  );
-
-const status =
-  document.querySelector<HTMLDivElement>(
-    '#status',
-  );
-
-const proposalBar =
-  document.querySelector<HTMLDivElement>(
-    '#proposal-bar',
-  );
-
-const acceptProposalButton =
-  document.querySelector<HTMLButtonElement>(
-    '#accept-proposal',
-  );
-
-const rejectProposalButton =
-  document.querySelector<HTMLButtonElement>(
-    '#reject-proposal',
-  );
-
-const aiSelector =
-  document.querySelector<HTMLDivElement>(
-    '#ai-selector',
-  );
-
-const aiSelectorButton =
-  document.querySelector<HTMLButtonElement>(
-    '#ai-selector-button',
-  );
-
-const aiMenu =
-  document.querySelector<HTMLDivElement>(
-    '#ai-menu',
-  );
-
-const aiOptions =
-  document.querySelector<HTMLDivElement>(
-    '#ai-options',
-  );
-
-let projectFiles: ProjectFile[] = [];
-let projectRootPath: string | null = null;
-let openTabs: OpenTab[] = [];
-let activeTabPath: string | null = null;
-
-let editorInstance:
-  | monaco.editor.IStandaloneCodeEditor
-  | null = null;
-
-let diffEditorInstance:
-  | monaco.editor.IStandaloneDiffEditor
-  | null = null;
-
-let editorChangeDisposable:
-  | monaco.IDisposable
-  | null = null;
-
-let pendingProposal:
-  | PendingProposal
-  | null = null;
-
-let fileLoadSequence = 0;
-let aiInspectionSequence = 0;
-
-const expandedDirectories =
-  new Set<string>();
-
-monaco.editor.defineTheme(
-  'auto-codez',
-  {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [],
-    colors: {
-      'editor.background': '#0b0d11',
-      'editor.foreground': '#c8ced7',
-      'editorLineNumber.foreground': '#454c58',
-      'editorLineNumber.activeForeground': '#8d95a3',
-      'editorCursor.foreground': '#e7eaf0',
-      'editor.selectionBackground': '#303744',
-      'editor.inactiveSelectionBackground': '#242a33',
-      'editor.lineHighlightBackground': '#10141a',
-      'editorIndentGuide.background1': '#171b22',
-      'editorIndentGuide.activeBackground1': '#242a33',
-      'diffEditor.insertedTextBackground': '#263c2d',
-      'diffEditor.removedTextBackground': '#432b2b',
-      'diffEditor.insertedLineBackground': '#17251c',
-      'diffEditor.removedLineBackground': '#2a1c1c',
-    },
-  },
-);
-
-monaco.editor.setTheme(
-  'auto-codez',
-);
-
-window.autoCodez.onAiSessionState(
-  ({
-    sessionId,
-    state,
-  }) => {
-    console.log(
-      'AI_SESSION_STATE',
-      sessionId,
-      state,
-    );
-
-    switch (state) {
-      case 'preparing':
-        showStatus(
-          'Preparando solicitação...',
-        );
-        break;
-
-      case 'waiting':
-        showStatus(
-          'Enviando solicitação para a IA...',
-        );
-        break;
-
-      case 'receiving':
-        showStatus(
-          'Recebendo resposta...',
-        );
-        break;
-
-      case 'completed':
-        showStatus(
-          'Resposta recebida.',
-        );
-        break;
-
-      case 'failed':
-        showStatus(
-          'A sessão da IA falhou.',
-          true,
-        );
-        break;
-
-      case 'cancelled':
-        showStatus(
-          'Solicitação cancelada.',
-          true,
-        );
-        break;
-    }
-  },
-);
-
-function getAiProvider(
-  providerId: AiProviderId | null,
-): AiProvider | null {
-  if (!providerId) {
-    return null;
-  }
-
-  return (
-    aiProviders.find(
-      (provider) =>
-        provider.id === providerId,
-    ) || null
-  );
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
 }
 
-function getProviderName(
-  providerId: AiProviderId | null,
-): string {
-  return (
-    getAiProvider(providerId)?.name ||
-    'IA'
-  );
+function providerName(id: string): string {
+  if (id === 'unconfigured') return 'IA não configurada';
+  return providers.find((provider) => provider.id === id)?.displayName || id;
 }
 
-function getAiIcon(
-  providerId: AiProviderId,
-): string {
-  switch (providerId) {
-    case 'chatgpt':
-      return `
-        <span class="ai-provider-icon chatgpt-icon">
-          ◎
-        </span>
-      `;
-
-    case 'claude':
-      return `
-        <span class="ai-provider-icon claude-icon">
-          C
-        </span>
-      `;
-
-    case 'gemini':
-      return `
-        <span class="ai-provider-icon gemini-icon">
-          ✦
-        </span>
-      `;
-  }
+function intelligenceLabel(level: string): string {
+  return intelligence.find((item) => item[0] === level)?.[1] || 'Normal';
 }
 
-function renderAiOptions() {
-  if (!aiOptions) {
-    return;
-  }
-
-  aiOptions.innerHTML = '';
-
-  for (const provider of aiProviders) {
-    const option =
-      document.createElement(
-        'button',
-      );
-
-    option.type = 'button';
-    option.className = 'ai-option';
-
-    option.setAttribute(
-      'role',
-      'menuitemradio',
-    );
-
-    option.setAttribute(
-      'aria-checked',
-      String(
-        provider.id ===
-          selectedAiProvider,
-      ),
-    );
-
-    if (
-      provider.id ===
-      selectedAiProvider
-    ) {
-      option.classList.add(
-        'selected',
-      );
-    }
-
-    option.innerHTML = `
-      ${getAiIcon(provider.id)}
-
-      <span class="ai-option-name">
-        ${provider.name}
-      </span>
-
-      <span class="ai-option-check">
-        ${
-          provider.id ===
-          selectedAiProvider
-            ? '✓'
-            : ''
-        }
-      </span>
-    `;
-
-    option.addEventListener(
-      'click',
-      () => {
-        selectedAiProvider =
-          provider.id;
-
-        window.localStorage.setItem(
-          'auto-codez-ai-provider',
-          provider.id,
-        );
-
-        renderAiOptions();
-        closeAiMenu();
-
-        showStatus(
-          `${provider.name} selecionado.`,
-        );
-      },
-    );
-
-    aiOptions.appendChild(
-      option,
-    );
-  }
+function intelligenceDescription(level: IntelligenceLevel): string {
+  return intelligence.find((item) => item[0] === level)?.[2] || '';
 }
 
-function openAiMenu() {
-  renderAiOptions();
-
-  aiMenu?.classList.add(
-    'visible',
-  );
-
-  aiSelectorButton?.setAttribute(
-    'aria-expanded',
-    'true',
-  );
+function setExecutionState(state: ExecutionState, error = ''): void {
+  executionState = state;
+  lastError = error;
+  renderMessages();
+  renderComposer();
 }
 
-function closeAiMenu() {
-  aiMenu?.classList.remove(
-    'visible',
-  );
-
-  aiSelectorButton?.setAttribute(
-    'aria-expanded',
-    'false',
-  );
+function setIntelligenceMenu(open: boolean): void {
+  intelligenceMenuOpen = open;
+  intelligenceMenu.hidden = !open;
+  intelligenceButton.setAttribute('aria-expanded', String(open));
+  intelligenceButton.classList.toggle('open', open);
+  if (open) renderIntelligenceMenu();
 }
 
-function toggleAiMenu() {
-  if (
-    aiMenu?.classList.contains(
-      'visible',
-    )
-  ) {
-    closeAiMenu();
-    return;
-  }
-
-  openAiMenu();
-}
-
-aiSelectorButton?.addEventListener(
-  'click',
-  (event) => {
-    event.stopPropagation();
-    toggleAiMenu();
-  },
-);
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  message: string,
-): Promise<T> {
-  let timeoutId:
-    | number
-    | undefined;
-
-  const timeoutPromise =
-    new Promise<T>(
-      (_, reject) => {
-        timeoutId =
-          window.setTimeout(
-            () => {
-              reject(
-                new Error(
-                  message,
-                ),
-              );
-            },
-            timeoutMs,
-          );
-      },
-    );
-
-  try {
-    return await Promise.race([
-      promise,
-      timeoutPromise,
-    ]);
-  } finally {
-    if (
-      timeoutId !==
-      undefined
-    ) {
-      window.clearTimeout(
-        timeoutId,
-      );
-    }
-  }
-}
-
-async function inspectSelectedAi() {
-  if (!selectedAiProvider) {
-    showStatus(
-      'Selecione uma IA primeiro.',
-      true,
-    );
-
-    openAiMenu();
-
-    return;
-  }
-
-  const provider =
-    getAiProvider(
-      selectedAiProvider,
-    );
-
-  if (!provider) {
-    return;
-  }
-
-  const inspectionId =
-    ++aiInspectionSequence;
-
-  showStatus(
-    `Verificando ${provider.name}...`,
-  );
-
-  try {
-    const result =
-      await withTimeout(
-        window.autoCodez.inspectExternalAi(
-          provider.id,
-        ),
-        7000,
-        `A verificação de ${provider.name} demorou demais.`,
-      );
-
-    if (
-      inspectionId !==
-      aiInspectionSequence
-    ) {
-      return;
-    }
-
-    if (!result.success) {
-      showStatus(
-        result.error ||
-          `Não foi possível verificar ${provider.name}.`,
-        true,
-      );
-
-      console.error(
-        'AI_AUTOMATION_ERROR',
-        result,
-      );
-
-      return;
-    }
-
-    console.log(
-      'AI_AUTOMATION_DIAGNOSTIC',
-      result,
-    );
-
-    if (!result.running) {
-      showStatus(
-        `${provider.name} não foi encontrada.`,
-        true,
-      );
-
-      return;
-    }
-
-    const windows =
-      result.windows || [];
-
-    const controls =
-      windows.reduce(
-        (
-          total,
-          windowInfo,
-        ) =>
-          total +
-          (
-            windowInfo.controls
-              ?.length || 0
-          ),
-        0,
-      );
-
-    showStatus(
-      `${provider.name} encontrada. ${windows.length} janela(s), ${controls} controle(s).`,
-    );
-  } catch (error) {
-    if (
-      inspectionId !==
-      aiInspectionSequence
-    ) {
-      return;
-    }
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : `Não foi possível verificar ${provider.name}.`;
-
-    showStatus(
-      message,
-      true,
-    );
-
-    console.error(
-      'AI_AUTOMATION_EXCEPTION',
-      error,
-    );
-  }
-}
-
-window.addEventListener(
-  'keydown',
-  (event) => {
-    if (
-      event.ctrlKey &&
-      event.shiftKey &&
-      event.key.toLowerCase() ===
-        'i'
-    ) {
-      event.preventDefault();
-      void inspectSelectedAi();
-    }
-  },
-);
-
-document.addEventListener(
-  'click',
-  (event) => {
-    if (
-      !aiSelector ||
-      !(event.target instanceof Node)
-    ) {
-      return;
-    }
-
-    if (
-      !aiSelector.contains(
-        event.target,
-      )
-    ) {
-      closeAiMenu();
-    }
-  },
-);
-
-renderAiOptions();
-hideProposal();
-
-openFolderButton?.addEventListener(
-  'click',
-  async () => {
-    if (pendingProposal) {
-      const discard =
-        window.confirm(
-          'Existe uma alteração proposta pendente. Deseja descartá-la e abrir outro projeto?',
-        );
-
-      if (!discard) {
-        return;
-      }
-
-      rejectProposal();
-    }
-
-    try {
-      const result =
-        await withTimeout(
-          window.autoCodez.openFolder(),
-          30000,
-          'A abertura da pasta demorou demais.',
-        );
-
-      if (!result) {
-        return;
-      }
-
-      disposeAllModels();
-
-      projectRootPath =
-        result.path;
-
-      projectFiles =
-        result.files;
-
-      openTabs = [];
-      activeTabPath = null;
-
-      expandedDirectories.clear();
-
-      const parts =
-        result.path.split(
-          /[\\/]/
-        );
-
-      const name =
-        parts[
-          parts.length - 1
-        ] ||
-        result.path;
-
-      if (projectName) {
-        projectName.textContent =
-          name;
-      }
-
-      renderFileTree();
-      renderTabs();
-      renderEmptyEditor();
-      updateSaveButton();
-    } catch (error) {
-      showStatus(
-        error instanceof Error
-          ? error.message
-          : 'Não foi possível abrir a pasta.',
-        true,
-      );
-    }
-  },
-);
-
-async function openFile(
-  file: ProjectFile,
-) {
-  if (
-    file.type !==
-    'file'
-  ) {
-    return;
-  }
-
-  if (pendingProposal) {
-    if (
-      pendingProposal.tabPath ===
-      file.path
-    ) {
-      return;
-    }
-
-    const discard =
-      window.confirm(
-        'Existe uma alteração proposta pendente. Deseja descartá-la?',
-      );
-
-    if (!discard) {
-      return;
-    }
-
-    rejectProposal();
-  }
-
-  const existingTab =
-    openTabs.find(
-      (tab) =>
-        tab.path ===
-        file.path,
-    );
-
-  if (existingTab) {
-    activeTabPath =
-      existingTab.path;
-
-    activateTab(
-      existingTab,
-    );
-
-    return;
-  }
-
-  if (!editor) {
-    return;
-  }
-
-  const requestId =
-    ++fileLoadSequence;
-
-  if (editorInstance) {
-    editorInstance.setModel(
-      null,
-    );
-
-    editorInstance.dispose();
-    editorInstance = null;
-  }
-
-  editorChangeDisposable?.dispose();
-  editorChangeDisposable = null;
-
-  editor.innerHTML = `
-    <div class="loading-file">
-      Carregando arquivo...
+function renderIntelligenceMenu(): void {
+  intelligenceMenu.innerHTML = intelligence.map(([value, label]) => `
+    <div class="intelligence-option ${value === composerIntelligence ? 'selected' : ''}" data-intelligence-option="${value}" role="menuitemradio" aria-checked="${value === composerIntelligence}">
+      <span class="intelligence-option-main"><span class="intelligence-option-label">${label}</span></span>
+      <button class="info-button" data-intelligence-info="${value}" title="Informações sobre ${label}" aria-label="Informações sobre ${label}"></button>
     </div>
-  `;
+  `).join('');
+}
 
-  if (currentFile) {
-    currentFile.textContent =
-      `Carregando ${file.relativePath}...`;
+function renderNav(): void {
+  document.querySelectorAll('.rail-button').forEach((button) => button.classList.toggle('active', button.getAttribute('data-panel') === activePanel));
+  if (activePanel === 'projects') {
+    const project = activeProjectId ? projects.find((item) => item.id === activeProjectId) : undefined;
+    const projectChats = project ? chats.filter((chat) => chat.projectId === project.id) : [];
+    navPanel.innerHTML = `<div class="panel-title">${project ? escapeHtml(project.name) : 'Projetos'}</div><button class="new-item" data-action="new-project"><span class="new-item-icon new-folder-icon" aria-hidden="true"></span><span>Novo projeto</span></button>${project ? `<button class="new-item" data-action="new-project-chat"><span class="new-item-icon new-chat-icon" aria-hidden="true"></span><span>Novo chat neste projeto</span></button><div class="group-label">Chats do projeto</div>${projectChats.map((chat) => chatItem(chat)).join('') || '<div class="empty-panel">Nenhum chat neste projeto.</div>'}` : projects.map((item) => `<div class="project-item" data-project="${item.id}" role="button" tabindex="0"><span class="project-item-main"><span class="project-folder-icon" aria-hidden="true"></span><span class="project-item-copy"><span>${escapeHtml(item.name)}</span><small>${escapeHtml(item.rootPath)}</small></span></span></div>`).join('') || '<div class="empty-panel">Nenhum projeto criado.</div>'}`;
+    return;
   }
+  if (activePanel === 'plugins') {
+    navPanel.innerHTML = `<div class="panel-title">Plugins</div><div class="plugin-card"><span class="plugin-card-icon plugin-extension-icon" aria-hidden="true"></span><div><strong>Ecossistema de extensões</strong><span>A barra lateral direita permanece reservada para extensões.</span></div></div><div class="empty-panel">Nenhum plugin instalado.</div>`;
+    return;
+  }
+  navPanel.innerHTML = `<div class="panel-title">Chats</div><button class="new-item" data-action="new-chat"><span class="new-item-icon new-chat-icon" aria-hidden="true"></span><span>Novo chat</span></button><div class="group-label">Recentes</div>${chats.map(chatItem).join('') || '<div class="empty-panel">Nenhum chat salvo.</div>'}`;
+}
 
+function chatItem(chat: Chat): string {
+  return `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-settings="${chat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button><button class="chat-delete" data-chat-delete="${chat.id}" title="Excluir chat" aria-label="Excluir chat">×</button></div>`;
+}
+
+function renderHeader(): void {
+  if (!activeChat) {
+    chatHeader.innerHTML = `<div><div class="eyebrow">NOVO CHAT</div><h1>Comece uma conversa</h1></div><div class="header-actions"><button class="header-button" data-action="ai-settings">Configurar IA</button></div>`;
+    return;
+  }
+  const unconfigured = activeChat.providerId === 'unconfigured';
+  chatHeader.innerHTML = `<div><div class="chat-title-row"><h1>${escapeHtml(activeChat.title)}</h1><button class="gear" data-chat-settings="${activeChat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button></div><div class="chat-subtitle">${escapeHtml(providerName(activeChat.providerId))}${unconfigured ? '' : ` · ${escapeHtml(activeChat.model)} · Inteligência ${intelligenceLabel(activeChat.intelligence)}`}</div></div><div class="header-actions"><button class="provider-chip" data-chat-settings="${activeChat.id}">${escapeHtml(providerName(activeChat.providerId))}<span class="provider-chevron" aria-hidden="true"></span></button></div>`;
+}
+
+function renderApprovals(): string {
+  if (!pendingApprovals.length) return '';
+  return pendingApprovals.map((approval) => `<div class="approval-card" data-approval="${approval.id}"><div class="approval-heading">Aprovação necessária</div><div class="approval-tool">${escapeHtml(approval.toolCall.name)}</div><div class="approval-input">${escapeHtml(JSON.stringify(approval.toolCall.input, null, 2))}</div><div class="approval-actions"><button data-approve="${approval.id}" class="primary-button">Aprovar</button><button data-deny="${approval.id}" class="danger-button">Recusar</button></div></div>`).join('');
+}
+
+function renderMessages(): void {
+  if (!activeChat) {
+    messages.innerHTML = `<div class="welcome"><div class="welcome-mark"><span class="welcome-mark-eye"></span></div><h2>Como você quer trabalhar?</h2><p>Converse com uma IA, crie conteúdo ou abra um projeto para trabalhar em arquivos.</p><div class="welcome-grid"><button data-suggestion="Explique como o Auto CodeZ funciona.">Pergunte qualquer coisa</button><button data-suggestion="Analise meu projeto e explique a estrutura.">Analise um projeto</button><button data-suggestion="Crie uma ideia de interface moderna.">Crie conteúdo</button></div></div>`;
+    return;
+  }
+  const rendered = activeChat.messages.map((message) => `<article class="message ${message.role}"><div class="message-label">${message.role === 'user' ? 'Você' : message.role === 'tool' ? 'Ferramenta' : providerName(activeChat!.providerId)}</div><div class="message-content">${escapeHtml(message.content).replace(/\n/g, '<br>')}</div></article>`).join('');
+  const live = executionState === 'running' && streamingText ? `<article class="message assistant streaming"><div class="message-label">${escapeHtml(providerName(activeChat.providerId))}</div><div class="message-content">${escapeHtml(streamingText).replace(/\n/g, '<br>')}</div></article>` : '';
+  const activityLines = [...streamingActivity];
+  if (executionState === 'waiting_approval') activityLines.push('Aguardando sua aprovação.');
+  if (lastError) activityLines.push(lastError);
+  const activity = activityLines.length || pendingApprovals.length ? `<div class="activity-card"><div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line ${executionState === 'failed' ? 'error' : 'running'}">${escapeHtml(line)}</div>`).join('')}${renderApprovals()}</div>` : '';
+  messages.innerHTML = rendered + live + activity;
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function renderComposer(): void {
+  const busy = executionState === 'running' || executionState === 'waiting_approval';
+  intelligenceButton.querySelector<HTMLElement>('.intelligence-current')!.textContent = intelligenceLabel(composerIntelligence);
+  sendButton.disabled = !activeChat || !prompt.value.trim() || busy || pendingApprovals.length > 0;
+  prompt.disabled = busy;
+  renderIntelligenceMenu();
+}
+
+async function refresh(): Promise<void> {
   try {
-    const result =
-      await withTimeout(
-        window.autoCodez.readFile(
-          file.path,
-        ),
-        15000,
-        'A leitura do arquivo demorou demais.',
-      );
-
-    if (
-      requestId !==
-      fileLoadSequence
-    ) {
-      return;
+    const state = await window.autoCodez.getState();
+    providers = state.providers;
+    chats = state.chats;
+    projects = state.projects;
+    if (activeChat) {
+      const persistedChat = chats.find((chat) => chat.id === activeChat!.id);
+      if (persistedChat) activeChat = persistedChat;
+      else if (activeChat.messages.length > 0) activeChat = null;
     }
-
-    if (!result.success) {
-      editor.innerHTML = `
-        <div class="loading-file error">
-          ${escapeHtml(
-            result.error ||
-              'Erro ao abrir arquivo.',
-          )}
-        </div>
-      `;
-
-      if (currentFile) {
-        currentFile.textContent =
-          file.relativePath;
-      }
-
-      return;
-    }
-
-    const content =
-      result.content || '';
-
-    const language =
-      getMonacoLanguage(
-        file.name,
-      );
-
-    const existingModel =
-      monaco.editor.getModel(
-        monaco.Uri.file(
-          file.path,
-        ),
-      );
-
-    existingModel?.dispose();
-
-    const model =
-      monaco.editor.createModel(
-        content,
-        language,
-        monaco.Uri.file(
-          file.path,
-        ),
-      );
-
-    const tab: OpenTab = {
-      path: file.path,
-      name: file.name,
-      relativePath:
-        file.relativePath,
-      content,
-      originalContent:
-        content,
-      modified: false,
-      model,
-    };
-
-    openTabs.push(tab);
-    activeTabPath =
-      tab.path;
-
-    activateTab(tab);
+    if (activeChat) composerIntelligence = activeChat.intelligence;
+    renderNav();
+    renderHeader();
+    renderMessages();
+    renderComposer();
   } catch (error) {
-    if (
-      requestId !==
-      fileLoadSequence
-    ) {
-      return;
-    }
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Erro desconhecido ao abrir arquivo.';
-
-    editor.innerHTML = `
-      <div class="loading-file error">
-        ${escapeHtml(
-          message,
-        )}
-      </div>
-    `;
-
-    if (currentFile) {
-      currentFile.textContent =
-        file.relativePath;
-    }
-
-    showStatus(
-      message,
-      true,
-    );
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível carregar o estado do aplicativo.');
   }
 }
 
-function createEditor(
-  container: HTMLDivElement,
-  model: monaco.editor.ITextModel,
-) {
-  const instance =
-    monaco.editor.create(
-      container,
-      {
-        model,
-        automaticLayout: true,
-        theme: 'auto-codez',
-        fontFamily:
-          '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
-        fontSize: 13,
-        lineHeight: 21,
-        minimap: {
-          enabled: true,
-        },
-        smoothScrolling: true,
-        cursorSmoothCaretAnimation:
-          'on',
-        padding: {
-          top: 8,
-          bottom: 20,
-        },
-        scrollBeyondLastLine:
-          false,
-        renderWhitespace:
-          'selection',
-        wordWrap: 'off',
-        tabSize: 2,
-        scrollbar: {
-          verticalScrollbarSize: 10,
-          horizontalScrollbarSize: 10,
-        },
-        overviewRulerLanes: 3,
-        folding: true,
-        lineNumbers: 'on',
-        glyphMargin: false,
-        guides: {
-          indentation: true,
-        },
-        fixedOverflowWidgets: true,
-        renderLineHighlight:
-          'line',
-        selectOnLineNumbers: true,
-      },
-    );
-
-  instance.layout();
-
-  window.requestAnimationFrame(
-    () => {
-      instance.layout();
-      instance.setScrollTop(
-        0,
-      );
-      instance.setPosition({
-        lineNumber: 1,
-        column: 1,
-      });
-      instance.revealLine(
-        1,
-      );
-    },
-  );
-
-  return instance;
+function closeModal(): void {
+  modalRoot.innerHTML = '';
 }
 
-function activateTab(
-  tab: OpenTab,
-) {
-  if (pendingProposal) {
-    if (
-      pendingProposal.tabPath ===
-      tab.path
-    ) {
-      return;
-    }
-
-    rejectProposal();
-  }
-
-  activeTabPath =
-    tab.path;
-
-  renderTabs();
-  renderFileTree();
-  updateSaveButton();
-
-  if (!editor) {
-    return;
-  }
-
-  if (!editorInstance) {
-    editor.innerHTML = '';
-
-    editorInstance =
-      createEditor(
-        editor,
-        tab.model,
-      );
-
-    attachEditorChangeListener();
-  } else {
-    editorInstance.setModel(
-      tab.model,
-    );
-
-    editorInstance.layout();
-
-    window.requestAnimationFrame(
-      () => {
-        editorInstance?.layout();
-        editorInstance?.setScrollTop(
-          0,
-        );
-        editorInstance?.setPosition({
-          lineNumber: 1,
-          column: 1,
-        });
-        editorInstance?.revealLine(
-          1,
-        );
-      },
-    );
-  }
-
-  if (currentFile) {
-    currentFile.textContent =
-      tab.relativePath;
-  }
-
-  editorInstance.focus();
+function openModal(content: string): void {
+  setIntelligenceMenu(false);
+  modalRoot.innerHTML = `<div class="modal-backdrop"><div class="modal">${content}</div></div>`;
 }
 
-function attachEditorChangeListener() {
-  if (!editorInstance) {
-    return;
-  }
-
-  editorChangeDisposable?.dispose();
-
-  editorChangeDisposable =
-    editorInstance.onDidChangeModelContent(
-      () => {
-        if (
-          !activeTabPath ||
-          pendingProposal
-        ) {
-          return;
-        }
-
-        const tab =
-          openTabs.find(
-            (item) =>
-              item.path ===
-              activeTabPath,
-          );
-
-        if (!tab) {
-          return;
-        }
-
-        tab.content =
-          tab.model.getValue();
-
-        tab.modified =
-          tab.content !==
-          tab.originalContent;
-
-        renderTabs();
-        renderFileTree();
-        updateSaveButton();
-      },
-    );
+async function openGeneralSettings(): Promise<void> {
+  openModal(`<div class="modal-head"><div><div class="eyebrow">AUTO CODEZ</div><h2>Configurações gerais</h2><p>Configurações gerais do aplicativo.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="empty-panel">Preferências gerais, aparência, comportamento e integrações globais serão configurados nos módulos correspondentes.</div>`);
 }
 
-function renderTabs() {
-  if (!tabs) {
-    return;
+async function openProviderSettings(providerId = ''): Promise<void> {
+  openModal(`<div class="modal-head"><div><div class="eyebrow">CONFIGURAÇÕES DE IA</div><h2>Inteligências artificiais</h2><p>Cadastre provedores, API keys e modelos.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="provider-list">${providers.map((provider) => `<div class="provider-row"><div><strong>${escapeHtml(provider.displayName)}</strong><span>${provider.configured ? 'API key configurada' : 'Não configurada'}</span></div><div class="row-actions"><button data-provider-edit="${provider.id}">${provider.configured ? 'Alterar chave' : 'Configurar'}</button>${provider.configured ? `<button data-provider-remove="${provider.id}" class="danger">Remover</button>` : ''}</div></div>`).join('')}</div><div class="add-provider"><h3>${providerId ? 'Editar provedor' : 'Adicionar IA'}</h3><label>IA<select id="provider-id">${providers.map((provider) => `<option value="${provider.id}" ${provider.id === providerId ? 'selected' : ''}>${escapeHtml(provider.displayName)}</option>`).join('')}</select></label><label>API Key<input id="provider-key" type="password" placeholder="Cole sua API key aqui" autocomplete="off"></label><label>Modelo<input id="provider-model" type="text" placeholder="Modelo opcional"></label><button class="primary-button" id="save-provider">Testar e salvar</button></div>`);
+}
+
+async function openChatSettings(chat: Chat): Promise<void> {
+  let models: Model[] = [];
+  const provider = providers.find((item) => item.id === chat.providerId);
+  if (provider?.configured) {
+    try { models = await window.autoCodez.listModels(chat.providerId); } catch { models = []; }
   }
+  openModal(`<div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Configurações do chat</h2><p>Essas configurações pertencem a esta conversa.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><label>Inteligência artificial<select id="chat-provider">${providers.map((item) => `<option value="${item.id}" ${item.id === chat.providerId ? 'selected' : ''} ${item.configured ? '' : 'disabled'}>${escapeHtml(item.displayName)}${item.configured ? '' : ' · não configurada'}</option>`).join('')}</select></label><label>Modelo<select id="chat-model">${models.map((model) => `<option value="${model.id}" ${model.id === chat.model ? 'selected' : ''}>${escapeHtml(model.name)}</option>`).join('') || (chat.model === 'unconfigured' ? '<option value="">Configure uma IA primeiro</option>' : `<option value="${escapeHtml(chat.model)}">${escapeHtml(chat.model)}</option>`)}</select></label><label>Perfil de raciocínio<select id="chat-intelligence">${intelligence.map((item) => `<option value="${item[0]}" ${item[0] === chat.intelligence ? 'selected' : ''}>${item[1]} · ${item[2]}</option>`).join('')}</select></label><label>Nível de acesso<select id="chat-permission"><option value="read-only" ${chat.permissionLevel === 'read-only' ? 'selected' : ''}>Somente leitura</option><option value="safe" ${chat.permissionLevel === 'safe' ? 'selected' : ''}>Acesso seguro</option><option value="ask" ${chat.permissionLevel === 'ask' ? 'selected' : ''}>Acesso solicitado</option><option value="unrestricted" ${chat.permissionLevel === 'unrestricted' ? 'selected' : ''}>Acesso irrestrito</option></select></label><button class="primary-button" id="save-chat-settings">Salvar configurações</button></div>`);
+}
 
-  tabs.innerHTML = '';
-
-  for (
-    const tab of openTabs
-  ) {
-    const tabElement =
-      document.createElement(
-        'div',
-      );
-
-    tabElement.className =
-      'tab';
-
-    if (
-      tab.path ===
-      activeTabPath
-    ) {
-      tabElement.classList.add(
-        'active',
-      );
-    }
-
-    tabElement.innerHTML = `
-      <button
-        class="tab-main"
-        type="button"
-      >
-        <span class="tab-icon ${getFileColorClass(
-          tab.name,
-        )}">
-          ${getFileIcon(
-            tab.name,
-          )}
-        </span>
-
-        <span class="tab-name"></span>
-
-        <span class="tab-modified"></span>
-      </button>
-
-      <button
-        class="tab-close"
-        title="Fechar"
-        type="button"
-      >
-        ×
-      </button>
-    `;
-
-    const tabName =
-      tabElement.querySelector<HTMLSpanElement>(
-        '.tab-name',
-      );
-
-    const modified =
-      tabElement.querySelector<HTMLSpanElement>(
-        '.tab-modified',
-      );
-
-    if (tabName) {
-      tabName.textContent =
-        tab.name;
-    }
-
-    if (
-      modified &&
-      tab.modified
-    ) {
-      modified.textContent =
-        '●';
-    }
-
-    const tabMain =
-      tabElement.querySelector<HTMLButtonElement>(
-        '.tab-main',
-      );
-
-    const tabClose =
-      tabElement.querySelector<HTMLButtonElement>(
-        '.tab-close',
-      );
-
-    tabMain?.addEventListener(
-      'click',
-      () => {
-        activateTab(tab);
-      },
-    );
-
-    tabClose?.addEventListener(
-      'click',
-      (event) => {
-        event.stopPropagation();
-        closeTab(
-          tab.path,
-        );
-      },
-    );
-
-    tabs.appendChild(
-      tabElement,
-    );
+async function newChat(projectId?: string): Promise<void> {
+  if (executionState !== 'idle' && executionState !== 'failed') return;
+  try {
+    activeChat = await window.autoCodez.createChat({ intelligence: 'normal', permissionLevel: 'safe', projectId });
+    composerIntelligence = 'normal';
+    pendingApprovals = [];
+    streamingActivity = [];
+    lastError = '';
+    executionState = 'idle';
+    activePanel = projectId ? 'projects' : 'chats';
+    activeProjectId = projectId;
+    await refresh();
+  } catch (error) {
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível criar o chat.');
   }
 }
 
-function closeTab(
-  filePath: string,
-) {
-  if (
-    pendingProposal?.tabPath ===
-    filePath
-  ) {
-    const discard =
-      window.confirm(
-        'Existe uma alteração proposta pendente. Deseja fechar o arquivo e descartá-la?',
-      );
-
-    if (!discard) {
-      return;
-    }
-
-    rejectProposal();
+async function newProject(): Promise<void> {
+  try {
+    const rootPath = await window.autoCodez.openFolder();
+    if (!rootPath) return;
+    const name = rootPath.split(/[\\/]/).pop() || 'Novo projeto';
+    await window.autoCodez.createProject({ name, rootPath });
+    activePanel = 'projects';
+    activeProjectId = undefined;
+    await refresh();
+  } catch (error) {
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível criar o projeto.');
   }
+}
 
-  const tab =
-    openTabs.find(
-      (item) =>
-        item.path ===
-        filePath,
-    );
-
-  if (!tab) {
-    return;
+async function refreshApprovals(): Promise<void> {
+  try {
+    pendingApprovals = await window.autoCodez.listApprovals();
+    if (pendingApprovals.length) executionState = 'waiting_approval';
+    renderMessages();
+    renderComposer();
+  } catch (error) {
+    pendingApprovals = [];
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível carregar as aprovações.');
   }
+}
 
-  if (tab.modified) {
-    const discard =
-      window.confirm(
-        `O arquivo "${tab.name}" possui alterações não salvas. Deseja fechar mesmo assim?`,
-      );
-
-    if (!discard) {
-      return;
-    }
+async function sendMessage(): Promise<void> {
+  const content = prompt.value.trim();
+  if (!content || !activeChat || (executionState !== 'idle' && executionState !== 'failed') || pendingApprovals.length) return;
+  if (executionState === 'failed') {
+    executionState = 'idle';
+    lastError = '';
   }
-
-  ++fileLoadSequence;
-
-  const index =
-    openTabs.findIndex(
-      (item) =>
-        item.path ===
-        filePath,
-    );
-
-  if (index < 0) {
-    return;
-  }
-
-  if (
-    activeTabPath ===
-    filePath
-  ) {
-    editorChangeDisposable?.dispose();
-    editorChangeDisposable = null;
-
-    editorInstance?.setModel(
-      null,
-    );
-  }
-
-  tab.model.dispose();
-
-  openTabs.splice(
-    index,
-    1,
-  );
-
-  if (
-    activeTabPath ===
-    filePath
-  ) {
-    const nextTab =
-      openTabs[index] ||
-      openTabs[index - 1] ||
-      null;
-
-    activeTabPath =
-      nextTab?.path ||
-      null;
-
-    if (nextTab) {
-      activateTab(
-        nextTab,
-      );
+  const chatId = activeChat.id;
+  prompt.value = '';
+  prompt.style.height = '';
+  streamingText = '';
+  streamingActivity = [`Enviando para ${providerName(activeChat.providerId)}`];
+  lastError = '';
+  activeChat.messages = [...activeChat.messages, { role: 'user', content, createdAt: Date.now() }];
+  setExecutionState('running');
+  try {
+    const result = await window.autoCodez.streamChat({ chatId, content });
+    if (!activeChat || activeChat.id !== chatId) return;
+    activeChat = result.chat;
+    pendingApprovals = result.pendingApprovalIds.length ? await window.autoCodez.listApprovals() : [];
+    if (pendingApprovals.length) {
+      executionState = 'waiting_approval';
+      streamingText = '';
+      renderMessages();
+      renderComposer();
     } else {
-      renderEmptyEditor();
+      executionState = 'idle';
+      streamingText = '';
+      streamingActivity = [];
+      await refresh();
     }
-  }
-
-  renderTabs();
-  renderFileTree();
-  updateSaveButton();
-}
-
-async function saveActiveFile() {
-  if (
-    !activeTabPath ||
-    pendingProposal
-  ) {
-    return;
-  }
-
-  const tab =
-    openTabs.find(
-      (item) =>
-        item.path ===
-        activeTabPath,
-    );
-
-  if (
-    !tab ||
-    !tab.modified
-  ) {
-    return;
-  }
-
-  tab.content =
-    tab.model.getValue();
-
-  try {
-    const result =
-      await withTimeout(
-        window.autoCodez.writeFile(
-          tab.path,
-          tab.content,
-        ),
-        15000,
-        'A gravação do arquivo demorou demais.',
-      );
-
-    if (!result.success) {
-      showStatus(
-        result.error ||
-          'Erro ao salvar arquivo.',
-        true,
-      );
-
-      return;
-    }
-
-    tab.originalContent =
-      tab.content;
-
-    tab.modified = false;
-
-    renderTabs();
-    renderFileTree();
-    updateSaveButton();
-
-    showStatus(
-      'Arquivo salvo.',
-    );
   } catch (error) {
-    showStatus(
-      error instanceof Error
-        ? error.message
-        : 'Erro ao salvar arquivo.',
-      true,
-    );
+    setExecutionState('failed', error instanceof Error ? error.message : 'Falha ao enviar mensagem.');
   }
 }
 
-saveButton?.addEventListener(
-  'click',
-  () => {
-    void saveActiveFile();
-  },
-);
-
-window.addEventListener(
-  'keydown',
-  (event) => {
-    if (
-      (event.ctrlKey ||
-        event.metaKey) &&
-      event.key.toLowerCase() ===
-        's'
-    ) {
-      event.preventDefault();
-      void saveActiveFile();
-    }
-
-    if (
-      pendingProposal &&
-      event.key === 'Escape'
-    ) {
-      event.preventDefault();
-      rejectProposal();
-    }
-  },
-);
-
-function updateSaveButton() {
-  if (!saveButton) {
-    return;
-  }
-
-  const activeTab =
-    openTabs.find(
-      (tab) =>
-        tab.path ===
-        activeTabPath,
-    );
-
-  saveButton.disabled =
-    !activeTab?.modified ||
-    pendingProposal !== null;
-}
-
-function renderEmptyEditor() {
-  ++fileLoadSequence;
-
-  disposeDiffEditor();
-
-  editorChangeDisposable?.dispose();
-  editorChangeDisposable = null;
-
-  if (editorInstance) {
-    editorInstance.setModel(
-      null,
-    );
-
-    editorInstance.dispose();
-    editorInstance = null;
-  }
-
-  if (
-    editor &&
-    currentFile
-  ) {
-    currentFile.textContent =
-      'Nenhum arquivo selecionado';
-
-    editor.innerHTML = `
-      <div class="editor-empty">
-        <div class="editor-empty-icon">
-          { }
-        </div>
-
-        <div>
-          Selecione um arquivo
-        </div>
-      </div>
-    `;
-  }
-
-  hideProposal();
-}
-
-function disposeAllModels() {
-  ++fileLoadSequence;
-
-  disposeDiffEditor();
-
-  editorChangeDisposable?.dispose();
-  editorChangeDisposable = null;
-
-  if (editorInstance) {
-    editorInstance.setModel(
-      null,
-    );
-
-    editorInstance.dispose();
-    editorInstance = null;
-  }
-
-  for (
-    const tab of openTabs
-  ) {
-    tab.model.dispose();
-  }
-
-  pendingProposal = null;
-  hideProposal();
-}
-
-function disposeDiffEditor() {
-  if (diffEditorInstance) {
-    diffEditorInstance.setModel(
-      null,
-    );
-
-    diffEditorInstance.dispose();
-    diffEditorInstance = null;
-  }
-
-  if (pendingProposal) {
-    pendingProposal.originalModel.dispose();
-    pendingProposal.proposedModel.dispose();
-  }
-
-  pendingProposal = null;
-}
-
-function showProposal() {
-  proposalBar?.classList.add(
-    'visible',
-  );
-
-  updateSaveButton();
-}
-
-function hideProposal() {
-  proposalBar?.classList.remove(
-    'visible',
-  );
-
-  updateSaveButton();
-}
-
-function createProposal(
-  proposedContent: string,
-) {
-  if (pendingProposal) {
-    showStatus(
-      'Já existe uma alteração proposta. Aceite ou rejeite a proposta atual.',
-      true,
-    );
-
-    return;
-  }
-
-  if (
-    !activeTabPath ||
-    !editor
-  ) {
-    showStatus(
-      'Abra um arquivo antes de criar uma proposta.',
-      true,
-    );
-
-    return;
-  }
-
-  const tab =
-    openTabs.find(
-      (item) =>
-        item.path ===
-        activeTabPath,
-    );
-
-  if (!tab) {
-    return;
-  }
-
-  const originalContent =
-    tab.model.getValue();
-
-  if (
-    originalContent ===
-    proposedContent
-  ) {
-    showStatus(
-      'A proposta não possui alterações.',
-      true,
-    );
-
-    return;
-  }
-
-  const language =
-    getMonacoLanguage(
-      tab.name,
-    );
-
-  const originalModel =
-    monaco.editor.createModel(
-      originalContent,
-      language,
-    );
-
-  const proposedModel =
-    monaco.editor.createModel(
-      proposedContent,
-      language,
-    );
-
-  pendingProposal = {
-    tabPath: tab.path,
-    originalContent,
-    proposedContent,
-    originalModel,
-    proposedModel,
-  };
-
-  editorChangeDisposable?.dispose();
-  editorChangeDisposable = null;
-
-  if (editorInstance) {
-    editorInstance.setModel(
-      null,
-    );
-
-    editorInstance.dispose();
-    editorInstance = null;
-  }
-
-  editor.innerHTML = '';
-
-  diffEditorInstance =
-    monaco.editor.createDiffEditor(
-      editor,
-      {
-        automaticLayout: true,
-        theme: 'auto-codez',
-        fontFamily:
-          '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
-        fontSize: 13,
-        lineHeight: 21,
-        minimap: {
-          enabled: false,
-        },
-        renderSideBySide: false,
-        readOnly: true,
-        originalEditable: false,
-        enableSplitViewResizing:
-          false,
-        scrollBeyondLastLine:
-          false,
-        renderIndicators: true,
-        padding: {
-          top: 8,
-          bottom: 20,
-        },
-        scrollbar: {
-          verticalScrollbarSize: 10,
-          horizontalScrollbarSize: 10,
-        },
-        folding: true,
-        lineNumbers: 'on',
-        glyphMargin: false,
-        overviewRulerLanes: 3,
-      },
-    );
-
-  diffEditorInstance.setModel({
-    original:
-      originalModel,
-    modified:
-      proposedModel,
-  });
-
-  diffEditorInstance.layout();
-
-  window.requestAnimationFrame(
-    () => {
-      diffEditorInstance?.layout();
-
-      const modifiedEditor =
-        diffEditorInstance?.getModifiedEditor();
-
-      modifiedEditor?.setScrollTop(
-        0,
-      );
-
-      modifiedEditor?.setPosition({
-        lineNumber: 1,
-        column: 1,
-      });
-
-      modifiedEditor?.revealLine(
-        1,
-      );
-    },
-  );
-
-  if (currentFile) {
-    currentFile.textContent =
-      `${tab.relativePath} • Alteração proposta`;
-  }
-
-  showProposal();
-}
-
-function restoreTabEditor(
-  tab: OpenTab,
-) {
-  if (!editor) {
-    return;
-  }
-
-  disposeDiffEditor();
-
-  editor.innerHTML = '';
-
-  if (editorInstance) {
-    editorInstance.setModel(
-      null,
-    );
-
-    editorInstance.dispose();
-    editorInstance = null;
-  }
-
-  editorInstance =
-    createEditor(
-      editor,
-      tab.model,
-    );
-
-  attachEditorChangeListener();
-
-  activeTabPath =
-    tab.path;
-
-  if (currentFile) {
-    currentFile.textContent =
-      tab.relativePath;
-  }
-
-  renderTabs();
-  renderFileTree();
-  updateSaveButton();
-
-  editorInstance.focus();
-}
-
-function acceptProposal() {
-  if (!pendingProposal) {
-    return;
-  }
-
-  const proposal =
-    pendingProposal;
-
-  const tab =
-    openTabs.find(
-      (item) =>
-        item.path ===
-        proposal.tabPath,
-    );
-
-  if (!tab) {
-    rejectProposal();
-    return;
-  }
-
-  const proposedContent =
-    proposal.proposedContent;
-
-  disposeDiffEditor();
-
-  tab.model.setValue(
-    proposedContent,
-  );
-
-  tab.content =
-    proposedContent;
-
-  tab.modified =
-    tab.content !==
-    tab.originalContent;
-
-  restoreTabEditor(tab);
-
-  hideProposal();
-
-  showStatus(
-    'Alteração aceita.',
-  );
-}
-
-function rejectProposal() {
-  if (!pendingProposal) {
-    return;
-  }
-
-  const tabPath =
-    pendingProposal.tabPath;
-
-  disposeDiffEditor();
-
-  const tab =
-    openTabs.find(
-      (item) =>
-        item.path ===
-        tabPath,
-    );
-
-  if (!tab) {
-    hideProposal();
-    return;
-  }
-
-  restoreTabEditor(tab);
-
-  hideProposal();
-
-  showStatus(
-    'Alteração rejeitada.',
-  );
-}
-
-acceptProposalButton?.addEventListener(
-  'click',
-  acceptProposal,
-);
-
-rejectProposalButton?.addEventListener(
-  'click',
-  rejectProposal,
-);
-
-function buildAiPrompt(): {
-  request: string;
-  projectRoot: string;
-  activeFile: {
-    path: string;
-    relativePath: string;
-    name: string;
-    content: string;
-  };
-  files: {
-    path: string;
-    relativePath: string;
-    name: string;
-    content: string;
-  }[];
-} | null {
-  if (!activeTabPath) {
-    showStatus(
-      'Abra um arquivo antes de enviar uma solicitação.',
-      true,
-    );
-
-    return null;
-  }
-
-  if (!projectRootPath) {
-    showStatus(
-      'Abra um projeto antes de enviar uma solicitação.',
-      true,
-    );
-
-    return null;
-  }
-
-  const tab =
-    openTabs.find(
-      (item) =>
-        item.path ===
-        activeTabPath,
-    );
-
-  if (!tab) {
-    showStatus(
-      'Não foi possível localizar o arquivo ativo.',
-      true,
-    );
-
-    return null;
-  }
-
-  const request =
-    prompt.value.trim();
-
-  if (!request) {
-    return null;
-  }
-
-  const files =
-    projectFiles
-      .filter(
-        (file) =>
-          file.type === 'file',
-      )
-      .map(
-        (file) => ({
-          path:
-            file.path,
-          relativePath:
-            file.relativePath,
-          name:
-            file.name,
-          content:
-  openTabs.find(
-    (tab) =>
-      tab.path === file.path,
-  )?.model.getValue() ||
-  '',
-        }),
-      );
-
-  const activeFile = {
-    path:
-      tab.path,
-    relativePath:
-      tab.relativePath,
-    name:
-      tab.name,
-    content:
-      tab.model.getValue(),
-  };
-
-  return {
-    request,
-    projectRoot:
-      projectRootPath,
-    activeFile,
-    files,
-  };
-}
-
-async function sendMessage() {
-  if (!prompt) {
-    return;
-  }
-
-  if (pendingProposal) {
-    showStatus(
-      'Aceite ou rejeite a alteração atual antes de enviar outra solicitação.',
-      true,
-    );
-
-    return;
-  }
-
-  if (!selectedAiProvider) {
-    openAiMenu();
-
-    showStatus(
-      'Selecione uma IA primeiro.',
-      true,
-    );
-
-    return;
-  }
-
-  const provider =
-    getAiProvider(
-      selectedAiProvider,
-    );
-
-  if (!provider) {
-    return;
-  }
-
-  const sessionInput =
-    buildAiPrompt();
-
-  if (!sessionInput) {
-    return;
-  }
-
-  sendButton!.disabled = true;
-
+async function resumeApproval(id: string, approve: boolean): Promise<void> {
+  if (executionState !== 'waiting_approval') return;
+  const approval = pendingApprovals.find((item) => item.id === id);
+  if (!approval) return;
+  executionState = 'running';
+  pendingApprovals = pendingApprovals.filter((item) => item.id !== id);
+  streamingText = '';
+  streamingActivity = [approve ? 'Aprovando operação...' : 'Recusando operação...'];
+  lastError = '';
+  renderMessages();
+  renderComposer();
   try {
-    showStatus(
-      'Preparando solicitação...',
-    );
-
-    const result =
-      await window.autoCodez.createAiSession({
-        provider:
-          selectedAiProvider,
-        request:
-          sessionInput.request,
-        projectRoot:
-          sessionInput.projectRoot,
-        activeFile:
-          sessionInput.activeFile,
-        files:
-          sessionInput.files,
-      });
-
-    if (!result.success) {
-      showStatus(
-        result.error ||
-          'Não foi possível iniciar a sessão.',
-        true,
-      );
-
-      return;
+    const result = approve ? await window.autoCodez.approveTool(id) : await window.autoCodez.denyTool(id);
+    if (result.chatId) {
+      const chat = chats.find((item) => item.id === result.chatId);
+      if (chat && result.messages) chat.messages = result.messages;
+      if (activeChat?.id === result.chatId && result.messages) activeChat.messages = result.messages;
     }
-
-    prompt.value = '';
-
-    prompt.style.height =
-      'auto';
-
-    showStatus(
-      `Enviando para ${provider.name}...`,
-    );
+    pendingApprovals = await window.autoCodez.listApprovals();
+    if (pendingApprovals.length) {
+      executionState = 'waiting_approval';
+      streamingActivity = ['Outras operações ainda aguardam aprovação.'];
+      renderMessages();
+      renderComposer();
+    } else {
+      executionState = 'idle';
+      streamingText = '';
+      streamingActivity = [];
+      await refresh();
+    }
   } catch (error) {
-    showStatus(
-      error instanceof Error
-        ? error.message
-        : 'Não foi possível iniciar a sessão.',
-      true,
-    );
-  } finally {
-    sendButton!.disabled =
-      pendingProposal !== null;
+    pendingApprovals = await window.autoCodez.listApprovals().catch((): Approval[] => []);
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível processar a aprovação.');
   }
 }
 
-sendButton?.addEventListener(
-  'click',
-  () => {
+async function setComposerIntelligence(level: IntelligenceLevel): Promise<void> {
+  if (!activeChat || (executionState !== 'idle' && executionState !== 'failed')) return;
+  const previous = composerIntelligence;
+  const previousState = executionState;
+  composerIntelligence = level;
+  setIntelligenceMenu(false);
+  if (activeChat.intelligence === level) { renderComposer(); return; }
+  try {
+    activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId: activeChat.providerId, model: activeChat.model, intelligence: level, permissionLevel: activeChat.permissionLevel });
+    executionState = 'idle';
+    lastError = '';
+    await refresh();
+  } catch (error) {
+    composerIntelligence = previous;
+    setExecutionState(previousState === 'failed' ? 'failed' : 'failed', error instanceof Error ? error.message : 'Não foi possível atualizar o perfil de raciocínio.');
+  }
+}
+
+async function deleteChat(chatId: string): Promise<void> {
+  if (executionState === 'running' || executionState === 'waiting_approval') return;
+  if (!window.confirm('Excluir esta conversa permanentemente?')) return;
+  try {
+    await window.autoCodez.deleteChat(chatId);
+    if (activeChat?.id === chatId) {
+      activeChat = null;
+      pendingApprovals = [];
+      streamingText = '';
+      streamingActivity = [];
+      lastError = '';
+      executionState = 'idle';
+    }
+    await refresh();
+  } catch (error) {
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível excluir o chat.');
+  }
+}
+
+intelligenceButton.addEventListener('click', () => setIntelligenceMenu(!intelligenceMenuOpen));
+intelligenceMenu.addEventListener('click', async (event) => {
+  const target = event.target as HTMLElement;
+  const info = target.closest<HTMLElement>('[data-intelligence-info]');
+  if (info) {
+    event.stopPropagation();
+    const level = info.dataset.intelligenceInfo as IntelligenceLevel;
+    openModal(`<div class="modal-head"><div><div class="eyebrow">RACIOCÍNIO</div><h2>${intelligenceLabel(level)}</h2><p>${escapeHtml(intelligenceDescription(level))}</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="intelligence-info-card"><span class="info-card-icon" aria-hidden="true"></span><span>O Auto CodeZ traduz este perfil para o nível de esforço compatível com o modelo escolhido.</span></div>`);
+    return;
+  }
+  const option = target.closest<HTMLElement>('[data-intelligence-option]');
+  if (option) await setComposerIntelligence(option.dataset.intelligenceOption as IntelligenceLevel);
+});
+
+prompt.addEventListener('input', () => {
+  prompt.style.height = 'auto';
+  prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`;
+  renderComposer();
+});
+prompt.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
     void sendMessage();
-  },
-);
+  }
+});
+sendButton.addEventListener('click', () => void sendMessage());
+document.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement;
+  if (!target.closest('.intelligence-control')) setIntelligenceMenu(false);
+  const approve = target.closest<HTMLElement>('[data-approve]');
+  if (approve?.dataset.approve) void resumeApproval(approve.dataset.approve, true);
+  const deny = target.closest<HTMLElement>('[data-deny]');
+  if (deny?.dataset.deny) void resumeApproval(deny.dataset.deny, false);
+});
 
-prompt?.addEventListener(
-  'keydown',
-  (event) => {
-    if (
-      event.key === 'Enter' &&
-      !event.shiftKey
-    ) {
-      event.preventDefault();
-      void sendMessage();
-    }
-  },
-);
+app.addEventListener('click', async (event) => {
+  const target = event.target as HTMLElement;
+  const panel = target.closest<HTMLElement>('[data-panel]');
+  if (panel) {
+    activePanel = panel.dataset.panel || 'chats';
+    activeProjectId = undefined;
+    renderNav();
+    return;
+  }
+  const deleteButton = target.closest<HTMLElement>('[data-chat-delete]');
+  if (deleteButton?.dataset.chatDelete) {
+    event.stopPropagation();
+    await deleteChat(deleteButton.dataset.chatDelete);
+    return;
+  }
+  const settings = target.closest<HTMLElement>('[data-chat-settings]');
+  if (settings) {
+    if (executionState === 'running' || executionState === 'waiting_approval') return;
+    const chat = chats.find((item) => item.id === settings.dataset.chatSettings) || (activeChat?.id === settings.dataset.chatSettings ? activeChat : undefined);
+    if (chat) await openChatSettings(chat);
+    return;
+  }
+  const chatButton = target.closest<HTMLElement>('[data-chat]');
+  if (chatButton) {
+    if (executionState === 'running' || executionState === 'waiting_approval') return;
+    activeChat = chats.find((chat) => chat.id === chatButton.dataset.chat) || null;
+    pendingApprovals = [];
+    streamingText = '';
+    streamingActivity = [];
+    lastError = '';
+    composerIntelligence = activeChat?.intelligence || 'normal';
+    renderNav();
+    renderHeader();
+    renderMessages();
+    renderComposer();
+    return;
+  }
+  const projectButton = target.closest<HTMLElement>('[data-project]');
+  if (projectButton) {
+    activePanel = 'projects';
+    activeProjectId = projectButton.dataset.project;
+    renderNav();
+    renderHeader();
+    renderMessages();
+    renderComposer();
+    return;
+  }
+  const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
+  if (action === 'new-chat') { closeModal(); await newChat(); return; }
+  if (action === 'new-project-chat') { if (activeProjectId) await newChat(activeProjectId); return; }
+  if (action === 'new-project') { await newProject(); return; }
+  if (action === 'settings') { await openGeneralSettings(); return; }
+  if (action === 'ai-settings') { await openProviderSettings(); return; }
+  if (action === 'close-modal') { closeModal(); return; }
+  if (action === 'profile') { openModal(`<div class="modal-head"><div><div class="eyebrow">PERFIL</div><h2>Seu perfil</h2><p>O sistema de conta e sincronização será conectado em uma etapa própria.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="profile-preview"><div class="avatar">CZ</div><div><strong>Usuário local</strong><span>Configuração local do Auto CodeZ</span></div></div>`); return; }
+  if (action === 'attachments') { openModal(`<div class="modal-head"><div><div class="eyebrow">ANEXOS</div><h2>Anexar conteúdo</h2><p>Arquivos e multimídia serão conectados ao sistema de capacidades.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="attachment-options"><button>Arquivo</button><button>Imagem</button><button>Áudio</button><button>Vídeo</button></div>`); return; }
+});
 
-prompt?.addEventListener(
-  'input',
-  () => {
-    if (!prompt) {
+modalRoot.addEventListener('click', async (event) => {
+  const target = event.target as HTMLElement;
+  const edit = target.closest<HTMLElement>('[data-provider-edit]');
+  if (edit) { await openProviderSettings(edit.dataset.providerEdit || ''); return; }
+  const remove = target.closest<HTMLElement>('[data-provider-remove]');
+  if (remove) {
+    try { await window.autoCodez.removeProvider(remove.dataset.providerRemove || ''); await refresh(); await openProviderSettings(); } catch (error) { setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível remover o provider.'); }
+    return;
+  }
+  if (target.id === 'save-provider') {
+    const providerId = document.querySelector<HTMLSelectElement>('#provider-id')?.value || '';
+    const apiKey = document.querySelector<HTMLInputElement>('#provider-key')?.value || '';
+    const model = document.querySelector<HTMLInputElement>('#provider-model')?.value.trim() || undefined;
+    const button = target as HTMLButtonElement;
+    if (!apiKey.trim()) return;
+    button.disabled = true;
+    button.textContent = 'Validando...';
+    try { await window.autoCodez.saveProvider({ providerId, apiKey, model }); await refresh(); await openProviderSettings(providerId); } catch (error) { button.disabled = false; button.textContent = 'Testar e salvar'; setExecutionState('failed', error instanceof Error ? error.message : 'Falha ao validar a API key.'); }
+    return;
+  }
+  if (target.id === 'chat-provider') {
+    const providerId = (target as HTMLSelectElement).value;
+    const select = document.querySelector<HTMLSelectElement>('#chat-model');
+    try { const nextModels = await window.autoCodez.listModels(providerId); if (select) select.innerHTML = nextModels.map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.name)}</option>`).join(''); } catch (error) { if (select) select.innerHTML = `<option value="">${escapeHtml(error instanceof Error ? error.message : 'Não foi possível carregar os modelos')}</option>`; }
+    return;
+  }
+  if (target.id === 'save-chat-settings') {
+    if (!activeChat) return;
+    const providerId = document.querySelector<HTMLSelectElement>('#chat-provider')?.value || activeChat.providerId;
+    const model = document.querySelector<HTMLSelectElement>('#chat-model')?.value || activeChat.model;
+    const intelligenceLevel = document.querySelector<HTMLSelectElement>('#chat-intelligence')?.value || activeChat.intelligence;
+    const permissionLevel = document.querySelector<HTMLSelectElement>('#chat-permission')?.value || activeChat.permissionLevel;
+    if (providerId === 'unconfigured' || !model) {
+      closeModal();
+      await openProviderSettings();
       return;
     }
+    try { activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId, model, intelligence: intelligenceLevel, permissionLevel }); composerIntelligence = activeChat.intelligence; closeModal(); executionState = 'idle'; lastError = ''; await refresh(); } catch (error) { setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.'); }
+  }
+});
 
-    prompt.style.height =
-      'auto';
-
-    prompt.style.height =
-      `${Math.min(
-        prompt.scrollHeight,
-        180,
-      )}px`;
-  },
-);
-
-function renderFileTree() {
-  if (!fileList) {
+window.autoCodez.onStreamEvent((event) => {
+  if (event.type === 'start') {
+    executionState = 'running';
+    lastError = '';
+    renderComposer();
     return;
   }
-
-  fileList.innerHTML = '';
-
-  if (
-    projectFiles.length ===
-    0
-  ) {
-    fileList.innerHTML = `
-      <div class="empty-files">
-        Nenhum arquivo encontrado.
-      </div>
-    `;
-
+  if (event.type === 'delta' && event.text) {
+    streamingText += event.text;
+    renderMessages();
     return;
   }
-
-  const tree =
-    buildTree(
-      projectFiles,
-    );
-
-  const fragment =
-    document.createDocumentFragment();
-
-  for (
-    const item of tree
-  ) {
-    renderTreeItem(
-      item,
-      fragment,
-      0,
-    );
-  }
-
-  fileList.appendChild(
-    fragment,
-  );
-}
-
-type TreeNode = {
-  file: ProjectFile;
-  children: TreeNode[];
-};
-
-function buildTree(
-  files: ProjectFile[],
-): TreeNode[] {
-  const roots: TreeNode[] = [];
-
-  const nodes =
-    new Map<
-      string,
-      TreeNode
-    >();
-
-  for (
-    const file of files
-  ) {
-    nodes.set(
-      file.path,
-      {
-        file,
-        children: [],
-      },
-    );
-  }
-
-  for (
-    const file of files
-  ) {
-    const node =
-      nodes.get(
-        file.path,
-      );
-
-    if (!node) {
-      continue;
-    }
-
-    const parentPath =
-      getParentPath(
-        file.path,
-      );
-
-    if (
-      parentPath &&
-      nodes.has(parentPath)
-    ) {
-      nodes
-        .get(parentPath)
-        ?.children.push(
-          node,
-        );
-    } else {
-      roots.push(node);
-    }
-  }
-
-  for (
-    const node of nodes.values()
-  ) {
-    node.children.sort(
-      (a, b) => {
-        if (
-          a.file.type !==
-          b.file.type
-        ) {
-          return a.file.type ===
-            'directory'
-            ? -1
-            : 1;
-        }
-
-        return a.file.name.localeCompare(
-          b.file.name,
-        );
-      },
-    );
-  }
-
-  roots.sort(
-    (a, b) => {
-      if (
-        a.file.type !==
-        b.file.type
-      ) {
-        return a.file.type ===
-          'directory'
-          ? -1
-          : 1;
-      }
-
-      return a.file.name.localeCompare(
-        b.file.name,
-      );
-    },
-  );
-
-  return roots;
-}
-
-function getParentPath(
-  filePath: string,
-): string | null {
-  const normalized =
-    filePath.replace(
-      /[\\/]+$/,
-      '',
-    );
-
-  const index =
-    Math.max(
-      normalized.lastIndexOf(
-        '/',
-      ),
-      normalized.lastIndexOf(
-        '\\',
-      ),
-    );
-
-  if (index <= 0) {
-    return null;
-  }
-
-  return normalized.substring(
-    0,
-    index,
-  );
-}
-
-function renderTreeItem(
-  node: TreeNode,
-  fragment: DocumentFragment,
-  depth: number,
-) {
-  const { file } =
-    node;
-
-  const item =
-    document.createElement(
-      'button',
-    );
-
-  item.className =
-    `file-item ${file.type}`;
-
-  item.style.paddingLeft =
-    `${8 + depth * 18}px`;
-
-  item.type = 'button';
-
-  if (
-    file.type ===
-    'directory'
-  ) {
-    const expanded =
-      expandedDirectories.has(
-        file.path,
-      );
-
-    item.innerHTML = `
-      <span class="folder-chevron ${
-        expanded
-          ? 'expanded'
-          : ''
-      }">
-        ${getChevronIcon()}
-      </span>
-
-      <span class="file-icon folder-icon">
-        ${getFolderIcon(
-          expanded,
-        )}
-      </span>
-
-      <span class="file-name"></span>
-    `;
-
-    const nameElement =
-      item.querySelector<HTMLSpanElement>(
-        '.file-name',
-      );
-
-    if (nameElement) {
-      nameElement.textContent =
-        file.name;
-    }
-
-    item.addEventListener(
-      'click',
-      () => {
-        if (expanded) {
-          expandedDirectories.delete(
-            file.path,
-          );
-        } else {
-          expandedDirectories.add(
-            file.path,
-          );
-        }
-
-        renderFileTree();
-      },
-    );
-
-    fragment.appendChild(
-      item,
-    );
-
-    if (expanded) {
-      for (
-        const child of
-        node.children
-      ) {
-        renderTreeItem(
-          child,
-          fragment,
-          depth + 1,
-        );
-      }
-    }
-
+  if (event.type === 'tool_call' && event.toolCall) {
+    streamingActivity.push(`Solicitou ferramenta: ${event.toolCall.name}`);
+    renderMessages();
     return;
   }
-
-  item.innerHTML = `
-    <span class="folder-chevron file-spacer"></span>
-
-    <span class="file-icon ${getFileColorClass(
-      file.name,
-    )}">
-      ${getFileIcon(
-        file.name,
-      )}
-    </span>
-
-    <span class="file-name"></span>
-
-    <span class="file-status"></span>
-  `;
-
-  const nameElement =
-    item.querySelector<HTMLSpanElement>(
-      '.file-name',
-    );
-
-  const statusElement =
-    item.querySelector<HTMLSpanElement>(
-      '.file-status',
-    );
-
-  if (nameElement) {
-    nameElement.textContent =
-      file.name;
-  }
-
-  const tab =
-    openTabs.find(
-      (item) =>
-        item.path ===
-        file.path,
-    );
-
-  if (
-    tab?.modified &&
-    statusElement
-  ) {
-    statusElement.textContent =
-      'U';
-  }
-
-  if (
-    activeTabPath ===
-    file.path
-  ) {
-    item.classList.add(
-      'active',
-    );
-  }
-
-  item.addEventListener(
-    'click',
-    () => {
-      void openFile(file);
-    },
-  );
-
-  fragment.appendChild(
-    item,
-  );
-}
-
-function getChevronIcon(): string {
-  return `
-    <svg
-      viewBox="0 0 16 16"
-      width="12"
-      height="12"
-      aria-hidden="true"
-    >
-      <path
-        d="M6 3.5L10.5 8L6 12.5"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.4"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
-  `;
-}
-
-function getFolderIcon(
-  expanded: boolean,
-): string {
-  return `
-    <svg
-      viewBox="0 0 16 16"
-      width="16"
-      height="16"
-      aria-hidden="true"
-    >
-      <path
-        d="M1.5 4.5C1.5 3.95 1.95 3.5 2.5 3.5H6L7.5 5H13.5C14.05 5 14.5 5.45 14.5 6V12C14.5 12.55 14.05 13 13.5 13H2.5C1.95 13 1.5 12.55 1.5 12V4.5Z"
-        fill="currentColor"
-      />
-      ${
-        expanded
-          ? `
-            <path
-              d="M2.5 6H13.5"
-              fill="none"
-              stroke="#0b0d11"
-              stroke-width="0.8"
-            />
-          `
-          : ''
-      }
-    </svg>
-  `;
-}
-
-function getFileIcon(
-  fileName: string,
-): string {
-  const lowerName =
-    fileName.toLowerCase();
-
-  if (
-    lowerName ===
-    '.gitignore'
-  ) {
-    return `
-      <svg viewBox="0 0 16 16" width="16" height="16">
-        <circle
-          cx="8"
-          cy="8"
-          r="6"
-          fill="currentColor"
-        />
-        <path
-          d="M5 8H11M8 5V11"
-          stroke="#0b0d11"
-          stroke-width="1.2"
-        />
-      </svg>
-    `;
-  }
-
-  if (
-    lowerName ===
-    'dockerfile'
-  ) {
-    return `
-      <svg viewBox="0 0 16 16" width="16" height="16">
-        <path
-          d="M2 7H12V11H2Z"
-          fill="currentColor"
-        />
-        <path
-          d="M4 5H6V7H4ZM7 5H9V7H7ZM10 5H12V7H10Z"
-          fill="currentColor"
-        />
-      </svg>
-    `;
-  }
-
-  const extension =
-    fileName
-      .split('.')
-      .pop()
-      ?.toLowerCase();
-
-  switch (extension) {
-    case 'html':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <path
-            d="M2.5 2.5H13.5L12.5 13L8 14L3.5 13Z"
-            fill="currentColor"
-          />
-          <path
-            d="M5 6H11M5.5 8H10.5M5.8 10H10.2"
-            stroke="#0b0d11"
-            stroke-width="1"
-          />
-        </svg>
-      `;
-
-    case 'css':
-    case 'scss':
-    case 'less':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <path
-            d="M3 2H13L12 14L8 15L4 14Z"
-            fill="currentColor"
-          />
-          <path
-            d="M5 6H11M5 8H10M5 10H9"
-            stroke="#0b0d11"
-            stroke-width="1"
-          />
-        </svg>
-      `;
-
-    case 'js':
-    case 'jsx':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <rect
-            x="1.5"
-            y="1.5"
-            width="13"
-            height="13"
-            rx="1"
-            fill="currentColor"
-          />
-          <text
-            x="8"
-            y="11.2"
-            text-anchor="middle"
-            font-size="6"
-            font-family="Arial"
-            font-weight="700"
-            fill="#0b0d11"
-          >JS</text>
-        </svg>
-      `;
-
-    case 'ts':
-    case 'tsx':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <rect
-            x="1.5"
-            y="1.5"
-            width="13"
-            height="13"
-            rx="1"
-            fill="currentColor"
-          />
-          <text
-            x="8"
-            y="11.2"
-            text-anchor="middle"
-            font-size="5.5"
-            font-family="Arial"
-            font-weight="700"
-            fill="#ffffff"
-          >TS</text>
-        </svg>
-      `;
-
-    case 'json':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <text
-            x="8"
-            y="11.5"
-            text-anchor="middle"
-            font-size="10"
-            font-family="monospace"
-            font-weight="700"
-            fill="currentColor"
-          >{}</text>
-        </svg>
-      `;
-
-    case 'md':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <path
-            d="M2 4H14V12H2Z"
-            fill="currentColor"
-          />
-          <path
-            d="M4 10V6L6 8L8 6V10M10 8H12M11 7V9"
-            stroke="#0b0d11"
-            stroke-width="1"
-            fill="none"
-          />
-        </svg>
-      `;
-
-    case 'py':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <path
-            d="M8 1.5C5 1.5 4 2.6 4 4.2V6H8V7H3C1.8 7 1.5 8.2 1.5 9.8C1.5 11.6 2.2 12.5 4 12.5H6V10.5C6 8.8 7 8 8.5 8H12C13.6 8 14.5 7 14.5 5.5V4C14.5 2.3 12.8 1.5 10.5 1.5Z"
-            fill="currentColor"
-          />
-        </svg>
-      `;
-
-    case 'java':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <path
-            d="M5 10C3 11 4 12.5 8 12.5C11.5 12.5 13 11 12 10"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-          />
-          <path
-            d="M8 2C10 4 5 5 8 7C10 8.2 7 9 7 10"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.3"
-          />
-        </svg>
-      `;
-
-    case 'c':
-    case 'cpp':
-    case 'h':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <circle
-            cx="8"
-            cy="8"
-            r="6"
-            fill="currentColor"
-          />
-          <text
-            x="8"
-            y="10.3"
-            text-anchor="middle"
-            font-size="7"
-            font-family="Arial"
-            font-weight="700"
-            fill="#0b0d11"
-          >C</text>
-        </svg>
-      `;
-
-    case 'xml':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <path
-            d="M3 4L1.5 8L3 12M13 4L14.5 8L13 12M7 3L9 13"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.2"
-            stroke-linecap="round"
-          />
-        </svg>
-      `;
-
-    case 'yaml':
-    case 'yml':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <path
-            d="M3 3H13V13H3Z"
-            fill="currentColor"
-          />
-          <path
-            d="M5 6H11M5 8H10M5 10H9"
-            stroke="#0b0d11"
-            stroke-width="1"
-          />
-        </svg>
-      `;
-
-    case 'sql':
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <ellipse
-            cx="8"
-            cy="4"
-            rx="5"
-            ry="2.2"
-            fill="currentColor"
-          />
-          <path
-            d="M3 4V10C3 11.2 5.2 12.2 8 12.2C10.8 12.2 13 11.2 13 10V4"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.2"
-          />
-        </svg>
-      `;
-
-    default:
-      return `
-        <svg viewBox="0 0 16 16" width="16" height="16">
-          <path
-            d="M3 1.5H9L13 5.5V14.5H3Z"
-            fill="currentColor"
-          />
-          <path
-            d="M9 1.5V5.5H13"
-            fill="none"
-            stroke="#0b0d11"
-            stroke-width="1"
-          />
-        </svg>
-      `;
-  }
-}
-
-function getFileColorClass(
-  fileName: string,
-): string {
-  const lowerName =
-    fileName.toLowerCase();
-
-  if (
-    lowerName ===
-    '.gitignore'
-  ) {
-    return 'file-color-git';
-  }
-
-  if (
-    lowerName ===
-    'dockerfile'
-  ) {
-    return 'file-color-docker';
-  }
-
-  const extension =
-    fileName
-      .split('.')
-      .pop()
-      ?.toLowerCase();
-
-  switch (extension) {
-    case 'html':
-      return 'file-color-html';
-
-    case 'css':
-    case 'scss':
-    case 'less':
-      return 'file-color-css';
-
-    case 'js':
-    case 'jsx':
-      return 'file-color-js';
-
-    case 'ts':
-    case 'tsx':
-      return 'file-color-ts';
-
-    case 'json':
-      return 'file-color-json';
-
-    case 'md':
-      return 'file-color-md';
-
-    case 'py':
-      return 'file-color-python';
-
-    case 'java':
-      return 'file-color-java';
-
-    case 'c':
-    case 'cpp':
-    case 'h':
-      return 'file-color-c';
-
-    case 'xml':
-      return 'file-color-xml';
-
-    case 'yaml':
-    case 'yml':
-      return 'file-color-yaml';
-
-    case 'sql':
-      return 'file-color-sql';
-
-    case 'sh':
-      return 'file-color-shell';
-
-    case 'bat':
-    case 'ps1':
-      return 'file-color-terminal';
-
-    default:
-      return 'file-color-default';
-  }
-}
-
-function getMonacoLanguage(
-  fileName: string,
-): string {
-  const lowerName =
-    fileName.toLowerCase();
-
-  if (
-    lowerName ===
-    '.gitignore'
-  ) {
-    return 'shell';
-  }
-
-  if (
-    lowerName ===
-    'dockerfile'
-  ) {
-    return 'dockerfile';
-  }
-
-  const extension =
-    fileName
-      .split('.')
-      .pop()
-      ?.toLowerCase();
-
-  switch (extension) {
-    case 'ts':
-    case 'tsx':
-      return 'typescript';
-
-    case 'js':
-    case 'jsx':
-      return 'javascript';
-
-    case 'json':
-      return 'json';
-
-    case 'html':
-      return 'html';
-
-    case 'css':
-      return 'css';
-
-    case 'scss':
-      return 'scss';
-
-    case 'less':
-      return 'less';
-
-    case 'md':
-      return 'markdown';
-
-    case 'py':
-      return 'python';
-
-    case 'java':
-      return 'java';
-
-    case 'c':
-      return 'c';
-
-    case 'cpp':
-      return 'cpp';
-
-    case 'h':
-      return 'cpp';
-
-    case 'xml':
-      return 'xml';
-
-    case 'yaml':
-    case 'yml':
-      return 'yaml';
-
-    case 'sql':
-      return 'sql';
-
-    case 'sh':
-      return 'shell';
-
-    case 'bat':
-      return 'bat';
-
-    case 'ps1':
-      return 'powershell';
-
-    default:
-      return 'plaintext';
-  }
-}
-
-function escapeHtml(
-  value: string,
-): string {
-  return value
-    .replaceAll(
-      '&',
-      '&amp;',
-    )
-    .replaceAll(
-      '<',
-      '&lt;',
-    )
-    .replaceAll(
-      '>',
-      '&gt;',
-    )
-    .replaceAll(
-      '"',
-      '&quot;',
-    );
-}
-
-function getProjectRoot(): string | null {
-  return projectRootPath;
-}
-
-function getOpenFileContent(
-  filePath: string,
-): string {
-  const tab =
-    openTabs.find(
-      (item) =>
-        item.path ===
-        filePath,
-    );
-
-  if (tab) {
-    return tab.model.getValue();
-  }
-
-  return '';
-}
-
-function showStatus(
-  message: string,
-  error = false,
-) {
-  if (!status) {
+  if (event.type === 'activity' && event.activity?.message) {
+    streamingActivity.push(event.activity.message);
+    renderMessages();
     return;
   }
+  if (event.type === 'approval_required') {
+    executionState = 'waiting_approval';
+    void refreshApprovals();
+    return;
+  }
+  if (event.type === 'complete') {
+    streamingText = '';
+    renderMessages();
+    return;
+  }
+  if (event.type === 'error' && event.error) {
+    setExecutionState('failed', event.error);
+  }
+});
 
-  status.textContent =
-    message;
+window.autoCodez.onActivity((event) => {
+  if (event.message) {
+    streamingActivity.push(event.message);
+    if (executionState === 'running') renderMessages();
+  }
+});
 
-  status.className =
-    `status visible ${
-      error
-        ? 'error'
-        : ''
-    }`;
+window.addEventListener('error', (event) => {
+  if (executionState === 'running' || executionState === 'waiting_approval') setExecutionState('failed', event.error instanceof Error ? event.error.message : event.message || 'Erro inesperado no renderer.');
+});
+window.addEventListener('unhandledrejection', (event) => {
+  setExecutionState('failed', event.reason instanceof Error ? event.reason.message : String(event.reason || 'Operação rejeitada.'));
+});
 
-  window.setTimeout(
-    () => {
-      status.className =
-        'status';
-    },
-    2200,
-  );
-}
+void refresh();

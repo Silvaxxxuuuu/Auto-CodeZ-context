@@ -1,248 +1,101 @@
-import {
-  contextBridge,
-  ipcRenderer,
-} from 'electron';
+import { contextBridge, ipcRenderer } from 'electron';
+import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 
-type ClipboardResult = {
-  success: boolean;
-  content?: string;
-  error?: string;
-};
+function normalizeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  return 'Operação falhou.';
+}
 
-type ProjectContextResult = {
-  success: boolean;
-  context?: {
-    projectRoot: string;
-    request: string;
-    activeFile: string | null;
-    files: Array<{
-      path: string;
-      relativePath: string;
-      name: string;
-      extension: string;
-      content: string;
-      size: number;
-      score: number;
-      selected: boolean;
-    }>;
-    totalFiles: number;
-    selectedFiles: number;
-    totalCharacters: number;
-  };
-  serialized?: string;
-  error?: string;
-};
+function reportRendererError(error: unknown): void {
+  window.alert(`Auto CodeZ\n\n${normalizeError(error)}`);
+}
 
-type ExternalAiResult = {
-  success: boolean;
-  error?: string;
-};
+async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+  try {
+    return await ipcRenderer.invoke(channel, ...args) as T;
+  } catch (error) {
+    reportRendererError(error);
+    throw error;
+  }
+}
 
-type AiControl = {
-  name?: string;
-  automationId?: string;
-  controlType?: string;
-  className?: string;
-  framework?: string;
-  processId?: number;
-  enabled?: boolean;
-  offscreen?: boolean;
-};
-
-type AiWindow = {
-  title: string;
-  processId: number;
-  className: string;
-  framework: string;
-  controls: AiControl[];
-};
-
-type InspectExternalAiResult = {
-  success: boolean;
-  running?: boolean;
-  provider?: string;
-  windows?: AiWindow[];
-  error?: string;
-};
-
-type AiResponseResult = {
-  success: boolean;
-  response?: {
-    provider:
-      | 'chatgpt'
-      | 'claude'
-      | 'gemini';
-    content: string;
-    receivedAt: number;
-  };
-  error?: string;
-};
-
-contextBridge.exposeInMainWorld(
-  'autoCodez',
-  {
-    createAiSession: (
-  request: {
-    provider:
-      | 'chatgpt'
-      | 'claude'
-      | 'gemini';
-    request: string;
-    projectRoot: string;
-    activeFile: {
-      path: string;
-      relativePath: string;
-      name: string;
-      content: string;
-    };
-    files: {
-      path: string;
-      relativePath: string;
-      name: string;
-      content: string;
-    }[];
+contextBridge.exposeInMainWorld('autoCodez', {
+  getState: () => invoke<{ providers: unknown[]; chats: unknown[]; projects: unknown[] }>('app:get-state'),
+  listModels: (providerId: string) => invoke('providers:list-models', requireIdentifier(providerId, 'Provider')),
+  saveProvider: (input: { providerId: string; apiKey: string; model?: string; baseUrl?: string }) => {
+    const value = requireObject(input, 'Dados do provider');
+    const providerId = requireIdentifier(value.providerId, 'Provider');
+    const apiKey = requireNonEmptyString(value.apiKey, 'API key');
+    const model = value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo');
+    const baseUrl = value.baseUrl === undefined ? undefined : requireNonEmptyString(value.baseUrl, 'URL base');
+    return invoke('providers:save', { providerId, apiKey, model, baseUrl });
   },
-) =>
-  ipcRenderer.invoke(
-    'create-ai-session',
-    request,
-  ),
-
-cancelAiSession: (
-  sessionId: string,
-) =>
-  ipcRenderer.invoke(
-    'cancel-ai-session',
-    sessionId,
-  ),
-
-onAiSessionState: (
-  callback: (
-    state: {
-      sessionId: string;
-      state:
-        | 'idle'
-        | 'preparing'
-        | 'waiting'
-        | 'receiving'
-        | 'completed'
-        | 'failed'
-        | 'cancelled';
-    },
-  ) => void,
-) => {
-  const listener = (
-    _event: Electron.IpcRendererEvent,
-    state: {
-      sessionId: string;
-      state:
-        | 'idle'
-        | 'preparing'
-        | 'waiting'
-        | 'receiving'
-        | 'completed'
-        | 'failed'
-        | 'cancelled';
-    },
-  ) => {
-    callback(state);
-  };
-
-  ipcRenderer.on(
-    'ai-session-state',
-    listener,
-  );
-
-  return () => {
-    ipcRenderer.removeListener(
-      'ai-session-state',
-      listener,
-    );
-  };
-},
-    sendAiRequest: (
-  request: {
-    provider:
-      | 'chatgpt'
-      | 'claude'
-      | 'gemini';
-    prompt: string;
-    timeoutMs?: number;
+  removeProvider: (providerId: string) => invoke('providers:remove', requireIdentifier(providerId, 'Provider')),
+  createChat: (input: { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }) => {
+    const value = requireObject(input, 'Dados do chat');
+    const providerId = value.providerId === undefined ? undefined : requireIdentifier(value.providerId, 'Provider');
+    const model = value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo');
+    const intelligence = requireIdentifier(value.intelligence, 'Inteligência');
+    const permissionLevel = requireIdentifier(value.permissionLevel, 'Permissão');
+    const projectId = value.projectId === undefined ? undefined : requireIdentifier(value.projectId, 'Projeto');
+    return invoke('chat:create', { providerId, model, intelligence, permissionLevel, projectId });
   },
-) =>
-  ipcRenderer.invoke(
-    'send-ai-request',
-    request,
-  ),
-    openFolder: () =>
-      ipcRenderer.invoke(
-        'open-folder',
-      ),
-
-    readFile: (
-      filePath: string,
-    ) =>
-      ipcRenderer.invoke(
-        'read-file',
-        filePath,
-      ),
-
-    writeFile: (
-      filePath: string,
-      content: string,
-    ) =>
-      ipcRenderer.invoke(
-        'write-file',
-        filePath,
-        content,
-      ),
-
-    openExternalAi: (
-      provider: string,
-    ): Promise<ExternalAiResult> =>
-      ipcRenderer.invoke(
-        'open-external-ai',
-        provider,
-      ),
-
-    writeClipboard: (
-      text: string,
-    ): Promise<ClipboardResult> =>
-      ipcRenderer.invoke(
-        'write-clipboard',
-        text,
-      ),
-
-    readClipboard:
-      (): Promise<ClipboardResult> =>
-        ipcRenderer.invoke(
-          'read-clipboard',
-        ),
-
-    inspectExternalAi: (
-      provider: string,
-    ): Promise<InspectExternalAiResult> =>
-      ipcRenderer.invoke(
-        'inspect-external-ai',
-        provider,
-      ),
-
-    buildProjectContext: (
-      input: {
-        projectRoot: string;
-        request: string;
-        activeFile: string | null;
-        files: Array<{
-          path: string;
-          relativePath: string;
-          name: string;
-          content: string;
-        }>;
-      },
-    ): Promise<ProjectContextResult> =>
-      ipcRenderer.invoke(
-        'build-project-context',
-        input,
-      ),
+  deleteChat: (chatId: string) => invoke('chat:delete', requireIdentifier(chatId, 'Chat')),
+  updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => {
+    const value = requireObject(input, 'Configurações do chat');
+    return invoke('chat:update-settings', {
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      providerId: requireIdentifier(value.providerId, 'Provider'),
+      model: requireIdentifier(value.model, 'Modelo'),
+      intelligence: requireIdentifier(value.intelligence, 'Inteligência'),
+      permissionLevel: requireIdentifier(value.permissionLevel, 'Permissão'),
+    });
   },
-);
+  sendChat: (input: { chatId: string; content: string }) => {
+    const value = requireObject(input, 'Mensagem');
+    return invoke('chat:send', {
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      content: requireNonEmptyString(value.content, 'Mensagem'),
+    });
+  },
+  streamChat: (input: { chatId: string; content: string }) => {
+    const value = requireObject(input, 'Mensagem');
+    return invoke('chat:stream', {
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      content: requireNonEmptyString(value.content, 'Mensagem'),
+    });
+  },
+  onStreamEvent: (listener: (event: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+    ipcRenderer.on('chat:stream-event', handler);
+    return () => ipcRenderer.removeListener('chat:stream-event', handler);
+  },
+  listTools: () => invoke('agent:list-tools'),
+  listApprovals: () => invoke('agent:list-approvals'),
+  approveTool: (approvalId: string) => invoke('agent:approve', requireIdentifier(approvalId, 'Aprovação')),
+  denyTool: (approvalId: string) => invoke('agent:deny', requireIdentifier(approvalId, 'Aprovação')),
+  onActivity: (listener: (event: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+    ipcRenderer.on('agent:activity', handler);
+    return () => ipcRenderer.removeListener('agent:activity', handler);
+  },
+  createProject: (input: { name: string; rootPath: string }) => {
+    const value = requireObject(input, 'Dados do projeto');
+    return invoke('projects:create', {
+      name: requireNonEmptyString(value.name, 'Nome do projeto'),
+      rootPath: requireNonEmptyString(value.rootPath, 'Pasta do projeto'),
+    });
+  },
+  openFolder: () => invoke<string | null>('projects:open-folder'),
+  scanProject: (rootPath: string) => invoke('projects:scan', requireNonEmptyString(rootPath, 'Pasta do projeto')),
+  readFile: (filePath: string) => invoke('projects:read-file', requireNonEmptyString(filePath, 'Arquivo')),
+  writeFile: (input: { filePath: string; content: string }) => {
+    const value = requireObject(input, 'Dados do arquivo');
+    return invoke('projects:write-file', {
+      filePath: requireNonEmptyString(value.filePath, 'Arquivo'),
+      content: typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo do arquivo é inválido.'); })(),
+    });
+  },
+  openExternal: (url: string) => invoke('app:open-external', requireNonEmptyString(url, 'URL externa')),
+});

@@ -1,0 +1,57 @@
+name: Validate Auto CodeZ
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+      - 'fix/**'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript validation
+        run: npx tsc --noEmit
+
+      - name: Core tests
+        run: npm test
+
+      - name: ESLint validation
+        run: npm run lint
+
+      - name: Electron Forge package build
+        run: npm run package
+
+      - name: Electron startup smoke test
+        shell: pwsh
+        env:
+          AUTO_CODEZ_SMOKE: '1'
+        run: |
+          $process = Start-Process -FilePath 'npm.cmd' -ArgumentList 'start' -PassThru -WorkingDirectory $PWD
+          if (-not $process.WaitForExit(30000)) {
+            Stop-Process -Id $process.Id -Force
+            throw 'Electron smoke test exceeded the 30 second timeout.'
+          }
+          if ($process.ExitCode -ne 0) {
+            throw "Electron smoke test exited with code $($process.ExitCode)."
+          }

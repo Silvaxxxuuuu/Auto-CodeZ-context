@@ -1,8 +1,8 @@
 {
-  "name": "auto codez",
-  "productName": "auto codez",
-  "version": "1.0.0",
-  "description": "My Electron application description",
+  "name": "auto-codez",
+  "productName": "Auto CodeZ",
+  "version": "2.0.0-alpha.1",
+  "description": "Local-first multi-provider AI workspace for chats, projects and agent tools.",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {
@@ -10,12 +10,13 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
-    "lint": "eslint --ext .ts,.tsx ."
+    "lint": "eslint --ext .ts,.tsx .",
+    "typecheck": "tsc --noEmit",
+    "test": "node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node --test .test-dist/tests/*.test.js"
   },
-  "keywords": [],
+  "keywords": ["ai", "electron", "typescript", "workspace", "agents"],
   "author": {
-    "name": "ggmacro",
-    "email": "sebastiao54e@gmail.com"
+    "name": "Auto CodeZ"
   },
   "license": "MIT",
   "devDependencies": {
