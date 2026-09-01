@@ -1,17 +1,12 @@
-type Project = { id: string; name: string; rootPath: string };
+type GitMutationApi = {
+  git: {
+    createBranch: (input: { projectId: string; name: string }) => Promise<{ output: string; branch: string }>;
+    checkout: (input: { projectId: string; name: string }) => Promise<{ output: string; branch: string }>;
+    commit: (input: { projectId: string; message: string }) => Promise<{ output: string; branch: string }>;
+  };
+};
 
-declare global {
-  interface Window {
-    autoCodez: {
-      getState: () => Promise<{ projects: Project[] }>;
-      git: {
-        createBranch: (input: { projectId: string; name: string }) => Promise<{ output: string; branch: string }>;
-        checkout: (input: { projectId: string; name: string }) => Promise<{ output: string; branch: string }>;
-        commit: (input: { projectId: string; message: string }) => Promise<{ output: string; branch: string }>;
-      };
-    };
-  }
-}
+const api = (window as Window & { autoCodez: GitMutationApi }).autoCodez;
 
 const style = document.createElement('style');
 style.textContent = `
@@ -23,10 +18,6 @@ style.textContent = `
 .git-action-status { font-size:11px; opacity:.7; min-height:16px; }
 `;
 document.head.appendChild(style);
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
-}
 
 function getProjectId(): string {
   return document.querySelector<HTMLSelectElement>('#git-project')?.value || '';
@@ -69,8 +60,8 @@ function install(): void {
     if (!window.confirm(`Criar a branch "${name.trim()}" a partir da branch atual?`)) return;
     setStatus('Criando branch...');
     try {
-      const result = await window.autoCodez.git.createBranch({ projectId, name: name.trim() });
-      setStatus(`Branch ${escapeHtml(result.branch)} criada.`);
+      const result = await api.git.createBranch({ projectId, name: name.trim() });
+      setStatus(`Branch ${result.branch} criada.`);
       await refreshGitPanel();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Não foi possível criar a branch.', true);
@@ -85,8 +76,8 @@ function install(): void {
     if (!window.confirm(`Trocar para a branch "${name.trim()}"? Alterações locais incompatíveis podem impedir a operação.`)) return;
     setStatus('Trocando branch...');
     try {
-      const result = await window.autoCodez.git.checkout({ projectId, name: name.trim() });
-      setStatus(`Branch atual: ${escapeHtml(result.branch)}.`);
+      const result = await api.git.checkout({ projectId, name: name.trim() });
+      setStatus(`Branch atual: ${result.branch}.`);
       await refreshGitPanel();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Não foi possível trocar de branch.', true);
@@ -101,8 +92,8 @@ function install(): void {
     if (!window.confirm(`Criar um commit com a mensagem:\n\n${message.trim()}`)) return;
     setStatus('Criando commit...');
     try {
-      const result = await window.autoCodez.git.commit({ projectId, message: message.trim() });
-      setStatus(`Commit criado em ${escapeHtml(result.branch)}.`);
+      const result = await api.git.commit({ projectId, message: message.trim() });
+      setStatus(`Commit criado em ${result.branch}.`);
       await refreshGitPanel();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Não foi possível criar o commit.', true);
