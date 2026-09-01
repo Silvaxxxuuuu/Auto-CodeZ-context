@@ -52,7 +52,8 @@ export class AgentRuntime {
     if (!call) throw new Error('Chamada de ferramenta associada à aprovação não encontrada.');
     const result = await this.tools.approve(approvalId);
     pending.workingChat.messages.push({ role: 'tool', content: result.ok ? result.output || 'Operação concluída sem saída.' : `Falha: ${result.error || 'erro desconhecido'}`, toolCallId: result.toolCallId, toolName: call.name, changes: result.changes, diffPlan: result.diffPlan, createdAt: Date.now() });
-    if (pending.streamEmitter) pending.streamEmitter({ type: 'activity', activity: { id: `approval_${Date.now()}`, type: 'tool', message: `Aprovado: ${call.name}`, status: result.ok ? 'success' : 'failed', createdAt: Date.now() } });
+    if (pending.streamEmitter) pending.streamEmitter({ type: 'activity', activity: { id: `approval_${Date.now()}`, type: 'tool', message: result.pendingApproval ? `Aprovação mantida: ${call.name}` : `Aprovado: ${call.name}`, status: result.pendingApproval ? 'failed' : result.ok ? 'success' : 'failed', createdAt: Date.now() } });
+    if (result.pendingApproval) return { chatId: pending.chat.id, response: { content: '', model: pending.workingChat.model, providerId: pending.workingChat.providerId }, toolRounds: pending.toolRounds, pendingApprovalIds: [approvalId], messages: [...pending.workingChat.messages] };
     return this.finishApproval(pending, approvalId);
   }
 
