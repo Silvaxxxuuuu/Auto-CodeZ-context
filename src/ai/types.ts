@@ -20,7 +20,7 @@ export interface AIToolResult { toolCallId: string; ok: boolean; output?: string
 export interface AIToolDefinition { name: ToolName; description: string; parameters: Record<string, unknown>; requiresWriteAccess: boolean; requiresApproval: boolean; }
 export interface ApprovalRequest { id: string; projectId: string; permissionLevel: PermissionLevel; toolCall: AIToolCall; createdAt: number; diffPlan?: DiffPlan; }
 export interface AIProviderAdapter { readonly id: ProviderId; readonly displayName: string; listModels(config: AIProviderConfig): Promise<AIModel[]>; send(config: AIProviderConfig, request: AIRequest): Promise<AIResponse>; stream?(config: AIProviderConfig, request: AIRequest): AsyncIterable<AIStreamEvent>; }
-export interface ProviderSummary { id: ProviderId; displayName: string; configured: boolean; selectedModel?: string; }
+export interface ProviderSummary { id: ProviderId; displayName: string; configured: boolean; apiKeyConfigured: boolean; selectedModel?: string; }
 export interface ChatRecord { id: string; title: string; projectId?: string; providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel; messages: AIMessage[]; createdAt: number; updatedAt: number; }
 export interface ProjectRecord { id: string; name: string; rootPath: string; createdAt: number; updatedAt: number; }
 export interface FileChange { path: string; type: 'created' | 'modified' | 'deleted' | 'renamed'; accepted: boolean; }
