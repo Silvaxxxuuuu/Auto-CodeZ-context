@@ -5,7 +5,7 @@ type RenameApi = {
 const bridge = window.autoCodez as unknown as RenameApi;
 
 function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
 }
 
 async function renameChat(chatId: string, currentTitle: string, item: HTMLElement): Promise<void> {
