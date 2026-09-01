@@ -21,9 +21,16 @@ export function classifyProviderError(status: number, message: string): Provider
   if (status === 401 || status === 403 || /invalid\s+(?:api\s*)?key|api\s*key.*(?:invalid|incorrect|not\s+valid)|invalid\s+authentication|unauthorized|authentication.*failed|permission\s+denied|forbidden/.test(normalized)) return 'authentication';
   if (status === 402 || /billing|payment required|no credits|credits remaining|insufficient funds|billing hard limit/.test(normalized)) return 'billing';
   if (status === 429 || /quota|rate limit|rate_limit|too many requests|resource exhausted|free tier/.test(normalized)) return /quota|free tier|resource exhausted/.test(normalized) ? 'quota' : 'rate_limit';
+  if (/network|fetch failed|timed out|timeout|socket|econn|enotfound|dns/.test(normalized)) return 'network';
   if (status >= 500) return 'server';
   if (status === 400 || status === 404 || /invalid request|invalid argument|unsupported|malformed/.test(normalized)) return 'invalid_request';
   return 'unknown';
+}
+
+export function normalizeProviderError(provider: string, operation: string, error: unknown): ProviderRequestError {
+  if (error instanceof ProviderRequestError) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  return new ProviderRequestError(message || 'Falha desconhecida do provider.', 0, provider, undefined, operation);
 }
 
 export function isAuthenticationError(error: unknown): boolean {
@@ -47,6 +54,7 @@ export function formatProviderError(error: unknown): string {
     case 'quota': return `${prefix} a cota disponível para este modelo foi atingida. A API key continua salva.`;
     case 'rate_limit': return `${prefix} o limite de requisições foi atingido. Aguarde e tente novamente.`;
     case 'server': return `${prefix} o serviço do provider apresentou um erro temporário. Tente novamente.`;
+    case 'network': return `${prefix} não foi possível alcançar o serviço. Verifique a conexão e tente novamente.`;
     case 'invalid_request': return `${prefix} a solicitação foi recusada. ${error.message}`;
     default: return `${prefix} ${error.message}`;
   }
