@@ -9,6 +9,23 @@ const SECURE_FILE = 'provider-secrets.json';
 
 interface ProviderState { configs: AIProviderConfig[]; }
 
+const DEFAULT_MODEL_PREFERENCES: Partial<Record<ProviderId, string[]>> = {
+  google: [
+    'gemini-3.7-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3-flash-preview',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+  ],
+};
+
+export function selectDefaultModel(providerId: ProviderId, models: AIModel[]): string | undefined {
+  const preferred = DEFAULT_MODEL_PREFERENCES[providerId] || [];
+  return preferred.find((id) => models.some((model) => model.id === id)) || models[0]?.id;
+}
+
 function normalizeConfig(value: AIProviderConfig): AIProviderConfig {
   return { id: value.id, displayName: value.displayName, apiKey: value.apiKey, ...(value.baseUrl ? { baseUrl: value.baseUrl } : {}), ...(value.selectedModel ? { selectedModel: value.selectedModel } : {}), enabled: Boolean(value.enabled) };
 }
@@ -61,7 +78,7 @@ export class ProviderManager {
     const models = await adapter.listModels(config);
     if (!models.length) throw new Error('O provider não retornou modelos disponíveis.');
     if (config.selectedModel && !models.some((model) => model.id === config.selectedModel)) throw new Error('O modelo selecionado não está disponível para este provider.');
-    config.selectedModel ||= models[0].id;
+    config.selectedModel ||= selectDefaultModel(providerId, models);
     this.configs = [...this.configs.filter((item) => item.id !== providerId), config];
     await this.persist();
     return { providers: await this.list(), models };
