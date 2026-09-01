@@ -1,5 +1,6 @@
 import type { AIModel, AIProviderConfig, ProviderId } from './types';
 import { ProviderRegistry } from './provider-registry';
+import { selectDefaultModel } from './model-selection';
 
 const UNCONFIGURED_MODEL_IDS = new Set(['unconfigured', 'Unconfigured']);
 
@@ -22,9 +23,10 @@ export class ModelResolver {
     else this.cache.clear();
   }
 
-  find(models: AIModel[], modelId: string): AIModel {
+  find(models: AIModel[], modelId: string, providerId?: ProviderId): AIModel {
     if (UNCONFIGURED_MODEL_IDS.has(modelId)) {
-      const fallback = models[0];
+      const fallbackId = selectDefaultModel(providerId || models[0]?.providerId || 'unknown', models);
+      const fallback = fallbackId ? models.find((model) => model.id === fallbackId) : undefined;
       if (fallback) return fallback;
     }
     const model = models.find((item) => item.id === modelId);
