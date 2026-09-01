@@ -19,10 +19,16 @@ const icon = (name: string): string => {
   return `<svg class="profile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths['user-round']}</svg>`;
 };
 
+function closeLegacyProfileModal(): void {
+  document.querySelector<HTMLElement>('#modal-root')?.replaceChildren();
+}
+
 function renderProfile(): void {
   if (document.querySelector('.profile-overlay')) return;
   const shell = document.querySelector<HTMLElement>('.app-shell');
   if (!shell) return;
+
+  closeLegacyProfileModal();
 
   const overlay = document.createElement('section');
   overlay.className = 'profile-overlay';
@@ -94,6 +100,7 @@ function renderProfile(): void {
 
 function closeProfile(): void {
   document.querySelector('.profile-overlay')?.remove();
+  closeLegacyProfileModal();
   document.querySelector<HTMLElement>('.rail-button[data-action="profile"]')?.classList.remove('active');
 }
 
