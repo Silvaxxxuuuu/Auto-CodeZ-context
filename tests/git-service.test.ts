@@ -17,5 +17,5 @@ test('GitService delegates read-only operations to GitRuntime', async () => {
   assert.deepEqual(await service.status('project-1'), { branch: 'project-1', ahead: 1, behind: 2, clean: true, files: [] });
   assert.deepEqual(await service.branches('project-1'), [{ name: 'project-1', current: true }]);
   assert.equal(await service.diff('project-1'), 'diff:project-1');
-  assert.deepEqual(await service.log('project-1', 10), [{ hash: 'project-1', shortHash: 'project-', author: 'test', date: '2026-01-01T00:00:00Z', subject: 'limit:10' }]);
+  assert.deepEqual(await service.log('project-1', 10), [{ hash: 'project-1', shortHash: 'project', author: 'test', date: '2026-01-01T00:00:00Z', subject: 'limit:10' }]);
 });
