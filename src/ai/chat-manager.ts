@@ -70,6 +70,17 @@ export class ChatManager {
     return { ...chat, messages: [...chat.messages] };
   }
 
+  async rename(chatId: string, title: string): Promise<ChatRecord> {
+    const chat = this.require(chatId);
+    const normalized = title.trim().replace(/\s+/g, ' ');
+    if (!normalized) throw new Error('O nome do chat não pode ficar vazio.');
+    if (normalized.length > 80) throw new Error('O nome do chat deve ter no máximo 80 caracteres.');
+    chat.title = normalized;
+    chat.updatedAt = Date.now();
+    await this.persist();
+    return { ...chat, messages: [...chat.messages] };
+  }
+
   async remove(chatId: string): Promise<ChatRecord[]> {
     this.chats = this.chats.filter((chat) => chat.id !== chatId);
     await this.persist();

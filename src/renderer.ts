@@ -185,7 +185,7 @@ function renderNav(): void {
 }
 
 function chatItem(chat: Chat): string {
-  return `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-settings="${chat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button><button class="chat-delete" data-chat-delete="${chat.id}" title="Excluir chat" aria-label="Excluir chat">×</button></div>`;
+  return `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-rename="${chat.id}" title="Renomear chat" aria-label="Renomear chat"></button><button class="chat-delete" data-chat-delete="${chat.id}" title="Excluir chat" aria-label="Excluir chat">×</button></div>`;
 }
 
 function renderHeader(): void {

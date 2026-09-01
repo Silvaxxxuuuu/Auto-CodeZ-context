@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalStorage } from './core/storage';
@@ -48,11 +48,8 @@ function sendActivity(event: unknown): void { if (mainWindow && !mainWindow.isDe
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({ width: 1440, height: 920, minWidth: 960, minHeight: 680, webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false } });
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
-    void mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
-  }
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  else void mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
@@ -66,10 +63,19 @@ async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnTyp
 
 ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.list(), chats: await chatManager.list(), projects: await projectManager.list() }));
 ipcMain.handle('providers:list-models', async (_event, providerId: string) => providerManager.listModels(requireIdentifier(providerId, 'Provider')));
+ipcMain.handle('providers:list-keys', async () => providerManager.listKeys());
+ipcMain.handle('providers:save-key', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Dados da API key');
+  return providerManager.saveKey({ providerId: requireIdentifier(value.providerId, 'Provider'), name: requireNonEmptyString(value.name, 'Nome da API key'), apiKey: requireNonEmptyString(value.apiKey, 'API key'), model: value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo'), baseUrl: value.baseUrl === undefined ? undefined : requireNonEmptyString(value.baseUrl, 'URL base') });
+});
+ipcMain.handle('providers:rename-key', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome da API key'); return providerManager.renameKey(requireIdentifier(value.keyId, 'API key'), requireNonEmptyString(value.name, 'Nome da API key')); });
+ipcMain.handle('providers:set-active-key', async (_event, keyId: string) => providerManager.setActiveKey(requireIdentifier(keyId, 'API key')));
+ipcMain.handle('providers:remove-key', async (_event, keyId: string) => providerManager.removeKey(requireIdentifier(keyId, 'API key')));
 ipcMain.handle('providers:save', async (_event, input: unknown) => providerManager.save(requireObject(input, 'Dados do provider') as { providerId: string; apiKey: string; model?: string; baseUrl?: string }));
 ipcMain.handle('providers:remove', async (_event, providerId: string) => providerManager.remove(requireIdentifier(providerId, 'Provider')));
 ipcMain.handle('chat:create', async (_event, input: unknown) => chatManager.create(requireObject(input, 'Dados do chat') as { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }));
 ipcMain.handle('chat:delete', async (_event, chatId: string) => chatManager.remove(requireIdentifier(chatId, 'Chat')));
+ipcMain.handle('chat:rename', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome do chat'); return chatManager.rename(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.title, 'Nome do chat')); });
 ipcMain.handle('chat:update-settings', async (_event, input: unknown) => chatManager.updateSettings(requireObject(input, 'Configurações do chat') as { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }));
 
 async function executeChat(chatId: string, content: string): Promise<{ pendingApprovalIds: string[]; chat: Awaited<ReturnType<ChatManager['list']>>[number] | undefined }> {
@@ -141,6 +147,7 @@ app.whenReady().then(async () => {
   await agentRuntime.init();
   activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
+  Menu.setApplicationMenu(null);
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

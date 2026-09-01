@@ -24,10 +24,12 @@ export class ProviderRegistry {
   summaries(configs: AIProviderConfig[]): ProviderSummary[] {
     return this.list().map((adapter) => {
       const config = configs.find((item) => item.id === adapter.id);
+      const apiKeyConfigured = Boolean(config?.apiKey);
       return {
         id: adapter.id,
         displayName: adapter.displayName,
-        configured: Boolean(config?.enabled && config.apiKey),
+        configured: Boolean(config?.enabled && apiKeyConfigured),
+        apiKeyConfigured,
         selectedModel: config?.selectedModel,
       };
     });
