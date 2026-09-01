@@ -4,6 +4,7 @@ import { CapabilityResolver } from './capability-resolver';
 import { IntelligenceRuntime } from './intelligence-runtime';
 import { ModelResolver } from './model-resolver';
 import { ProviderRegistry } from './provider-registry';
+import { ProviderRequestJournal } from './provider-request-journal';
 
 export class ChatRuntime {
   constructor(
@@ -13,7 +14,16 @@ export class ChatRuntime {
     private readonly activity = new ActivityRuntime(),
     private readonly models = new ModelResolver(registry),
     private readonly toolDefinitions: AIToolDefinition[] = [],
+    private readonly requestJournal = new ProviderRequestJournal(),
   ) {}
+
+  async init(): Promise<void> {
+    await this.requestJournal.init();
+  }
+
+  listInterruptedProviderRequests() {
+    return this.requestJournal.listInterrupted();
+  }
 
   private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string) {
     const adapter = this.registry.get(config.id);
@@ -47,9 +57,21 @@ export class ChatRuntime {
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
 
-      const response = await adapter.send(config, request);
-      this.activity.success('complete', 'Resposta recebida.');
-      return response;
+      const journal = await this.requestJournal.begin(request);
+      if (journal.cachedResponse) {
+        this.activity.emit({ type: 'action', message: 'Resposta recuperada do journal do provider.', status: 'success' });
+        return journal.cachedResponse;
+      }
+      try {
+        const response = await adapter.send(config, request);
+        await this.requestJournal.complete(journal.requestId, response);
+        this.activity.success('complete', 'Resposta recebida.');
+        return response;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.requestJournal.fail(journal.requestId, message);
+        throw error;
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.activity.failure('error', message);
@@ -64,18 +86,35 @@ export class ChatRuntime {
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
 
-      if (adapter.stream) {
-        for await (const event of adapter.stream(config, request)) {
-          if (event.type === 'activity' && event.activity) this.activity.emit(event.activity);
-          yield event;
-        }
-      } else {
-        const response = await adapter.send(config, request);
+      const journal = await this.requestJournal.begin(request);
+      if (journal.cachedResponse) {
         yield { type: 'start' };
-        if (response.content) yield { type: 'delta', text: response.content };
-        yield { type: 'complete', response, usage: response.usage };
+        if (journal.cachedResponse.content) yield { type: 'delta', text: journal.cachedResponse.content };
+        yield { type: 'complete', response: journal.cachedResponse, usage: journal.cachedResponse.usage };
+        return;
       }
-      this.activity.success('complete', 'Resposta recebida.');
+
+      try {
+        if (adapter.stream) {
+          for await (const event of adapter.stream(config, request)) {
+            if (event.type === 'activity' && event.activity) this.activity.emit(event.activity);
+            if (event.type === 'complete' && event.response) await this.requestJournal.complete(journal.requestId, event.response);
+            if (event.type === 'error') await this.requestJournal.fail(journal.requestId, event.error || 'Erro durante o streaming.');
+            yield event;
+          }
+        } else {
+          const response = await adapter.send(config, request);
+          await this.requestJournal.complete(journal.requestId, response);
+          yield { type: 'start' };
+          if (response.content) yield { type: 'delta', text: response.content };
+          yield { type: 'complete', response, usage: response.usage };
+        }
+        this.activity.success('complete', 'Resposta recebida.');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.requestJournal.fail(journal.requestId, message);
+        throw error;
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.activity.failure('error', message);
