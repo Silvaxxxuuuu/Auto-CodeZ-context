@@ -37,6 +37,7 @@ function icon(name: IconName, size = 18): SVGSVGElement {
   svg.setAttribute('stroke-linejoin', 'round');
   svg.setAttribute('aria-hidden', 'true');
   svg.classList.add('ac-lucide-icon');
+  svg.dataset.acLucideIcon = name;
   for (const d of ICON_PATHS[name]) {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', d);
@@ -58,8 +59,6 @@ function installStyle(): void {
     .composer-hint.ac-busy{opacity:.35}.chat-header{position:relative}.chat-header h1{max-width:min(48vw,520px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.header-actions{align-items:center}
     .empty-panel{margin:8px 2px;padding:18px 12px!important;border:1px solid #1b212b;border-radius:10px;background:#0f1319;color:#6d7785!important}.empty-panel:empty{display:none}
     .plugin-card{transition:border-color .16s,background .16s,transform .16s}.plugin-card:hover{border-color:#303845;background:linear-gradient(145deg,#131820,#0f1319);transform:translateY(-1px)}
-
-    /* One icon system. Legacy masks and pseudo-elements stay inert. */
     .ac-lucide-icon{display:block;width:18px;height:18px;min-width:18px;min-height:18px;flex:0 0 18px;overflow:visible;color:currentColor;stroke:currentColor;fill:none;stroke-width:2;pointer-events:none}
     .ac-lucide-icon path,.ac-lucide-icon circle,.ac-lucide-icon line,.ac-lucide-icon polyline,.ac-lucide-icon polygon,.ac-lucide-icon rect{vector-effect:non-scaling-stroke}
     .rail-button{display:inline-flex!important;align-items:center!important;justify-content:center!important;color:inherit!important}
@@ -120,7 +119,8 @@ function ensureAppSettingsButton(): void {
 
 function replaceIcon(element: Element,name: IconName,size=18): void {
   const target=element as HTMLElement;
-  if(target.querySelector(':scope > .ac-lucide-icon'))return;
+  const existing=target.querySelector<SVGSVGElement>(':scope > .ac-lucide-icon');
+  if(existing?.dataset.acLucideIcon===name)return;
   target.querySelectorAll(':scope > *').forEach(child=>child.remove());
   target.appendChild(icon(name,size));
 }
