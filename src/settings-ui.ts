@@ -12,7 +12,7 @@ type SectionId = (typeof sections)[number]['id'];
 const icon = (name: string): string => {
   const paths: Record<string, string> = {
     'settings-2': '<path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
-    sparkles: '<path d="m12 3-1.5 4.5L6 9l4.5 1.5L12 15l1.5-4.5L18 9l-4.5-1.5L12 3Z"/><path d="m19 14-.8 2.2L16 17l2.2.8L19 20l.8-2.2L22 17l-2.2-.8L19 14Z"/>',
+    sparkles: '<path d="m12 3-1.5 4.5L6 9l4.5 1.5L12 15l1.5-4.5L18 9l-4.5-1.5L12 3Z"/><path d="m19 14-.8 2.2L16 17l2.2.8L19 20l.8-2.2L19 14Z"/>',
     'code-2': '<path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>',
     terminal: '<path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>',
     'shield-check': '<path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/>',
@@ -140,12 +140,12 @@ function closeSettings(): void {
   clearLegacySettings();
 }
 
-document.addEventListener('click', (event) => {
+window.addEventListener('click', (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
   if (target.closest('[data-action="settings"]')) {
     event.preventDefault();
-    event.stopPropagation();
+    event.stopImmediatePropagation();
     renderSettings();
     return;
   }
