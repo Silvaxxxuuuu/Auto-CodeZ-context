@@ -1,5 +1,5 @@
 AUTO CODEZ — DOCUMENTO DE CONTEXTO PERMANENTE
-Última atualização: 01/09/2026
+Última atualização: 02/09/2026
 
 ============================================================
 1. PRODUTO
@@ -23,9 +23,15 @@ Branch atual de trabalho: feature/ui-hierarchy-polish
 PR #9: feature/ui-hierarchy-polish -> feature/provider-error-resilience
 Não fazer merge do PR sem solicitação explícita.
 
-Último commit conhecido antes desta atualização do contexto:
+Commits recentes relevantes:
+
+e31094c660a1d8e3445c28605afd2352e0773664
+fix(ui): remove legacy settings modal
+
 1d4579de7a49126d1f16afd8fa6240a2a2604ef2
 fix(settings): route legacy settings action to new screen
+
+A nova tela de Settings foi confirmada funcionando antes da remoção da implementação antiga. O commit e31094c removeu somente o modal legado de ui-polish.ts, preservando o botão #ac-app-settings como ponto de integração visual com settings-ui.ts.
 
 A atualização deste TXT gera um novo commit na mesma branch. O novo SHA deve ser tratado como o novo HEAD quando a operação terminar.
 
@@ -291,41 +297,31 @@ Comportamento intermitente de foco/cursor no campo de nome ainda deve ser retest
 12. SETTINGS — POSIÇÃO ATUAL
 ============================================================
 
-Existe uma nova implementação em settings-ui.ts.
+Existe uma única implementação real de Settings em settings-ui.ts.
 
-O botão legado #ac-app-settings era controlado por openAppSettings() em ui-polish.ts. A nova tela não recebia o clique porque o código legado ainda existia.
+O botão #ac-app-settings continua existindo em ui-polish.ts como ponto de integração visual. settings-ui.ts intercepta esse botão em fase de captura e abre a nova tela de Settings.
 
-Commit já feito:
-1d4579de7a49126d1f16afd8fa6240a2a2604ef2
-fix(settings): route legacy settings action to new screen
+O caminho legado foi removido de ui-polish.ts no commit:
+e31094c660a1d8e3445c28605afd2352e0773664
+fix(ui): remove legacy settings modal
 
-Após esse commit, settings-ui.ts intercepta o botão legado e abre a nova tela de Settings.
-Usuário confirmou que a nova tela apareceu.
+Removidos de ui-polish.ts:
+- APP_SETTINGS_MODAL_ID;
+- CSS exclusivo do modal antigo;
+- openAppSettings();
+- listener que chamava openAppSettings;
+- referência .ac-app-settings-close em syncLucideIcons().
 
-IMPORTANTE: o código legado AINDA NÃO FOI REMOVIDO de src/ui-polish.ts.
+Preservados intencionalmente:
+- APP_SETTINGS_ID;
+- ensureAppSettingsButton();
+- criação/estilização do botão de configurações;
+- settings-ui.ts e sua interceptação em fase de captura;
+- restante da lógica de ui-polish.ts.
 
-Foi confirmado pela árvore/blob da branch que ui-polish.ts ainda contém:
-- APP_SETTINGS_MODAL_ID = 'ac-app-settings-modal'
-- CSS do modal antigo
-- openAppSettings()
-- referência .ac-app-settings-close em syncLucideIcons()
-- listener button.addEventListener('click', openAppSettings)
+Usuário confirmou anteriormente que a nova interface de configurações aparecia normalmente. Não reintroduzir nem reconstruir o modal antigo.
 
-Blob atual conhecido de src/ui-polish.ts:
-c4a1df465d19266a8ec2eebffa9676322228ddc4
-
-A remoção planejada é cirúrgica:
-1. remover APP_SETTINGS_MODAL_ID;
-2. remover somente CSS do modal antigo;
-3. remover openAppSettings();
-4. manter ensureAppSettingsButton() e o botão #ac-app-settings, pois ele continua sendo o ponto de integração visual com settings-ui.ts;
-5. remover button.addEventListener('click', openAppSettings);
-6. mudar o seletor de syncLucideIcons() de .modal-close,.ac-app-settings-close para .modal-close;
-7. não alterar observers, recuperação de IA, ícones ou outras lógicas.
-
-Essa remoção ainda NÃO foi commitada porque a escrita do GitHub Contents API exige substituição integral do arquivo. Não reconstruir manualmente um arquivo grande sem preservar exatamente o restante.
-
-Objetivo: ficar com uma única implementação real de Settings.
+A remoção foi feita cirurgicamente e deve ser validada localmente antes de ser considerada encerrada.
 
 ============================================================
 13. SETTINGS — SISTEMA FUTURO
@@ -374,7 +370,7 @@ LOCAL-ONLY:
 - processos locais;
 - hardware;
 - recursos físicos;
-- projetos/pastas explicitamente não sincronizados.
+- projetos/pastas explicitamente não sincronizadas.
 
 SINCRONIZADO:
 - configurações;
@@ -415,182 +411,174 @@ Regra: nunca apagar alteração local porque sync falhou.
 
 Fluxo:
 alteração local -> salvar localmente -> fila -> tentar sync -> confirmação -> sincronizado.
-
-Falha = salvo localmente + pendente.
-
-Cloud é persistência compartilhada entre dispositivos, não a única fonte de contexto durante uma sessão.
+Falha -> salvo localmente + pending.
 
 ============================================================
-17. CONFLITOS E MODELO DE SYNC
+17. AUTENTICAÇÃO
 ============================================================
 
-Não usar last-write-wins silencioso como regra de produto.
+Modelo: passwordless-first.
 
-Conflitos devem:
-- identificar origem/dispositivo;
-- mostrar alteração/diff quando aplicável;
-- permitir aceitar, rejeitar ou revisar;
-- preservar a alteração local até resolução.
-
-Modelo deve acompanhar:
-entityId, revision, deviceId, timestamp, operation, payload, syncStatus.
-
-============================================================
-18. AUTENTICAÇÃO E SEGURANÇA
-============================================================
-
-Autenticação planejada passwordless-first:
-- Google
-- GitHub
-- Microsoft
+Métodos:
+- Google OAuth
+- GitHub OAuth
+- Microsoft OAuth
 - Passkeys
-- Magic Link por email
+- Magic Link/email
 
-Não usar telefone/OTP como base.
-Não usar email + senha como arquitetura principal planejada.
+Não definidos:
+- senha tradicional;
+- recuperação de senha;
+- telefone/OTP como método primário.
 
-Identidades externas devem ser vinculadas a uma única conta Auto CodeZ.
+Todos vinculam à mesma conta Auto CodeZ.
 
-Perfil: identidade, email principal, identidades vinculadas, passkeys, Magic Link, vincular/desvincular.
+Conta nunca deve ficar sem método válido de acesso/recuperação.
 
-Segurança: sessões, dispositivos, revogação, atividade de autenticação e proteções.
+Perfil:
+- identidade;
+- email principal;
+- contas vinculadas;
+- passkeys;
+- Magic Link.
 
-Secrets futuros incluem API keys, OAuth tokens, GitHub/Git credentials e tokens de serviços/plugins. Devem ser criptografados em repouso, protegidos por autenticação, revogáveis, nunca logados e não expostos desnecessariamente ao renderer.
-
-============================================================
-19. CLOUD / BACKEND
-============================================================
-
-Servidor/cloud será responsável por:
-- autenticação;
-- contas;
-- sincronização;
-- armazenamento cloud;
-- secrets da conta;
-- dispositivos;
-- conflitos;
-- backups.
-
-Desktop deve continuar localmente quando cloud estiver indisponível.
-
-A infraestrutura cloud final ainda precisa ser especificada antes da implementação completa da conta.
-
-Portabilidade/exportação deve existir para evitar lock-in de dados.
-
-============================================================
-20. PLUGINS
-============================================================
-
-Plugins vêm depois da fundação Account/Sync/Permissions.
-
-Podem fornecer:
-- ícone na left rail;
-- right panel;
-- command;
-- provider;
-- tool;
-- theme;
-- integration;
-- automation.
-
-Instalar plugin nunca deve conceder acesso arbitrário automaticamente. Permissões devem ser explícitas.
-
-============================================================
-21. ROADMAP
-============================================================
-
-FASE 1 — Estabilização
-- terminar correção pendente de Settings legado;
-- validar providers/model discovery;
-- validar billing/quota;
-- retestar API Key Manager;
-- retestar Configurar IA;
-- validar execution;
-- validar streaming;
-- validar persistência;
-- auditoria técnica e regressões.
-
-FASE 2 — Account Foundation
-- modelo de conta;
-- identidades;
-- contas externas vinculadas;
+Segurança:
 - sessões;
 - dispositivos;
-- passwordless auth;
-- Passkeys;
-- OAuth;
-- Magic Link;
-- segurança;
-- modelo de dados sincronizável.
+- revogação;
+- atividade de autenticação;
+- proteções.
 
-FASE 3 — Sync
-- chats/histórico;
-- settings;
-- library;
+Sync:
+- estado;
+- pending;
+- conflitos;
+- Change Requests.
+
+============================================================
+18. ROADMAP
+============================================================
+
+FASE 1 — ESTABILIZAÇÃO
+- billing/quota provider handling;
+- API Key Manager;
+- fluxo “Configurar IA”;
+- foco/cursor do campo de nome;
+- auditoria de observers/listeners;
+- persistência;
+- execução de ferramentas;
+- regressões;
+- auditoria técnica;
+- comportamento de provider indisponível;
+- validação completa do estado atual.
+
+Status imediato:
+- nova Settings UI funcionando;
+- implementação antiga de Settings removida;
+- validação local completa ainda pendente.
+
+FASE 2 — ACCOUNT FOUNDATION
+- account model;
+- identidade Auto CodeZ;
+- Google/GitHub/Microsoft OAuth;
+- Passkeys;
+- Magic Link;
+- email principal;
+- identidades vinculadas;
+- sessões/dispositivos/segurança/revogação;
+- estrutura de dados sincronizável.
+
+FASE 3 — SYNC
+- chats/histórico/settings/preferences/library;
 - projetos sincronizados;
 - backups;
-- offline queue;
+- fila offline;
+- confirmação de sync;
 - conflitos;
-- change requests.
+- Change Requests/review accept/reject.
 
-FASE 4 — Secrets e integrações
-- API Keys cloud;
+Invariante:
+local change -> local save -> queue -> sync attempt -> confirmation -> synced
+
+Falha => saved locally + pending.
+
+FASE 4 — SECRETS/INTEGRAÇÕES
+- cloud API keys;
 - GitHub;
 - Git;
 - OAuth;
-- permissões;
-- revogação;
-- dispositivos.
+- tokens externos;
+- permissões/revogação/dispositivos;
+- encryption at rest;
+- sem secrets em logs.
 
-FASE 5 — Settings + UI/UX maior
-- Settings real;
-- estados de sync;
-- loading/empty/error;
-- chat;
-- activity;
-- editor;
+FASE 5 — SETTINGS + MAJOR UI
+Geral: tema, idioma, animações, densidade, startup.
+IA: provider/modelo/inteligência/tools/approval.
+Editor: fonte/tamanho/word wrap/minimap/tabs/indentação.
+Terminal: shell/diretório inicial/comportamento.
+Segurança/Privacidade: credenciais/integrações/dispositivos/sessões.
+Sync: estado/pending/conflitos.
+
+Depois: evolução visual/UX de chat/activity/editor/tools/loading/empty/error.
+
+FASE 6 — PLUGINS
+Após Account/Sync/Permissions.
+- left icon;
+- right panel;
+- commands;
+- providers;
 - tools;
-- refinamento visual amplo após a base estar estável.
+- themes;
+- integrations;
+- automations;
+- permissões por recurso.
 
-FASE 6 — Plugins
-
-FASE 7 — Produto/distribuição
+FASE 7 — PRODUTO/DISTRIBUIÇÃO
 - updater;
 - builds;
-- cloud final;
-- billing/planos se decididos;
-- suporte;
-- observabilidade.
+- cloud infrastructure;
+- billing/plans quando decidido;
+- support;
+- observability;
+- distribution.
+
+Cross-cutting: Local-first + Cloud Sync + Offline Queue.
+
+Antes de major feature perguntar:
+1. user data ou device data?
+2. offline?
+3. sync?
+4. secret?
+5. conflict?
+6. permission?
+7. local/cloud?
+8. failure behavior?
+9. internet loss?
+10. provider unavailable?
 
 ============================================================
-22. PRÓXIMO TRABALHO IMEDIATO
+19. PREFERÊNCIAS DO USUÁRIO
 ============================================================
 
-1. Continuar na branch feature/ui-hierarchy-polish.
-2. Usar Contents API com ?ref=feature/ui-hierarchy-polish e árvore Git quando possível. Não usar GitHub Search.
-3. Confirmar HEAD e blob de AUTO_CODEZ_CONTEXT.txt antes de qualquer nova atualização.
-4. Próxima alteração de código deve remover de forma cirúrgica o modal antigo de Settings em src/ui-polish.ts, mantendo o botão #ac-app-settings para settings-ui.ts.
-5. Antes da escrita integral, recuperar o arquivo completo de forma confiável e preservar todas as linhas fora do alvo.
-6. Commitar a remoção do legado separadamente.
-7. Atualizar este AUTO_CODEZ_CONTEXT.txt imediatamente após cada mudança arquitetural relevante, sempre descrevendo a posição real e os próximos passos.
-8. Validar typecheck, testes e lint após as mudanças. npm start deve ser usado para validação visual/comportamental quando necessário.
-9. Não fazer merge do PR #9.
-10. Depois da estabilização, iniciar a especificação e implementação da Account Foundation, sem pular diretamente para plugins.
+- Quer mudanças maiores por etapa, mas com precisão absoluta e sem quebrar funcionalidades existentes.
+- Prefere análise do estado real do repositório antes de editar.
+- Não quer refatorações amplas quando a correção é localizada.
+- Quer preservar linhas e comportamento que já funcionam.
+- Quer validação real antes de considerar uma etapa concluída.
+- Prefere Lucide Icons como referência profissional para a interface.
+- Gosta de organização inspirada no VS Code, mas não quer copiar sua identidade visual.
+- Prefere interface escura, limpa e profissional.
+- Não quer títulos/elementos visuais desnecessariamente grandes.
+- Não quer que alterações visuais mexam na lógica do Monaco, arquivos ou execução sem necessidade.
+- Quando pedir para continuar, espera recuperação do contexto e continuidade sem repetir trabalho já concluído.
 
 ============================================================
-23. COMO CONTINUAR EM NOVO CHAT
+20. PRÓXIMAS ETAPAS IMEDIATAS
 ============================================================
 
-Ao iniciar outro chat, primeiro ler AUTO_CODEZ_CONTEXT.txt da branch feature/ui-hierarchy-polish.
-
-Assumir que:
-- o projeto é real e está em desenvolvimento incremental;
-- não se deve perder nenhuma linha de trabalho existente;
-- o botão novo de Settings já funciona;
-- o legado de Settings ainda existe em ui-polish.ts até ser removido explicitamente;
-- o usuário quer trabalho direto no repositório, não instruções manuais, sempre que as ferramentas permitirem;
-- “puxar” significa atualizar o código no computador do usuário para a branch correta e então executar npm start;
-- não pedir login novamente se o acesso GitHub continuar funcionando;
-- atualizar este TXT sempre que a posição do projeto mudar.
-
-FIM DO CONTEXTO PERMANENTE
+1. Validar o commit e31094c e a atualização deste contexto.
+2. Executar/confirmar typecheck, testes e lint em ambiente local; npm start para validação manual da nova Settings UI.
+3. Se tudo estiver limpo, auditar os itens ainda pendentes da Fase 1, começando pelo model resolver/provider unavailable e pelo foco/cursor do campo de nome.
+4. Fazer mudanças em blocos coerentes, preservando as correções já confirmadas.
+5. Não fazer merge do PR #9 sem autorização explícita.
