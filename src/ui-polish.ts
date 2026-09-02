@@ -1,7 +1,6 @@
 const STYLE_ID = 'auto-codez-ui-polish';
 const RECOVERY_ID = 'ac-ai-recovery';
 const APP_SETTINGS_ID = 'ac-app-settings';
-const APP_SETTINGS_MODAL_ID = 'ac-app-settings-modal';
 
 type IconName = 'message-circle' | 'message-circle-plus' | 'folder' | 'blocks' | 'git-branch' | 'square-terminal' | 'key-round' | 'plus' | 'sparkles' | 'settings' | 'user-round' | 'code-2' | 'pencil' | 'trash-2' | 'chevron-down' | 'chevron-up' | 'info' | 'x' | 'send';
 
@@ -10,7 +9,7 @@ const ICON_PATHS: Record<IconName, string[]> = {
   'message-circle-plus': ['M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719', 'M8 12h8', 'M12 8v8'],
   folder: ['M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'],
   blocks: ['M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2', 'M14 2h8v8h-8z'],
-  'git-branch': ['M6 3v12', 'M18 9V3', 'M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z', 'M18 3a3 3 0 1 0 0 6 3 3 0 0 0-6Z', 'M6 15c0-3 3-6 9-6'],
+  'git-branch': ['M6 3v12', 'M18 9V3', 'M6 15a3 3 0 1 0 0 6 3 3 0 0 0-6Z', 'M18 3a3 3 0 1 0 0 6 3 3 0 0 0-6Z', 'M6 15c0-3 3-6 9-6'],
   'square-terminal': ['m7 11 3 3-3 3', 'm13 17 4 0', 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z'],
   'key-round': ['M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z', 'M17 7.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0Z'],
   plus: ['M5 12h14', 'M12 5v14'],
@@ -86,33 +85,12 @@ function installStyle(): void {
     #${APP_SETTINGS_ID}{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border:0;border-radius:9px;color:#aeb7c4;background:transparent;cursor:pointer}
     #${APP_SETTINGS_ID}:hover{color:#eef2f6;background:#171d26}#${APP_SETTINGS_ID} .ac-lucide-icon{width:17px;height:17px;min-width:17px;min-height:17px;flex-basis:17px}
     .chat-title-row .gear{display:none!important}
-    #${APP_SETTINGS_MODAL_ID}{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.52);padding:24px}
-    #${APP_SETTINGS_MODAL_ID}[hidden]{display:none}.ac-app-settings-dialog{width:min(560px,100%);border:1px solid #2a313d;border-radius:14px;background:#10151c;color:#e8edf3;box-shadow:0 24px 70px rgba(0,0,0,.45);overflow:hidden}
-    .ac-app-settings-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid #202731}.ac-app-settings-head h2{margin:0;font-size:16px;font-weight:650}
-    .ac-app-settings-close{width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:#8f9aaa;font-size:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
-    .ac-app-settings-close:hover{background:#1a2029;color:#eef2f6}.ac-app-settings-body{padding:20px;color:#98a3b2;font-size:13px;line-height:1.55}
-    .ac-app-settings-section{padding:12px 0;border-top:1px solid #202731}.ac-app-settings-section:first-child{border-top:0;padding-top:0}.ac-app-settings-section strong{display:block;color:#dce2e9;margin-bottom:4px}
     @keyframes ac-pulse{0%,100%{opacity:.45;transform:scale(.9)}50%{opacity:1;transform:scale(1)}}@media(prefers-reduced-motion:reduce){.message.streaming .message-label:before{animation:none}}
   `;
   document.head.appendChild(style);
 }
 
 function openApiKeyManager(): void { document.querySelector<HTMLButtonElement>('.api-key-rail-button')?.click(); }
-
-function openAppSettings(): void {
-  let modal=document.getElementById(APP_SETTINGS_MODAL_ID);
-  if(!modal){
-    modal=document.createElement('div');
-    modal.id=APP_SETTINGS_MODAL_ID;
-    modal.hidden=true;
-    modal.innerHTML='<div class="ac-app-settings-dialog" role="dialog" aria-modal="true"><div class="ac-app-settings-head"><h2>Configurações do aplicativo</h2><button class="ac-app-settings-close" type="button" aria-label="Fechar"></button></div><div class="ac-app-settings-body"><div class="ac-app-settings-section"><strong>Auto CodeZ</strong><span>As configurações gerais do aplicativo ficarão concentradas neste painel.</span></div><div class="ac-app-settings-section"><strong>Próximas configurações</strong><span>Aparência, comportamento, editor, notificações e outras preferências serão adicionadas aqui.</span></div></div></div>';
-    document.body.appendChild(modal);
-    const closeButton=modal.querySelector<HTMLButtonElement>('.ac-app-settings-close');
-    closeButton?.appendChild(icon('x',16));
-    modal.addEventListener('click',(event)=>{if(event.target===modal||(event.target as HTMLElement).closest('.ac-app-settings-close')) modal!.hidden=true;});
-  }
-  modal.hidden=false;
-}
 
 function ensureAppSettingsButton(): void {
   const actions=document.querySelector<HTMLElement>('.topbar-actions');
@@ -123,7 +101,6 @@ function ensureAppSettingsButton(): void {
   button.title='Configurações do aplicativo';
   button.setAttribute('aria-label','Configurações do aplicativo');
   button.appendChild(icon('settings',17));
-  button.addEventListener('click',openAppSettings);
   actions.appendChild(button);
 }
 
@@ -163,7 +140,7 @@ function syncLucideIcons(): void {
     const open=element.closest('.intelligence-button')?.classList.contains('open') ?? false;
     replaceIcon(element,open?'chevron-up':'chevron-down',12);
   });
-  document.querySelectorAll<HTMLElement>('.modal-close,.ac-app-settings-close').forEach(element=>replaceIcon(element,'x',16));
+  document.querySelectorAll<HTMLElement>('.modal-close').forEach(element=>replaceIcon(element,'x',16));
   document.querySelectorAll<HTMLElement>('.info-button,.info-card-icon').forEach(element=>replaceIcon(element,'info',16));
   document.querySelectorAll<HTMLElement>('.brand-mark').forEach(element=>replaceIcon(element,'code-2',19));
 }
