@@ -65,7 +65,11 @@ async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnTyp
 }
 
 ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.list(), chats: await chatManager.list(), projects: await projectManager.list() }));
-ipcMain.handle('providers:list-models', async (_event, providerId: string) => providerManager.listModels(requireIdentifier(providerId, 'Provider')));
+ipcMain.handle('providers:list-models', async (_event, identifier: string) => {
+  const value = requireIdentifier(identifier, 'Provider');
+  const key = (await providerManager.listKeys()).find((item) => item.id === value);
+  return key ? providerManager.listModelsForKey(value) : providerManager.listModels(value);
+});
 ipcMain.handle('providers:list-models-for-key', async (_event, keyId: string) => providerManager.listModelsForKey(requireIdentifier(keyId, 'API key')));
 ipcMain.handle('providers:list-keys', async () => providerManager.listKeys());
 ipcMain.handle('providers:save-key', async (_event, input: unknown) => { const value = requireObject(input, 'Dados da API key'); return providerManager.saveKey({ providerId: requireIdentifier(value.providerId, 'Provider'), name: requireNonEmptyString(value.name, 'Nome da API key'), apiKey: requireNonEmptyString(value.apiKey, 'API key'), model: value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo'), baseUrl: value.baseUrl === undefined ? undefined : requireNonEmptyString(value.baseUrl, 'URL base') }); });
@@ -77,7 +81,20 @@ ipcMain.handle('providers:remove', async (_event, providerId: string) => provide
 ipcMain.handle('chat:create', async (_event, input: unknown) => chatManager.create(requireObject(input, 'Dados do chat') as { providerId?: string; model?: string; apiKeyId?: string; intelligence: string; permissionLevel: string; projectId?: string }));
 ipcMain.handle('chat:delete', async (_event, chatId: string) => chatManager.remove(requireIdentifier(chatId, 'Chat')));
 ipcMain.handle('chat:rename', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome do chat'); return chatManager.rename(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.title, 'Nome do chat')); });
-ipcMain.handle('chat:update-settings', async (_event, input: unknown) => chatManager.updateSettings(requireObject(input, 'Configurações do chat') as { chatId: string; providerId: string; model: string; apiKeyId?: string; intelligence: string; permissionLevel: string }));
+ipcMain.handle('chat:update-settings', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Configurações do chat');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const requestedProviderId = requireIdentifier(value.providerId, 'Provider');
+  const explicitApiKeyId = value.apiKeyId === undefined ? undefined : requireIdentifier(value.apiKeyId, 'API key');
+  const selectedKey = explicitApiKeyId ? (await providerManager.listKeys()).find((item) => item.id === explicitApiKeyId) : (await providerManager.listKeys()).find((item) => item.id === requestedProviderId);
+  const apiKeyId = explicitApiKeyId || selectedKey?.id;
+  const providerId = selectedKey?.providerId || requestedProviderId;
+  if (apiKeyId) {
+    const config = providerManager.getConfigForKey(apiKeyId);
+    if (config.id !== providerId) throw new Error('A API key selecionada não pertence ao provider informado.');
+  }
+  return chatManager.updateSettings({ chatId, providerId, model: requireIdentifier(value.model, 'Modelo'), apiKeyId, intelligence: requireIdentifier(value.intelligence, 'Inteligência'), permissionLevel: requireIdentifier(value.permissionLevel, 'Permissão') });
+});
 
 async function executeChat(chatId: string, content: string): Promise<{ pendingApprovalIds: string[]; chat: Awaited<ReturnType<ChatManager['list']>>[number] | undefined }> {
   const { chat, config, projectContext } = await getChatContext(chatId);
