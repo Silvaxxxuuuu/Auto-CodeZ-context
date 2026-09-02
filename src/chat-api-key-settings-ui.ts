@@ -1,22 +1,18 @@
 type SavedApiKey = { id: string; name: string; providerId: string; providerName: string; maskedKey: string; selectedModel?: string; active: boolean };
 type Chat = { id: string; providerId: string; model: string; apiKeyId?: string; permissionLevel: string; intelligence: string };
 type Model = { id: string; name: string };
-
-declare global {
-  interface Window {
-    autoCodez: {
-      getState: () => Promise<{ providers: unknown[]; chats: Chat[]; projects: unknown[] }>;
-      listApiKeys: () => Promise<SavedApiKey[]>;
-      listModels: (providerId: string) => Promise<Model[]>;
-    };
-  }
-}
+type ChatApi = {
+  getState: () => Promise<{ providers: unknown[]; chats: Chat[]; projects: unknown[] }>;
+  listApiKeys: () => Promise<SavedApiKey[]>;
+  listModels: (providerId: string) => Promise<Model[]>;
+};
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
 }
 
 function modalRoot(): HTMLElement | null { return document.querySelector('#modal-root'); }
+function api(): ChatApi { return window.autoCodez as unknown as ChatApi; }
 
 function openSavedKeyChatSettings(chat: Chat, keys: SavedApiKey[]): void {
   const root = modalRoot();
@@ -33,7 +29,7 @@ async function loadModels(identifier: string, selectedModel: string): Promise<vo
   const select = document.querySelector<HTMLSelectElement>('#chat-model');
   if (!select) return;
   try {
-    const models = await window.autoCodez.listModels(identifier);
+    const models = await api().listModels(identifier);
     select.innerHTML = models.map((model) => `<option value="${escapeHtml(model.id)}" ${model.id === selectedModel ? 'selected' : ''}>${escapeHtml(model.name)}</option>`).join('') || `<option value="${escapeHtml(selectedModel)}">${escapeHtml(selectedModel || 'Modelo não disponível')}</option>`;
   } catch (error) {
     select.innerHTML = `<option value="${escapeHtml(selectedModel)}">${escapeHtml(selectedModel || (error instanceof Error ? error.message : 'Não foi possível carregar os modelos'))}</option>`;
@@ -47,10 +43,10 @@ document.addEventListener('click', async (event) => {
   event.preventDefault();
   event.stopImmediatePropagation();
   try {
-    const state = await window.autoCodez.getState();
+    const state = await api().getState();
     const chat = state.chats.find((item) => item.id === settings.dataset.chatSettings);
     if (!chat) return;
-    const keys = await window.autoCodez.listApiKeys();
+    const keys = await api().listApiKeys();
     openSavedKeyChatSettings(chat, keys);
   } catch (error) {
     const root = modalRoot();
