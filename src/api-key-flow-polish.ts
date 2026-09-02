@@ -1,5 +1,6 @@
 const STYLE_ID = 'api-key-flow-polish-style';
 let managerObserver: MutationObserver | undefined;
+let observedBackdrop: HTMLElement | undefined;
 let managerEnhanceFrame = 0;
 
 function installStyles(): void {
@@ -90,7 +91,7 @@ function installKeyIcon(): void {
   if (!button || button.querySelector(':scope > .ac-lucide-icon[data-api-key-icon="true"]')) return;
   const existing = button.querySelector(':scope > .ac-lucide-icon');
   if (existing) existing.remove();
-  const key = lucideSvg(['M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 0 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z'], 'api-key-rail-icon');
+  const key = lucideSvg(['M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z'], 'api-key-rail-icon');
   key.dataset.apiKeyIcon = 'true';
   key.dataset.acLucideIcon = 'key-round';
   const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -155,11 +156,13 @@ function enhance(): void {
   installStatus(backdrop);
   installKeyboardBehavior(backdrop);
   installFocusBehavior(backdrop);
-  if (managerObserver) return;
+  if (managerObserver && observedBackdrop === backdrop) return;
+  managerObserver?.disconnect();
   managerObserver = new MutationObserver(() => {
     installActionIcons(backdrop);
     installStatus(backdrop);
   });
+  observedBackdrop = backdrop;
   managerObserver.observe(backdrop, { childList: true, subtree: true });
 }
 
