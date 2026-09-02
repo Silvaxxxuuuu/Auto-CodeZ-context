@@ -141,7 +141,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   readFile: (filePath: string) => invoke('projects:read-file', requireNonEmptyString(filePath, 'Arquivo')),
   writeFile: (input: { filePath: string; content: string }) => {
     const value = requireObject(input, 'Dados do arquivo');
-    return invoke('projects:write-file', { filePath: requireNonEmptyString(value.filePath, 'Arquivo'), content: typeof value.content === 'string' ? value.content : (()o => { throw new Error('Conteúdo de arquivo é inválido.'); })() });
+    return invoke('projects:write-file', { filePath: requireNonEmptyString(value.filePath, 'Arquivo'), content: typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo de arquivo é inválido.'); })() });
   },
   openExternal: (url: string) => invoke('app:open-external', requireNonEmptyString(url, 'URL externa')),
 });
