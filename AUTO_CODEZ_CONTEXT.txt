@@ -2,30 +2,35 @@ AUTO CODEZ — DOCUMENTO DE CONTEXTO PERMANENTE
 Última atualização: 01/09/2026
 
 ============================================================
-1. PRODUTO E OBJETIVO
+1. PRODUTO
 ============================================================
 
-Auto CodeZ é um aplicativo desktop real em Electron + Vite + TypeScript. É uma plataforma de desenvolvimento assistida por múltiplos provedores de IA, com interface própria, execução de ferramentas controladas, projetos locais, agente, chats, configurações, plugins futuros e conta/sincronização.
+Auto CodeZ é um aplicativo desktop real em Electron + Vite + TypeScript. É uma plataforma de desenvolvimento assistida por múltiplos provedores de IA, com interface própria, agente, execução controlada de ferramentas, projetos locais, chats, configurações, plugins futuros e conta/sincronização.
 
-A arquitetura antiga baseada em automação de navegador/UI Automation para ChatGPT, Claude e Gemini não é mais o núcleo do produto. O fluxo principal é:
+Arquitetura antiga baseada em automação de navegador/UI Automation para ChatGPT, Claude e Gemini não é mais o núcleo.
 
+Fluxo principal:
 Auto CodeZ -> AI Runtime -> Provider Adapter -> API -> modelo.
 
-O projeto deve ser tratado como software de produção: engenharia alta, código limpo, mudanças incrementais, validação antes de concluir mudanças, sem refatorações amplas desnecessárias.
+Tratar como software de produção: mudanças incrementais, código limpo, validação real, sem refatorações amplas sem necessidade.
 
 ============================================================
-2. REPOSITÓRIO / BRANCH
+2. REPOSITÓRIO E BRANCH
 ============================================================
 
 Repositório: Silvaxxxuuuu/Auto-CodeZ-context
-Branch de trabalho: feature/ui-hierarchy-polish
-Branch base do PR: feature/provider-error-resilience
-PR: #9 — feature/ui-hierarchy-polish -> feature/provider-error-resilience
+Branch atual de trabalho: feature/ui-hierarchy-polish
+PR #9: feature/ui-hierarchy-polish -> feature/provider-error-resilience
+Não fazer merge do PR sem solicitação explícita.
 
-NÃO fazer merge do PR sem solicitação explícita.
+Último commit conhecido antes desta atualização do contexto:
+1d4579de7a49126d1f16afd8fa6240a2a2604ef2
+fix(settings): route legacy settings action to new screen
+
+A atualização deste TXT gera um novo commit na mesma branch. O novo SHA deve ser tratado como o novo HEAD quando a operação terminar.
 
 ============================================================
-3. STACK
+3. STACK E REGRAS
 ============================================================
 
 - Electron
@@ -40,24 +45,28 @@ NÃO fazer merge do PR sem solicitação explícita.
 
 React não deve ser introduzido sem necessidade arquitetural real.
 
-============================================================
-4. PRINCÍPIOS DE ENGENHARIA
-============================================================
+Regras:
+- mudanças cirúrgicas quando o problema for localizado;
+- não alterar componentes corretos sem necessidade;
+- não trocar sistemas inteiros de ícones/CSS para resolver detalhes;
+- preservar renderer/preload/main;
+- secrets nunca no renderer;
+- UI não deve conhecer detalhes HTTP dos providers;
+- evitar observers/listeners/timers globais desnecessários;
+- evitar módulos carregados duas vezes;
+- não esconder erros reais atrás de mensagens genéricas;
+- não declarar correção concluída sem validação.
 
-- Mudanças cirúrgicas quando o problema for localizado.
-- Não alterar componentes já corretos sem necessidade.
-- Não trocar sistemas inteiros de ícones/CSS para resolver um detalhe.
-- Não esconder erros reais atrás de mensagens genéricas.
-- Evitar observers/listeners/timers globais desnecessários.
-- Evitar módulos carregados duas vezes.
-- Preservar separação renderer/preload/main.
-- Secrets nunca devem ser expostos ao renderer.
-- UI não deve conhecer detalhes HTTP de providers.
-- Validar typecheck, testes e comportamento relevante.
-- Não declarar uma correção concluída sem validação.
+Validação padrão:
+npm run typecheck
+npm test
+npm run lint
+npm start
+
+Não afirmar que testes locais passaram sem executá-los ou sem confirmação real.
 
 ============================================================
-5. IA / PROVIDERS
+4. PROVIDERS E IA
 ============================================================
 
 Providers iniciais:
@@ -76,104 +85,71 @@ Arquivos principais:
 - src/ai/providers/google.ts
 - src/ai/providers/anthropic.ts
 
-Contratos globais incluem provider, model, capabilities, request, response, messages, stream events, tools e inteligência. Novos providers devem ser adicionáveis via adapter sem reescrever o núcleo.
+Contratos globais incluem provider, model, capabilities, request, response, messages, stream events, tools e inteligência.
 
-Cada chat usa um provider/modelo por vez, mas pode trocar provider/modelo no meio da conversa. O histórico pertence ao Auto CodeZ, não ao provider.
+Cada chat usa um provider/modelo por vez, mas pode trocar provider/modelo no meio da conversa. Histórico pertence ao Auto CodeZ.
 
-Capacidades podem incluir text, streaming, vision, image, video, audio, reasoning e tools. A UI deve respeitar capacidades reais.
+Capacidades: text, streaming, vision, image, video, audio, reasoning e tools. UI deve respeitar capacidades reais.
 
-============================================================
-6. INTELIGÊNCIA
-============================================================
-
-Perfis globais:
+Perfis de inteligência:
 - Baixo
 - Normal
 - Alto
 - Máximo
 
-O perfil representa esforço/orçamento, não simplesmente tokens. O runtime traduz o perfil para parâmetros equivalentes do provider/modelo. A UI não deve exigir conhecimento de parâmetros específicos de APIs.
+Perfil representa esforço/orçamento. Runtime traduz para parâmetros específicos do provider/modelo.
 
 ============================================================
-7. API KEYS / PROVIDERS — ESTADO ATUAL
+5. ESTADO DE API KEYS E ERROS
 ============================================================
 
 Fluxo:
-provider -> nome -> API Key -> modelo/base URL opcional -> validação -> descoberta de modelos -> salvar.
+provider -> nome -> API Key -> modelo/base URL opcional -> validação -> model discovery -> salvar.
 
-API Keys são secrets. Localmente devem usar safeStorage e não aparecer em providers.json em texto puro.
+API Keys são secrets. Localmente usar safeStorage. Nunca salvar plaintext em providers.json.
 
-Tipos de erro que o sistema deve distinguir:
-- authentication
-- billing
-- quota
-- rate limit
-- network
-- server
-- invalid request
-- unknown
+Erros devem distinguir:
+authentication, billing, quota, rate limit, network, server, invalid request e unknown.
 
-Estado real em 01/09/2026:
+Estado observado em 01/09/2026:
 - Google AI respondeu corretamente a um primeiro “olá”.
-- Depois, ao pedir criação de pasta, informou falta de créditos/cota.
-- OpenAI e Anthropic foram testados e também estavam sem créditos no momento.
-- Isso demonstra que o fluxo alcança os providers; a prioridade é exibir/classificar corretamente billing/quota, não tratar tudo como falha genérica.
+- Depois, criação de pasta retornou falta de créditos/cota.
+- OpenAI e Anthropic também estavam sem créditos no momento.
+- Isso prova que o fluxo alcança os providers.
+- Prioridade é classificação e apresentação correta de billing/quota, não erro genérico.
 
-Erro Google anteriormente observado durante model discovery:
-ProviderRequestError: The service is currently unavailable.
-provider: Google AI
-operation: model discovery
-status: 0
-
-============================================================
-8. RESILIÊNCIA DE MODEL DISCOVERY
-============================================================
-
-src/ai/model-resolver.ts agora preserva cache quando discovery falha e permite fallback para o modelo já configurado.
-
-Commit: 7354cf9485172bf438ceb1903cf532f0d0c267f2
+Model discovery:
+7354cf9485172bf438ceb1903cf532f0d0c267f2
 fix(ai): allow configured chats to survive model discovery outages
 
-src/ai/chat-runtime.ts agora usa o modelo configurado quando model discovery falha.
-
-Commit: 742dd7f56414185beb996522ac607191239ccc39
+742dd7f56414185beb996522ac607191239ccc39
 fix(ai): keep chat model resolution type-safe
 
-src/ai/provider-errors.ts classifica indisponibilidade de serviço, billing, quota, autenticação, rede etc.
-
-Commit: 0cc5750015ae80eb4a93172a1631674eb46140f1
+0cc5750015ae80eb4a93172a1631674eb46140f1
 fix(ai): classify unavailable provider services correctly
 
-Essas alterações não devem ser consideradas validadas localmente até execução dos testes.
+Model resolver preserva cache quando discovery falha e usa modelo configurado como fallback.
+Essas mudanças ainda precisam de validação local para serem consideradas concluídas.
 
 ============================================================
-9. EXECUTION MANAGER
+6. EXECUTION E STREAMING
 ============================================================
 
-Existe src/execution-manager.ts.
+src/execution-manager.ts
+Estados: idle, running, waiting_approval, completed, failed, interrupted.
+Usa chatId/runId. Impede duas execuções no mesmo chat e permite execuções simultâneas em chats diferentes.
 
-Estados:
-- idle
-- running
-- waiting_approval
-- completed
-- failed
-- interrupted
+Commit principal:
+200e24bd7a05d360e2900be275356dd30637bc5c
 
-Usa chatId/runId. Impede duas execuções no mesmo chat, permite execuções simultâneas em chats diferentes e preserva estados de aprovação/falha/interrupção.
+Testes:
+c5fabf459a8d4775544fec08c7a289691b0891d7
 
-Commit principal: 200e24bd7a05d360e2900be275356dd30637bc5c
-Testes: c5fabf459a8d4775544fec08c7a289691b0891d7
+Bug grave de congelamento após primeira mensagem foi corrigido.
 
-============================================================
-10. STREAMING / FREEZE — ESTADO
-============================================================
-
-Houve um bug grave em que a UI congelava depois da primeira mensagem. A causa provável principal foi excesso de trabalho de MutationObservers e reconstrução de DOM durante streaming.
-
-Correções feitas:
+Correções relevantes:
 - streaming atualiza apenas DOM ativo;
-- ~30 FPS para atualizações;
+- atualizações em torno de 30 FPS;
 - activity/tool blocks incrementais;
 - Execution Visibility observa nav em vez de document.body;
 - chat-execution-ui.ts redundante deixou de ser montado;
@@ -181,112 +157,83 @@ Correções feitas:
 - api-key-flow-polish sem observer global permanente;
 - módulos duplicados removidos do index.html quando já injetados pelo Vite.
 
-O usuário confirmou que a UI deixou de congelar.
+Commits:
+719efd604353fe4ded8b06783055c7d09b14f139
+fd7d2295ce44db46ee856009a08d2a84d8a5f024
+d0a90976316e426e280ff9450ab6642ad5c0f586
+2a8603fce62b38f0534a5a7413863db58ef44791
 
-Commits relevantes:
-719efd604353fe4ded8b06783055c7d09b14f139 — streaming
-fd7d2295ce44db46ee856009a08d2a84d8a5f024 — execution visibility
-d0a90976316e426e280ff9450ab6642ad5c0f586 — remoção de módulo redundante
-2a8603fce62b38f0534a5a7413863db58ef44791 — recovery UI
-
-Proteger contra regressões.
+Usuário confirmou que a UI deixou de congelar. Proteger contra regressões.
 
 ============================================================
-11. INTERFACE VISUAL
+7. UI E ÍCONES
 ============================================================
 
-Identidade própria do Auto CodeZ. VS Code é referência estrutural, não identidade.
+Visual: escuro, profissional, limpo, poucos efeitos, sem shaders pesados, espaçamento consistente, estados claros.
 
-Preferências:
-- tema escuro;
-- visual profissional e limpo;
-- poucos efeitos;
-- sem shaders pesados;
-- espaçamento consistente;
-- estados claros;
-- Lucide Icons como referência/biblioteca de ícones;
-- mudanças visuais cirúrgicas.
+Lucide Icons é a referência preferida: https://lucide.dev
 
-Lucide: https://lucide.dev
-
-Ícones já considerados corretos e que NÃO devem ser alterados sem pedido:
+Ícones já aprovados e não devem ser alterados sem pedido:
 - Chats: message-circle
 - Novo chat: message-circle-plus
-- inteligência: Sparkles
-- chevrons da inteligência: chevron-up/down
-- send button
-- ícone de API key baseado em key-round
-- demais controles já refinados.
+- Inteligência: Sparkles
+- chevrons: chevron-up/down
+- send
+- API key baseado em key-round
 
-Lápis e lixeira dos chats já foram alinhados à direita. A causa era conflito entre CSS estático e CSS injetado por ui-polish.ts.
+VS Code é referência estrutural, não identidade visual.
 
-Commit: 8148e177b1dd6c7b75326e8c9b3ea289a293e438
+Lápis e lixeira dos chats já foram alinhados à direita.
+Commit:
+8148e177b1dd6c7b75326e8c9b3ea289a293e438
 
-Não substituir novamente o sistema de ícones para corrigir posicionamento.
+Não substituir o sistema de ícones para corrigir posicionamento.
 
 ============================================================
-12. ESTRUTURA DA UI
+8. ESTRUTURA DA UI
 ============================================================
 
-Barra superior: permanente, baixa, marca, ações globais, configurações e conta/perfil.
+Top bar: permanente, baixa, branding, ações globais, configurações e conta/perfil.
 
-Barra esquerda: Chats, Projetos, Plugins/Extensões futuramente, perfil/conta no inferior.
+Left rail: Chats, Projetos, Plugins/Extensões futuramente, perfil/conta no inferior.
 
-Painel de navegação: histórico, projetos, chats de projetos e ações de chat.
+Navigation panel: histórico, projetos, chats de projetos e ações de chat.
 
 Centro: chat, activity, composer e resultados de ferramentas.
 
-Barra direita: inicialmente vazia; futuramente extensões podem inserir painéis.
+Right bar: inicialmente vazia. Futuramente plugins podem inserir painéis.
 
-Composer conceitual:
+Composer:
 [ anexar ] [ Digite uma mensagem... ] [ Inteligência ] [ enviar ]
 
-Provider/modelo ativo deve ser identificado no cabeçalho/configuração do chat, não necessariamente no composer.
+Provider/modelo ativo deve aparecer no cabeçalho/configuração do chat, não necessariamente no composer.
 
-A área de Perfil é o local exclusivo da interface principal para identidade da conta e contas externas vinculadas. O usuário deve poder visualizar e gerenciar ali as identidades Google, GitHub, Microsoft, Passkeys e acesso por Magic Link. Segurança permanece responsável por sessões/dispositivos/proteções; Sincronização permanece responsável por estado de sync, pendências e conflitos.
-
-============================================================
-13. CHAT / HISTÓRICO
-============================================================
-
-Chat possui conceitualmente:
-- id
-- título
-- projeto opcional
-- provider
-- modelo
-- perfil de inteligência
-- nível de acesso
-- mensagens
-- timestamps
-- estado de execução
-
-Chats vazios podem ser temporários. Após a primeira mensagem tornam-se histórico persistente.
-
-Lápis/lixeira aparecem no hover e ficam à direita.
+Perfil é o local principal para identidade e contas externas vinculadas: Google, GitHub, Microsoft, Passkeys e Magic Link.
+Segurança trata sessões, dispositivos e proteções.
+Sincronização trata estado, pendências e conflitos.
 
 ============================================================
-14. ATIVIDADE DO AGENTE
+9. CHAT E AGENT ACTIVITY
 ============================================================
 
-O Auto CodeZ mostra atividade operacional, nunca raciocínio interno privado.
+Chat conceitualmente possui:
+id, título, projeto opcional, provider, modelo, inteligência, nível de acesso, mensagens, timestamps e estado de execução.
 
-Exemplos:
-- “Vou verificar como o fluxo atual funciona.”
-- “Vou atualizar a validação da sessão.”
-- “Executei os testes e todos passaram.”
+Chat vazio pode ser temporário. Após primeira mensagem vira histórico persistente.
 
-Existe src/core/activity-runtime.ts.
+Atividade mostra ações operacionais, nunca raciocínio privado.
+
+src/core/activity-runtime.ts
 Tipos: thought, action, tool, test, build, complete, error.
 Status: pending, running, success, failed.
 
-A atividade deve acompanhar ações reais do runtime.
+Atividade deve refletir ações reais do runtime.
 
 ============================================================
-15. PROJETOS / WORKSPACE / FERRAMENTAS
+10. PROJETOS, WORKSPACE E PERMISSÕES
 ============================================================
 
-Projeto local aponta para uma pasta do computador e pode conter vários chats. Chat pode existir sem projeto.
+Projeto local aponta para pasta do computador e pode conter vários chats. Chat pode existir sem projeto.
 
 Ferramentas conceituais:
 read_file()
@@ -299,440 +246,294 @@ run_command()
 
 A IA não recebe acesso arbitrário ao SO apenas por estar em modo agente.
 
-Alterações devem ser observáveis e, quando exigido pelo nível de acesso, passar por proposta -> revisão -> aprovação -> aplicação.
+Mudanças devem ser observáveis e, conforme o nível de acesso, seguir proposta -> revisão -> aprovação -> aplicação.
 
 Mostrar arquivos criados, modificados, excluídos, renomeados, diff, operações, testes e build.
 
-Estados de alteração: pending, accepted, rejected, applied, failed.
+Estados de alteração:
+pending, accepted, rejected, applied, failed.
 
-============================================================
-16. PERMISSÕES
-============================================================
-
-Níveis conceituais:
+Níveis de acesso:
 - Somente leitura
 - Acesso seguro
 - Acesso solicitado
 - Acesso irrestrito
 
-Mesmo no modo irrestrito, manter proteções estruturais contra operações perigosas fora do workspace quando tecnicamente possível.
+Mesmo irrestrito, manter proteções contra operações perigosas fora do workspace quando tecnicamente possível.
 
 ============================================================
-17. ERROR RECOVERY / CONFIGURAR IA
+11. ERROR RECOVERY E API SETTINGS
 ============================================================
 
-src/error-recovery-ui.ts mostra estados de recuperação e deve preservar a mensagem real do provider quando disponível.
+src/error-recovery-ui.ts preserva mensagem real do provider quando disponível.
 
-Commit: 5a191aa978e0a3cad16148ab17372db524fe2c01
+Commit:
+5a191aa978e0a3cad16148ab17372db524fe2c01
 fix(ui): expose provider error details in recovery state
 
 src/api-settings-routing-ui.ts roteia [data-action="ai-settings"] para .api-key-rail-button.
 
-Se “Configurar IA” voltar a falhar, verificar primeiro o markup real gerado por error-recovery-ui.ts.
+Se “Configurar IA” falhar novamente, verificar primeiro o markup real produzido por error-recovery-ui.ts.
+
+API Key Manager possui provider, nome, API Key, modelo opcional, base URL opcional, validação e model discovery.
+
+Duplicação de terminal-ui.ts, api-key-ui.ts e ui-polish.ts no index.html + Vite foi removida.
+Commit:
+060941fef86385e2a9ea3f6d10851a9aa162b5ac
+
+Observer global permanente de api-key-flow-polish.ts foi removido/restringido.
+Commit:
+5883ccc338b0721163dd73dcd5baf50ed53a732c
+
+Comportamento intermitente de foco/cursor no campo de nome ainda deve ser retestado.
 
 ============================================================
-18. API KEY MANAGER
+12. SETTINGS — POSIÇÃO ATUAL
 ============================================================
 
-Possui provider, nome, API Key, modelo opcional, base URL opcional, validação e model discovery.
+Existe uma nova implementação em settings-ui.ts.
 
-Foi identificado carregamento duplicado de terminal-ui.ts, api-key-ui.ts e ui-polish.ts no index.html + injeção Vite. A duplicação foi removida.
+O botão legado #ac-app-settings era controlado por openAppSettings() em ui-polish.ts. A nova tela não recebia o clique porque o código legado ainda existia.
 
-Commit: 060941fef86385e2a9ea3f6d10851a9aa162b5ac
+Commit já feito:
+1d4579de7a49126d1f16afd8fa6240a2a2604ef2
+fix(settings): route legacy settings action to new screen
 
-api-key-flow-polish.ts teve observer global permanente removido/restringido.
+Após esse commit, settings-ui.ts intercepta o botão legado e abre a nova tela de Settings.
+Usuário confirmou que a nova tela apareceu.
 
-Commit: 5883ccc338b0721163dd73dcd5baf50ed53a732c
+IMPORTANTE: o código legado AINDA NÃO FOI REMOVIDO de src/ui-polish.ts.
 
-Houve também comportamento intermitente de foco/cursor no campo de nome. Deve ser retestado após as correções.
+Foi confirmado pela árvore/blob da branch que ui-polish.ts ainda contém:
+- APP_SETTINGS_MODAL_ID = 'ac-app-settings-modal'
+- CSS do modal antigo
+- openAppSettings()
+- referência .ac-app-settings-close em syncLucideIcons()
+- listener button.addEventListener('click', openAppSettings)
 
-============================================================
-19. SETTINGS
-============================================================
+Blob atual conhecido de src/ui-polish.ts:
+c4a1df465d19266a8ec2eebffa9676322228ddc4
 
-A aba de configurações ainda precisa ser transformada em sistema real.
+A remoção planejada é cirúrgica:
+1. remover APP_SETTINGS_MODAL_ID;
+2. remover somente CSS do modal antigo;
+3. remover openAppSettings();
+4. manter ensureAppSettingsButton() e o botão #ac-app-settings, pois ele continua sendo o ponto de integração visual com settings-ui.ts;
+5. remover button.addEventListener('click', openAppSettings);
+6. mudar o seletor de syncLucideIcons() de .modal-close,.ac-app-settings-close para .modal-close;
+7. não alterar observers, recuperação de IA, ícones ou outras lógicas.
 
-Áreas previstas:
+Essa remoção ainda NÃO foi commitada porque a escrita do GitHub Contents API exige substituição integral do arquivo. Não reconstruir manualmente um arquivo grande sem preservar exatamente o restante.
 
-Geral:
-- tema
-- idioma
-- animações
-- densidade
-- inicialização
-
-IA:
-- provider padrão
-- modelo padrão
-- inteligência
-- ferramentas
-- aprovação
-
-Editor:
-- fonte
-- tamanho
-- word wrap
-- minimap
-- tabs
-- indentação
-
-Terminal:
-- shell
-- diretório inicial
-- comportamento
-
-Segurança/privacidade:
-- credenciais
-- integrações
-- dispositivos
-- sessões
-
-Sincronização:
-- estado
-- pendências
-- conflitos
+Objetivo: ficar com uma única implementação real de Settings.
 
 ============================================================
-20. NOVA ARQUITETURA CENTRAL: CONTA AUTO CODEZ
+13. SETTINGS — SISTEMA FUTURO
 ============================================================
 
-A conta Auto CodeZ é uma das partes mais importantes do produto. Não é login cosmético.
+Geral: tema, idioma, animações, densidade, inicialização.
+IA: provider padrão, modelo padrão, inteligência, ferramentas, aprovação.
+Editor: fonte, tamanho, word wrap, minimap, tabs, indentação.
+Terminal: shell, diretório inicial, comportamento.
+Segurança/privacidade: credenciais, integrações, dispositivos, sessões.
+Sincronização: estado, pendências, conflitos.
 
-A conta deve sincronizar praticamente todo o estado pertencente ao usuário, permitindo instalar o Auto CodeZ em outro PC e recuperar o ambiente sem depender de um arquivo de backup que possa ser perdido.
+============================================================
+14. CONTA AUTO CODEZ
+============================================================
 
-Dados que pertencem ao usuário:
-- API Keys
-- chats
-- histórico dos chats
-- configurações
-- preferências
-- biblioteca
-- projetos sincronizados
-- backups
-- integrações
-- permissões externas
-- dispositivos conectados
+Conta não é login cosmético. É infraestrutura central do produto.
+
+Objetivo: instalar Auto CodeZ em outro PC e recuperar o ambiente do usuário sem depender de backup manual perdido.
+
+Dados sincronizáveis incluem:
+- API Keys/secrets de forma segura;
+- chats e histórico;
+- configurações e preferências;
+- biblioteca;
+- projetos marcados para sincronização;
+- backups;
+- integrações;
+- permissões externas;
+- dispositivos conectados;
 - demais dados persistentes do produto.
 
-O aplicativo instalado em si é local-only; os dados do produto que forem sincronizáveis pertencem à conta.
+Não existe dispositivo rei. Vários dispositivos têm acesso equivalente aos dados sincronizados.
+
+Recursos físicos continuam locais: filesystem, processos, terminal, hardware, aplicativos instalados e pastas explicitamente não sincronizadas.
+
+Um dispositivo remoto não ganha automaticamente controle físico de outro computador.
 
 ============================================================
-21. USUÁRIO VS DISPOSITIVO
-============================================================
-
-Não existe “dispositivo rei”. O primeiro dispositivo conectado não tem autoridade superior.
-
-Uma conta pode ter vários dispositivos com acesso equivalente aos dados sincronizados.
-
-Exemplo:
-Conta -> PC, Notebook, Laptop, etc.
-
-Recursos físicos continuam locais ao dispositivo:
-- filesystem local
-- processos
-- terminal
-- hardware
-- aplicativos instalados
-- pastas explicitamente não sincronizadas.
-
-Um dispositivo remoto não ganha automaticamente controle físico sobre outro computador.
-
-============================================================
-22. LOCAL-ONLY VS SINCRONIZADO
+15. LOCAL-ONLY VS SYNC
 ============================================================
 
 LOCAL-ONLY:
-- instalação do aplicativo
-- cache local
-- processos locais
-- hardware/recursos físicos
-- projetos/pastas mantidos explicitamente somente naquele dispositivo
+- instalação;
+- cache;
+- processos locais;
+- hardware;
+- recursos físicos;
+- projetos/pastas explicitamente não sincronizados.
 
 SINCRONIZADO:
-- configurações
-- chats
-- histórico
-- biblioteca
-- projetos marcados para sincronização
-- preferências
-- dispositivos conectados
-- API Keys/secrets, de forma segura
-- integrações
-- backups
-- demais dados da conta
-
-Deve existir distinção entre projeto local e projeto sincronizado.
+- configurações;
+- chats;
+- histórico;
+- biblioteca;
+- projetos sincronizados;
+- preferências;
+- dispositivos;
+- API Keys/secrets protegidos;
+- integrações;
+- backups;
+- dados da conta.
 
 ============================================================
-23. LOCAL-FIRST / OFFLINE
+16. LOCAL-FIRST / OFFLINE
 ============================================================
 
 Decisão arquitetural permanente:
-
 AUTO CODEZ = LOCAL-FIRST + CLOUD SYNC + OFFLINE QUEUE.
 
-Se a internet cair durante uma sessão:
-- a sessão não é perdida;
-- chats continuam acessíveis;
-- histórico continua acessível;
-- contexto local continua disponível;
+Se internet cair:
+- sessão não é perdida;
+- chats/histórico/contexto local continuam disponíveis;
 - projetos locais continuam disponíveis;
 - configurações continuam disponíveis;
-- alterações continuam sendo salvas localmente;
-- operações que dependem da cloud ficam pendentes;
-- UI mostra estado de sincronização sem bloquear o usuário.
+- alterações continuam salvas localmente;
+- operações dependentes da cloud ficam pendentes;
+- UI permanece utilizável.
 
-Quando a internet voltar:
+Quando internet voltar:
 - fila é processada;
-- servidor confirma operações;
-- alterações viram sincronizadas;
+- servidor confirma;
+- estado vira sincronizado;
 - conflitos são apresentados quando necessário.
 
-REGRA FUNDAMENTAL: nunca apagar uma alteração local porque a sincronização falhou.
+Regra: nunca apagar alteração local porque sync falhou.
 
 Fluxo:
 alteração local -> salvar localmente -> fila -> tentar sync -> confirmação -> sincronizado.
 
 Falha = salvo localmente + pendente.
 
-O contexto da conversa atual deve permanecer local enquanto a sessão estiver aberta. A cloud é persistência compartilhada entre dispositivos, não a única fonte de contexto durante uma sessão.
+Cloud é persistência compartilhada entre dispositivos, não a única fonte de contexto durante uma sessão.
 
 ============================================================
-24. CONFLITOS ENTRE DISPOSITIVOS
+17. CONFLITOS E MODELO DE SYNC
 ============================================================
 
-Conflitos importantes não devem ser resolvidos silenciosamente por “última escrita vence”.
+Não usar last-write-wins silencioso como regra de produto.
 
-Se dois dispositivos alterarem o mesmo recurso de forma conflitante, deve existir uma Solicitação de Alteração.
+Conflitos devem:
+- identificar origem/dispositivo;
+- mostrar alteração/diff quando aplicável;
+- permitir aceitar, rejeitar ou revisar;
+- preservar a alteração local até resolução.
 
-A notificação deve permitir:
-- identificar dispositivo de origem;
-- visualizar o que mudou;
-- ver diff quando aplicável;
-- aceitar;
-- rejeitar;
-- revisar novamente.
-
-Se uma alteração antiga for aceita depois de outra já ter sido aceita, mostrar confirmação explícita, por exemplo:
-
-“Você tem certeza que deseja aceitar esta alteração? O dispositivo {dispositivo} já fez uma alteração neste arquivo.”
-
-O sistema precisa preservar revision/deviceId/timestamp/operação suficientes para detectar isso.
+Modelo deve acompanhar:
+entityId, revision, deviceId, timestamp, operation, payload, syncStatus.
 
 ============================================================
-25. PROJETOS SINCRONIZADOS
+18. AUTENTICAÇÃO E SEGURANÇA
 ============================================================
 
-Existem dois conceitos:
-1. Projeto local
-2. Projeto sincronizado
-
-Projeto sincronizado pode ser recuperado em outro dispositivo autenticado.
-
-Exemplo:
-PC -> projeto sincronizado -> Auto CodeZ Cloud -> Notebook.
-
-O usuário não deve ser obrigado a transportar manualmente um backup para continuar o projeto em outro computador.
-
-============================================================
-26. SECRETS / GITHUB / GIT / INTEGRAÇÕES
-============================================================
-
-Secrets incluem:
-- API Keys
-- OAuth tokens
-- credenciais GitHub
-- credenciais Git
-- tokens de serviços externos
-- credenciais futuras de plugins
-
-Pertencem ao usuário, mas possuem tratamento separado dos dados comuns.
-
-Devem ser:
-- criptografados em repouso;
-- protegidos por autenticação/autorização;
-- revogáveis;
-- não expostos desnecessariamente ao renderer;
-- nunca registrados em logs;
-- não retornados em texto puro em listagens comuns.
-
-============================================================
-27. LOGIN / IDENTIDADES VINCULADAS / RECUPERAÇÃO
-============================================================
-
-A autenticação do Auto CodeZ é passwordless-first.
-
-Métodos adotados como núcleo:
+Autenticação planejada passwordless-first:
 - Google
 - GitHub
 - Microsoft
 - Passkeys
+- Magic Link por email
 
-Acesso por e-mail, quando necessário, usa Magic Link temporário e não senha.
+Não usar telefone/OTP como base.
+Não usar email + senha como arquitetura principal planejada.
 
-Telefone/OTP não faz parte da arquitetura planejada.
-E-mail + senha não faz parte da arquitetura planejada.
+Identidades externas devem ser vinculadas a uma única conta Auto CodeZ.
 
-A conta Auto CodeZ é independente das identidades externas. Um usuário pode vincular várias identidades à mesma conta, por exemplo:
+Perfil: identidade, email principal, identidades vinculadas, passkeys, Magic Link, vincular/desvincular.
 
-Auto CodeZ Account
-├── Google
-├── GitHub
-├── Microsoft
-├── Passkey(s)
-└── Magic Link / e-mail
+Segurança: sessões, dispositivos, revogação, atividade de autenticação e proteções.
 
-Essas identidades não criam contas Auto CodeZ separadas. São diferentes mecanismos para autenticar a mesma conta.
+Secrets futuros incluem API keys, OAuth tokens, GitHub/Git credentials e tokens de serviços/plugins. Devem ser criptografados em repouso, protegidos por autenticação, revogáveis, nunca logados e não expostos desnecessariamente ao renderer.
 
-A aba Perfil da interface principal é o local dedicado ao gerenciamento de identidade:
-- perfil do usuário;
-- e-mail principal;
-- contas Google vinculadas;
-- contas GitHub vinculadas;
-- contas Microsoft vinculadas;
-- Passkeys;
-- acesso por Magic Link;
-- vincular nova identidade;
-- desvincular identidade, respeitando a regra de que a conta não pode ficar sem nenhum método de recuperação/acesso válido.
+============================================================
+19. CLOUD / BACKEND
+============================================================
 
-Segurança permanece separada e concentra:
-- dispositivos conectados;
-- sessões;
-- revogação;
-- atividade de autenticação;
-- proteções de segurança.
-
-Sincronização permanece separada e concentra:
-- estado da sincronização;
-- pendências;
+Servidor/cloud será responsável por:
+- autenticação;
+- contas;
+- sincronização;
+- armazenamento cloud;
+- secrets da conta;
+- dispositivos;
 - conflitos;
-- solicitações de alteração.
+- backups.
 
-Google, GitHub e Microsoft são responsáveis pela recuperação de suas respectivas identidades externas. Para Magic Link, o e-mail funciona como prova temporária de acesso.
+Desktop deve continuar localmente quando cloud estiver indisponível.
 
-Não existe fluxo planejado de recuperação por senha, pois senha não é parte do modelo principal.
+A infraestrutura cloud final ainda precisa ser especificada antes da implementação completa da conta.
 
-Qualquer recuperação excepcional da conta deve possuir controles de segurança, auditoria e verificação adequada. Suporte manual, se necessário, deve ser posterior ao fluxo automático e nunca baseado apenas em informações facilmente falsificáveis.
-
-============================================================
-28. DISPOSITIVOS CONECTADOS
-============================================================
-
-Nas configurações haverá “Dispositivos conectados”.
-
-Mostrar:
-- nome
-- sistema operacional
-- dispositivo atual
-- última atividade
-- estado de sessão
-- desconectar
-
-Desconectar um dispositivo invalida a sessão daquele dispositivo. Ele precisará autenticar novamente. Outros dispositivos permanecem conectados.
-
-Não existe hierarquia de autoridade entre dispositivos.
+Portabilidade/exportação deve existir para evitar lock-in de dados.
 
 ============================================================
-29. SERVIDOR / CLOUD
+20. PLUGINS
 ============================================================
 
-“Servidor” = infraestrutura online do Auto CodeZ responsável por autenticação, contas, sincronização, armazenamento cloud, secrets de conta, dispositivos, conflitos e backups.
+Plugins vêm depois da fundação Account/Sync/Permissions.
 
-O desktop não pode depender da disponibilidade dessa infraestrutura para funcionar localmente.
+Podem fornecer:
+- ícone na left rail;
+- right panel;
+- command;
+- provider;
+- tool;
+- theme;
+- integration;
+- automation.
 
-Arquitetura conceitual:
-Desktop -> armazenamento local -> fila de sync -> Auto CodeZ Cloud.
-
-A infraestrutura cloud definitiva ainda deve ser especificada antes da implementação completa da conta.
-
-============================================================
-30. MODELO DE SYNC
-============================================================
-
-A sincronização deve trabalhar com alterações rastreáveis, não apenas sobrescrita cega.
-
-Conceitos esperados:
-- entityId
-- revision
-- deviceId
-- timestamp
-- operation
-- payload
-- syncStatus
-
-Deve ser possível identificar alteração local, pendente, confirmada, conflitante, revisão atual e dispositivo de origem.
+Instalar plugin nunca deve conceder acesso arbitrário automaticamente. Permissões devem ser explícitas.
 
 ============================================================
-31. PORTABILIDADE / EXPORTAÇÃO
+21. ROADMAP
 ============================================================
 
-Foi decidido manter futuramente algum mecanismo de portabilidade/recuperação dos dados, apesar de a conta ser o mecanismo principal de recuperação entre computadores.
+FASE 1 — Estabilização
+- terminar correção pendente de Settings legado;
+- validar providers/model discovery;
+- validar billing/quota;
+- retestar API Key Manager;
+- retestar Configurar IA;
+- validar execution;
+- validar streaming;
+- validar persistência;
+- auditoria técnica e regressões.
 
-Não precisa ser necessariamente ZIP. O importante é não criar uma prisão de dados caso o serviço deixe de existir ou o usuário precise recuperar seus dados.
-
-A decisão deve influenciar o desenho do modelo de dados desde o início, mesmo que a implementação seja posterior.
-
-============================================================
-32. PLUGINS
-============================================================
-
-Plugins são parte importante do produto, mas devem vir depois da fundação de Account/Sync/Permissions.
-
-Plugins poderão fornecer:
-- ícone na barra esquerda
-- painel na barra direita
-- comando
-- provider
-- ferramenta
-- tema
-- integração
-- automação
-
-Plugins devem possuir permissões explícitas para filesystem, terminal, chats, providers, GitHub, dados da conta etc.
-
-Instalar plugin não deve conceder acesso arbitrário.
-
-============================================================
-33. ROADMAP ATUAL
-============================================================
-
-FASE 1 — ESTABILIZAÇÃO
-- corrigir pendências atuais;
-- billing/quota;
-- API Key Manager;
-- Configurar IA;
-- execução;
-- streaming;
-- persistência;
-- auditoria técnica;
-- regressões.
-
-FASE 2 — ACCOUNT FOUNDATION
+FASE 2 — Account Foundation
 - modelo de conta;
-- identidade;
-- identidades externas vinculadas;
+- identidades;
+- contas externas vinculadas;
 - sessões;
 - dispositivos;
-- autenticação passwordless-first;
+- passwordless auth;
 - Passkeys;
-- OAuth Google/GitHub/Microsoft;
+- OAuth;
 - Magic Link;
 - segurança;
-- modelo sincronizável.
+- modelo de dados sincronizável.
 
-FASE 3 — SYNC
-- chats;
-- histórico;
-- configurações;
-- biblioteca;
+FASE 3 — Sync
+- chats/histórico;
+- settings;
+- library;
 - projetos sincronizados;
 - backups;
-- preferências;
-- fila offline;
+- offline queue;
 - conflitos;
-- solicitações.
+- change requests.
 
-FASE 4 — SECRETS / INTEGRAÇÕES
+FASE 4 — Secrets e integrações
 - API Keys cloud;
 - GitHub;
 - Git;
@@ -741,157 +542,55 @@ FASE 4 — SECRETS / INTEGRAÇÕES
 - revogação;
 - dispositivos.
 
-FASE 5 — SETTINGS + GRANDE EVOLUÇÃO UI/UX
-- configurações reais;
-- estados de sincronização;
-- erros/loading/empty;
+FASE 5 — Settings + UI/UX maior
+- Settings real;
+- estados de sync;
+- loading/empty/error;
 - chat;
 - activity;
 - editor;
-- ferramentas;
-- grande refinamento visual.
+- tools;
+- refinamento visual amplo após a base estar estável.
 
-FASE 6 — PLUGINS
-- plugin API;
-- permissions;
-- manager;
-- UI extensions;
-- ferramentas externas.
+FASE 6 — Plugins
 
-FASE 7 — DISTRIBUIÇÃO / PRODUTO
+FASE 7 — Produto/distribuição
 - updater;
 - builds;
 - cloud final;
-- billing/planos quando decidido;
+- billing/planos se decididos;
 - suporte;
 - observabilidade.
 
-LOGIN E SYNC SÃO INFRAESTRUTURA CENTRAL, NÃO FUNCIONALIDADES SECUNDÁRIAS.
-
 ============================================================
-34. PENDÊNCIAS E ESTADO ATUAL
+22. PRÓXIMO TRABALHO IMEDIATO
 ============================================================
 
-RESOLVIDO/MELHORADO:
-- freeze após primeira mensagem;
-- rebuild excessivo durante streaming;
-- observers globais mais críticos;
-- módulos duplicados index/Vite;
-- alinhamento lápis/lixeira;
-- ícone de inteligência;
-- controles de chat/inteligência;
-- classificação de indisponibilidade de provider;
-- fallback de modelo configurado durante falha de discovery;
-- fundação inicial de Account, Device Identity, Sync Queue e Secret Vault;
-- modelo de identidades vinculadas à mesma conta.
-
-PENDENTE/VERIFICAR:
-- exibição correta de billing/quota;
-- “Configurar IA” em todos os estados;
-- foco intermitente do API Key Manager;
-- auditoria de observers/listeners;
-- incompatibilidades e bugs gerais;
-- execução completa de ferramentas;
-- persistência de estados;
-- UI real de Perfil/Conta;
-- autenticação OAuth;
-- Passkeys;
-- Magic Link;
-- backend/cloud de Account;
-- Settings;
-- Account/Sync;
-- secrets cloud;
-- projetos sincronizados;
-- conflitos;
-- plugins.
+1. Continuar na branch feature/ui-hierarchy-polish.
+2. Usar Contents API com ?ref=feature/ui-hierarchy-polish e árvore Git quando possível. Não usar GitHub Search.
+3. Confirmar HEAD e blob de AUTO_CODEZ_CONTEXT.txt antes de qualquer nova atualização.
+4. Próxima alteração de código deve remover de forma cirúrgica o modal antigo de Settings em src/ui-polish.ts, mantendo o botão #ac-app-settings para settings-ui.ts.
+5. Antes da escrita integral, recuperar o arquivo completo de forma confiável e preservar todas as linhas fora do alvo.
+6. Commitar a remoção do legado separadamente.
+7. Atualizar este AUTO_CODEZ_CONTEXT.txt imediatamente após cada mudança arquitetural relevante, sempre descrevendo a posição real e os próximos passos.
+8. Validar typecheck, testes e lint após as mudanças. npm start deve ser usado para validação visual/comportamental quando necessário.
+9. Não fazer merge do PR #9.
+10. Depois da estabilização, iniciar a especificação e implementação da Account Foundation, sem pular diretamente para plugins.
 
 ============================================================
-35. VALIDAÇÃO
+23. COMO CONTINUAR EM NOVO CHAT
 ============================================================
 
-Scripts:
-npm start
-npm run typecheck
-npm test
-npm run lint
+Ao iniciar outro chat, primeiro ler AUTO_CODEZ_CONTEXT.txt da branch feature/ui-hierarchy-polish.
 
-Comandos preferidos:
-cd "C:\Users\User\Desktop\Auto CodeZ"
-git fetch origin
-git checkout feature/ui-hierarchy-polish
-git pull --ff-only origin feature/ui-hierarchy-polish
-npm run typecheck
-npm test
-npm run lint
-npm start
+Assumir que:
+- o projeto é real e está em desenvolvimento incremental;
+- não se deve perder nenhuma linha de trabalho existente;
+- o botão novo de Settings já funciona;
+- o legado de Settings ainda existe em ui-polish.ts até ser removido explicitamente;
+- o usuário quer trabalho direto no repositório, não instruções manuais, sempre que as ferramentas permitirem;
+- “puxar” significa atualizar o código no computador do usuário para a branch correta e então executar npm start;
+- não pedir login novamente se o acesso GitHub continuar funcionando;
+- atualizar este TXT sempre que a posição do projeto mudar.
 
-Não afirmar que testes passaram sem execução/confirmação.
-
-============================================================
-36. ARQUITETURA CONCEITUAL FINAL
-============================================================
-
-                    AUTO CODEZ CLOUD
-                           |
-                 +---------+---------+
-                 |                   |
-              Account            Cloud Data
-                 |                   |
-        +--------+--------+     +----+----+----+----+
-        |        |        |     |    |    |    |    |
-      Chats  Projects Devices Library Settings Secrets
-                 |
-                 +--------- SYNC ---------+
-                                           |
-                         +-----------------+----------------+
-                         |                                  |
-                    Desktop A                           Desktop B
-                         |                                  |
-                  Local Database                     Local Database
-                         |                                  |
-                    Local Files                        Local Files
-
-Cloud = estado compartilhado da conta.
-Local = estado necessário para funcionamento e recursos físicos do dispositivo.
-Sync = conexão eventual entre os dois, sem bloquear o funcionamento local.
-
-============================================================
-37. CHECKLIST PARA NOVAS FUNCIONALIDADES
-============================================================
-
-Antes de implementar algo importante, perguntar:
-
-1. Pertence ao usuário ou ao dispositivo?
-2. Precisa funcionar offline?
-3. Deve sincronizar?
-4. É secret?
-5. Pode gerar conflito entre dispositivos?
-6. Precisa de permissão?
-7. É local ou cloud?
-8. Como recuperar o estado se falhar?
-9. O que ocorre se a internet cair durante a operação?
-10. O que ocorre se o provider estiver indisponível?
-
-Nenhuma funcionalidade importante deve assumir internet, provider ou cloud sempre disponíveis.
-
-============================================================
-38. DIRETRIZ FINAL
-============================================================
-
-Auto CodeZ deve evoluir como uma plataforma real de desenvolvimento assistido por IA.
-
-A prioridade é construir uma base coerente em que:
-- IA seja provider-agnostic;
-- execução seja segura;
-- UI seja profissional;
-- dados pertençam ao usuário;
-- conta tenha funcionalidade real;
-- múltiplos dispositivos tenham acesso equivalente aos dados;
-- offline não destrua sessões/contexto;
-- sincronização seja confiável;
-- secrets sejam protegidos;
-- conflitos sejam explícitos;
-- plugins tenham permissões;
-- e o produto continue sustentável conforme crescer.
-
-Decisões futuras que alterarem arquitetura, UX, segurança, modelo de dados, roadmap ou comportamento fundamental devem atualizar este documento.
+FIM DO CONTEXTO PERMANENTE
