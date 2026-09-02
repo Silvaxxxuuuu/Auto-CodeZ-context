@@ -62,10 +62,11 @@ export class ChatManager {
 
   async updateSettings(input: { chatId: string; providerId: string; model: string; apiKeyId?: string; intelligence: string; permissionLevel: string }): Promise<ChatRecord> {
     const chat = this.require(input.chatId);
+    const previousProviderId = chat.providerId;
     chat.providerId = input.providerId;
     chat.model = input.model;
     if (input.apiKeyId) chat.apiKeyId = input.apiKeyId;
-    else if (chat.apiKeyId && chat.providerId !== input.providerId) delete chat.apiKeyId;
+    else if (chat.apiKeyId && previousProviderId !== input.providerId) delete chat.apiKeyId;
     chat.intelligence = input.intelligence as IntelligenceLevel;
     chat.permissionLevel = input.permissionLevel as PermissionLevel;
     chat.updatedAt = Date.now();
