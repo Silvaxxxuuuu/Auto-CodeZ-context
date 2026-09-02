@@ -161,7 +161,7 @@ document.addEventListener('click', (event) => {
     document.querySelectorAll('[data-settings-section]').forEach((item) => item.classList.toggle('active', item === sectionButton));
     renderSection(id);
   }
-});
+}, true);
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && document.querySelector('.settings-overlay')) closeSettings();
