@@ -1,0 +1,69 @@
+type SavedApiKey = { id: string; name: string; providerId: string; providerName: string; maskedKey: string; selectedModel?: string; active: boolean };
+type Chat = { id: string; providerId: string; model: string; apiKeyId?: string; permissionLevel: string; intelligence: string };
+type Model = { id: string; name: string };
+
+declare global {
+  interface Window {
+    autoCodez: {
+      getState: () => Promise<{ providers: unknown[]; chats: Chat[]; projects: unknown[] }>;
+      listApiKeys: () => Promise<SavedApiKey[]>;
+      listModels: (providerId: string) => Promise<Model[]>;
+    };
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
+}
+
+function modalRoot(): HTMLElement | null { return document.querySelector('#modal-root'); }
+
+function openSavedKeyChatSettings(chat: Chat, keys: SavedApiKey[]): void {
+  const root = modalRoot();
+  if (!root) return;
+  const currentKey = chat.apiKeyId ? keys.find((key) => key.id === chat.apiKeyId) : keys.find((key) => key.providerId === chat.providerId && key.active);
+  const options = keys.length
+    ? keys.map((key) => `<option value="${escapeHtml(key.id)}" ${key.id === currentKey?.id ? 'selected' : ''}>${escapeHtml(key.name)} · ${escapeHtml(key.providerName)}</option>`).join('')
+    : `<option value="${escapeHtml(chat.providerId)}">${escapeHtml(chat.providerId)}</option>`;
+  root.innerHTML = `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Configurações do chat</h2><p>Escolha exatamente qual credencial salva esta conversa deve usar.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><label>Chaves API salvas<select id="chat-provider">${options}</select></label><label>Modelo<select id="chat-model"><option value="">Carregando modelos...</option></select></label><label>Nível de acesso<select id="chat-permission"><option value="read-only" ${chat.permissionLevel === 'read-only' ? 'selected' : ''}>Somente leitura</option><option value="safe" ${chat.permissionLevel === 'safe' ? 'selected' : ''}>Acesso seguro</option><option value="ask" ${chat.permissionLevel === 'ask' ? 'selected' : ''}>Acesso solicitado</option><option value="unrestricted" ${chat.permissionLevel === 'unrestricted' ? 'selected' : ''}>Acesso irrestrito</option></select></label><button class="primary-button" id="save-chat-settings" ${keys.length ? '' : 'disabled'}>Salvar configurações</button></div></div>`;
+  void loadModels(currentKey?.id || chat.providerId, chat.model);
+}
+
+async function loadModels(identifier: string, selectedModel: string): Promise<void> {
+  const select = document.querySelector<HTMLSelectElement>('#chat-model');
+  if (!select) return;
+  try {
+    const models = await window.autoCodez.listModels(identifier);
+    select.innerHTML = models.map((model) => `<option value="${escapeHtml(model.id)}" ${model.id === selectedModel ? 'selected' : ''}>${escapeHtml(model.name)}</option>`).join('') || `<option value="${escapeHtml(selectedModel)}">${escapeHtml(selectedModel || 'Modelo não disponível')}</option>`;
+  } catch (error) {
+    select.innerHTML = `<option value="${escapeHtml(selectedModel)}">${escapeHtml(selectedModel || (error instanceof Error ? error.message : 'Não foi possível carregar os modelos'))}</option>`;
+  }
+}
+
+document.addEventListener('click', async (event) => {
+  const target = event.target as HTMLElement;
+  const settings = target.closest<HTMLElement>('[data-chat-settings]');
+  if (!settings) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  try {
+    const state = await window.autoCodez.getState();
+    const chat = state.chats.find((item) => item.id === settings.dataset.chatSettings);
+    if (!chat) return;
+    const keys = await window.autoCodez.listApiKeys();
+    openSavedKeyChatSettings(chat, keys);
+  } catch (error) {
+    const root = modalRoot();
+    if (root) root.innerHTML = `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Não foi possível carregar as configurações</h2><p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div></div></div>`;
+  }
+}, true);
+
+document.addEventListener('change', (event) => {
+  const target = event.target as HTMLSelectElement;
+  if (target.id !== 'chat-provider') return;
+  const chatModel = document.querySelector<HTMLSelectElement>('#chat-model');
+  const saveButton = document.querySelector<HTMLButtonElement>('#save-chat-settings');
+  if (!chatModel) return;
+  if (saveButton) saveButton.disabled = false;
+  void loadModels(target.value, '');
+}, true);
