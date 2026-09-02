@@ -24,87 +24,21 @@ const icon = (name: string): string => {
 };
 
 const content: Record<SectionId, { eyebrow: string; title: string; description: string; rows: Array<[string, string, string]> }> = {
-  general: {
-    eyebrow: 'PREFERÊNCIAS', title: 'Geral', description: 'Ajustes que definem como o Auto CodeZ se apresenta e inicia.',
-    rows: [
-      ['Tema', 'Escuro', 'A interface atual usa o tema escuro do Auto CodeZ.'],
-      ['Idioma', 'Português (Brasil)', 'Idioma principal da interface.'],
-      ['Animações', 'Ativadas', 'Transições sutis da interface.'],
-      ['Densidade', 'Confortável', 'Espaçamento padrão entre controles e conteúdo.'],
-      ['Inicialização', 'Estado anterior', 'Mantém a última área de trabalho aberta.'],
-    ],
-  },
-  ai: {
-    eyebrow: 'IA', title: 'Inteligência', description: 'Preferências globais para providers, modelos e execução assistida.',
-    rows: [
-      ['Provider padrão', 'Automático', 'Será usado quando um novo chat não definir um provider.'],
-      ['Modelo padrão', 'Automático', 'O modelo será resolvido de acordo com o provider disponível.'],
-      ['Inteligência', 'Normal', 'Equilíbrio entre qualidade, velocidade e custo.'],
-      ['Ferramentas', 'Permitidas', 'A disponibilidade real depende das capacidades e permissões.'],
-      ['Aprovação', 'Acesso seguro', 'Operações sensíveis continuam sujeitas às regras de permissão.'],
-    ],
-  },
-  editor: {
-    eyebrow: 'EDITOR', title: 'Editor', description: 'Preferências que serão aplicadas ao ambiente de edição.',
-    rows: [
-      ['Fonte', 'Inter', 'Família tipográfica da interface e áreas de código.'],
-      ['Tamanho', '13 px', 'Tamanho base previsto para o editor.'],
-      ['Word wrap', 'Automático', 'Quebra de linhas conforme a largura disponível.'],
-      ['Minimap', 'Ativo', 'Mapa lateral para navegação rápida em arquivos.'],
-      ['Indentação', 'Detectar automaticamente', 'Respeita a estrutura existente do arquivo.'],
-    ],
-  },
-  terminal: {
-    eyebrow: 'AMBIENTE', title: 'Terminal', description: 'Comportamento do terminal e dos processos locais.',
-    rows: [
-      ['Shell', 'Padrão do sistema', 'Usa o shell configurado no Windows.'],
-      ['Diretório inicial', 'Projeto ativo', 'Novas sessões começam no workspace selecionado.'],
-      ['Histórico', 'Persistente', 'O histórico permanece associado ao projeto.'],
-    ],
-  },
-  security: {
-    eyebrow: 'PROTEÇÃO', title: 'Segurança', description: 'Credenciais, sessões e dispositivos ficam concentrados nesta área.',
-    rows: [
-      ['Credenciais', 'Protegidas localmente', 'Secrets locais usam o armazenamento seguro do Electron.'],
-      ['Sessões', 'Gerenciar', 'Revogação e atividade de login serão exibidas aqui.'],
-      ['Dispositivos', 'Gerenciar', 'Controle de dispositivos conectados à conta Auto CodeZ.'],
-      ['Recuperação', 'Magic Link / provedores', 'Recuperação segue os métodos de acesso da conta.'],
-    ],
-  },
-  sync: {
-    eyebrow: 'CONTA', title: 'Sincronização', description: 'Estado do armazenamento local, nuvem e alterações pendentes.',
-    rows: [
-      ['Estado', 'Local', 'A conta ainda não está conectada neste dispositivo.'],
-      ['Alterações pendentes', '0', 'Nenhuma operação de sincronização está aguardando envio.'],
-      ['Conflitos', '0', 'Conflitos serão apresentados para decisão explícita do usuário.'],
-      ['Projetos', 'Controle por projeto', 'Cada projeto poderá ser mantido localmente ou sincronizado.'],
-    ],
-  },
+  general: { eyebrow: 'PREFERÊNCIAS', title: 'Geral', description: 'Ajustes que definem como o Auto CodeZ se apresenta e inicia.', rows: [['Tema', 'Escuro', 'A interface atual usa o tema escuro do Auto CodeZ.'], ['Idioma', 'Português (Brasil)', 'Idioma principal da interface.'], ['Animações', 'Ativadas', 'Transições sutis da interface.'], ['Densidade', 'Confortável', 'Espaçamento padrão entre controles e conteúdo.'], ['Inicialização', 'Estado anterior', 'Mantém a última área de trabalho aberta.']] },
+  ai: { eyebrow: 'IA', title: 'Inteligência', description: 'Preferências globais para providers, modelos e execução assistida.', rows: [['Provider padrão', 'Automático', 'Será usado quando um novo chat não definir um provider.'], ['Modelo padrão', 'Automático', 'O modelo será resolvido de acordo com o provider disponível.'], ['Inteligência', 'Normal', 'Equilíbrio entre qualidade, velocidade e custo.'], ['Ferramentas', 'Permitidas', 'A disponibilidade real depende das capacidades e permissões.'], ['Aprovação', 'Acesso seguro', 'Operações sensíveis continuam sujeitas às regras de permissão.']] },
+  editor: { eyebrow: 'EDITOR', title: 'Editor', description: 'Preferências que serão aplicadas ao ambiente de edição.', rows: [['Fonte', 'Inter', 'Família tipográfica da interface e áreas de código.'], ['Tamanho', '13 px', 'Tamanho base previsto para o editor.'], ['Word wrap', 'Automático', 'Quebra de linhas conforme a largura disponível.'], ['Minimap', 'Ativo', 'Mapa lateral para navegação rápida em arquivos.'], ['Indentação', 'Detectar automaticamente', 'Respeita a estrutura existente do arquivo.']] },
+  terminal: { eyebrow: 'AMBIENTE', title: 'Terminal', description: 'Comportamento do terminal e dos processos locais.', rows: [['Shell', 'Padrão do sistema', 'Usa o shell configurado no Windows.'], ['Diretório inicial', 'Projeto ativo', 'Novas sessões começam no workspace selecionado.'], ['Histórico', 'Persistente', 'O histórico permanece associado ao projeto.']] },
+  security: { eyebrow: 'PROTEÇÃO', title: 'Segurança', description: 'Credenciais, sessões e dispositivos ficam concentrados nesta área.', rows: [['Credenciais', 'Protegidas localmente', 'Secrets locais usam o armazenamento seguro do Electron.'], ['Sessões', 'Gerenciar', 'Revogação e atividade de login serão exibidas aqui.'], ['Dispositivos', 'Gerenciar', 'Controle de dispositivos conectados à conta Auto CodeZ.'], ['Recuperação', 'Magic Link / provedores', 'Recuperação segue os métodos de acesso da conta.']] },
+  sync: { eyebrow: 'CONTA', title: 'Sincronização', description: 'Estado do armazenamento local, nuvem e alterações pendentes.', rows: [['Estado', 'Local', 'A conta ainda não está conectada neste dispositivo.'], ['Alterações pendentes', '0', 'Nenhuma operação de sincronização está aguardando envio.'], ['Conflitos', '0', 'Conflitos serão apresentados para decisão explícita do usuário.'], ['Projetos', 'Controle por projeto', 'Cada projeto poderá ser mantido localmente ou sincronizado.']] },
 };
 
-function clearLegacySettings(): void {
-  document.querySelector<HTMLElement>('#modal-root')?.replaceChildren();
-}
+function clearLegacySettings(): void { document.querySelector<HTMLElement>('#modal-root')?.replaceChildren(); }
 
 function renderSection(id: SectionId): void {
   const data = content[id];
   const body = document.querySelector<HTMLElement>('.settings-body');
   if (!body) return;
-  body.innerHTML = `
-    <header class="settings-section-header">
-      <div class="settings-eyebrow">${data.eyebrow}</div>
-      <h2>${data.title}</h2>
-      <p>${data.description}</p>
-    </header>
-    <section class="settings-card">
-      ${data.rows.map(([label, value, description]) => `
-        <div class="settings-row">
-          <div class="settings-row-copy"><strong>${label}</strong><span>${description}</span></div>
-          <div class="settings-row-value"><span>${value}</span><button type="button" disabled aria-label="Editar ${label}">${icon('chevron-right')}</button></div>
-        </div>
-      `).join('')}
-    </section>
-    <div class="settings-footnote">A estrutura visual está pronta. Persistência e controles editáveis serão conectados aos módulos de configuração correspondentes.</div>`;
+  body.innerHTML = `<header class="settings-section-header"><div class="settings-eyebrow">${data.eyebrow}</div><h2>${data.title}</h2><p>${data.description}</p></header><section class="settings-card">${data.rows.map(([label, value, description]) => `<div class="settings-row"><div class="settings-row-copy"><strong>${label}</strong><span>${description}</span></div><div class="settings-row-value"><span>${value}</span><button type="button" disabled aria-label="Editar ${label}">${icon('chevron-right')}</button></div></div>`).join('')}</section><div class="settings-footnote">A estrutura visual está pronta. Persistência e controles editáveis serão conectados aos módulos de configuração correspondentes.</div>`;
 }
 
 function renderSettings(initial: SectionId = 'general'): void {
@@ -112,48 +46,29 @@ function renderSettings(initial: SectionId = 'general'): void {
   const shell = document.querySelector<HTMLElement>('.app-shell');
   if (!shell) return;
   clearLegacySettings();
-
   const overlay = document.createElement('section');
   overlay.className = 'settings-overlay';
   overlay.setAttribute('aria-label', 'Configurações');
-  overlay.innerHTML = `
-    <div class="settings-page">
-      <header class="settings-header">
-        <div><div class="settings-eyebrow">AUTO CODEZ</div><h1>Configurações</h1><p>Organize preferências, ambiente, segurança e sincronização em um único lugar.</p></div>
-        <button class="settings-close" type="button" data-settings-close title="Fechar configurações" aria-label="Fechar configurações">${icon('x')}</button>
-      </header>
-      <div class="settings-layout">
-        <nav class="settings-nav" aria-label="Categorias de configuração">
-          ${sections.map((section) => `<button type="button" class="settings-nav-item ${section.id === initial ? 'active' : ''}" data-settings-section="${section.id}"><span class="settings-nav-icon">${icon(section.icon)}</span><span><strong>${section.label}</strong><small>${section.description}</small></span></button>`).join('')}
-        </nav>
-        <main class="settings-body"></main>
-      </div>
-    </div>`;
-
+  overlay.innerHTML = `<div class="settings-page"><header class="settings-header"><div><div class="settings-eyebrow">AUTO CODEZ</div><h1>Configurações</h1><p>Organize preferências, ambiente, segurança e sincronização em um único lugar.</p></div><button class="settings-close" type="button" data-settings-close title="Fechar configurações" aria-label="Fechar configurações">${icon('x')}</button></header><div class="settings-layout"><nav class="settings-nav" aria-label="Categorias de configuração">${sections.map((section) => `<button type="button" class="settings-nav-item ${section.id === initial ? 'active' : ''}" data-settings-section="${section.id}"><span class="settings-nav-icon">${icon(section.icon)}</span><span><strong>${section.label}</strong><small>${section.description}</small></span></button>`).join('')}</nav><main class="settings-body"></main></div></div>`;
   shell.appendChild(overlay);
   renderSection(initial);
   overlay.querySelector<HTMLButtonElement>('[data-settings-close]')?.focus();
 }
 
-function closeSettings(): void {
-  document.querySelector('.settings-overlay')?.remove();
-  clearLegacySettings();
-}
+function closeSettings(): void { document.querySelector('.settings-overlay')?.remove(); clearLegacySettings(); }
 
-window.addEventListener('click', (event) => {
+document.addEventListener('click', (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
-  if (target.closest('[data-action="settings"]')) {
+  const legacySettingsButton = target.closest<HTMLElement>('#ac-app-settings');
+  const settingsAction = target.closest<HTMLElement>('[data-action="settings"]');
+  if (legacySettingsButton || settingsAction) {
     event.preventDefault();
     event.stopImmediatePropagation();
     renderSettings();
     return;
   }
-  if (target.closest('[data-settings-close]')) {
-    event.preventDefault();
-    closeSettings();
-    return;
-  }
+  if (target.closest('[data-settings-close]')) { event.preventDefault(); closeSettings(); return; }
   const sectionButton = target.closest<HTMLButtonElement>('[data-settings-section]');
   if (sectionButton) {
     const id = sectionButton.dataset.settingsSection as SectionId | undefined;
