@@ -8,6 +8,7 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 contextBridge.exposeInMainWorld('autoCodez', {
   getState: () => invoke<{ providers: unknown[]; chats: unknown[]; projects: unknown[] }>('app:get-state'),
   listModels: (providerId: string) => invoke('providers:list-models', requireIdentifier(providerId, 'Provider')),
+  listModelsForApiKey: (keyId: string) => invoke('providers:list-models-for-key', requireIdentifier(keyId, 'API key')),
   listApiKeys: () => invoke('providers:list-keys'),
   saveApiKey: (input: { providerId: string; name: string; apiKey: string; model?: string; baseUrl?: string }) => {
     const value = requireObject(input, 'Dados da API key');
@@ -34,26 +35,28 @@ contextBridge.exposeInMainWorld('autoCodez', {
     return invoke('providers:save', { providerId, apiKey, model, baseUrl });
   },
   removeProvider: (providerId: string) => invoke('providers:remove', requireIdentifier(providerId, 'Provider')),
-  createChat: (input: { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }) => {
+  createChat: (input: { providerId?: string; model?: string; apiKeyId?: string; intelligence: string; permissionLevel: string; projectId?: string }) => {
     const value = requireObject(input, 'Dados do chat');
     const providerId = value.providerId === undefined ? undefined : requireIdentifier(value.providerId, 'Provider');
     const model = value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo');
+    const apiKeyId = value.apiKeyId === undefined ? undefined : requireIdentifier(value.apiKeyId, 'API key');
     const intelligence = requireIdentifier(value.intelligence, 'Inteligência');
     const permissionLevel = requireIdentifier(value.permissionLevel, 'Permissão');
     const projectId = value.projectId === undefined ? undefined : requireIdentifier(value.projectId, 'Projeto');
-    return invoke('chat:create', { providerId, model, intelligence, permissionLevel, projectId });
+    return invoke('chat:create', { providerId, model, apiKeyId, intelligence, permissionLevel, projectId });
   },
   deleteChat: (chatId: string) => invoke('chat:delete', requireIdentifier(chatId, 'Chat')),
   renameChat: (input: { chatId: string; title: string }) => {
     const value = requireObject(input, 'Dados do nome do chat');
     return invoke('chat:rename', { chatId: requireIdentifier(value.chatId, 'Chat'), title: requireNonEmptyString(value.title, 'Nome do chat') });
   },
-  updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => {
+  updateChatSettings: (input: { chatId: string; providerId: string; model: string; apiKeyId?: string; intelligence: string; permissionLevel: string }) => {
     const value = requireObject(input, 'Configurações do chat');
     return invoke('chat:update-settings', {
       chatId: requireIdentifier(value.chatId, 'Chat'),
       providerId: requireIdentifier(value.providerId, 'Provider'),
       model: requireIdentifier(value.model, 'Modelo'),
+      apiKeyId: value.apiKeyId === undefined ? undefined : requireIdentifier(value.apiKeyId, 'API key'),
       intelligence: requireIdentifier(value.intelligence, 'Inteligência'),
       permissionLevel: requireIdentifier(value.permissionLevel, 'Permissão'),
     });
@@ -138,7 +141,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   readFile: (filePath: string) => invoke('projects:read-file', requireNonEmptyString(filePath, 'Arquivo')),
   writeFile: (input: { filePath: string; content: string }) => {
     const value = requireObject(input, 'Dados do arquivo');
-    return invoke('projects:write-file', { filePath: requireNonEmptyString(value.filePath, 'Arquivo'), content: typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo de arquivo é inválido.'); })() });
+    return invoke('projects:write-file', { filePath: requireNonEmptyString(value.filePath, 'Arquivo'), content: typeof value.content === 'string' ? value.content : (()o => { throw new Error('Conteúdo de arquivo é inválido.'); })() });
   },
   openExternal: (url: string) => invoke('app:open-external', requireNonEmptyString(url, 'URL externa')),
 });
