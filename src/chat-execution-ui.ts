@@ -12,6 +12,7 @@ type Activity = {
 };
 type Approval = {
   id: string;
+  chatId?: string;
   toolCall: { name: string; input: Record<string, unknown> };
 };
 type RecoverableRun = {
@@ -103,7 +104,7 @@ function recoveryMarkup(): string {
 }
 
 function latestRun(): RunState | undefined {
-  return [...runs.values()].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  return [...runs.values()].filter((run) => run.chatId === activeChatId).sort((a, b) => b.updatedAt - a.updatedAt)[0];
 }
 
 function render(): void {
@@ -165,7 +166,7 @@ function handleActivity(value: unknown): void {
 
 async function refreshApprovals(): Promise<void> {
   try {
-    pendingApprovals = await bridge.listApprovals();
+    pendingApprovals = (await bridge.listApprovals()).filter((approval) => !approval.chatId || approval.chatId === activeChatId);
   } catch {
     pendingApprovals = [];
   }
