@@ -23,7 +23,7 @@ function createRunId(): string {
 export class ExecutionManager {
   private readonly executions = new Map<string, ExecutionSnapshot>();
 
-  start(chatId: string, now = Date.now()): ExecutionSnapshot {
+  start(chatId: string, now = Date.now(), runId = createRunId()): ExecutionSnapshot {
     const existing = this.executions.get(chatId);
     if (existing && (existing.state === 'running' || existing.state === 'waiting_approval')) {
       throw new Error(`O chat ${chatId} já possui uma execução ativa.`);
@@ -31,7 +31,7 @@ export class ExecutionManager {
 
     const snapshot: ExecutionSnapshot = {
       chatId,
-      runId: createRunId(),
+      runId,
       state: 'running',
       startedAt: now,
       updatedAt: now,
