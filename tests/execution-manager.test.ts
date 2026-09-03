@@ -22,6 +22,28 @@ test('preserva o runId autoritativo ao iniciar uma execução recuperada', () =>
   assert.equal(manager.get('chat-a')?.runId, 'backend-run-123');
 });
 
+test('preserva o runId autoritativo quando a retomada chega sem snapshot em memória', () => {
+  const manager = new ExecutionManager();
+
+  const recovered = manager.update('chat-recovered', { state: 'running', runId: 'persisted-run-456' }, 5000);
+
+  assert.equal(recovered.state, 'running');
+  assert.equal(recovered.runId, 'persisted-run-456');
+  assert.equal(recovered.startedAt, 5000);
+  assert.equal(manager.listActive().length, 1);
+});
+
+test('rejeita atualização de uma execução com runId obsoleto', () => {
+  const manager = new ExecutionManager();
+  manager.start('chat-a', 1000, 'current-run');
+
+  assert.throws(
+    () => manager.update('chat-a', { state: 'running', runId: 'stale-run' }, 1200),
+    /não corresponde à execução ativa/
+  );
+  assert.equal(manager.get('chat-a')?.runId, 'current-run');
+});
+
 test('não permite duas execuções simultâneas no mesmo chat', () => {
   const manager = new ExecutionManager();
   manager.start('chat-a', 1000);
