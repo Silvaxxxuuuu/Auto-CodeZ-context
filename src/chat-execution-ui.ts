@@ -2,6 +2,7 @@ type ExecutionStatus = 'pending' | 'running' | 'success' | 'failed';
 type Activity = {
   id?: string;
   runId?: string;
+  chatId?: string;
   type?: string;
   message?: string;
   status?: ExecutionStatus | string;
@@ -29,6 +30,7 @@ type AutoCodeZBridge = {
 
 type RunState = {
   runId: string;
+  chatId: string;
   status: ExecutionStatus;
   startedAt: number;
   updatedAt: number;
@@ -43,6 +45,7 @@ const bridge = (window as unknown as { autoCodez?: AutoCodeZBridge }).autoCodez;
 if (!bridge?.onActivity || !bridge.onStreamEvent || !bridge.listApprovals || !bridge.listRecoverableRuns || !bridge.resumeRecoveredRun) throw new Error('Canal de execução não disponível.');
 
 const runs = new Map<string, RunState>();
+const runChatIds = new Map<string, string>();
 let pendingApprovals: Approval[] = [];
 let recoverableRuns: RecoverableRun[] = [];
 let activeChatId = '';
@@ -104,7 +107,7 @@ function latestRun(): RunState | undefined {
 }
 
 function render(): void {
-  const ordered = [...runs.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_RUNS);
+  const ordered = [...runs.values()].filter((run) => run.chatId === activeChatId).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_RUNS);
   const recovery = recoveryMarkup();
   container.hidden = ordered.length === 0 && pendingApprovals.length === 0 && !recovery;
   container.innerHTML = recovery + ordered.map((run) => {
@@ -129,17 +132,24 @@ function handleActivity(value: unknown): void {
   if (!value || typeof value !== 'object') return;
   const event = value as Activity;
   const runId = typeof event.runId === 'string' && event.runId.trim() ? event.runId : 'global';
+  if (event.chatId) runChatIds.set(runId, event.chatId);
+  const chatId = event.chatId || runChatIds.get(runId);
+  if (chatId && chatId !== activeChatId) return;
+  if (!chatId) return;
+  runChatIds.set(runId, chatId);
   const now = Date.now();
   const existing = runs.get(runId);
   const status = normalizeStatus(event.status);
   const run: RunState = existing || {
     runId,
+    chatId,
     status: 'running',
     startedAt: now,
     updatedAt: now,
     message: 'Execução iniciada.',
     steps: [],
   };
+  if (run.chatId !== chatId || run.chatId !== activeChatId) return;
   run.status = event.type === 'complete' ? status : status === 'failed' ? 'failed' : status === 'pending' ? 'pending' : run.status === 'pending' && status === 'running' ? 'running' : run.status;
   if (event.message) run.message = event.message;
   run.updatedAt = now;
@@ -171,6 +181,7 @@ async function refreshApprovals(): Promise<void> {
 async function refreshRecoverableRuns(): Promise<void> {
   try {
     recoverableRuns = (await bridge.listRecoverableRuns()).filter((run) => run.chatId === activeChatId);
+    for (const run of recoverableRuns) runChatIds.set(run.runId, run.chatId);
   } catch {
     recoverableRuns = [];
   }
@@ -199,8 +210,16 @@ chatContextObserver.observe(document.body, { subtree: true, childList: true, att
 bridge.onActivity(handleActivity);
 bridge.onStreamEvent((value: unknown) => {
   if (!value || typeof value !== 'object') return;
-  const event = value as { type?: string };
-  const current = latestRun();
+  const event = value as { type?: string; chatId?: string; runId?: string };
+  if (event.chatId) {
+    if (event.runId) runChatIds.set(event.runId, event.chatId);
+    if (event.chatId !== activeChatId) return;
+  } else if (event.runId && runChatIds.get(event.runId) && runChatIds.get(event.runId) !== activeChatId) {
+    return;
+  } else if (!event.runId && event.type !== 'start') {
+    return;
+  }
+  const current = event.runId ? runs.get(event.runId) : latestRun();
   if (event.type === 'approval_required') {
     void refreshApprovals();
     return;
@@ -236,9 +255,11 @@ document.addEventListener('click', (event) => {
     recoveryButton.textContent = 'Retomando…';
     void bridge.resumeRecoveredRun(runId).then((result) => {
       recoverableRuns = recoverableRuns.filter((run) => run.runId !== runId);
+      runChatIds.set(runId, result.chatId);
       const now = Date.now();
       runs.set(runId, {
         runId,
+        chatId: result.chatId,
         status: result.pendingApprovalIds.length ? 'pending' : 'success',
         startedAt: now,
         updatedAt: now,
@@ -257,6 +278,7 @@ document.addEventListener('click', (event) => {
       if (recovery) {
         runs.set(runId, {
           runId,
+          chatId: recovery.chatId,
           status: 'failed',
           startedAt: Date.now(),
           updatedAt: Date.now(),
