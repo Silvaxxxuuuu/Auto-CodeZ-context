@@ -130,7 +130,7 @@ test('recovers a provider-failed run explicitly without re-executing the approve
     await assert.rejects(first.resume(pending.pendingApprovalIds[0]), /Provider indisponível/);
     const persisted = await storage.read<{ runs: Array<{ runId: string; lastError?: string }> }>('agent-runs.json', { runs: [] });
     assert.equal(persisted.runs.length, 1);
-    assert.equal(persisted.runs[0].lastError, 'Provider indisponível durante a retomada.');
+    assert.equal(persisted.runs[0].lastError, 'Recovery Provider: Provider indisponível durante a retomada.');
     assert.equal(await fs.readFile(path.join(root, 'src', 'index.ts'), 'utf8'), 'export const value = 2;');
 
     const recovered = await createPersistentFixture(storage, [finalResponse], root);
