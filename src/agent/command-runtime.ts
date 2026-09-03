@@ -3,6 +3,8 @@ import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { ProjectRecord } from '../ai/types';
 
+export const SYSTEM_PROJECT_ID = '__system__';
+
 export interface CommandOutputEvent {
   stream: 'stdout' | 'stderr';
   text: string;
@@ -70,8 +72,9 @@ export class CommandRuntime {
     const normalizedCommand = command.trim();
     if (!normalizedCommand) throw new Error('O comando não pode estar vazio.');
 
-    const project = await this.project(projectId);
-    const cwd = await fs.realpath(path.resolve(project.rootPath));
+    const cwd = projectId === SYSTEM_PROJECT_ID
+      ? process.cwd()
+      : await fs.realpath(path.resolve((await this.project(projectId)).rootPath));
     const { executable, args } = commandForPlatform(normalizedCommand);
     const startedAt = Date.now();
 
