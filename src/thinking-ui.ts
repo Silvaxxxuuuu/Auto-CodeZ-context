@@ -54,9 +54,9 @@ function currentChatId(): string | undefined {
 
 function syncActiveChat(): void {
   const chatId = currentChatId();
-  if (chatId === activeChatId) return;
+  const changed = chatId !== activeChatId;
   activeChatId = chatId;
-  removeThinkingStatus();
+  if (changed) removeThinkingStatus();
   const state = getState(chatId);
   if (state?.active) ensureStatus();
 }
