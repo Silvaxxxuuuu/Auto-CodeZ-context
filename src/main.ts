@@ -64,15 +64,6 @@ async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnTyp
   return { chat, config, projectContext };
 }
 
-function prepareApprovalExecution(chatId: string, runId: string): void {
-  const current = executionManager.get(chatId);
-  if (current && (current.state === 'running' || current.state === 'waiting_approval') && current.runId !== runId) {
-    throw new Error('O chat possui outra execução ativa.');
-  }
-  if (!current || current.runId !== runId) executionManager.start(chatId, Date.now(), runId);
-  executionManager.update(chatId, { state: 'running' });
-}
-
 ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.list(), chats: await chatManager.list(), projects: await projectManager.list() }));
 ipcMain.handle('providers:list-models', async (_event, identifier: string) => {
   const value = requireIdentifier(identifier, 'Provider');
@@ -173,8 +164,7 @@ ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
   const approval = toolRuntime.listApprovals().find((item) => item.id === id);
   if (!approval?.chatId) throw new Error('Aprovação sem chat associado.');
   const chatId = approval.chatId;
-  const runId = agentRuntime.getPendingRunId(id);
-  prepareApprovalExecution(chatId, runId);
+  executionManager.update(chatId, { state: 'running' });
   try {
     const result = await agentRuntime.resume(id);
     const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
@@ -193,8 +183,7 @@ ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
   const approval = toolRuntime.listApprovals().find((item) => item.id === id);
   if (!approval?.chatId) throw new Error('Aprovação sem chat associado.');
   const chatId = approval.chatId;
-  const runId = agentRuntime.getPendingRunId(id);
-  prepareApprovalExecution(chatId, runId);
+  executionManager.update(chatId, { state: 'running' });
   try {
     const result = await agentRuntime.reject(id);
     const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
@@ -229,3 +218,26 @@ ipcMain.handle('git:commit', async (_event, input: { projectId: string; message:
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => { const value = requireObject(input, 'Dados do projeto'); return projectManager.create(requireNonEmptyString(value.name, 'Nome do projeto'), requireNonEmptyString(value.rootPath, 'Pasta do projeto')); });
 ipcMain.handle('projects:open-folder', async () => { if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.'); const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] }); return result.canceled ? null : result.filePaths[0] || null; });
 ipcMain.handle('projects:list', async () => projectManager.list());
+ipcMain.handle('projects:delete', async (_event, projectId: string) => projectManager.remove(requireIdentifier(projectId, 'Projeto')));
+ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(requireNonEmptyString(rootPath, 'Pasta do projeto')));
+ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(requireNonEmptyString(filePath, 'Arquivo')));
+ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => { const value = requireObject(input, 'Dados do arquivo'); await projectManager.writeFile(requireNonEmptyString(value.filePath, 'Arquivo'), typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo de arquivo é inválido.'); })()); return { ok: true }; });
+ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(requireNonEmptyString(url, 'URL externa')));
+
+app.whenReady().then(async () => {
+  await storage.init();
+  await providerManager.init();
+  await chatManager.init();
+  await projectManager.init();
+  await terminalService.init();
+  await chatRuntime.init();
+  await toolRuntime.init();
+  await agentRuntime.init();
+  activityRuntime.subscribe((event) => sendActivity(event));
+  terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
+  Menu.setApplicationMenu(null);
+  createWindow();
+  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+});
+
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
