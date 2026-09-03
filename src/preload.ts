@@ -118,7 +118,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   git: {
     status: (projectId: string) => invoke('git:status', requireIdentifier(projectId, 'Projeto')),
-    branches: (projectId: string) => invoke('git:branches', requireIdentifier(projectId, 'Chat')),
+    branches: (projectId: string) => invoke('git:branches', requireIdentifier(projectId, 'Projeto')),
     diff: (projectId: string) => invoke('git:diff', requireIdentifier(projectId, 'Projeto')),
     log: (input: { projectId: string; limit?: number }) => {
       const value = requireObject(input, 'Dados do histórico Git');
