@@ -277,6 +277,7 @@ function initialize(): void {
   installStyle();
   activeChatId = currentChatId();
   if (bridge?.onStreamEvent) bridge.onStreamEvent(handleEvent);
+  window.addEventListener('auto-codez-execution-refresh', () => hydrateExecutions());
   observeMessages();
   hydrateExecutions();
 }
