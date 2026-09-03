@@ -17,6 +17,7 @@ async function createToolRuntime(commandRuntime?: CommandRuntime): Promise<{ roo
 }
 
 function call(id: string, name: AIToolCall['name'], input: Record<string, unknown>): AIToolCall { return { id, name, input }; }
+const CHAT_ID = 'chat-test';
 
 test('listDefinitions returns independent definition objects', async () => {
   const fixture = await createToolRuntime();
@@ -49,7 +50,7 @@ test('read_file executes without approval and returns file contents', async () =
   try {
     await fs.mkdir(path.join(fixture.root, 'src'), { recursive: true });
     await fs.writeFile(path.join(fixture.root, 'src', 'index.ts'), 'export const value = 42;');
-    const result = await fixture.runtime.execute('project-test', 'ask', call('call-1', 'read_file', { path: 'src/index.ts' }));
+    const result = await fixture.runtime.execute(CHAT_ID, 'project-test', 'ask', call('call-1', 'read_file', { path: 'src/index.ts' }));
     assert.equal(result.ok, true);
     assert.equal(result.output, 'export const value = 42;');
     assert.equal(result.pendingApproval, undefined);
@@ -60,7 +61,7 @@ test('write_file creates a diff-backed approval without modifying the file', asy
   const fixture = await createToolRuntime();
   try {
     await fs.writeFile(path.join(fixture.root, 'notes.txt'), 'before');
-    const result = await fixture.runtime.execute('project-test', 'ask', call('call-2', 'write_file', { path: 'notes.txt', content: 'after' }));
+    const result = await fixture.runtime.execute(CHAT_ID, 'project-test', 'ask', call('call-2', 'write_file', { path: 'notes.txt', content: 'after' }));
     assert.equal(result.ok, false);
     assert.equal(result.pendingApproval, true);
     assert.ok(result.approvalId);
@@ -70,6 +71,7 @@ test('write_file creates a diff-backed approval without modifying the file', asy
     assert.equal(result.diffPlan?.summary.modified, 1);
     assert.equal(await fs.readFile(path.join(fixture.root, 'notes.txt'), 'utf8'), 'before');
     assert.equal(fixture.runtime.listApprovals()[0]?.diffPlan?.id, result.diffPlan?.id);
+    assert.equal(fixture.runtime.listApprovals()[0]?.chatId, CHAT_ID);
   } finally { await fixture.cleanup(); }
 });
 
@@ -77,7 +79,7 @@ test('approving a write_file executes the approved plan and returns the resultin
   const fixture = await createToolRuntime();
   try {
     await fs.writeFile(path.join(fixture.root, 'notes.txt'), 'before');
-    const pending = await fixture.runtime.execute('project-test', 'ask', call('call-3', 'write_file', { path: 'notes.txt', content: 'after' }));
+    const pending = await fixture.runtime.execute(CHAT_ID, 'project-test', 'ask', call('call-3', 'write_file', { path: 'notes.txt', content: 'after' }));
     assert.ok(pending.approvalId);
     const result = await fixture.runtime.approve(pending.approvalId!);
     assert.equal(result.ok, true);
@@ -92,7 +94,7 @@ test('approval refuses execution when the workspace changed after preview', asyn
   const fixture = await createToolRuntime();
   try {
     await fs.writeFile(path.join(fixture.root, 'notes.txt'), 'before');
-    const pending = await fixture.runtime.execute('project-test', 'ask', call('call-4', 'write_file', { path: 'notes.txt', content: 'after' }));
+    const pending = await fixture.runtime.execute(CHAT_ID, 'project-test', 'ask', call('call-4', 'write_file', { path: 'notes.txt', content: 'after' }));
     assert.ok(pending.approvalId);
     await fs.writeFile(path.join(fixture.root, 'notes.txt'), 'changed externally');
     const result = await fixture.runtime.approve(pending.approvalId!);
@@ -106,7 +108,7 @@ test('approving the same approval twice fails without executing twice', async ()
   const fixture = await createToolRuntime();
   try {
     await fs.writeFile(path.join(fixture.root, 'notes.txt'), 'before');
-    const pending = await fixture.runtime.execute('project-test', 'ask', call('call-5', 'write_file', { path: 'notes.txt', content: 'after' }));
+    const pending = await fixture.runtime.execute(CHAT_ID, 'project-test', 'ask', call('call-5', 'write_file', { path: 'notes.txt', content: 'after' }));
     assert.ok(pending.approvalId);
     await fixture.runtime.approve(pending.approvalId!);
     await assert.rejects(fixture.runtime.approve(pending.approvalId!), /Aprovação não encontrada/);
@@ -117,7 +119,7 @@ test('approving the same approval twice fails without executing twice', async ()
 test('invalid tool input is rejected before permission or execution', async () => {
   const fixture = await createToolRuntime();
   try {
-    const result = await fixture.runtime.execute('project-test', 'unrestricted', call('call-6', 'read_file', { path: 'src/index.ts', unexpected: true }));
+    const result = await fixture.runtime.execute(CHAT_ID, 'project-test', 'unrestricted', call('call-6', 'read_file', { path: 'src/index.ts', unexpected: true }));
     assert.equal(result.ok, false);
     assert.match(result.error ?? '', /Parâmetro não permitido/);
     assert.equal(fixture.runtime.listApprovals().length, 0);
@@ -127,7 +129,7 @@ test('invalid tool input is rejected before permission or execution', async () =
 test('read-only permission denies write tools', async () => {
   const fixture = await createToolRuntime();
   try {
-    const result = await fixture.runtime.execute('project-test', 'read-only', call('call-7', 'write_file', { path: 'notes.txt', content: 'blocked' }));
+    const result = await fixture.runtime.execute(CHAT_ID, 'project-test', 'read-only', call('call-7', 'write_file', { path: 'notes.txt', content: 'blocked' }));
     assert.equal(result.ok, false);
     assert.match(result.error ?? '', /bloqueada pelas permissões/);
     assert.equal(fixture.runtime.listApprovals().length, 0);
@@ -138,7 +140,7 @@ test('run_command fails closed when no command runtime is configured', async () 
   const fixture = await createToolRuntime();
   try {
     const workspaceOnly = new ToolRuntime(new WorkspaceRuntime(async () => [{ id: 'project-test', name: 'Tool Test Project', rootPath: fixture.root, createdAt: Date.now(), updatedAt: Date.now() }]));
-    const pending = await workspaceOnly.execute('project-test', 'ask', call('call-8', 'run_command', { manager: 'npm', script: 'test' }));
+    const pending = await workspaceOnly.execute(CHAT_ID, 'project-test', 'ask', call('call-8', 'run_command', { manager: 'npm', script: 'test' }));
     assert.equal(pending.pendingApproval, true);
     assert.ok(pending.approvalId);
     assert.equal(pending.diffPlan, undefined);
@@ -152,7 +154,7 @@ test('run_command returns a structured command result', async () => {
   const fixture = await createToolRuntime();
   try {
     await fs.writeFile(path.join(fixture.root, 'package.json'), JSON.stringify({ scripts: { test: "node -e \"process.stdout.write('command-result-ok')\"" } }));
-    const pending = await fixture.runtime.execute('project-test', 'ask', call('call-9', 'run_command', { manager: 'npm', script: 'test' }));
+    const pending = await fixture.runtime.execute(CHAT_ID, 'project-test', 'ask', call('call-9', 'run_command', { manager: 'npm', script: 'test' }));
     assert.equal(pending.pendingApproval, true);
     assert.ok(pending.approvalId);
     const result = await fixture.runtime.approve(pending.approvalId!);
