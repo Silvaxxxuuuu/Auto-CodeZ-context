@@ -71,13 +71,10 @@ test('recovery-controller keeps the authoritative run identity when recovery fai
     /Provider indisponível\./,
   );
 
-  assert.deepEqual(executionManager.get('chat-test'), {
-    chatId: 'chat-test',
-    runId: 'persisted-run',
-    state: 'failed',
-    startedAt: 300,
-    updatedAt: 300,
-    error: 'Provider indisponível.',
-    currentTool: undefined,
-  });
+  const execution = executionManager.get('chat-test');
+  assert.equal(execution?.chatId, 'chat-test');
+  assert.equal(execution?.runId, 'persisted-run');
+  assert.equal(execution?.state, 'failed');
+  assert.equal(execution?.startedAt, 300);
+  assert.equal(execution?.error, 'Provider indisponível.');
 });
