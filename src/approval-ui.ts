@@ -94,9 +94,7 @@ async function handleAction(event: Event): Promise<void> {
   try {
     if (button.dataset.acApprove) await bridge.approveTool(approvalId);
     else await bridge.denyTool(approvalId);
-    const chatId = activeChatId;
-    if (chatId) approvalIdsByChat.set(chatId, (approvalIdsByChat.get(chatId) || []).filter((id) => id !== approvalId));
-    await render();
+    await syncApprovals();
   } catch {
     button.disabled = false;
   }
