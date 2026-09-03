@@ -25,6 +25,7 @@ const STYLE_ID = 'auto-codez-thinking-ui';
 type ThinkingState = {
   active: boolean;
   waitingApproval: boolean;
+  runId?: string;
   runStartedAt: number;
   accumulatedMs: number;
   pausedAt: number;
@@ -174,13 +175,19 @@ function hydrateExecutions(): void {
     }
     for (const snapshot of activeSnapshots.values()) {
       const state = getState(snapshot.chatId)!;
-      if (!state.active || state.runStartedAt !== snapshot.startedAt) {
+      const sameRun = state.active && state.runId === snapshot.runId;
+      if (!sameRun) {
         state.active = true;
         state.waitingApproval = snapshot.state === 'waiting_approval';
+        state.runId = snapshot.runId;
         state.runStartedAt = snapshot.startedAt;
         state.accumulatedMs = snapshot.state === 'waiting_approval' ? Math.max(0, snapshot.updatedAt - snapshot.startedAt) : 0;
         state.pausedAt = snapshot.state === 'waiting_approval' ? snapshot.updatedAt : 0;
         state.runToken += 1;
+      } else if (snapshot.state === 'waiting_approval' && !state.waitingApproval) {
+        state.accumulatedMs = elapsed(state, snapshot.updatedAt);
+        state.waitingApproval = true;
+        state.pausedAt = snapshot.updatedAt;
       }
     }
     syncActiveChat();
@@ -198,6 +205,7 @@ function handleEvent(event: StreamEvent): void {
     state.active = true;
     state.waitingApproval = false;
     state.runStartedAt = Date.now();
+    state.runId = undefined;
     if (!continuingRun) {
       state.accumulatedMs = 0;
       state.runToken += 1;
