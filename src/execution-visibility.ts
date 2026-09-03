@@ -30,8 +30,19 @@ function installStyle(): void {
     .chat-item.is-failed .execution-indicator{color:#d98289}
     .chat-item .execution-indicator{position:relative}
     .chat-item.is-executing .chat-item-copy>span::after{content:none!important}
+
+    .activity-card{max-width:800px!important;margin:2px auto 20px!important;padding:2px 0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
+    .activity-heading{height:18px;margin:0 0 2px!important;padding:0!important;font-size:0!important;letter-spacing:0!important;color:#687281!important;text-transform:none!important}
+    .activity-heading::before{content:'•••';display:inline-block;font-size:12px;letter-spacing:3px;line-height:18px;color:#727d8c;animation:ac-thinking 1.15s ease-in-out infinite}
+    .activity-line{padding:2px 0!important;font-size:10px!important;line-height:1.5!important;color:#6f7987!important}
+    .activity-line.running{color:#8b95a3!important}
+    .activity-line.done{color:#7f8997!important}
+    .activity-line.error{color:#d18c8c!important}
+    .approval-card{margin-top:9px}
+
     @keyframes ac-execution-pulse{0%,100%{transform:scale(.75);opacity:.45}50%{transform:scale(1);opacity:1}}
-    @media(prefers-reduced-motion:reduce){.chat-item.is-executing .execution-indicator::after{animation:none}}
+    @keyframes ac-thinking{0%,100%{opacity:.28;transform:translateY(0)}50%{opacity:1;transform:translateY(-1px)}}
+    @media(prefers-reduced-motion:reduce){.chat-item.is-executing .execution-indicator::after,.activity-heading::before{animation:none}}
   `;
   document.head.appendChild(style);
 }
