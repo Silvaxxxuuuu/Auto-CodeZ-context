@@ -137,19 +137,30 @@ async function hydrateExecutions(): Promise<void> {
   }
 }
 
+function currentEventExecution(event: StreamExecutionEvent): ExecutionSnapshot | undefined {
+  const current = event.chatId ? manager.get(event.chatId) : undefined;
+  if (!current) return undefined;
+  if (event.runId !== undefined && event.runId !== current.runId) return undefined;
+  return current;
+}
+
 function handleEvent(event: StreamExecutionEvent): void {
   if (!event.chatId) return;
   try {
     if (event.type === 'start') {
       manager.start(event.chatId, Date.now(), event.runId);
-    } else if (event.type === 'tool_call') {
-      if (manager.get(event.chatId)) manager.update(event.chatId, { state: 'running', currentTool: event.toolCall?.name });
-    } else if (event.type === 'approval_required') {
-      if (manager.get(event.chatId)) manager.update(event.chatId, { state: 'waiting_approval' });
-    } else if (event.type === 'activity' && event.activity?.type === 'complete' && event.activity.status === 'success') {
-      if (manager.get(event.chatId)) manager.update(event.chatId, { state: 'completed' });
-    } else if (event.type === 'error') {
-      if (manager.get(event.chatId)) manager.update(event.chatId, { state: 'failed', error: event.error });
+    } else {
+      const current = currentEventExecution(event);
+      if (!current) return;
+      if (event.type === 'tool_call') {
+        manager.update(event.chatId, { state: 'running', currentTool: event.toolCall?.name });
+      } else if (event.type === 'approval_required') {
+        manager.update(event.chatId, { state: 'waiting_approval' });
+      } else if (event.type === 'activity' && event.activity?.type === 'complete' && event.activity.status === 'success') {
+        manager.update(event.chatId, { state: 'completed' });
+      } else if (event.type === 'error') {
+        manager.update(event.chatId, { state: 'failed', error: event.error });
+      }
     }
   } catch {
     // A duplicate/stale stream event must never affect the renderer.
