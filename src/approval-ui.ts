@@ -1,19 +1,25 @@
-type ApprovalUiEvent = { type?: string; chatId?: string; pendingApprovalIds?: string[] };
+type ApprovalUiEvent = { type?: string; chatId?: string; runId?: string; pendingApprovalIds?: string[] };
 type ApprovalUiBridge = {
   onStreamEvent: (listener: (event: ApprovalUiEvent) => void) => () => void;
   approveTool: (approvalId: string) => Promise<unknown>;
   denyTool: (approvalId: string) => Promise<unknown>;
-  listApprovals: () => Promise<Array<{ id: string; chatId?: string; toolCall: { name: string; input: Record<string, unknown> } }>>;
+  listApprovals: (filters?: { chatId?: string; runId?: string }) => Promise<Array<{ id: string; chatId?: string; runId?: string; toolCall: { name: string; input: Record<string, unknown> } }>>;
 };
 
 const bridge = (window as unknown as { autoCodez?: ApprovalUiBridge }).autoCodez;
 const STYLE_ID = 'auto-codez-approval-ui';
 let activeChatId: string | undefined;
-const approvalIdsByChat = new Map<string, string[]>();
+let activeRunId: string | undefined;
+const approvalIdsByRun = new Map<string, string[]>();
 let rootElement: HTMLElement | null = null;
 
 function currentChatId(): string | undefined {
   return document.querySelector<HTMLElement>('.chat-item.selected')?.dataset.chat;
+}
+
+function currentRunId(): string | undefined {
+  const run = document.querySelector<HTMLElement>('.execution-run[data-run-id]');
+  return run?.dataset.runId;
 }
 
 function escapeHtml(value: string): string {
@@ -51,34 +57,41 @@ function ensureRoot(): HTMLElement | null {
 
 async function syncApprovals(): Promise<void> {
   if (!bridge) return;
-  const approvals = await bridge.listApprovals();
-  for (const approval of approvals) {
-    if (!approval.chatId) continue;
-    const ids = approvalIdsByChat.get(approval.chatId) || [];
-    if (!ids.includes(approval.id)) approvalIdsByChat.set(approval.chatId, [...ids, approval.id]);
-  }
+  const chatId = currentChatId();
+  if (!chatId) return;
+  const runId = currentRunId();
+  const approvals = await bridge.listApprovals({ chatId, ...(runId ? { runId } : {}) });
+  const ids = approvals.filter((approval) => approval.chatId === chatId && (!runId || !approval.runId || approval.runId === runId)).map((approval) => approval.id);
+  if (runId) approvalIdsByRun.set(runId, ids);
+  activeRunId = runId;
   await render();
 }
 
 async function render(): Promise<void> {
   const chatId = currentChatId();
   if (!chatId || chatId !== activeChatId) return;
-  const ids = approvalIdsByChat.get(chatId) || [];
+  const runId = activeRunId || currentRunId();
+  const ids = runId ? approvalIdsByRun.get(runId) || [] : [];
   const root = ensureRoot();
   if (!root) return;
   if (!ids.length || !bridge) {
     root.innerHTML = '';
     return;
   }
-  const approvals = await bridge.listApprovals();
-  const visible = approvals.filter((approval) => (approval.chatId === chatId || !approval.chatId) && ids.includes(approval.id));
+  const approvals = await bridge.listApprovals({ chatId, ...(runId ? { runId } : {}) });
+  const visible = approvals.filter((approval) => approval.chatId === chatId && (!runId || !approval.runId || approval.runId === runId) && ids.includes(approval.id));
   root.innerHTML = visible.map((approval) => `<div class="ac-approval-card" data-approval="${escapeHtml(approval.id)}"><div class="ac-approval-heading">Aprovação necessária</div><div class="ac-approval-tool">${escapeHtml(approval.toolCall.name)}</div><div class="ac-approval-input">${escapeHtml(JSON.stringify(approval.toolCall.input, null, 2))}</div><div class="ac-approval-actions"><button data-ac-approve="${escapeHtml(approval.id)}">Aprovar</button><button class="ac-approval-deny" data-ac-deny="${escapeHtml(approval.id)}">Recusar</button></div></div>`).join('');
 }
 
 function syncChat(): void {
   const chatId = currentChatId();
-  if (chatId === activeChatId) return;
+  if (chatId === activeChatId) {
+    const runId = currentRunId();
+    if (runId !== activeRunId) void syncApprovals();
+    return;
+  }
   activeChatId = chatId;
+  activeRunId = currentRunId();
   rootElement?.remove();
   rootElement = null;
   void syncApprovals();
@@ -92,11 +105,11 @@ async function handleAction(event: Event): Promise<void> {
   if (!approvalId) return;
   button.disabled = true;
   try {
-    const approval = (await bridge.listApprovals()).find((item) => item.id === approvalId);
-    const chatId = approval?.chatId || currentChatId();
+    const approval = (await bridge.listApprovals({ chatId: currentChatId(), ...(activeRunId ? { runId: activeRunId } : {}) })).find((item) => item.id === approvalId);
+    if (!approval || approval.chatId !== currentChatId() || (activeRunId && approval.runId && approval.runId !== activeRunId)) throw new Error('Aprovação fora do contexto atual.');
     if (button.dataset.acApprove) await bridge.approveTool(approvalId);
     else await bridge.denyTool(approvalId);
-    if (chatId) window.dispatchEvent(new CustomEvent('auto-codez-execution-refresh', { detail: { chatId } }));
+    if (approval.chatId) window.dispatchEvent(new CustomEvent('auto-codez-execution-refresh', { detail: { chatId: approval.chatId } }));
     await syncApprovals();
   } catch {
     button.disabled = false;
@@ -104,19 +117,23 @@ async function handleAction(event: Event): Promise<void> {
 }
 
 function handleStreamEvent(event: ApprovalUiEvent): void {
-  if (event.type !== 'approval_required' || !event.chatId || !event.pendingApprovalIds?.length) return;
-  approvalIdsByChat.set(event.chatId, [...event.pendingApprovalIds]);
+  if (event.type !== 'approval_required' || !event.chatId || !event.runId || !event.pendingApprovalIds?.length) return;
+  approvalIdsByRun.set(event.runId, [...event.pendingApprovalIds]);
   activeChatId = currentChatId();
-  if (activeChatId === event.chatId) void render();
+  activeRunId = currentRunId() || event.runId;
+  if (activeChatId === event.chatId && activeRunId === event.runId) void render();
 }
 
 function initialize(): void {
   installStyle();
   activeChatId = currentChatId();
+  activeRunId = currentRunId();
   bridge?.onStreamEvent(handleStreamEvent);
   document.addEventListener('click', (event) => void handleAction(event), true);
   const nav = document.querySelector<HTMLElement>('#nav-panel');
   if (nav) new MutationObserver(syncChat).observe(nav, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
+  const executionRoot = document.querySelector<HTMLElement>('.chat-area');
+  if (executionRoot) new MutationObserver(syncChat).observe(executionRoot, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-run-id'] });
   void syncApprovals();
 }
 
