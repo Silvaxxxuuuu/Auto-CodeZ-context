@@ -13,6 +13,7 @@ type Activity = {
 type Approval = {
   id: string;
   chatId?: string;
+  runId?: string;
   toolCall: { name: string; input: Record<string, unknown> };
 };
 type RecoverableRun = {
@@ -24,7 +25,7 @@ type RecoverableRun = {
 type AutoCodeZBridge = {
   onActivity: (listener: (event: unknown) => void) => () => void;
   onStreamEvent: (listener: (event: unknown) => void) => () => void;
-  listApprovals: () => Promise<Approval[]>;
+  listApprovals: (filters?: { chatId?: string; runId?: string }) => Promise<Approval[]>;
   listRecoverableRuns: () => Promise<RecoverableRun[]>;
   resumeRecoveredRun: (runId: string) => Promise<{ chatId: string; pendingApprovalIds: string[] }>;
 };
@@ -107,6 +108,10 @@ function latestRun(): RunState | undefined {
   return [...runs.values()].filter((run) => run.chatId === activeChatId).sort((a, b) => b.updatedAt - a.updatedAt)[0];
 }
 
+function currentRunId(): string | undefined {
+  return latestRun()?.runId;
+}
+
 function render(): void {
   const ordered = [...runs.values()].filter((run) => run.chatId === activeChatId).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_RUNS);
   const recovery = recoveryMarkup();
@@ -114,7 +119,7 @@ function render(): void {
   container.innerHTML = recovery + ordered.map((run) => {
     const existingRun = container.querySelector<HTMLElement>(`[data-run-id="${CSS.escape(run.runId)}"]`);
     const detailsMarkup = existingRun?.querySelector<HTMLElement>('.execution-run-details')?.outerHTML || '<div class="execution-run-details"></div>';
-    const approvalMarkupForRun = pendingApprovals.length && latestRun()?.runId === run.runId ? approvalMarkup(pendingApprovals) : '';
+    const approvalMarkupForRun = pendingApprovals.length && run.runId === currentRunId() ? approvalMarkup(pendingApprovals.filter((approval) => !approval.runId || approval.runId === run.runId)) : '';
     const steps = run.steps.slice(-MAX_STEPS).map((step) => {
       const status = normalizeStatus(step.status);
       const detail = step.commandResult
@@ -166,7 +171,8 @@ function handleActivity(value: unknown): void {
 
 async function refreshApprovals(): Promise<void> {
   try {
-    pendingApprovals = (await bridge.listApprovals()).filter((approval) => !approval.chatId || approval.chatId === activeChatId);
+    const runId = currentRunId();
+    pendingApprovals = (await bridge.listApprovals({ chatId: activeChatId, ...(runId ? { runId } : {}) })).filter((approval) => approval.chatId === activeChatId && (!runId || !approval.runId || approval.runId === runId));
   } catch {
     pendingApprovals = [];
   }
