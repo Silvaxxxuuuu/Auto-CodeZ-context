@@ -102,6 +102,7 @@ async function executeChat(chatId: string, content: string): Promise<{ pendingAp
   const current = (await chatManager.list()).find((item) => item.id === chat.id);
   if (!current) throw new Error('Chat desapareceu durante a execução.');
   const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
+  for (const approvalId of result.pendingApprovalIds) toolRuntime.setApprovalChat(approvalId, chat.id);
   await chatManager.update({ ...current, messages: result.messages });
   return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 }
@@ -143,6 +144,7 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     const workingChat = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
     const result = await agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit);
+    for (const approvalId of result.pendingApprovalIds) toolRuntime.setApprovalChat(approvalId, chat.id);
     await chatManager.update({ ...workingChat, messages: result.messages });
     if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval' });
     else if (executionManager.get(chatId)?.state === 'running') executionManager.update(chatId, { state: 'completed' });
@@ -159,16 +161,50 @@ ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
 ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
 ipcMain.handle('agent:list-interrupted-provider-requests', async () => chatRuntime.listInterruptedProviderRequests());
 ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
-  const result = await agentRuntime.resume(requireIdentifier(approvalId, 'Aprovação'));
-  const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
-  if (chat) await chatManager.update({ ...chat, messages: result.messages });
-  return result;
+  const id = requireIdentifier(approvalId, 'Aprovação');
+  const approval = toolRuntime.listApprovals().find((item) => item.id === id);
+  if (!approval?.chatId) throw new Error('Aprovação sem chat associado.');
+  const chatId = approval.chatId;
+  executionManager.update(chatId, { state: 'running' });
+  try {
+    const result = await agentRuntime.resume(id);
+    const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+    if (chat) await chatManager.update({ ...chat, messages: result.messages });
+    if (result.pendingApprovalIds.length) {
+      for (const pendingId of result.pendingApprovalIds) toolRuntime.setApprovalChat(pendingId, result.chatId);
+      executionManager.update(chatId, { state: 'waiting_approval' });
+    } else {
+      executionManager.update(chatId, { state: 'completed' });
+    }
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    executionManager.update(chatId, { state: 'failed', error: message });
+    throw error;
+  }
 });
 ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
-  const result = await agentRuntime.reject(requireIdentifier(approvalId, 'Aprovação'));
-  const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
-  if (chat) await chatManager.update({ ...chat, messages: result.messages });
-  return result;
+  const id = requireIdentifier(approvalId, 'Aprovação');
+  const approval = toolRuntime.listApprovals().find((item) => item.id === id);
+  if (!approval?.chatId) throw new Error('Aprovação sem chat associado.');
+  const chatId = approval.chatId;
+  executionManager.update(chatId, { state: 'running' });
+  try {
+    const result = await agentRuntime.reject(id);
+    const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+    if (chat) await chatManager.update({ ...chat, messages: result.messages });
+    if (result.pendingApprovalIds.length) {
+      for (const pendingId of result.pendingApprovalIds) toolRuntime.setApprovalChat(pendingId, result.chatId);
+      executionManager.update(chatId, { state: 'waiting_approval' });
+    } else {
+      executionManager.update(chatId, { state: 'completed' });
+    }
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    executionManager.update(chatId, { state: 'failed', error: message });
+    throw error;
+  }
 });
 
 ipcMain.handle('terminal:start', async (_event, input: { projectId: string; command: string }) => { const value = requireObject(input, 'Dados do terminal'); return terminalService.start(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.command, 'Comando')); });
