@@ -10,7 +10,7 @@ function createRuntime(result: { chatId: string; pendingApprovalIds: string[] })
     pendingApprovalIds: result.pendingApprovalIds,
     response: { content: '', model: 'test-model', providerId: 'test-provider' },
     toolRounds: 1,
-    messages: [],
+    messages: [] as never[],
   });
 
   return {
