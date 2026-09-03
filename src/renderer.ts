@@ -8,8 +8,8 @@ type Chat = { id: string; title: string; projectId?: string; providerId: string;
 type Project = { id: string; name: string; rootPath: string; createdAt: number; updatedAt: number };
 type IntelligenceLevel = Chat['intelligence'];
 type PermissionLevel = Chat['permissionLevel'];
-type StreamEvent = { type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'error'; chatId?: string; text?: string; activity?: { message: string; status: string }; toolCall?: { id: string; name: string; input: Record<string, unknown> }; pendingApprovalIds?: string[]; error?: string };
-type Approval = { id: string; projectId: string; permissionLevel: string; toolCall: { id: string; name: string; input: Record<string, unknown> }; createdAt: number };
+type StreamEvent = { type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'error'; chatId?: string; runId?: string; text?: string; activity?: { message: string; status: string }; toolCall?: { id: string; name: string; input: Record<string, unknown> }; pendingApprovalIds?: string[]; error?: string };
+type Approval = { id: string; projectId: string; chatId?: string; runId?: string; permissionLevel: string; toolCall: { id: string; name: string; input: Record<string, unknown> }; createdAt: number };
 type ExecutionState = 'idle' | 'running' | 'waiting_approval' | 'failed';
 
 declare global {
@@ -24,9 +24,9 @@ declare global {
       updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
       streamChat: (input: { chatId: string; content: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
-      listApprovals: () => Promise<Approval[]>;
-      approveTool: (approvalId: string) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
-      denyTool: (approvalId: string) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
+      listApprovals: (filters?: { chatId?: string; runId?: string }) => Promise<Approval[]>;
+      approveTool: (approvalId: string, filters?: { chatId?: string; runId?: string }) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
+      denyTool: (approvalId: string, filters?: { chatId?: string; runId?: string }) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
       onActivity: (listener: (event: { message?: string; status?: string }) => void) => () => void;
       terminal: {
         start: (input: { projectId: string; command: string }) => Promise<unknown>;
@@ -362,7 +362,9 @@ async function newProject(): Promise<void> {
 
 async function refreshApprovals(): Promise<void> {
   try {
-    pendingApprovals = await window.autoCodez.listApprovals();
+    const chatId = activeChat?.id;
+    if (!chatId) { pendingApprovals = []; return; }
+    pendingApprovals = (await window.autoCodez.listApprovals({ chatId })).filter((approval) => approval.chatId === chatId);
     if (pendingApprovals.length) executionState = 'waiting_approval';
     renderMessages();
     renderComposer();
@@ -393,7 +395,7 @@ async function sendMessage(contentOverride?: string, isRetry = false): Promise<v
     const result = await window.autoCodez.streamChat({ chatId, content });
     if (!activeChat || activeChat.id !== chatId) return;
     activeChat = result.chat;
-    pendingApprovals = result.pendingApprovalIds.length ? await window.autoCodez.listApprovals() : [];
+    pendingApprovals = result.pendingApprovalIds.length ? (await window.autoCodez.listApprovals({ chatId })).filter((approval) => approval.chatId === chatId) : [];
     if (pendingApprovals.length) {
       executionState = 'waiting_approval';
       streamingText = '';
@@ -403,6 +405,7 @@ async function sendMessage(contentOverride?: string, isRetry = false): Promise<v
       executionState = 'idle';
       streamingText = '';
       streamingActivity = [];
+      pendingApprovals = [];
       retryContent = '';
       lastSubmittedContent = '';
       await refresh();
@@ -420,9 +423,9 @@ async function retryLastMessage(): Promise<void> {
 }
 
 async function resumeApproval(id: string, approve: boolean): Promise<void> {
-  if (executionState !== 'waiting_approval') return;
+  if (executionState !== 'waiting_approval' || !activeChat) return;
   const approval = pendingApprovals.find((item) => item.id === id);
-  if (!approval) return;
+  if (!approval || approval.chatId !== activeChat.id) return;
   executionState = 'running';
   pendingApprovals = pendingApprovals.filter((item) => item.id !== id);
   streamingText = '';
@@ -431,13 +434,14 @@ async function resumeApproval(id: string, approve: boolean): Promise<void> {
   renderMessages();
   renderComposer();
   try {
-    const result = approve ? await window.autoCodez.approveTool(id) : await window.autoCodez.denyTool(id);
+    const scope = { chatId: approval.chatId, ...(approval.runId ? { runId: approval.runId } : {}) };
+    const result = approve ? await window.autoCodez.approveTool(id, scope) : await window.autoCodez.denyTool(id, scope);
     if (result.chatId) {
       const chat = chats.find((item) => item.id === result.chatId);
       if (chat && result.messages) chat.messages = result.messages;
       if (activeChat?.id === result.chatId && result.messages) activeChat.messages = result.messages;
     }
-    pendingApprovals = await window.autoCodez.listApprovals();
+    pendingApprovals = (await window.autoCodez.listApprovals({ chatId: activeChat.id })).filter((item) => item.chatId === activeChat?.id);
     if (pendingApprovals.length) {
       executionState = 'waiting_approval';
       streamingActivity = ['Outras operações ainda aguardam aprovação.'];
@@ -452,7 +456,7 @@ async function resumeApproval(id: string, approve: boolean): Promise<void> {
       await refresh();
     }
   } catch (error) {
-    pendingApprovals = await window.autoCodez.listApprovals().catch((): Approval[] => []);
+    pendingApprovals = await window.autoCodez.listApprovals({ chatId: activeChat.id }).catch((): Approval[] => []);
     setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível processar a aprovação.');
   }
 }
@@ -572,6 +576,7 @@ app.addEventListener('click', async (event) => {
     renderHeader();
     renderMessages();
     renderComposer();
+    void refreshApprovals();
     void refresh();
     return;
   }
@@ -662,6 +667,16 @@ window.autoCodez.onStreamEvent((event) => {
     return;
   }
   if (event.type === 'complete') {
+    if (activeChat && event.chatId === activeChat.id) {
+      executionState = 'idle';
+      streamingText = '';
+      streamingActivity = [];
+      pendingApprovals = [];
+      retryContent = '';
+      lastSubmittedContent = '';
+      renderMessages();
+      renderComposer();
+    }
     return;
   }
   if (event.type === 'error' && event.error) {
