@@ -42,7 +42,10 @@ export class ExecutionManager {
 
   update(chatId: string, update: ExecutionUpdate, now = Date.now()): ExecutionSnapshot {
     const current = this.executions.get(chatId);
-    if (!current) throw new Error(`Nenhuma execução encontrada para o chat ${chatId}.`);
+    if (!current) {
+      if (update.state !== 'running') throw new Error(`Nenhuma execução encontrada para o chat ${chatId}.`);
+      return this.start(chatId, now);
+    }
 
     const next: ExecutionSnapshot = {
       ...current,
