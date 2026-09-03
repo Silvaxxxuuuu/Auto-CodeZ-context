@@ -34,6 +34,29 @@ test('chat persists the exact saved API key selection', async () => {
   assert.equal((await restored.list())[0].apiKeyId, 'key-123');
 });
 
+test('chat keeps the exact API key when only model or intelligence settings change', async () => {
+  const storage = new MemoryStorage();
+  const manager = new ChatManager(storage);
+  await manager.init();
+  const created = await manager.create({ providerId: 'openai', model: 'model', apiKeyId: 'key-123', intelligence: 'normal', permissionLevel: 'safe' });
+
+  const updated = await manager.updateSettings({ chatId: created.id, providerId: 'openai', model: 'another-model', intelligence: 'high', permissionLevel: 'safe' });
+  assert.equal(updated.apiKeyId, 'key-123');
+  assert.equal(updated.model, 'another-model');
+  assert.equal(updated.intelligence, 'high');
+});
+
+test('chat clears a stale API key when the provider changes without a new key', async () => {
+  const storage = new MemoryStorage();
+  const manager = new ChatManager(storage);
+  await manager.init();
+  const created = await manager.create({ providerId: 'openai', model: 'model', apiKeyId: 'key-123', intelligence: 'normal', permissionLevel: 'safe' });
+
+  const updated = await manager.updateSettings({ chatId: created.id, providerId: 'anthropic', model: 'claude-model', intelligence: 'normal', permissionLevel: 'safe' });
+  assert.equal(updated.apiKeyId, undefined);
+  assert.equal(updated.providerId, 'anthropic');
+});
+
 test('provider manager resolves the exact selected key instead of the provider active key', async () => {
   const storage = new MemoryStorage();
   const manager = new ProviderManager(storage);
