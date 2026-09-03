@@ -5,7 +5,9 @@ AUTO CODEZ — DOCUMENTO DE CONTEXTO PERMANENTE
 1. PRODUTO
 ============================================================
 
-Auto CodeZ é um aplicativo desktop real em Electron + Vite + TypeScript. É uma plataforma de desenvolvimento assistida por múltiplos provedores de IA, com interface própria, agente, execução controlada de ferramentas, projetos locais, chats, configurações, plugins futuros e conta/sincronização.
+Auto CodeZ é um aplicativo desktop real em Electron + Vite + TypeScript. É uma plataforma local-first de desenvolvimento assistido por IA, projetada para trabalhar com muitos provedores e modelos, com interface própria, agente, execução controlada de ferramentas, projetos locais, chats, configurações, plugins futuros e conta/sincronização.
+
+O objetivo não é construir um aplicativo dependente somente de Anthropic, Google AI e OpenAI/ChatGPT. Esses são apenas os providers iniciais. A visão de longo prazo é suportar o maior número possível de provedores de IA que ofereçam APIs utilizáveis pelo usuário, respeitando capacidades, termos, autenticação, limites e compatibilidade técnica de cada serviço.
 
 Arquitetura antiga baseada em automação de navegador/UI Automation para ChatGPT, Claude e Gemini não é mais o núcleo.
 
@@ -13,6 +15,27 @@ Fluxo principal:
 Auto CodeZ -> AI Runtime -> Provider Adapter -> API -> modelo.
 
 Tratar como software de produção: mudanças incrementais, código limpo, validação real, sem refatorações amplas sem necessidade.
+
+Visão de produto:
+- chatbot conversacional;
+- histórico e memória de conversas;
+- contexto de workspace/projeto;
+- edição direta de arquivos no PC do usuário;
+- criação, alteração, exclusão e organização de arquivos;
+- execução de comandos e ferramentas sob controle do Auto CodeZ;
+- automação ampla por agentes;
+- testes, builds e outras tarefas de desenvolvimento;
+- geração de imagens quando o provider/modelo permitir;
+- geração de áudio quando o provider/modelo permitir;
+- geração de vídeo quando o provider/modelo permitir;
+- visão/multimodalidade quando suportada;
+- reasoning quando suportado;
+- tool calling e agentes;
+- futura arquitetura de plugins, integrações e automações.
+
+O produto deve tratar capacidades como propriedades reais de cada modelo/provider. Não prometer uma modalidade que o provider ou modelo não suporta.
+
+A IA deve poder trabalhar diretamente no ambiente local do usuário, mas nunca deve receber acesso arbitrário ao sistema operacional apenas por estar em modo agente. Execução, permissões, sandbox, aprovação e observabilidade são partes centrais da arquitetura.
 
 ============================================================
 2. REPOSITÓRIO E BRANCH
@@ -23,7 +46,15 @@ Branch atual de trabalho: feature/ui-hierarchy-polish
 PR #9: feature/ui-hierarchy-polish -> feature/provider-error-resilience
 Não fazer merge do PR sem solicitação explícita.
 
-Commits recentes relevantes:
+HEAD relevante atual:
+dbdd37a5b882aad35686ef915c8584f08acf9329
+fix(chat): load saved API key chat settings UI
+
+Commit anterior:
+cc5d91c86501224221715e0557d825f62e4171eb
+fix(chat): hide deleted saved credential from settings
+
+Outros commits recentes relevantes:
 
 e31094c660a1d8e3445c28605afd2352e0773664
 fix(ui): remove legacy settings modal
@@ -32,6 +63,18 @@ fix(ui): remove legacy settings modal
 fix(settings): route legacy settings action to new screen
 
 A nova tela de Settings foi confirmada funcionando antes da remoção da implementação antiga. O commit e31094c removeu somente o modal legado de ui-polish.ts, preservando o botão #ac-app-settings como ponto de integração visual com settings-ui.ts.
+
+O commit dbdd37a adicionou a injeção do novo módulo chat-api-key-settings-ui.ts no Vite renderer, corrigindo o problema em que a implementação existia no código mas não era carregada pelo app empacotado.
+
+CI do commit dbdd37a5b882aad35686ef915c8584f08acf9329:
+- workflow: Validate Auto CodeZ;
+- run: 33709681717;
+- conclusão: success;
+- TypeScript validation: passou;
+- core tests: passaram;
+- ESLint validation: passou;
+- Electron Forge package build: passou;
+- startup smoke test: passou.
 
 A atualização deste TXT gera um novo commit na mesma branch. O novo SHA deve ser tratado como o novo HEAD quando a operação terminar.
 
@@ -61,7 +104,10 @@ Regras:
 - evitar observers/listeners/timers globais desnecessários;
 - evitar módulos carregados duas vezes;
 - não esconder erros reais atrás de mensagens genéricas;
-- não declarar correção concluída sem validação.
+- não declarar correção concluída sem validação;
+- não fazer operações Git destrutivas;
+- não reescrever arquivos inteiros sem recuperar seu conteúdo exato e justificar a alteração;
+- não fazer merge de PR sem autorização explícita do usuário.
 
 Validação padrão:
 npm run typecheck
@@ -69,16 +115,24 @@ npm test
 npm run lint
 npm start
 
+CI pode substituir a validação local quando a execução local não estiver disponível, mas o resultado deve ser verificado de fato.
+
 Não afirmar que testes locais passaram sem executá-los ou sem confirmação real.
 
 ============================================================
-4. PROVIDERS E IA
+4. PROVIDERS E IA — VISÃO ATUAL E FUTURA
 ============================================================
 
 Providers iniciais:
 - OpenAI
 - Google AI
 - Anthropic
+
+Eles não são o limite do produto.
+
+Objetivo de longo prazo: arquitetura aberta para muitos providers e modelos, incluindo provedores comerciais, provedores com tiers gratuitos, serviços especializados, gateways/agregadores e outros serviços que disponibilizem API keys para uso pelo usuário. O Auto CodeZ deve evitar acoplamento estrutural a três vendors específicos.
+
+A arquitetura deve permitir adicionar um provider sem reescrever o chat, execution manager, sistema de permissões, armazenamento, Settings ou UI principal.
 
 Arquivos principais:
 - src/ai/types.ts
@@ -93,9 +147,19 @@ Arquivos principais:
 
 Contratos globais incluem provider, model, capabilities, request, response, messages, stream events, tools e inteligência.
 
-Cada chat usa um provider/modelo por vez, mas pode trocar provider/modelo no meio da conversa. Histórico pertence ao Auto CodeZ.
+Cada chat usa um provider/modelo/credencial por vez, mas pode trocar provider/modelo/credencial no meio da conversa. Histórico pertence ao Auto CodeZ.
 
-Capacidades: text, streaming, vision, image, video, audio, reasoning e tools. UI deve respeitar capacidades reais.
+Capacidades previstas no contrato global:
+- text
+- streaming
+- vision
+- image
+- video
+- audio
+- reasoning
+- tools
+
+A lista é extensível. Um provider pode suportar somente parte dela.
 
 Perfis de inteligência:
 - Baixo
@@ -105,14 +169,106 @@ Perfis de inteligência:
 
 Perfil representa esforço/orçamento. Runtime traduz para parâmetros específicos do provider/modelo.
 
+Regra arquitetural: provider, modelo e credencial são entidades separadas. Um chat não deve escolher apenas “Google” ou “OpenAI” quando existem várias credenciais para o mesmo provider.
+
 ============================================================
-5. ESTADO DE API KEYS E ERROS
+5. ABSTRAÇÃO MULTIPROVIDER E VERCEL AI SDK
+============================================================
+
+Foi identificada a possibilidade de utilizar o Vercel AI SDK como camada de abstração TypeScript para consumo uniforme de múltiplos modelos/providers e modalidades, especialmente text generation, streaming, tool calling, structured output e recursos multimodais quando suportados.
+
+A ideia é arquiteturalmente relevante para o Auto CodeZ porque o produto pretende suportar muitos providers e modalidades. Entretanto, o AI SDK não deve assumir o controle das abstrações próprias do Auto CodeZ.
+
+Princípio desejado:
+Auto CodeZ AI Runtime -> camada de adapters/abstração -> provider/modelo
+
+O Vercel AI SDK pode ocupar a camada de infraestrutura/abstração se, após um spike técnico, demonstrar que reduz complexidade sem prejudicar:
+- BYOK / API keys próprias do usuário;
+- seleção por apiKeyId;
+- safeStorage;
+- ProviderManager;
+- ModelResolver;
+- ChatRuntime;
+- capabilities reais;
+- permissões;
+- Execution Manager;
+- sandbox;
+- Electron IPC;
+- execução local;
+- tratamento de erros e indisponibilidade;
+- histórico/memória do Auto CodeZ;
+- suporte a providers que não sejam cobertos nativamente pelo SDK.
+
+Não adotar o AI SDK apenas por conveniência. Antes da adoção, comparar o custo de manter adapters próprios com o benefício real da abstração. Se a integração for extremamente vantajosa, ele pode se tornar a camada padrão de consumo de modelos do Auto CodeZ, sem substituir o domínio e as regras do próprio Auto CodeZ.
+
+Não tornar o AI Gateway de terceiros uma dependência obrigatória do produto. A visão principal continua sendo local-first + BYOK: sempre que possível, Auto CodeZ -> provider diretamente usando a credencial do usuário.
+
+Futuro desejado:
+- provider adapters finos;
+- registry extensível;
+- discovery de modelos/capabilities;
+- normalização de requests/responses/stream events;
+- suporte a modalidades heterogêneas;
+- fallback/retry controlados sem trocar silenciosamente a identidade da credencial;
+- possibilidade de providers adicionais sem alterações profundas no core.
+
+============================================================
+6. API KEYS, CREDENCIAIS E ERROS
 ============================================================
 
 Fluxo:
 provider -> nome -> API Key -> modelo/base URL opcional -> validação -> model discovery -> salvar.
 
 API Keys são secrets. Localmente usar safeStorage. Nunca salvar plaintext em providers.json.
+
+ApiKeySummary inclui conceitualmente:
+- id;
+- name;
+- providerId;
+- providerName;
+- maskedKey;
+- selectedModel;
+- active.
+
+Uma credencial salva possui identidade própria. O nome informado pelo usuário deve ser preservado exatamente.
+
+Exemplos de nomes:
+- Minha Gemini principal
+- Google trabalho
+- Claude pessoal
+- OpenAI produção
+- Gemini testes
+
+Se o usuário tiver várias chaves do mesmo provider, o chat deve selecionar a credencial específica, e não somente o provider.
+
+Persistência de chat usa apiKeyId.
+
+Regras atuais:
+- chat persiste o apiKeyId exato;
+- runtime resolve exatamente essa credencial;
+- provider é derivado/verificado a partir da credencial selecionada;
+- chat pode trocar de credencial/provider/modelo;
+- remover uma credencial não deve silenciosamente trocar chats existentes para outra credencial;
+- se a credencial exata de um chat for removida, a UI de configurações do chat não deve inventar um estado “credencial ausente” nem selecionar automaticamente outra;
+- a lista deve mostrar somente credenciais atualmente existentes;
+- se o usuário fechar sem salvar, o apiKeyId antigo pode permanecer persistido e o runtime deve continuar recusando a credencial inexistente;
+- selecionar e salvar uma nova credencial substitui explicitamente o apiKeyId;
+- uma nova chave com o mesmo nome nunca deve ser confundida com a antiga, pois IDs são distintos.
+
+Arquivos envolvidos:
+- src/ai/chat-manager.ts
+- src/ai/types.ts
+- src/ai/provider-manager.ts
+- src/main.ts
+- src/preload.ts
+- src/chat-api-key-settings-ui.ts
+- tests/chat-saved-api-key-selection.test.ts
+
+Testes atuais cobrem:
+1. persistência da credencial exata;
+2. preservação da credencial ao alterar somente modelo/inteligência;
+3. limpeza de credencial obsoleta quando provider muda sem nova credencial;
+4. resolução da credencial exata em vez da credencial ativa do provider.
 
 Erros devem distinguir:
 authentication, billing, quota, rate limit, network, server, invalid request e unknown.
@@ -135,10 +291,9 @@ fix(ai): keep chat model resolution type-safe
 fix(ai): classify unavailable provider services correctly
 
 Model resolver preserva cache quando discovery falha e usa modelo configurado como fallback.
-Essas mudanças ainda precisam de validação local para serem consideradas concluídas.
 
 ============================================================
-6. EXECUTION E STREAMING
+7. EXECUTION, AGENT E AUTOMAÇÃO
 ============================================================
 
 src/execution-manager.ts
@@ -171,8 +326,38 @@ d0a90976316e426e280ff9450ab6642ad5c0f586
 
 Usuário confirmou que a UI deixou de congelar. Proteger contra regressões.
 
+Visão futura de agente:
+A IA poderá executar sequências completas de trabalho, por exemplo:
+- analisar projeto;
+- planejar alterações;
+- editar vários arquivos;
+- executar testes;
+- corrigir falhas;
+- fazer build;
+- revisar resultados;
+- continuar iterando;
+- entregar um resumo das alterações.
+
+Automação total significa autonomia operacional controlada, não acesso irrestrito e invisível. Toda operação deve passar pelo sistema de ferramentas, permissões, políticas de segurança e observabilidade do Auto CodeZ.
+
 ============================================================
-7. UI E ÍCONES
+8. SANDBOX E SEGURANÇA DE EXECUÇÃO — FUTURO PRIORITÁRIO
+============================================================
+
+O sandbox é uma das próximas grandes áreas arquiteturais porque o Auto CodeZ pretende permitir que a IA edite o PC e execute ferramentas.
+
+Objetivo:
+IA -> tool call -> policy/permission -> sandbox ou executor controlado -> filesystem/processo -> resultado observável.
+
+Não permitir como arquitetura final:
+IA -> child_process arbitrário -> sistema operacional inteiro.
+
+A solução futura deve considerar isolamento de processos, workspace boundaries, allowlists/denylists, confirmação de operações perigosas, cancelamento, timeouts, limites de recursos, captura de stdout/stderr, auditoria e recuperação de falhas.
+
+A arquitetura deve permitir automação forte sem transformar o Auto CodeZ em um mecanismo de execução cega de comandos.
+
+============================================================
+9. UI E ÍCONES
 ============================================================
 
 Visual: escuro, profissional, limpo, poucos efeitos, sem shaders pesados, espaçamento consistente, estados claros.
@@ -196,7 +381,7 @@ Commit:
 Não substituir o sistema de ícones para corrigir posicionamento.
 
 ============================================================
-8. ESTRUTURA DA UI
+10. ESTRUTURA DA UI
 ============================================================
 
 Top bar: permanente, baixa, branding, ações globais, configurações e conta/perfil.
@@ -212,18 +397,18 @@ Right bar: inicialmente vazia. Futuramente plugins podem inserir painéis.
 Composer:
 [ anexar ] [ Digite uma mensagem... ] [ Inteligência ] [ enviar ]
 
-Provider/modelo ativo deve aparecer no cabeçalho/configuração do chat, não necessariamente no composer.
+Provider/modelo/credencial ativos devem aparecer no cabeçalho/configuração do chat quando necessário, não necessariamente no composer.
 
 Perfil é o local principal para identidade e contas externas vinculadas: Google, GitHub, Microsoft, Passkeys e Magic Link.
 Segurança trata sessões, dispositivos e proteções.
 Sincronização trata estado, pendências e conflitos.
 
 ============================================================
-9. CHAT E AGENT ACTIVITY
+11. CHAT E AGENT ACTIVITY
 ============================================================
 
 Chat conceitualmente possui:
-id, título, projeto opcional, provider, modelo, inteligência, nível de acesso, mensagens, timestamps e estado de execução.
+id, título, projeto opcional, apiKeyId opcional, provider, modelo, inteligência, nível de acesso, mensagens, timestamps e estado de execução.
 
 Chat vazio pode ser temporário. Após primeira mensagem vira histórico persistente.
 
@@ -236,7 +421,7 @@ Status: pending, running, success, failed.
 Atividade deve refletir ações reais do runtime.
 
 ============================================================
-10. PROJETOS, WORKSPACE E PERMISSÕES
+12. PROJETOS, WORKSPACE E PERMISSÕES
 ============================================================
 
 Projeto local aponta para pasta do computador e pode conter vários chats. Chat pode existir sem projeto.
@@ -249,6 +434,8 @@ delete_file()
 rename_file()
 search_files()
 run_command()
+
+Futuras ferramentas podem cobrir outras operações locais, mídia, Git, build, testes, automações e integrações.
 
 A IA não recebe acesso arbitrário ao SO apenas por estar em modo agente.
 
@@ -268,7 +455,7 @@ Níveis de acesso:
 Mesmo irrestrito, manter proteções contra operações perigosas fora do workspace quando tecnicamente possível.
 
 ============================================================
-11. ERROR RECOVERY E API SETTINGS
+13. ERROR RECOVERY E API SETTINGS
 ============================================================
 
 src/error-recovery-ui.ts preserva mensagem real do provider quando disponível.
@@ -294,7 +481,7 @@ Commit:
 Comportamento intermitente de foco/cursor no campo de nome ainda deve ser retestado.
 
 ============================================================
-12. SETTINGS — POSIÇÃO ATUAL
+14. SETTINGS — POSIÇÃO ATUAL
 ============================================================
 
 Existe uma única implementação real de Settings em settings-ui.ts.
@@ -324,18 +511,18 @@ Usuário confirmou anteriormente que a nova interface de configurações apareci
 A remoção foi feita cirurgicamente e deve ser validada localmente antes de ser considerada encerrada.
 
 ============================================================
-13. SETTINGS — SISTEMA FUTURO
+15. SETTINGS — SISTEMA FUTURO
 ============================================================
 
 Geral: tema, idioma, animações, densidade, inicialização.
-IA: provider padrão, modelo padrão, inteligência, ferramentas, aprovação.
+IA: provider padrão, modelo padrão, credencial padrão, inteligência, ferramentas, aprovação e políticas.
 Editor: fonte, tamanho, word wrap, minimap, tabs, indentação.
 Terminal: shell, diretório inicial, comportamento.
-Segurança/privacidade: credenciais, integrações, dispositivos, sessões.
+Segurança/privacidade: credenciais, integrações, dispositivos, sessões, permissões e sandbox.
 Sincronização: estado, pendências, conflitos.
 
 ============================================================
-14. CONTA AUTO CODEZ
+16. CONTA AUTO CODEZ
 ============================================================
 
 Conta não é login cosmético. É infraestrutura central do produto.
@@ -361,7 +548,7 @@ Recursos físicos continuam locais: filesystem, processos, terminal, hardware, a
 Um dispositivo remoto não ganha automaticamente controle físico de outro computador.
 
 ============================================================
-15. LOCAL-ONLY VS SYNC
+17. LOCAL-ONLY VS SYNC
 ============================================================
 
 LOCAL-ONLY:
@@ -386,11 +573,11 @@ SINCRONIZADO:
 - dados da conta.
 
 ============================================================
-16. LOCAL-FIRST / OFFLINE
+18. LOCAL-FIRST / OFFLINE
 ============================================================
 
 Decisão arquitetural permanente:
-AUTO CODEZ = LOCAL-FIRST + CLOUD SYNC + OFFLINE QUEUE.
+AUTO CODEZ = LOCAL-FIRST + CLOUD SYNC + OFFLINE QUEUE + BYOK.
 
 Se internet cair:
 - sessão não é perdida;
@@ -413,8 +600,11 @@ Fluxo:
 alteração local -> salvar localmente -> fila -> tentar sync -> confirmação -> sincronizado.
 Falha -> salvo localmente + pending.
 
+BYOK:
+Sempre que a integração permitir, o usuário fornece e controla sua própria API key. O Auto CodeZ não deve obrigar o usuário a usar uma conta/proxy proprietário para conversar com um modelo externo.
+
 ============================================================
-17. AUTENTICAÇÃO
+19. AUTENTICAÇÃO
 ============================================================
 
 Modelo: passwordless-first.
@@ -456,7 +646,7 @@ Sync:
 - Change Requests.
 
 ============================================================
-18. ROADMAP
+20. ROADMAP
 ============================================================
 
 FASE 1 — ESTABILIZAÇÃO
@@ -470,12 +660,17 @@ FASE 1 — ESTABILIZAÇÃO
 - regressões;
 - auditoria técnica;
 - comportamento de provider indisponível;
-- validação completa do estado atual.
+- validação completa do estado atual;
+- consolidação da seleção de credenciais específicas por chat.
 
-Status imediato:
+Status atual relevante:
 - nova Settings UI funcionando;
 - implementação antiga de Settings removida;
-- validação local completa ainda pendente.
+- seleção de API key salva por credencial específica implementada;
+- chat persiste apiKeyId;
+- runtime usa a credencial exata;
+- UI não mostra placeholder para credencial apagada;
+- commit dbdd37a5b882aad35686ef915c8584f08acf9329 validado pelo CI com sucesso.
 
 FASE 2 — ACCOUNT FOUNDATION
 - account model;
@@ -514,10 +709,10 @@ FASE 4 — SECRETS/INTEGRAÇÕES
 
 FASE 5 — SETTINGS + MAJOR UI
 Geral: tema, idioma, animações, densidade, startup.
-IA: provider/modelo/inteligência/tools/approval.
+IA: provider/modelo/credencial/inteligência/tools/approval/policies.
 Editor: fonte/tamanho/word wrap/minimap/tabs/indentação.
 Terminal: shell/diretório inicial/comportamento.
-Segurança/Privacidade: credenciais/integrações/dispositivos/sessões.
+Segurança/Privacidade: credenciais/integrações/dispositivos/sessões/sandbox.
 Sync: estado/pending/conflitos.
 
 Depois: evolução visual/UX de chat/activity/editor/tools/loading/empty/error.
@@ -543,7 +738,32 @@ FASE 7 — PRODUTO/DISTRIBUIÇÃO
 - observability;
 - distribution.
 
-Cross-cutting: Local-first + Cloud Sync + Offline Queue.
+FASE FUTURA — AI PLATFORM / MULTIMODAL / AGENT
+Essa fase é transversal ao roadmap e deve evoluir progressivamente:
+- ampliar catálogo de providers;
+- ampliar catálogo de modelos;
+- adapters ou camada de abstração comum;
+- avaliar/adotar Vercel AI SDK se validado arquiteturalmente;
+- text generation e streaming;
+- vision;
+- image generation;
+- audio generation e processamento de áudio;
+- video generation e processamento de vídeo quando providers permitirem;
+- structured output;
+- tool calling;
+- agentes de longa duração;
+- memória/context management;
+- execução de tarefas multi-etapas;
+- sandbox seguro;
+- automação local controlada;
+- Git/build/test loops;
+- plugins de provider/tool/integration;
+- fallback e recuperação de falhas sem quebrar identidade de credencial;
+- capability discovery por modelo.
+
+A expansão para novos providers deve ser tratada como capacidade central do produto, não como coleção de hacks específicos para cada vendor.
+
+Cross-cutting: Local-first + Cloud Sync + Offline Queue + BYOK + Security + Provider Abstraction.
 
 Antes de major feature perguntar:
 1. user data ou device data?
@@ -556,9 +776,11 @@ Antes de major feature perguntar:
 8. failure behavior?
 9. internet loss?
 10. provider unavailable?
+11. capability real do modelo/provider?
+12. a funcionalidade mantém BYOK e não cria dependência desnecessária de vendor?
 
 ============================================================
-19. PREFERÊNCIAS DO USUÁRIO
+21. PREFERÊNCIAS DO USUÁRIO
 ============================================================
 
 - Quer mudanças maiores por etapa, mas com precisão absoluta e sem quebrar funcionalidades existentes.
@@ -572,13 +794,22 @@ Antes de major feature perguntar:
 - Não quer títulos/elementos visuais desnecessariamente grandes.
 - Não quer que alterações visuais mexam na lógica do Monaco, arquivos ou execução sem necessidade.
 - Quando pedir para continuar, espera recuperação do contexto e continuidade sem repetir trabalho já concluído.
+- Quer que o Auto CodeZ evolua para uma plataforma de IA ampla, não limitada a Anthropic, Google AI e OpenAI.
+- Quer suporte futuro ao maior número possível de providers que disponibilizem API keys utilizáveis.
+- Quer que o app possa combinar chatbot, edição direta no PC, automação de agente, ferramentas, geração de imagem, áudio e vídeo conforme os providers permitirem.
+- Valoriza abstrações que reduzam dependência de vendors, mas não aceita que uma abstração externa substitua as regras de segurança, credenciais, execução e arquitetura próprias do Auto CodeZ.
 
 ============================================================
-20. PRÓXIMAS ETAPAS IMEDIATAS
+22. PRÓXIMAS ETAPAS IMEDIATAS
 ============================================================
 
-1. Validar o commit e31094c e a atualização deste contexto.
-2. Executar/confirmar typecheck, testes e lint em ambiente local; npm start para validação manual da nova Settings UI.
-3. Se tudo estiver limpo, auditar os itens ainda pendentes da Fase 1, começando pelo model resolver/provider unavailable e pelo foco/cursor do campo de nome.
-4. Fazer mudanças em blocos coerentes, preservando as correções já confirmadas.
-5. Não fazer merge do PR #9 sem autorização explícita.
+1. Manter o commit atual e a CI verde como baseline de estabilidade.
+2. Validar localmente quando possível: typecheck, testes, lint e npm start.
+3. Fechar itens restantes da Fase 1, sem regressão da nova Settings UI nem do sistema de API keys salvas.
+4. Auditar model resolver/provider unavailable e itens de foco/cursor ainda pendentes.
+5. Planejar um spike isolado do Vercel AI SDK antes de qualquer migração do runtime.
+6. Definir a interface definitiva de Provider Adapter/Capability antes de adicionar grande quantidade de novos providers.
+7. Projetar sandbox/execução segura antes de ampliar automação irrestrita da IA.
+8. Projetar memória/context management antes de aumentar significativamente a autonomia de agentes.
+9. Só então expandir progressivamente providers, modalidades multimídia, ferramentas, plugins e automações.
+10. Não fazer merge do PR #9 sem autorização explícita.
