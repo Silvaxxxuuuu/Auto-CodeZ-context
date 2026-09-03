@@ -104,6 +104,13 @@ function syncUi(): void {
   syncComposer();
 }
 
+function applySnapshot(snapshot: ExecutionSnapshot): void {
+  manager.remove(snapshot.chatId);
+  if (!active(snapshot)) return;
+  manager.start(snapshot.chatId, snapshot.startedAt, snapshot.runId);
+  manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
+}
+
 async function hydrateExecutions(): Promise<void> {
   if (!bridge?.listExecutions) return;
   try {
@@ -120,17 +127,8 @@ async function hydrateExecutions(): Promise<void> {
     }
     for (const snapshot of snapshots) {
       const current = manager.get(snapshot.chatId);
-      if (!current) {
-        if (snapshot.state === 'running') manager.start(snapshot.chatId, snapshot.startedAt, snapshot.runId);
-        else manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
-        if (snapshot.state === 'running') manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
-        continue;
-      }
-      if (current.runId !== snapshot.runId || snapshot.updatedAt >= current.updatedAt) {
-        manager.remove(snapshot.chatId);
-        if (snapshot.state === 'running') manager.start(snapshot.chatId, snapshot.startedAt, snapshot.runId);
-        else manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
-        if (snapshot.state === 'running') manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
+      if (!current || current.runId !== snapshot.runId || snapshot.updatedAt >= current.updatedAt) {
+        applySnapshot(snapshot);
       }
     }
     syncUi();
