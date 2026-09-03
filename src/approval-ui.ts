@@ -71,7 +71,7 @@ async function render(): Promise<void> {
     return;
   }
   const approvals = await bridge.listApprovals();
-  const visible = approvals.filter((approval) => approval.chatId === chatId && ids.includes(approval.id));
+  const visible = approvals.filter((approval) => (approval.chatId === chatId || !approval.chatId) && ids.includes(approval.id));
   root.innerHTML = visible.map((approval) => `<div class="ac-approval-card" data-approval="${escapeHtml(approval.id)}"><div class="ac-approval-heading">Aprovação necessária</div><div class="ac-approval-tool">${escapeHtml(approval.toolCall.name)}</div><div class="ac-approval-input">${escapeHtml(JSON.stringify(approval.toolCall.input, null, 2))}</div><div class="ac-approval-actions"><button data-ac-approve="${escapeHtml(approval.id)}">Aprovar</button><button class="ac-approval-deny" data-ac-deny="${escapeHtml(approval.id)}">Recusar</button></div></div>`).join('');
 }
 
