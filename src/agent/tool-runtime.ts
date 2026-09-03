@@ -84,7 +84,7 @@ export class ToolRuntime {
   restoreApprovals(approvals: ApprovalRequest[]): void { this.approvals.restore(approvals); }
   setApprovalChat(approvalId: string, chatId: string): ApprovalRequest { return this.approvals.setChatId(approvalId, chatId); }
 
-  async execute(projectId: string, permission: PermissionLevel, call: AIToolCall): Promise<AIToolResult> {
+  async execute(chatId: string, projectId: string, permission: PermissionLevel, call: AIToolCall): Promise<AIToolResult> {
     const normalizedCall = normalizeToolCall(call);
     const definition = definitions.find((item) => item.name === normalizedCall.name);
     if (!definition) return { toolCallId: normalizedCall.id, ok: false, error: `Ferramenta desconhecida: ${normalizedCall.name}` };
@@ -103,7 +103,7 @@ export class ToolRuntime {
           } catch { /* keep the approval without a preview when validation itself fails */ }
         }
       }
-      const approval = this.approvals.request({ projectId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });
+      const approval = this.approvals.request({ projectId, chatId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });
       this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${normalizedCall.name}.`, status: 'pending', toolCallId: normalizedCall.id, toolName: normalizedCall.name, ...(diffPlan ? { diffPlan } : {}) });
       return { toolCallId: normalizedCall.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
     }
