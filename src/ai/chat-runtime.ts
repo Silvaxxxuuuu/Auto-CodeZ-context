@@ -6,6 +6,7 @@ import { ModelResolver } from './model-resolver';
 import { ProviderRegistry } from './provider-registry';
 import { ProviderRequestJournal } from './provider-request-journal';
 import { formatProviderError, normalizeProviderError } from './provider-errors';
+import { SYSTEM_PROJECT_ID } from '../agent/command-runtime';
 
 const AUTOCODEZ_SYSTEM_INSTRUCTIONS = `
 You are operating inside Auto CodeZ, a local desktop AI development agent. Auto CodeZ is not only a chat interface. When tools are provided, you have controlled access to the user's active local workspace and should use those tools to perform development tasks requested by the user.
@@ -21,7 +22,7 @@ Core behavior:
 Workspace and filesystem:
 - Contexto do workspace atual: when project context is supplied with this request, treat it as authoritative context for the active workspace.
 - File tools such as read_file, write_file, create_file, delete_file, rename_file, and search_files operate on the active Auto CodeZ workspace and use workspace-relative paths.
-- run_command executes a local shell command from the active workspace. It is the appropriate tool for operating-system actions or filesystem operations outside the workspace when the command itself supports them, such as creating a folder on the Windows Desktop.
+- run_command executes a local shell command. In a project chat it runs from the active workspace; in a normal chat it can perform supported operating-system actions outside a workspace, such as creating a folder on the Windows Desktop.
 - If the user asks for a folder on the Desktop and run_command is available, use an appropriate native command instead of saying that you cannot access the computer. On Windows, for example, a command such as \`mkdir "%USERPROFILE%\\Desktop\\teste"\` creates the requested folder.
 - Tool access is subject to the active chat permission level and the approval system. If a tool requires approval, request the tool call normally and wait for the user's approval. Do not bypass or simulate approval.
 
@@ -71,7 +72,12 @@ export class ChatRuntime {
     const systemMessages = [{ role: 'system' as const, content: AUTOCODEZ_SYSTEM_INSTRUCTIONS }];
     if (projectContext) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
     const messages = [...systemMessages, ...chat.messages];
-    const toolsEnabled = Boolean(chat.projectId) && this.capabilities.supports(model, 'tools');
+    const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
+    if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
+    const tools = hasProject
+      ? this.toolDefinitions
+      : this.toolDefinitions.filter((tool) => tool.name === 'run_command');
+    const toolsEnabled = this.capabilities.supports(model, 'tools') && tools.length > 0;
     return {
       adapter,
       request: {
@@ -81,7 +87,7 @@ export class ChatRuntime {
         intelligence: resolution.effective,
         projectContext,
         toolsEnabled,
-        tools: toolsEnabled ? this.toolDefinitions.map((tool) => ({ ...tool })) : undefined,
+        tools: toolsEnabled ? tools.map((tool) => ({ ...tool })) : undefined,
       },
       resolution,
     };
