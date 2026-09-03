@@ -102,7 +102,6 @@ async function executeChat(chatId: string, content: string): Promise<{ pendingAp
   const current = (await chatManager.list()).find((item) => item.id === chat.id);
   if (!current) throw new Error('Chat desapareceu durante a execução.');
   const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
-  for (const approvalId of result.pendingApprovalIds) toolRuntime.setApprovalChat(approvalId, chat.id);
   await chatManager.update({ ...current, messages: result.messages });
   return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
 }
@@ -144,7 +143,6 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     const workingChat = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
     const result = await agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit);
-    for (const approvalId of result.pendingApprovalIds) toolRuntime.setApprovalChat(approvalId, chat.id);
     await chatManager.update({ ...workingChat, messages: result.messages });
     if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval' });
     else if (executionManager.get(chatId)?.state === 'running') executionManager.update(chatId, { state: 'completed' });
@@ -171,7 +169,6 @@ ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
     const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
     if (chat) await chatManager.update({ ...chat, messages: result.messages });
     if (result.pendingApprovalIds.length) {
-      for (const pendingId of result.pendingApprovalIds) toolRuntime.setApprovalChat(pendingId, result.chatId);
       executionManager.update(chatId, { state: 'waiting_approval' });
     } else {
       executionManager.update(chatId, { state: 'completed' });
@@ -194,7 +191,6 @@ ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
     const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
     if (chat) await chatManager.update({ ...chat, messages: result.messages });
     if (result.pendingApprovalIds.length) {
-      for (const pendingId of result.pendingApprovalIds) toolRuntime.setApprovalChat(pendingId, result.chatId);
       executionManager.update(chatId, { state: 'waiting_approval' });
     } else {
       executionManager.update(chatId, { state: 'completed' });
