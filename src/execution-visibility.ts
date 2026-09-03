@@ -121,14 +121,16 @@ async function hydrateExecutions(): Promise<void> {
     for (const snapshot of snapshots) {
       const current = manager.get(snapshot.chatId);
       if (!current) {
-        if (snapshot.state === 'running') manager.start(snapshot.chatId, snapshot.startedAt);
-        manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
+        if (snapshot.state === 'running') manager.start(snapshot.chatId, snapshot.startedAt, snapshot.runId);
+        else manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
+        if (snapshot.state === 'running') manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
         continue;
       }
       if (current.runId !== snapshot.runId || snapshot.updatedAt >= current.updatedAt) {
         manager.remove(snapshot.chatId);
-        if (snapshot.state === 'running') manager.start(snapshot.chatId, snapshot.startedAt);
-        manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
+        if (snapshot.state === 'running') manager.start(snapshot.chatId, snapshot.startedAt, snapshot.runId);
+        else manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
+        if (snapshot.state === 'running') manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
       }
     }
     syncUi();
@@ -141,8 +143,7 @@ function handleEvent(event: StreamExecutionEvent): void {
   if (!event.chatId) return;
   try {
     if (event.type === 'start') {
-      const snapshot = manager.start(event.chatId);
-      if (event.runId && snapshot.runId !== event.runId) manager.update(event.chatId, { state: 'running' });
+      manager.start(event.chatId, Date.now(), event.runId);
     } else if (event.type === 'tool_call') {
       if (manager.get(event.chatId)) manager.update(event.chatId, { state: 'running', currentTool: event.toolCall?.name });
     } else if (event.type === 'approval_required') {
