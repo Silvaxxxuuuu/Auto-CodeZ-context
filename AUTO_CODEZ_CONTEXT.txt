@@ -47,8 +47,8 @@ PR #9: feature/ui-hierarchy-polish -> feature/provider-error-resilience
 Não fazer merge do PR sem solicitação explícita.
 
 HEAD atual:
-57183d048dee76a6c5bea3792500c90ded1c14f2
-Pass approval scope through legacy approval controls
+ce3eb14e36dbd7a5a536f363af900dafe102f450
+fix(ui): load execution/approval modules in renderer
 
 Commits recentes de hardening de execução/aprovação:
 
@@ -66,6 +66,15 @@ Add regression coverage for run-scoped approval recovery
 
 57183d048dee76a6c5bea3792500c90ded1c14f2
 Pass approval scope through legacy approval controls
+
+54e690371e397723b78291396cdcaee19e237854
+fix(ui): clear execution state after completion
+
+29be0a6e68f00ba0b3d3b081cae47f23ecca035d
+ test: allow regular chat tool approval recovery
+
+ce3eb14e36dbd7a5a536f363af900dafe102f450
+fix(ui): load execution/approval modules in renderer
 
 O baseline anterior de Settings/API keys continua relevante:
 
@@ -95,10 +104,21 @@ CI anterior do commit dbdd37a5b882aad35686ef915c8584f08acf9329:
 - Electron Forge package build: passou;
 - startup smoke test: passou.
 
-CI do hardening atual:
+CI do hardening anterior:
 - workflow: Validate Auto CodeZ;
 - run: 33761315476;
 - run number: 1247;
+- conclusão: success;
+- TypeScript validation: passou;
+- core tests: passaram;
+- ESLint validation: passou;
+- Electron Forge package build: passou;
+- startup smoke test: passou.
+
+CI mais recente do estado atual:
+- workflow: Validate Auto CodeZ;
+- run: 33763352995;
+- job: 100674889698;
 - conclusão: success;
 - TypeScript validation: passou;
 - core tests: passaram;
@@ -348,15 +368,7 @@ Correções relevantes:
 - api-key-flow-polish sem observer global permanente;
 - módulos duplicados removidos do index.html quando já injetados pelo Vite.
 
-Commits:
-719efd604353fe4ded8b06783055c7d09b14f139
-fd7d2295ce44db46ee856009a08d2a84d8a5f024
-d0a90976316e426e280ff9450ab6642ad5c0f586
-2a8603fce62b38f0534a5a7413863db58ef44791
-
-Usuário confirmou que a UI deixou de congelar. Proteger contra regressões.
-
-Hardening de isolamento de execução/aprovação concluído no estado atual:
+Hardening de isolamento de execução/aprovação:
 - ExecutionManager usa chatId + runId para impedir concorrência dentro do mesmo chat e permitir concorrência entre chats;
 - AgentRuntime cria e propaga runId durante a execução;
 - ToolRuntime recebe runId e propaga chatId/runId nos eventos de atividade e nas solicitações de aprovação;
@@ -367,12 +379,28 @@ Hardening de isolamento de execução/aprovação concluído no estado atual:
 - chat-execution-ui e approval-ui filtram aprovações pelo chat/run ativo;
 - preload aceita escopo opcional em list/approve/deny;
 - main valida o escopo informado antes de aprovar/negar uma approval;
-- approval-ui agora transmite explicitamente chatId/runId ao approve/deny;
+- approval-ui transmite explicitamente chatId/runId ao approve/deny;
 - tests/agent-approval-recovery.test.ts cobre recuperação e isolamento entre runs/chats.
 
-A auditoria também confirmou que src/renderer.ts não recebeu alteração nessa etapa de hardening. O caminho de approvals relevante foi tratado em approval-ui.ts e nas camadas main/preload/runtime. Não reescrever renderer.ts sem necessidade e sem recuperar seu conteúdo integral.
+Correções concluídas no estado atual:
+- index.html passou a carregar explicitamente settings-ui.ts, stream-performance.ts, renderer.ts, thinking-ui.ts, chat-execution-ui.ts, approval-ui.ts e terminal-ui.ts na ordem necessária;
+- o fluxo de aprovação da execução agora consegue ser renderizado na UI normal do chat, em vez de ficar oculto apenas na camada legada;
+- renderer.ts deixou de ignorar o evento complete e agora limpa explicitamente estado de execução, streaming, atividade, approvals pendentes e retry;
+- o caminho normal de approval passou a respeitar chatId/runId e não deve exibir/aprovar uma solicitação pertencente a outro chat;
+- chat normal sem projeto agora pode solicitar ferramentas usando o workspace de sistema controlado;
+- SYSTEM_PROJECT_ID = "__system__" representa o workspace de sistema;
+- src/agent/system-workspace.ts resolve a pasta Desktop, priorizando OneDrive\Desktop quando OneDrive estiver configurado e usando Desktop do perfil do usuário como fallback;
+- WorkspaceRuntime resolve SYSTEM_PROJECT_ID para esse workspace;
+- CommandRuntime usa esse workspace como cwd quando a execução pertence a chat normal;
+- AgentRuntime usa SYSTEM_PROJECT_ID para tool execution quando o chat não possui projectId, mantendo project chats no projeto selecionado;
+- a permissão/approval continua sendo obrigatória conforme o nível de acesso do chat;
+- tests/agent-approval-recovery.test.ts cobre que um chat normal sem projeto pode solicitar approval de ferramenta e que o projectId usado é SYSTEM_PROJECT_ID.
 
-CI run 33761315476 confirmou os passos de TypeScript, testes, ESLint, package build e startup smoke test com sucesso.
+A correção de SYSTEM_PROJECT_ID não concede acesso arbitrário ao sistema operacional: o workspace padrão de chat normal é limitado ao Desktop e continua sujeito às camadas de ferramenta, permissão e aprovação.
+
+A auditoria desta etapa também confirmou que a alteração em renderer.ts foi localizada e necessária para o ciclo de vida do evento complete. Não fazer refatoração ampla do renderer sem necessidade.
+
+CI run 33763352995 confirmou TypeScript, testes, ESLint, package build e startup smoke test com sucesso para o estado em ce3eb14e36dbd7a5a536f363af900dafe102f450.
 
 Visão futura de agente:
 A IA poderá executar sequências completas de trabalho, por exemplo:
@@ -501,6 +529,12 @@ Níveis de acesso:
 - Acesso irrestrito
 
 Mesmo irrestrito, manter proteções contra operações perigosas fora do workspace quando tecnicamente possível.
+
+Chat sem projeto:
+- possui SYSTEM_PROJECT_ID = "__system__" apenas durante a execução de ferramentas;
+- workspace padrão é o Desktop do usuário;
+- não transforma o chat em acesso global ao filesystem;
+- continua sujeito a permission/approval e às políticas do ToolRuntime.
 
 ============================================================
 13. ERROR RECOVERY E API SETTINGS
@@ -710,7 +744,10 @@ FASE 1 — ESTABILIZAÇÃO
 - comportamento de provider indisponível;
 - validação completa do estado atual;
 - consolidação da seleção de credenciais específicas por chat;
-- isolamento de approvals por chat e run.
+- isolamento de approvals por chat e run;
+- aprovação visível e funcional em chats normais;
+- lifecycle correto de “Pensando...” até complete;
+- execução concorrente entre chats diferentes.
 
 Status atual relevante:
 - nova Settings UI funcionando;
@@ -722,7 +759,10 @@ Status atual relevante:
 - execução usa identidade chatId/runId;
 - approvals possuem escopo por chat/run nas camadas relevantes;
 - recuperação de approvals tem cobertura de regressão;
-- CI run 33761315476 está verde.
+- chats normais sem projeto podem usar ferramentas no Desktop via SYSTEM_PROJECT_ID;
+- approval UI, execution UI e thinking UI estão carregadas pelo renderer;
+- complete limpa o estado de execução e “Pensando...” não deve permanecer após resposta concluída;
+- CI run 33763352995 está verde.
 
 FASE 2 — ACCOUNT FOUNDATION
 - account model;
@@ -857,14 +897,16 @@ Antes de major feature perguntar:
 ============================================================
 
 1. Manter o commit atual e a CI verde como baseline de estabilidade.
-2. Validar localmente quando possível: typecheck, testes, lint e npm start.
-3. Fechar itens restantes da Fase 1, sem regressão da nova Settings UI nem do sistema de API keys salvas.
-4. Auditar model resolver/provider unavailable e itens de foco/cursor ainda pendentes.
-5. Validar manualmente o isolamento de approvals entre dois chats/runs concorrentes.
-6. Auditar qualquer caminho legado de approval fora de approval-ui.ts antes de ampliar a automação.
-7. Planejar um spike isolado do Vercel AI SDK antes de qualquer migração do runtime.
-8. Definir a interface definitiva de Provider Adapter/Capability antes de adicionar grande quantidade de novos providers.
-9. Projetar sandbox/execução segura antes de ampliar automação irrestrita da IA.
-10. Projetar memória/context management antes de aumentar significativamente a autonomia de agentes.
-11. Só então expandir progressivamente providers, modalidades multimídia, ferramentas, plugins e automações.
-12. Não fazer merge do PR #9 sem autorização explícita.
+2. Atualizar este contexto após cada estado validado, preservando o histórico existente.
+3. Validar localmente quando possível: typecheck, testes, lint e npm start.
+4. Fechar itens restantes da Fase 1, sem regressão da nova Settings UI nem do sistema de API keys salvas.
+5. Retestar manualmente: approval em chat normal criando pasta no Desktop, lifecycle de “Pensando...” e concorrência em múltiplos chats.
+6. Verificar que aprovar/negar em um chat não altera approval ou execução de outro chat.
+7. Auditar qualquer caminho legado de approval fora de approval-ui.ts antes de ampliar a automação.
+8. Auditar model resolver/provider unavailable e itens de foco/cursor ainda pendentes.
+9. Planejar um spike isolado do Vercel AI SDK antes de qualquer migração do runtime.
+10. Definir a interface definitiva de Provider Adapter/Capability antes de adicionar grande quantidade de novos providers.
+11. Projetar sandbox/execução segura antes de ampliar automação irrestrita da IA.
+12. Projetar memória/context management antes de aumentar significativamente a autonomia de agentes.
+13. Só então expandir progressivamente providers, modalidades multimídia, ferramentas, plugins e automações.
+14. Não fazer merge do PR #9 sem autorização explícita.
