@@ -1,9 +1,8 @@
 type StreamEvent = {
   type?: string;
   chatId?: string;
-  text?: string;
+  runId?: string;
   activity?: { message?: string; status?: string; type?: string };
-  toolCall?: { name?: string; input?: Record<string, unknown> };
 };
 
 type ExecutionSnapshot = {
@@ -14,272 +13,216 @@ type ExecutionSnapshot = {
   updatedAt: number;
 };
 
-type StreamBridge = {
+type Bridge = {
   onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
   listExecutions?: () => Promise<unknown>;
 };
 
-const bridge = (window as unknown as { autoCodez?: StreamBridge }).autoCodez;
-const messages = () => document.querySelector<HTMLElement>('#messages');
-const STYLE_ID = 'auto-codez-thinking-ui';
 type ThinkingState = {
   active: boolean;
   waitingApproval: boolean;
   runId?: string;
-  runStartedAt: number;
+  startedAt: number;
   accumulatedMs: number;
   pausedAt: number;
-  runToken: number;
+  token: number;
 };
+
+const bridge = (window as unknown as { autoCodez?: Bridge }).autoCodez;
 const states = new Map<string, ThinkingState>();
 let activeChatId: string | undefined;
-
-function createState(): ThinkingState {
-  return { active: false, waitingApproval: false, runStartedAt: 0, accumulatedMs: 0, pausedAt: 0, runToken: 0 };
-}
-
-function getState(chatId: string | undefined): ThinkingState | undefined {
-  if (!chatId) return undefined;
-  let state = states.get(chatId);
-  if (!state) {
-    state = createState();
-    states.set(chatId, state);
-  }
-  return state;
-}
+let observer: MutationObserver | undefined;
 
 function currentChatId(): string | undefined {
   return document.querySelector<HTMLElement>('.chat-item.selected')?.dataset.chat;
 }
 
-function syncActiveChat(): void {
-  const chatId = currentChatId();
-  const changed = chatId !== activeChatId;
-  activeChatId = chatId;
-  if (changed) removeThinkingStatus();
-  const state = getState(chatId);
-  if (state?.active) ensureStatus();
+function stateFor(chatId: string): ThinkingState {
+  const existing = states.get(chatId);
+  if (existing) return existing;
+  const state: ThinkingState = { active: false, waitingApproval: false, startedAt: 0, accumulatedMs: 0, pausedAt: 0, token: 0 };
+  states.set(chatId, state);
+  return state;
+}
+
+function elapsed(state: ThinkingState, now = Date.now()): number {
+  if (!state.startedAt || (state.waitingApproval && state.pausedAt)) return state.accumulatedMs;
+  return state.accumulatedMs + Math.max(0, now - state.startedAt);
+}
+
+function seconds(ms: number): string {
+  const value = Math.max(1, Math.round(ms / 1000));
+  return `${value} ${value === 1 ? 'segundo' : 'segundos'}`;
 }
 
 function installStyle(): void {
-  if (document.getElementById(STYLE_ID)) return;
+  if (document.getElementById('auto-codez-thinking-ui')) return;
   const style = document.createElement('style');
-  style.id = STYLE_ID;
+  style.id = 'auto-codez-thinking-ui';
   style.textContent = `
-    .ac-thinking-status{max-width:800px;margin:0 auto 7px;display:flex;align-items:center;gap:5px;color:#7b8491;font-size:11px;line-height:18px;font-weight:400}
-    .ac-thinking-label{white-space:nowrap}
-    .ac-thinking-dots{display:inline-flex;min-width:17px;letter-spacing:2px}
+    .ac-thinking-status{max-width:800px;margin:0 auto 7px;color:#7b8491;font-size:11px;line-height:18px}
+    .ac-thinking-dots{display:inline-flex;min-width:17px;margin-left:4px;letter-spacing:2px}
     .ac-thinking-dots span{opacity:.25;animation:ac-thinking-dot 1.05s infinite}
     .ac-thinking-dots span:nth-child(2){animation-delay:.15s}
     .ac-thinking-dots span:nth-child(3){animation-delay:.3s}
-    .ac-thought-time{max-width:800px;margin:0 auto 7px;color:#737d8a;font-size:10px;line-height:16px}
-    .approval-card{margin:10px 0 2px!important;padding:12px 13px!important;border:1px solid #2a323d!important;border-radius:10px!important;background:#10151b!important}
-    .approval-heading{font-size:10px!important;font-weight:650!important;color:#dce2e9!important}
-    .approval-tool{margin-top:5px!important;color:#aeb7c3!important;font-size:10px!important;font-family:ui-monospace,SFMono-Regular,Consolas,monospace!important}
-    .approval-input{margin-top:7px!important;max-height:150px;overflow:auto;padding:8px!important;border:1px solid #222a34!important;border-radius:7px!important;background:#0a0e13!important;color:#818b99!important;font:9px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace!important;white-space:pre-wrap}
-    .approval-actions{display:flex!important;gap:7px!important;margin-top:9px!important}
-    .approval-actions .primary-button,.approval-actions .danger-button{width:auto!important;flex:1;margin-top:0!important;padding:8px 10px!important}
-    .danger-button{border:1px solid #493238!important;border-radius:8px!important;background:#171015!important;color:#d7a0a6!important;font-size:10px!important;font-weight:650!important;cursor:pointer}
-    .danger-button:hover{background:#21161a!important}
+    .ac-thought-time{margin:0 0 6px;color:#737d8a;font-size:10px;line-height:16px}
     @keyframes ac-thinking-dot{0%,100%{opacity:.25;transform:translateY(0)}35%{opacity:1;transform:translateY(-1px)}70%{opacity:.25;transform:translateY(0)}}
     @media(prefers-reduced-motion:reduce){.ac-thinking-dots span{animation:none;opacity:.7}}
   `;
   document.head.appendChild(style);
 }
 
-function elapsed(state: ThinkingState, now = Date.now()): number {
-  if (!state.runStartedAt || (state.waitingApproval && state.pausedAt)) return state.accumulatedMs;
-  return state.accumulatedMs + Math.max(0, now - state.runStartedAt);
+function removeLiveStatus(): void {
+  document.querySelectorAll('.ac-thinking-status').forEach((node) => node.remove());
 }
 
-function formatSeconds(ms: number): string {
-  const seconds = ms > 0 ? Math.max(1, Math.round(ms / 1000)) : 0;
-  return `${seconds} ${seconds === 1 ? 'segundo' : 'segundos'}`;
-}
-
-function ensureStatus(): HTMLElement | null {
-  const state = getState(activeChatId);
-  if (!state?.active) return null;
-  const root = messages();
-  if (!root) return null;
-  const status = root.querySelector<HTMLElement>('.ac-thinking-status') || document.createElement('div');
+function renderLiveStatus(): void {
+  const chatId = activeChatId;
+  if (!chatId) return;
+  const state = stateFor(chatId);
+  removeLiveStatus();
+  if (!state.active) return;
+  const messages = document.querySelector<HTMLElement>('#messages');
+  if (!messages) return;
+  const status = document.createElement('div');
   status.className = 'ac-thinking-status';
-  const desired = state.waitingApproval
-    ? '<span class="ac-thinking-label">Aguardando sua aprovação</span>'
-    : '<span class="ac-thinking-label">Pensando</span><span class="ac-thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
-  if (status.innerHTML !== desired) status.innerHTML = desired;
-  const anchor = root.querySelector<HTMLElement>('.message.assistant.streaming, .activity-card');
-  if (anchor) {
-    if (status.parentElement !== root || status.nextElementSibling !== anchor) root.insertBefore(status, anchor);
-  } else if (!status.parentElement) {
-    root.appendChild(status);
-  }
-  return status;
+  status.innerHTML = state.waitingApproval
+    ? '<span>Aguardando sua aprovação</span>'
+    : '<span>Pensando</span><span class="ac-thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
+  const anchor = messages.querySelector('.message.assistant.streaming, .activity-card, .ac-approval-root');
+  if (anchor) messages.insertBefore(status, anchor);
+  else messages.appendChild(status);
 }
 
-function removeThinkingStatus(): void {
-  document.querySelectorAll('.ac-thinking-status').forEach((element) => element.remove());
-}
-
-function insertThoughtTime(state: ThinkingState, durationMs: number): void {
-  const root = messages();
-  if (!root || state.runToken !== getState(activeChatId)?.runToken) return;
-  const assistantMessages = [...root.querySelectorAll<HTMLElement>('.message.assistant:not(.streaming)')];
-  const lastAssistant = assistantMessages.at(-1);
-  if (!lastAssistant) return;
-  if (root.querySelector<HTMLElement>(`[data-ac-thought-token="${state.runToken}"]`)) return;
+function insertThoughtTime(chatId: string, token: number, durationMs: number): void {
+  if (chatId !== activeChatId) return;
+  const messages = document.querySelector<HTMLElement>('#messages');
+  if (!messages) return;
+  const state = stateFor(chatId);
+  if (state.active || state.token !== token) return;
+  const assistant = [...messages.querySelectorAll<HTMLElement>('.message.assistant:not(.streaming)')].at(-1);
+  if (!assistant) return;
+  assistant.querySelectorAll<HTMLElement>('.ac-thought-time').forEach((node) => node.remove());
   const label = document.createElement('div');
   label.className = 'ac-thought-time';
-  label.dataset.acThoughtToken = String(state.runToken);
-  label.textContent = `Pensou por ${formatSeconds(durationMs)}`;
-  lastAssistant.before(label);
+  label.dataset.acThoughtToken = String(token);
+  label.textContent = `Pensou por ${seconds(durationMs)}`;
+  assistant.prepend(label);
 }
 
-function finishRun(chatId: string): void {
-  const state = getState(chatId);
-  if (!state?.active) return;
+function finish(chatId: string): void {
+  const state = stateFor(chatId);
+  if (!state.active) return;
   state.accumulatedMs = elapsed(state);
   state.active = false;
   state.waitingApproval = false;
   state.pausedAt = 0;
+  const token = state.token;
   const duration = state.accumulatedMs;
-  const token = state.runToken;
   if (chatId !== activeChatId) return;
-  removeThinkingStatus();
-  const tryInsert = () => {
-    if (state.runToken !== token || state.active || chatId !== activeChatId) return;
-    insertThoughtTime(state, duration);
-  };
-  tryInsert();
-  window.setTimeout(tryInsert, 0);
-  window.setTimeout(tryInsert, 60);
-  window.setTimeout(tryInsert, 250);
-}
-
-function hydrateExecutions(): void {
-  if (!bridge?.listExecutions) return;
-  void bridge.listExecutions().then((value) => {
-    if (!Array.isArray(value)) return;
-    const snapshots = value.filter((item): item is ExecutionSnapshot => {
-      if (!item || typeof item !== 'object') return false;
-      const snapshot = item as Partial<ExecutionSnapshot>;
-      return typeof snapshot.chatId === 'string' && typeof snapshot.runId === 'string' && typeof snapshot.state === 'string' && typeof snapshot.startedAt === 'number';
-    });
-    const activeSnapshots = new Map(snapshots.filter((snapshot) => snapshot.state === 'running' || snapshot.state === 'waiting_approval').map((snapshot) => [snapshot.chatId, snapshot]));
-    for (const [chatId, state] of states) {
-      if (!activeSnapshots.has(chatId)) {
-        state.active = false;
-        state.waitingApproval = false;
-        state.pausedAt = 0;
-      }
-    }
-    for (const snapshot of activeSnapshots.values()) {
-      const state = getState(snapshot.chatId)!;
-      const sameRun = state.active && state.runId === snapshot.runId;
-      if (!sameRun) {
-        state.active = true;
-        state.waitingApproval = snapshot.state === 'waiting_approval';
-        state.runId = snapshot.runId;
-        state.runStartedAt = snapshot.startedAt;
-        state.accumulatedMs = snapshot.state === 'waiting_approval' ? Math.max(0, snapshot.updatedAt - snapshot.startedAt) : 0;
-        state.pausedAt = snapshot.state === 'waiting_approval' ? snapshot.updatedAt : 0;
-        state.runToken += 1;
-      } else if (snapshot.state === 'waiting_approval' && !state.waitingApproval) {
-        state.accumulatedMs = elapsed(state, snapshot.updatedAt);
-        state.waitingApproval = true;
-        state.pausedAt = snapshot.updatedAt;
-      }
-    }
-    syncActiveChat();
-  }).catch(() => {
-    // Renderer hydration is best-effort and must never interrupt the chat UI.
-  });
+  removeLiveStatus();
+  const retry = () => insertThoughtTime(chatId, token, duration);
+  retry();
+  window.setTimeout(retry, 0);
+  window.setTimeout(retry, 60);
+  window.setTimeout(retry, 250);
 }
 
 function handleEvent(event: StreamEvent): void {
   const chatId = event.chatId || currentChatId();
   if (!chatId) return;
-  const state = getState(chatId)!;
+  const state = stateFor(chatId);
   if (event.type === 'start') {
-    const continuingRun = state.active;
     state.active = true;
     state.waitingApproval = false;
-    state.runStartedAt = Date.now();
-    state.runId = undefined;
-    if (!continuingRun) {
-      state.accumulatedMs = 0;
-      state.runToken += 1;
-    }
+    state.startedAt = Date.now();
+    state.accumulatedMs = 0;
     state.pausedAt = 0;
-    if (chatId === activeChatId) ensureStatus();
+    state.runId = event.runId;
+    state.token += 1;
+    if (chatId === activeChatId) renderLiveStatus();
     return;
   }
-  if (!state.active) return;
-  if (event.type === 'tool_call') {
-    if (state.waitingApproval) {
-      state.runStartedAt = Date.now();
-      state.pausedAt = 0;
-      state.waitingApproval = false;
-    }
-    if (chatId === activeChatId) ensureStatus();
-    return;
-  }
+  if (event.runId && state.runId && event.runId !== state.runId) return;
   if (event.type === 'approval_required') {
     state.accumulatedMs = elapsed(state);
-    state.pausedAt = Date.now();
     state.waitingApproval = true;
-    if (chatId === activeChatId) ensureStatus();
+    state.pausedAt = Date.now();
+    if (chatId === activeChatId) renderLiveStatus();
     return;
   }
-  if (event.type === 'delta') {
-    if (state.waitingApproval) {
-      state.waitingApproval = false;
-      state.runStartedAt = Date.now();
-      state.pausedAt = 0;
-    }
-    if (chatId === activeChatId) ensureStatus();
+  if (event.type === 'tool_call' && state.waitingApproval) {
+    state.waitingApproval = false;
+    state.startedAt = Date.now();
+    state.pausedAt = 0;
+    if (chatId === activeChatId) renderLiveStatus();
     return;
   }
-  if (event.type === 'activity') {
-    if (event.activity?.type === 'complete' && event.activity.status === 'success') finishRun(chatId);
-    else if (chatId === activeChatId) ensureStatus();
+  if (event.type === 'activity' && event.activity?.type === 'complete' && event.activity.status === 'success') {
+    finish(chatId);
     return;
   }
-  if (event.type === 'error') finishRun(chatId);
+  if (event.type === 'complete' || event.type === 'error') finish(chatId);
 }
 
-function observeMessages(): void {
-  const root = messages();
-  if (!root) return;
-  const observer = new MutationObserver(() => {
-    syncActiveChat();
-    const state = getState(activeChatId);
-    if (state?.active) ensureStatus();
-  });
-  observer.observe(root, { childList: true, subtree: true });
-  const navObserver = new MutationObserver(() => {
-    syncActiveChat();
-    hydrateExecutions();
-  });
-  const nav = document.querySelector<HTMLElement>('#nav-panel');
-  if (nav) {
-    navObserver.observe(nav, { childList: true, subtree: true });
-    nav.addEventListener('click', () => {
-      queueMicrotask(() => {
-        syncActiveChat();
-        hydrateExecutions();
-      });
-    }, true);
+function hydrate(): void {
+  if (!bridge?.listExecutions) return;
+  void bridge.listExecutions().then((value) => {
+    if (!Array.isArray(value)) return;
+    const active = value.filter((item): item is ExecutionSnapshot => {
+      if (!item || typeof item !== 'object') return false;
+      const snapshot = item as Partial<ExecutionSnapshot>;
+      return typeof snapshot.chatId === 'string' && typeof snapshot.runId === 'string' && typeof snapshot.state === 'string' && typeof snapshot.startedAt === 'number';
+    });
+    const live = new Map(active.filter((item) => item.state === 'running' || item.state === 'waiting_approval').map((item) => [item.chatId, item]));
+    for (const [chatId, state] of states) if (!live.has(chatId)) state.active = false;
+    for (const snapshot of live.values()) {
+      const state = stateFor(snapshot.chatId);
+      if (state.runId === snapshot.runId && state.active) continue;
+      state.active = true;
+      state.waitingApproval = snapshot.state === 'waiting_approval';
+      state.runId = snapshot.runId;
+      state.startedAt = snapshot.startedAt;
+      state.accumulatedMs = state.waitingApproval ? Math.max(0, snapshot.updatedAt - snapshot.startedAt) : 0;
+      state.pausedAt = state.waitingApproval ? snapshot.updatedAt : 0;
+      state.token += 1;
+    }
+    if (currentChatId() === activeChatId) renderLiveStatus();
+  }).catch(() => undefined);
+}
+
+function syncChat(): void {
+  const next = currentChatId();
+  if (next === activeChatId) return;
+  activeChatId = next;
+  removeLiveStatus();
+  if (next) {
+    const state = stateFor(next);
+    if (state.active) renderLiveStatus();
   }
+}
+
+function observe(): void {
+  const messages = document.querySelector<HTMLElement>('#messages');
+  if (!messages) return;
+  observer = new MutationObserver(() => {
+    syncChat();
+    const state = activeChatId ? stateFor(activeChatId) : undefined;
+    if (state?.active) renderLiveStatus();
+    else if (state && !state.active) removeLiveStatus();
+    if (activeChatId && state && !state.active) insertThoughtTime(activeChatId, state.token, state.accumulatedMs);
+  });
+  observer.observe(messages, { childList: true, subtree: true });
+  const nav = document.querySelector<HTMLElement>('#nav-panel');
+  if (nav) new MutationObserver(() => { syncChat(); hydrate(); }).observe(nav, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
 }
 
 function initialize(): void {
   installStyle();
   activeChatId = currentChatId();
-  if (bridge?.onStreamEvent) bridge.onStreamEvent(handleEvent);
-  window.addEventListener('auto-codez-execution-refresh', () => hydrateExecutions());
-  observeMessages();
-  hydrateExecutions();
+  bridge?.onStreamEvent(handleEvent);
+  observe();
+  hydrate();
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
