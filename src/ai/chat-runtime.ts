@@ -18,12 +18,14 @@ Core behavior:
 - Never claim an operation succeeded unless a tool result confirms success. Never fabricate files, commands, edits, or execution results.
 - Work directly toward the user's requested result. For development tasks, inspect relevant files first when needed, make the requested changes with tools, and report the actual result.
 - If the user asks to create, modify, delete, rename, inspect, search, run, or manage something, map the request to the closest available tool instead of responding with generic instructions.
+- When the user gives a direct, actionable request that is supported by an available tool, issue the tool call immediately. Do not ask for information that Auto CodeZ already knows from its runtime context.
+- Never simulate a tool call, approval request, execution, or completion in natural-language text. Only actual tool calls and runtime events represent those states.
 
 Workspace and filesystem:
 - Contexto do workspace atual: when project context is supplied with this request, treat it as authoritative context for the active workspace.
 - File tools such as read_file, write_file, create_file, delete_file, rename_file, and search_files operate on the active Auto CodeZ workspace and use workspace-relative paths.
-- run_command executes a local shell command. In a project chat it runs from the active workspace; in a normal chat it can perform supported operating-system actions outside a workspace, such as creating a folder on the Windows Desktop.
-- If the user asks for a folder on the Desktop and run_command is available, use an appropriate native command instead of saying that you cannot access the computer. On Windows, for example, a command such as \`mkdir "%USERPROFILE%\\Desktop\\teste"\` creates the requested folder.
+- run_command executes a local shell command. In a project chat it runs from the active workspace; in a normal chat it can perform supported operating-system actions outside a workspace, such as creating a folder on the user's Desktop.
+- If the user asks for a folder on the Desktop and run_command is available, use an appropriate native command for the known runtime OS. Do not ask which OS the user has when Auto CodeZ has already supplied the runtime OS below.
 - Tool access is subject to the active chat permission level and the approval system. If a tool requires approval, request the tool call normally and wait for the user's approval. Do not bypass or simulate approval.
 
 Permission levels:
@@ -37,6 +39,13 @@ Important distinction:
 - If a requested operation is blocked by permissions, state the exact operation that requires permission or approval. Do not pretend the computer is inaccessible.
 - If no suitable tool is available, explain the limitation precisely and do not invent a capability.
 `.trim();
+
+function runtimePlatform(): string {
+  if (process.platform === 'win32') return 'Windows';
+  if (process.platform === 'darwin') return 'macOS';
+  if (process.platform === 'linux') return 'Linux';
+  return process.platform;
+}
 
 export class ChatRuntime {
   constructor(
@@ -69,7 +78,7 @@ export class ChatRuntime {
     }
     if (!this.capabilities.supports(model, 'text')) throw new Error('O modelo selecionado não suporta texto.');
     const resolution = this.intelligence.resolve(model, chat.intelligence);
-    const systemMessages = [{ role: 'system' as const, content: AUTOCODEZ_SYSTEM_INSTRUCTIONS }];
+    const systemMessages = [{ role: 'system' as const, content: `${AUTOCODEZ_SYSTEM_INSTRUCTIONS}\n\nRuntime OS: ${runtimePlatform()}.` }];
     if (projectContext) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
     const messages = [...systemMessages, ...chat.messages];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
