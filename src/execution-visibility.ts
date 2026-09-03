@@ -5,6 +5,7 @@ type StreamExecutionEvent = {
   chatId?: string;
   runId?: string;
   toolCall?: { name?: string };
+  activity?: { type?: string; status?: string; message?: string };
   error?: string;
 };
 
@@ -12,7 +13,7 @@ type StreamBridge = {
   onStreamEvent: (listener: (event: StreamExecutionEvent) => void) => () => void;
 };
 
-const bridge = (window as unknown as { autoCodez?: StreamBridge }).autoCodez;
+const bridge = (window as unknown as { autoCodez?: StreamBridge });
 const manager = new ExecutionManager();
 const STYLE_ID = 'auto-codez-execution-visibility';
 
@@ -30,7 +31,6 @@ function installStyle(): void {
     .chat-item.is-failed .execution-indicator{color:#d98289}
     .chat-item .execution-indicator{position:relative}
     .chat-item.is-executing .chat-item-copy>span::after{content:none!important}
-
     .activity-card{max-width:800px!important;margin:2px auto 20px!important;padding:2px 0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
     .activity-heading{height:18px;margin:0 0 2px!important;padding:0!important;font-size:0!important;letter-spacing:0!important;color:#687281!important;text-transform:none!important}
     .activity-heading::before{content:'•••';display:inline-block;font-size:12px;letter-spacing:3px;line-height:18px;color:#727d8c;animation:ac-thinking 1.15s ease-in-out infinite}
@@ -39,7 +39,6 @@ function installStyle(): void {
     .activity-line.done{color:#7f8997!important}
     .activity-line.error{color:#d18c8c!important}
     .approval-card{margin-top:9px}
-
     @keyframes ac-execution-pulse{0%,100%{transform:scale(.75);opacity:.45}50%{transform:scale(1);opacity:1}}
     @keyframes ac-thinking{0%,100%{opacity:.28;transform:translateY(0)}50%{opacity:1;transform:translateY(-1px)}}
     @media(prefers-reduced-motion:reduce){.chat-item.is-executing .execution-indicator::after,.activity-heading::before{animation:none}}
@@ -114,7 +113,7 @@ function handleEvent(event: StreamExecutionEvent): void {
       if (manager.get(event.chatId)) manager.update(event.chatId, { state: 'running', currentTool: event.toolCall?.name });
     } else if (event.type === 'approval_required') {
       if (manager.get(event.chatId)) manager.update(event.chatId, { state: 'waiting_approval' });
-    } else if (event.type === 'complete') {
+    } else if (event.type === 'activity' && event.activity?.type === 'complete' && event.activity.status === 'success') {
       if (manager.get(event.chatId)) manager.update(event.chatId, { state: 'completed' });
     } else if (event.type === 'error') {
       if (manager.get(event.chatId)) manager.update(event.chatId, { state: 'failed', error: event.error });
@@ -128,15 +127,11 @@ function handleEvent(event: StreamExecutionEvent): void {
 function initialize(): void {
   installStyle();
   if (bridge?.onStreamEvent) bridge.onStreamEvent(handleEvent);
-
-  // Only the navigation can affect execution-item placement/selection. Observing the
-  // whole document made every streaming DOM mutation trigger a full UI rescan.
   const nav = document.querySelector<HTMLElement>('#nav-panel');
   if (nav) {
     const observer = new MutationObserver(syncUi);
     observer.observe(nav, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
   }
-
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey) return;
     const target = event.target as HTMLElement | null;

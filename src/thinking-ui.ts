@@ -2,7 +2,7 @@ type StreamEvent = {
   type?: string;
   chatId?: string;
   text?: string;
-  activity?: { message?: string };
+  activity?: { message?: string; status?: string; type?: string };
   toolCall?: { name?: string; input?: Record<string, unknown> };
 };
 
@@ -10,7 +10,7 @@ type StreamBridge = {
   onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
 };
 
-const bridge = (window as unknown as { autoCodez?: StreamBridge }).autoCodez;
+const bridge = (window as unknown as { autoCodez?: StreamBridge });
 const messages = () => document.querySelector<HTMLElement>('#messages');
 const STYLE_ID = 'auto-codez-thinking-ui';
 let active = false;
@@ -19,22 +19,27 @@ let runStartedAt = 0;
 let accumulatedMs = 0;
 let pausedAt = 0;
 let runToken = 0;
-let lastActivity = '';
 
 function installStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    .activity-card .activity-heading{display:none!important}
-    .ac-thinking-status{display:flex;align-items:center;gap:5px;margin:2px 0 5px;color:#7b8491;font-size:11px;line-height:18px;font-weight:400}
+    .ac-thinking-status{max-width:800px;margin:0 auto 7px;display:flex;align-items:center;gap:5px;color:#7b8491;font-size:11px;line-height:18px;font-weight:400}
     .ac-thinking-label{white-space:nowrap}
     .ac-thinking-dots{display:inline-flex;min-width:17px;letter-spacing:2px}
     .ac-thinking-dots span{opacity:.25;animation:ac-thinking-dot 1.05s infinite}
     .ac-thinking-dots span:nth-child(2){animation-delay:.15s}
     .ac-thinking-dots span:nth-child(3){animation-delay:.3s}
-    .ac-thought-time{margin:2px 0 7px;color:#737d8a;font-size:10px;line-height:16px}
-    .ac-context-line{padding:1px 0!important;margin:0!important;color:#7b8491!important;font-size:10px!important;line-height:16px!important}
+    .ac-thought-time{max-width:800px;margin:0 auto 7px;color:#737d8a;font-size:10px;line-height:16px}
+    .approval-card{margin:10px 0 2px!important;padding:12px 13px!important;border:1px solid #2a323d!important;border-radius:10px!important;background:#10151b!important}
+    .approval-heading{font-size:10px!important;font-weight:650!important;color:#dce2e9!important}
+    .approval-tool{margin-top:5px!important;color:#aeb7c3!important;font-size:10px!important;font-family:ui-monospace,SFMono-Regular,Consolas,monospace!important}
+    .approval-input{margin-top:7px!important;max-height:150px;overflow:auto;padding:8px!important;border:1px solid #222a34!important;border-radius:7px!important;background:#0a0e13!important;color:#818b99!important;font:9px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace!important;white-space:pre-wrap}
+    .approval-actions{display:flex!important;gap:7px!important;margin-top:9px!important}
+    .approval-actions .primary-button,.approval-actions .danger-button{width:auto!important;flex:1;margin-top:0!important;padding:8px 10px!important}
+    .danger-button{border:1px solid #493238!important;border-radius:8px!important;background:#171015!important;color:#d7a0a6!important;font-size:10px!important;font-weight:650!important;cursor:pointer}
+    .danger-button:hover{background:#21161a!important}
     @keyframes ac-thinking-dot{0%,100%{opacity:.25;transform:translateY(0)}35%{opacity:1;transform:translateY(-1px)}70%{opacity:.25;transform:translateY(0)}}
     @media(prefers-reduced-motion:reduce){.ac-thinking-dots span{animation:none;opacity:.7}}
   `;
@@ -47,56 +52,23 @@ function elapsed(now = Date.now()): number {
 }
 
 function formatSeconds(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
+  const seconds = ms > 0 ? Math.max(1, Math.round(ms / 1000)) : 0;
   return `${seconds} ${seconds === 1 ? 'segundo' : 'segundos'}`;
 }
 
-function toolContext(event: StreamEvent): string | undefined {
-  const name = event.toolCall?.name?.trim();
-  const input = event.toolCall?.input || {};
-  if (!name) return undefined;
-  const values = Object.values(input).filter((value) => typeof value === 'string' && value.trim()) as string[];
-  const detail = values[0]?.trim();
-  if (!detail) return `Executando ${name}...`;
-  const compact = detail.length > 110 ? `${detail.slice(0, 107)}...` : detail;
-  return `Executando ${compact}...`;
-}
-
-function ensureActivityCard(): HTMLElement | null {
+function ensureStatus(): HTMLElement | null {
   const root = messages();
   if (!root) return null;
-  let card = root.querySelector<HTMLElement>('.activity-card');
-  if (!card) {
-    card = document.createElement('div');
-    card.className = 'activity-card';
-    root.appendChild(card);
-  }
-  return card;
-}
-
-function renderStatus(): void {
-  const card = ensureActivityCard();
-  if (!card) return;
-  const status = card.querySelector<HTMLElement>('.ac-thinking-status') || document.createElement('div');
+  const status = root.querySelector<HTMLElement>('.ac-thinking-status') || document.createElement('div');
   status.className = 'ac-thinking-status';
   const desired = waitingApproval
     ? '<span class="ac-thinking-label">Aguardando sua aprovação</span>'
     : '<span class="ac-thinking-label">Pensando</span><span class="ac-thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
   if (status.innerHTML !== desired) status.innerHTML = desired;
-  if (!status.parentElement) card.prepend(status);
-}
-
-function renderContext(): void {
-  if (!lastActivity) return;
-  const card = ensureActivityCard();
-  if (!card) return;
-  let line = card.querySelector<HTMLElement>('.ac-context-line');
-  if (!line) {
-    line = document.createElement('div');
-    line.className = 'activity-line running ac-context-line';
-    card.appendChild(line);
-  }
-  if (line.textContent !== lastActivity) line.textContent = lastActivity;
+  const anchor = root.querySelector<HTMLElement>('.message.assistant.streaming, .activity-card');
+  if (anchor) root.insertBefore(status, anchor);
+  else if (!status.parentElement) root.appendChild(status);
+  return status;
 }
 
 function removeThinkingStatus(): void {
@@ -140,9 +112,8 @@ function handleEvent(event: StreamEvent): void {
     runStartedAt = Date.now();
     accumulatedMs = 0;
     pausedAt = 0;
-    lastActivity = '';
     runToken += 1;
-    renderStatus();
+    ensureStatus();
     return;
   }
   if (!active) return;
@@ -152,21 +123,14 @@ function handleEvent(event: StreamEvent): void {
       pausedAt = 0;
       waitingApproval = false;
     }
-    lastActivity = toolContext(event) || '';
-    renderStatus();
-    renderContext();
-    return;
-  }
-  if (event.type === 'activity' && event.activity?.message) {
-    lastActivity = event.activity.message;
-    renderContext();
+    ensureStatus();
     return;
   }
   if (event.type === 'approval_required') {
-    accumulatedMs += Math.max(0, Date.now() - runStartedAt);
+    accumulatedMs = elapsed();
     pausedAt = Date.now();
     waitingApproval = true;
-    renderStatus();
+    ensureStatus();
     return;
   }
   if (event.type === 'delta') {
@@ -174,21 +138,23 @@ function handleEvent(event: StreamEvent): void {
       waitingApproval = false;
       runStartedAt = Date.now();
       pausedAt = 0;
-      renderStatus();
     }
+    ensureStatus();
     return;
   }
-  if (event.type === 'complete' || event.type === 'error') finishRun();
+  if (event.type === 'activity') {
+    if (event.activity?.type === 'complete' && event.activity.status === 'success') finishRun();
+    else ensureStatus();
+    return;
+  }
+  if (event.type === 'error') finishRun();
 }
 
 function observeMessages(): void {
   const root = messages();
   if (!root) return;
   const observer = new MutationObserver(() => {
-    if (active) {
-      renderStatus();
-      renderContext();
-    }
+    if (active) ensureStatus();
   });
   observer.observe(root, { childList: true, subtree: true });
 }
