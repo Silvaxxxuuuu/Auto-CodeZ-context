@@ -66,8 +66,11 @@ function ensureStatus(): HTMLElement | null {
     : '<span class="ac-thinking-label">Pensando</span><span class="ac-thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
   if (status.innerHTML !== desired) status.innerHTML = desired;
   const anchor = root.querySelector<HTMLElement>('.message.assistant.streaming, .activity-card');
-  if (anchor) root.insertBefore(status, anchor);
-  else if (!status.parentElement) root.appendChild(status);
+  if (anchor) {
+    if (status.parentElement !== root || status.nextElementSibling !== anchor) root.insertBefore(status, anchor);
+  } else if (!status.parentElement) {
+    root.appendChild(status);
+  }
   return status;
 }
 
