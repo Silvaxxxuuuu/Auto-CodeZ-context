@@ -131,6 +131,7 @@ function initialize(): void {
   if (nav) {
     const observer = new MutationObserver(syncUi);
     observer.observe(nav, { childList: true, subtree: true });
+    nav.addEventListener('click', () => queueMicrotask(syncUi), true);
   }
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey) return;
