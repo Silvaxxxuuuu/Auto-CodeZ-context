@@ -129,7 +129,6 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
   const emit = (event: AIStreamEvent): void => {
     try {
       if (event.type === 'approval_required') executionManager.update(chatId, { state: 'waiting_approval' });
-      else if (event.type === 'complete') executionManager.update(chatId, { state: 'completed' });
       else if (event.type === 'error') executionManager.update(chatId, { state: 'failed', error: event.error });
       else if (event.type === 'tool_call') executionManager.update(chatId, { state: 'running', currentTool: event.toolCall?.name });
     } catch {
