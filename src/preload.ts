@@ -5,6 +5,17 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return await ipcRenderer.invoke(channel, ...args) as T;
 }
 
+type ApprovalScope = { chatId?: string; runId?: string };
+
+function requireApprovalScope(input: ApprovalScope | undefined): ApprovalScope | undefined {
+  if (input === undefined) return undefined;
+  const value = requireObject(input, 'Contexto da aprovação');
+  return {
+    chatId: value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat'),
+    runId: value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução'),
+  };
+}
+
 contextBridge.exposeInMainWorld('autoCodez', {
   getState: () => invoke<{ providers: unknown[]; chats: unknown[]; projects: unknown[] }>('app:get-state'),
   listModels: (providerId: string) => invoke('providers:list-models', requireIdentifier(providerId, 'Provider')),
@@ -77,13 +88,13 @@ contextBridge.exposeInMainWorld('autoCodez', {
     return () => ipcRenderer.removeListener('chat:stream-event', handler);
   },
   listTools: () => invoke('agent:list-tools'),
-  listApprovals: () => invoke('agent:list-approvals'),
+  listApprovals: (filters?: ApprovalScope) => invoke('agent:list-approvals', requireApprovalScope(filters)),
   listExecutions: (chatId?: string) => invoke('agent:list-executions', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
   listRecoverableRuns: () => invoke('agent:list-recoverable-runs'),
   resumeRecoveredRun: (runId: string) => invoke('agent:resume-recovered', requireIdentifier(runId, 'Execução recuperável')),
   listInterruptedProviderRequests: () => invoke('agent:list-interrupted-provider-requests'),
-  approveTool: (approvalId: string) => invoke('agent:approve', requireIdentifier(approvalId, 'Aprovação')),
-  denyTool: (approvalId: string) => invoke('agent:deny', requireIdentifier(approvalId, 'Aprovação')),
+  approveTool: (approvalId: string, filters?: ApprovalScope) => invoke('agent:approve', { approvalId: requireIdentifier(approvalId, 'Aprovação'), ...requireApprovalScope(filters) }),
+  denyTool: (approvalId: string, filters?: ApprovalScope) => invoke('agent:deny', { approvalId: requireIdentifier(approvalId, 'Aprovação'), ...requireApprovalScope(filters) }),
   onActivity: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('agent:activity', handler);
@@ -107,7 +118,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   git: {
     status: (projectId: string) => invoke('git:status', requireIdentifier(projectId, 'Projeto')),
-    branches: (projectId: string) => invoke('git:branches', requireIdentifier(projectId, 'Projeto')),
+    branches: (projectId: string) => invoke('git:branches', requireIdentifier(projectId, 'Chat')),
     diff: (projectId: string) => invoke('git:diff', requireIdentifier(projectId, 'Projeto')),
     log: (input: { projectId: string; limit?: number }) => {
       const value = requireObject(input, 'Dados do histórico Git');
