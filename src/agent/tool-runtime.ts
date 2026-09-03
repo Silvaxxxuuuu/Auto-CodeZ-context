@@ -63,6 +63,28 @@ function normalizeToolCall(call: AIToolCall): AIToolCall {
 
 const unavailableCommandRuntime = new CommandRuntime(async () => { throw new Error('O runtime de comandos não foi configurado para esta instância.'); });
 
+function executionActivityMessage(call: AIToolCall): string {
+  const value = (key: string): string | undefined => typeof call.input[key] === 'string' && String(call.input[key]).trim() ? String(call.input[key]).trim() : undefined;
+  switch (call.name) {
+    case 'run_command': return value('command') ? `Executando ${value('command')}` : 'Executando comando.';
+    case 'read_file': return value('path') ? `Lendo ${value('path')}` : 'Lendo arquivo.';
+    case 'write_file': return value('path') ? `Editando ${value('path')}` : 'Editando arquivo.';
+    case 'create_file': return value('path') ? `Criando ${value('path')}` : 'Criando arquivo.';
+    case 'delete_file': return value('path') ? `Excluindo ${value('path')}` : 'Excluindo arquivo.';
+    case 'rename_file': return value('from') && value('to') ? `Renomeando ${value('from')} → ${value('to')}` : 'Renomeando arquivo.';
+    case 'search_files': return value('query') ? `Pesquisando por ${value('query')}` : 'Pesquisando arquivos.';
+    case 'git_status': return 'Consultando status do Git.';
+    case 'git_diff': return 'Lendo alterações do Git.';
+    case 'git_log': return 'Consultando histórico do Git.';
+    case 'git_branches': return 'Consultando branches do Git.';
+    case 'git_create_branch': return value('name') ? `Criando branch ${value('name')}` : 'Criando branch.';
+    case 'git_checkout': return value('name') ? `Trocando para a branch ${value('name')}` : 'Trocando de branch.';
+    case 'git_stage': return 'Preparando arquivos para commit.';
+    case 'git_stage_all': return 'Preparando todas as alterações para commit.';
+    case 'git_commit': return value('message') ? `Criando commit: ${value('message')}` : 'Criando commit.';
+  }
+}
+
 export class ToolRuntime {
   private readonly journal = new Map<string, JournalEntry>();
   private journalWrite: Promise<void> = Promise.resolve();
@@ -192,7 +214,7 @@ export class ToolRuntime {
 
   private async executeNow(projectId: string, call: AIToolCall, approvalId?: string, diffPlan?: DiffPlan): Promise<AIToolResult> {
     const activityType = call.name === 'run_command' ? 'action' : 'tool';
-    this.activity.start(activityType, `Executando ${call.name}`);
+    this.activity.emit({ type: activityType, message: executionActivityMessage(call), status: 'running', toolCallId: call.id, toolName: call.name });
     try {
       if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);
       const execution = await this.executeAllowed(projectId, call.name, call.input);
