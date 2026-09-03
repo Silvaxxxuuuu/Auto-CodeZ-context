@@ -1,5 +1,5 @@
 AUTO CODEZ — DOCUMENTO DE CONTEXTO PERMANENTE
-Última atualização: 02/09/2026
+Última atualização: 03/09/2026
 
 ============================================================
 1. PRODUTO
@@ -46,15 +46,34 @@ Branch atual de trabalho: feature/ui-hierarchy-polish
 PR #9: feature/ui-hierarchy-polish -> feature/provider-error-resilience
 Não fazer merge do PR sem solicitação explícita.
 
-HEAD relevante atual:
+HEAD atual:
+57183d048dee76a6c5bea3792500c90ded1c14f2
+Pass approval scope through legacy approval controls
+
+Commits recentes de hardening de execução/aprovação:
+
+b354aabd76c9d20991ed12a1af5504aa8bb8d04b
+Propagate run identity through agent execution and recovery
+
+10520f070fcb4a75953b1fc0b49c49e2a7362dc1
+Scope execution approvals to the active run
+
+5a9e2dc47a362a089ba642da8f7a19d3174411f9
+Scope legacy approval UI to chat and run
+
+8434ea0a9428ff7f9a25bdb5cbc16cf7801e48b9
+Add regression coverage for run-scoped approval recovery
+
+57183d048dee76a6c5bea3792500c90ded1c14f2
+Pass approval scope through legacy approval controls
+
+O baseline anterior de Settings/API keys continua relevante:
+
 dbdd37a5b882aad35686ef915c8584f08acf9329
 fix(chat): load saved API key chat settings UI
 
-Commit anterior:
 cc5d91c86501224221715e0557d825f62e4171eb
 fix(chat): hide deleted saved credential from settings
-
-Outros commits recentes relevantes:
 
 e31094c660a1d8e3445c28605afd2352e0773664
 fix(ui): remove legacy settings modal
@@ -66,9 +85,20 @@ A nova tela de Settings foi confirmada funcionando antes da remoção da impleme
 
 O commit dbdd37a adicionou a injeção do novo módulo chat-api-key-settings-ui.ts no Vite renderer, corrigindo o problema em que a implementação existia no código mas não era carregada pelo app empacotado.
 
-CI do commit dbdd37a5b882aad35686ef915c8584f08acf9329:
+CI anterior do commit dbdd37a5b882aad35686ef915c8584f08acf9329:
 - workflow: Validate Auto CodeZ;
 - run: 33709681717;
+- conclusão: success;
+- TypeScript validation: passou;
+- core tests: passaram;
+- ESLint validation: passou;
+- Electron Forge package build: passou;
+- startup smoke test: passou.
+
+CI do hardening atual:
+- workflow: Validate Auto CodeZ;
+- run: 33761315476;
+- run number: 1247;
 - conclusão: success;
 - TypeScript validation: passou;
 - core tests: passaram;
@@ -326,6 +356,24 @@ d0a90976316e426e280ff9450ab6642ad5c0f586
 
 Usuário confirmou que a UI deixou de congelar. Proteger contra regressões.
 
+Hardening de isolamento de execução/aprovação concluído no estado atual:
+- ExecutionManager usa chatId + runId para impedir concorrência dentro do mesmo chat e permitir concorrência entre chats;
+- AgentRuntime cria e propaga runId durante a execução;
+- ToolRuntime recebe runId e propaga chatId/runId nos eventos de atividade e nas solicitações de aprovação;
+- ApprovalRequest passou a carregar runId opcional;
+- ApprovalRuntime lista aprovações com filtros por chatId e runId;
+- approvals persistidas/reidratadas preservam runId quando possível;
+- recuperação de approvals legadas associa IDs aos runs persistidos quando possível;
+- chat-execution-ui e approval-ui filtram aprovações pelo chat/run ativo;
+- preload aceita escopo opcional em list/approve/deny;
+- main valida o escopo informado antes de aprovar/negar uma approval;
+- approval-ui agora transmite explicitamente chatId/runId ao approve/deny;
+- tests/agent-approval-recovery.test.ts cobre recuperação e isolamento entre runs/chats.
+
+A auditoria também confirmou que src/renderer.ts não recebeu alteração nessa etapa de hardening. O caminho de approvals relevante foi tratado em approval-ui.ts e nas camadas main/preload/runtime. Não reescrever renderer.ts sem necessidade e sem recuperar seu conteúdo integral.
+
+CI run 33761315476 confirmou os passos de TypeScript, testes, ESLint, package build e startup smoke test com sucesso.
+
 Visão futura de agente:
 A IA poderá executar sequências completas de trabalho, por exemplo:
 - analisar projeto;
@@ -518,7 +566,7 @@ Geral: tema, idioma, animações, densidade, inicialização.
 IA: provider padrão, modelo padrão, credencial padrão, inteligência, ferramentas, aprovação e políticas.
 Editor: fonte, tamanho, word wrap, minimap, tabs, indentação.
 Terminal: shell, diretório inicial, comportamento.
-Segurança/privacidade: credenciais, integrações, dispositivos, sessões, permissões e sandbox.
+Segurança/privacidade: credenciais, integrações, dispositivos, sessões, proteções e sandbox.
 Sincronização: estado, pendências, conflitos.
 
 ============================================================
@@ -661,7 +709,8 @@ FASE 1 — ESTABILIZAÇÃO
 - auditoria técnica;
 - comportamento de provider indisponível;
 - validação completa do estado atual;
-- consolidação da seleção de credenciais específicas por chat.
+- consolidação da seleção de credenciais específicas por chat;
+- isolamento de approvals por chat e run.
 
 Status atual relevante:
 - nova Settings UI funcionando;
@@ -670,7 +719,10 @@ Status atual relevante:
 - chat persiste apiKeyId;
 - runtime usa a credencial exata;
 - UI não mostra placeholder para credencial apagada;
-- commit dbdd37a5b882aad35686ef915c8584f08acf9329 validado pelo CI com sucesso.
+- execução usa identidade chatId/runId;
+- approvals possuem escopo por chat/run nas camadas relevantes;
+- recuperação de approvals tem cobertura de regressão;
+- CI run 33761315476 está verde.
 
 FASE 2 — ACCOUNT FOUNDATION
 - account model;
@@ -798,6 +850,7 @@ Antes de major feature perguntar:
 - Quer suporte futuro ao maior número possível de providers que disponibilizem API keys utilizáveis.
 - Quer que o app possa combinar chatbot, edição direta no PC, automação de agente, ferramentas, geração de imagem, áudio e vídeo conforme os providers permitirem.
 - Valoriza abstrações que reduzam dependência de vendors, mas não aceita que uma abstração externa substitua as regras de segurança, credenciais, execução e arquitetura próprias do Auto CodeZ.
+- Quando uma alteração estiver pronta para consumo local, quer receber explicitamente o comando para atualizar o clone e uma lista objetiva do que testar.
 
 ============================================================
 22. PRÓXIMAS ETAPAS IMEDIATAS
@@ -807,9 +860,11 @@ Antes de major feature perguntar:
 2. Validar localmente quando possível: typecheck, testes, lint e npm start.
 3. Fechar itens restantes da Fase 1, sem regressão da nova Settings UI nem do sistema de API keys salvas.
 4. Auditar model resolver/provider unavailable e itens de foco/cursor ainda pendentes.
-5. Planejar um spike isolado do Vercel AI SDK antes de qualquer migração do runtime.
-6. Definir a interface definitiva de Provider Adapter/Capability antes de adicionar grande quantidade de novos providers.
-7. Projetar sandbox/execução segura antes de ampliar automação irrestrita da IA.
-8. Projetar memória/context management antes de aumentar significativamente a autonomia de agentes.
-9. Só então expandir progressivamente providers, modalidades multimídia, ferramentas, plugins e automações.
-10. Não fazer merge do PR #9 sem autorização explícita.
+5. Validar manualmente o isolamento de approvals entre dois chats/runs concorrentes.
+6. Auditar qualquer caminho legado de approval fora de approval-ui.ts antes de ampliar a automação.
+7. Planejar um spike isolado do Vercel AI SDK antes de qualquer migração do runtime.
+8. Definir a interface definitiva de Provider Adapter/Capability antes de adicionar grande quantidade de novos providers.
+9. Projetar sandbox/execução segura antes de ampliar automação irrestrita da IA.
+10. Projetar memória/context management antes de aumentar significativamente a autonomia de agentes.
+11. Só então expandir progressivamente providers, modalidades multimídia, ferramentas, plugins e automações.
+12. Não fazer merge do PR #9 sem autorização explícita.
