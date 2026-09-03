@@ -2,6 +2,7 @@ type StreamEvent = {
   type?: string;
   chatId?: string;
   text?: string;
+  activity?: { message?: string };
   toolCall?: { name?: string; input?: Record<string, unknown> };
 };
 
@@ -41,8 +42,7 @@ function installStyle(): void {
 }
 
 function elapsed(now = Date.now()): number {
-  if (!runStartedAt) return accumulatedMs;
-  if (waitingApproval && pausedAt) return accumulatedMs;
+  if (!runStartedAt || (waitingApproval && pausedAt)) return accumulatedMs;
   return accumulatedMs + Math.max(0, now - runStartedAt);
 }
 
@@ -108,8 +108,7 @@ function insertThoughtTime(token: number, durationMs: number): void {
   const assistantMessages = [...root.querySelectorAll<HTMLElement>('.message.assistant:not(.streaming)')];
   const lastAssistant = assistantMessages.at(-1);
   if (!lastAssistant) return;
-  const existing = root.querySelector<HTMLElement>(`[data-ac-thought-token="${token}"]`);
-  if (existing) return;
+  if (root.querySelector<HTMLElement>(`[data-ac-thought-token="${token}"]`)) return;
   const label = document.createElement('div');
   label.className = 'ac-thought-time';
   label.dataset.acThoughtToken = String(token);
@@ -148,7 +147,6 @@ function handleEvent(event: StreamEvent): void {
   if (!active) return;
   if (event.type === 'tool_call') {
     if (waitingApproval) {
-      accumulatedMs += Math.max(0, Date.now() - pausedAt);
       runStartedAt = Date.now();
       pausedAt = 0;
       waitingApproval = false;
@@ -158,8 +156,8 @@ function handleEvent(event: StreamEvent): void {
     renderContext();
     return;
   }
-  if (event.type === 'activity' && event.text) {
-    lastActivity = event.text;
+  if (event.type === 'activity' && event.activity?.message) {
+    lastActivity = event.activity.message;
     renderContext();
     return;
   }
