@@ -130,7 +130,7 @@ function initialize(): void {
   const nav = document.querySelector<HTMLElement>('#nav-panel');
   if (nav) {
     const observer = new MutationObserver(syncUi);
-    observer.observe(nav, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
+    observer.observe(nav, { childList: true, subtree: true });
   }
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey) return;
