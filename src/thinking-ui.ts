@@ -187,7 +187,10 @@ function observeMessages(): void {
   observer.observe(root, { childList: true, subtree: true });
   const navObserver = new MutationObserver(syncActiveChat);
   const nav = document.querySelector<HTMLElement>('#nav-panel');
-  if (nav) navObserver.observe(nav, { childList: true, subtree: true });
+  if (nav) {
+    navObserver.observe(nav, { childList: true, subtree: true });
+    nav.addEventListener('click', () => queueMicrotask(syncActiveChat), true);
+  }
 }
 
 function initialize(): void {
