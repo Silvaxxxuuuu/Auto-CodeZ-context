@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   listTools: () => invoke('agent:list-tools'),
   listApprovals: () => invoke('agent:list-approvals'),
+  listExecutions: () => invoke('agent:list-executions'),
   listInterruptedProviderRequests: () => invoke('agent:list-interrupted-provider-requests'),
   approveTool: (approvalId: string) => invoke('agent:approve', requireIdentifier(approvalId, 'Aprovação')),
   denyTool: (approvalId: string) => invoke('agent:deny', requireIdentifier(approvalId, 'Aprovação')),
