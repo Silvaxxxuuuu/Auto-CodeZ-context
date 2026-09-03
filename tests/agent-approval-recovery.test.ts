@@ -29,12 +29,12 @@ function adapter(): AIProviderAdapter {
   };
 }
 
-function createRuntime(storage: MemoryStorage): { runtime: AgentRuntime; tools: ToolRuntime } {
+function createRuntime(storage: MemoryStorage, providerAdapter: AIProviderAdapter = adapter()): { runtime: AgentRuntime; tools: ToolRuntime } {
   const project: ProjectRecord = { id: '__system__', name: 'System', rootPath: process.cwd(), createdAt: 1, updatedAt: 1 };
   const workspace = new WorkspaceRuntime(async () => [project]);
   const tools = new ToolRuntime(workspace);
   const registry = new ProviderRegistry();
-  registry.register(adapter());
+  registry.register(providerAdapter);
   return { runtime: new AgentRuntime(new ChatRuntime(registry, undefined, undefined, undefined, undefined, tools.listDefinitions()), tools, undefined, storage), tools };
 }
 
@@ -84,4 +84,30 @@ test('keeps approvals from two chats and runs isolated after recovery', async ()
   assert.deepEqual(tools.listApprovals({ chatId: chatB.id, runId: 'run-b' }).map((item) => item.id), [approvalB.id]);
   assert.equal(runtime.getPendingRunId(approvalA.id), 'run-a');
   assert.equal(runtime.getPendingRunId(approvalB.id), 'run-b');
+});
+
+test('allows a regular chat without a project to request a tool approval', async () => {
+  const toolCall: AIToolCall = { id: 'system-call', name: 'run_command', input: { command: 'mkdir auto-codez-test' } };
+  let sends = 0;
+  const providerAdapter: AIProviderAdapter = {
+    id: config.id,
+    displayName: config.displayName,
+    async listModels() { return [{ id: 'test-model', name: 'Test Model', providerId: config.id, capabilities: ['text', 'tools'] }]; },
+    async send() {
+      sends += 1;
+      return sends === 1
+        ? { content: 'Vou criar a pasta.', model: 'test-model', providerId: config.id, toolCalls: [toolCall] }
+        : { content: 'Pronto.', model: 'test-model', providerId: config.id };
+    },
+  };
+  const storage = new MemoryStorage();
+  const { runtime, tools } = createRuntime(storage, providerAdapter);
+  const regularChat: ChatRecord = { ...chat, id: 'chat-regular', title: 'Regular', projectId: undefined, permissionLevel: 'ask', messages: [] };
+
+  const result = await runtime.run(config, regularChat, undefined, 'ask');
+
+  assert.equal(result.pendingApprovalIds.length, 1);
+  const pending = tools.listApprovals({ chatId: regularChat.id, runId: runtime.getPendingRunId(result.pendingApprovalIds[0]) });
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0]?.projectId, '__system__');
 });
