@@ -11,6 +11,7 @@ type StreamExecutionEvent = {
 
 type StreamBridge = {
   onStreamEvent: (listener: (event: StreamExecutionEvent) => void) => () => void;
+  listExecutions?: () => Promise<unknown>;
 };
 
 const bridge = (window as unknown as { autoCodez?: StreamBridge }).autoCodez;
@@ -103,6 +104,39 @@ function syncUi(): void {
   syncComposer();
 }
 
+async function hydrateExecutions(): Promise<void> {
+  if (!bridge?.listExecutions) return;
+  try {
+    const value = await bridge.listExecutions();
+    if (!Array.isArray(value)) return;
+    const snapshots = value.filter((item): item is ExecutionSnapshot => {
+      if (!item || typeof item !== 'object') return false;
+      const snapshot = item as Partial<ExecutionSnapshot>;
+      return typeof snapshot.chatId === 'string' && typeof snapshot.runId === 'string' && typeof snapshot.state === 'string';
+    });
+    const activeChatIds = new Set(snapshots.filter((snapshot) => active(snapshot)).map((snapshot) => snapshot.chatId));
+    for (const snapshot of manager.list()) {
+      if (!activeChatIds.has(snapshot.chatId)) manager.remove(snapshot.chatId);
+    }
+    for (const snapshot of snapshots) {
+      const current = manager.get(snapshot.chatId);
+      if (!current) {
+        if (snapshot.state === 'running') manager.start(snapshot.chatId, snapshot.startedAt);
+        manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
+        continue;
+      }
+      if (current.runId !== snapshot.runId || snapshot.updatedAt >= current.updatedAt) {
+        manager.remove(snapshot.chatId);
+        if (snapshot.state === 'running') manager.start(snapshot.chatId, snapshot.startedAt);
+        manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
+      }
+    }
+    syncUi();
+  } catch {
+    // A renderer-side hydration failure must not interrupt the chat UI.
+  }
+}
+
 function handleEvent(event: StreamExecutionEvent): void {
   if (!event.chatId) return;
   try {
@@ -131,7 +165,10 @@ function initialize(): void {
   if (nav) {
     const observer = new MutationObserver(syncUi);
     observer.observe(nav, { childList: true, subtree: true });
-    nav.addEventListener('click', () => queueMicrotask(syncUi), true);
+    nav.addEventListener('click', () => {
+      queueMicrotask(syncUi);
+      void hydrateExecutions();
+    }, true);
   }
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey) return;
@@ -140,6 +177,7 @@ function initialize(): void {
     if (target.dataset.executionLocked === 'true') event.preventDefault();
   }, true);
   syncUi();
+  void hydrateExecutions();
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
