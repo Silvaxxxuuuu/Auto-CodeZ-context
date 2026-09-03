@@ -92,8 +92,11 @@ async function handleAction(event: Event): Promise<void> {
   if (!approvalId) return;
   button.disabled = true;
   try {
+    const approval = (await bridge.listApprovals()).find((item) => item.id === approvalId);
+    const chatId = approval?.chatId || currentChatId();
     if (button.dataset.acApprove) await bridge.approveTool(approvalId);
     else await bridge.denyTool(approvalId);
+    if (chatId) window.dispatchEvent(new CustomEvent('auto-codez-execution-refresh', { detail: { chatId } }));
     await syncApprovals();
   } catch {
     button.disabled = false;
