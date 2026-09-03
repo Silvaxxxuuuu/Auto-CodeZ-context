@@ -3,7 +3,7 @@ type ApprovalUiBridge = {
   onStreamEvent: (listener: (event: ApprovalUiEvent) => void) => () => void;
   approveTool: (approvalId: string) => Promise<unknown>;
   denyTool: (approvalId: string) => Promise<unknown>;
-  listApprovals: () => Promise<Array<{ id: string; toolCall: { name: string; input: Record<string, unknown> } }>>;
+  listApprovals: () => Promise<Array<{ id: string; chatId?: string; toolCall: { name: string; input: Record<string, unknown> } }>>;
 };
 
 const bridge = (window as unknown as { autoCodez?: ApprovalUiBridge }).autoCodez;
@@ -49,6 +49,17 @@ function ensureRoot(): HTMLElement | null {
   return rootElement;
 }
 
+async function syncApprovals(): Promise<void> {
+  if (!bridge) return;
+  const approvals = await bridge.listApprovals();
+  for (const approval of approvals) {
+    if (!approval.chatId) continue;
+    const ids = approvalIdsByChat.get(approval.chatId) || [];
+    if (!ids.includes(approval.id)) approvalIdsByChat.set(approval.chatId, [...ids, approval.id]);
+  }
+  await render();
+}
+
 async function render(): Promise<void> {
   const chatId = currentChatId();
   if (!chatId || chatId !== activeChatId) return;
@@ -60,7 +71,7 @@ async function render(): Promise<void> {
     return;
   }
   const approvals = await bridge.listApprovals();
-  const visible = approvals.filter((approval) => ids.includes(approval.id));
+  const visible = approvals.filter((approval) => approval.chatId === chatId && ids.includes(approval.id));
   root.innerHTML = visible.map((approval) => `<div class="ac-approval-card" data-approval="${escapeHtml(approval.id)}"><div class="ac-approval-heading">Aprovação necessária</div><div class="ac-approval-tool">${escapeHtml(approval.toolCall.name)}</div><div class="ac-approval-input">${escapeHtml(JSON.stringify(approval.toolCall.input, null, 2))}</div><div class="ac-approval-actions"><button data-ac-approve="${escapeHtml(approval.id)}">Aprovar</button><button class="ac-approval-deny" data-ac-deny="${escapeHtml(approval.id)}">Recusar</button></div></div>`).join('');
 }
 
@@ -70,7 +81,7 @@ function syncChat(): void {
   activeChatId = chatId;
   rootElement?.remove();
   rootElement = null;
-  void render();
+  void syncApprovals();
 }
 
 async function handleAction(event: Event): Promise<void> {
@@ -105,6 +116,7 @@ function initialize(): void {
   document.addEventListener('click', (event) => void handleAction(event), true);
   const nav = document.querySelector<HTMLElement>('#nav-panel');
   if (nav) new MutationObserver(syncChat).observe(nav, { childList: true, subtree: true });
+  void syncApprovals();
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
