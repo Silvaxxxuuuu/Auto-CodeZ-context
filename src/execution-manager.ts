@@ -14,6 +14,7 @@ export type ExecutionUpdate = {
   state: ExecutionState;
   currentTool?: string;
   error?: string;
+  runId?: string;
 };
 
 function createRunId(): string {
@@ -44,7 +45,10 @@ export class ExecutionManager {
     const current = this.executions.get(chatId);
     if (!current) {
       if (update.state !== 'running') throw new Error(`Nenhuma execução encontrada para o chat ${chatId}.`);
-      return this.start(chatId, now);
+      return this.start(chatId, now, update.runId);
+    }
+    if (update.runId !== undefined && update.runId !== current.runId) {
+      throw new Error(`A execução ${update.runId} não corresponde à execução ativa do chat ${chatId}.`);
     }
 
     const next: ExecutionSnapshot = {
