@@ -133,13 +133,16 @@ function handleEvent(event: StreamEvent): void {
   const chatId = currentChatId();
   if (event.chatId && chatId && event.chatId !== chatId) return;
   if (event.type === 'start') {
+    const continuingRun = active && activeChatId === (event.chatId || chatId);
     activeChatId = event.chatId || chatId;
     active = true;
     waitingApproval = false;
     runStartedAt = Date.now();
-    accumulatedMs = 0;
+    if (!continuingRun) {
+      accumulatedMs = 0;
+      runToken += 1;
+    }
     pausedAt = 0;
-    runToken += 1;
     ensureStatus();
     return;
   }
