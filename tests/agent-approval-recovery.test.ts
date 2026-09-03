@@ -29,12 +29,16 @@ function adapter(): AIProviderAdapter {
   };
 }
 
-test('migrates persisted approvals to the owning chat before exposing them', async () => {
+function createRuntime(storage: MemoryStorage): { runtime: AgentRuntime; tools: ToolRuntime } {
   const project: ProjectRecord = { id: '__system__', name: 'System', rootPath: process.cwd(), createdAt: 1, updatedAt: 1 };
   const workspace = new WorkspaceRuntime(async () => [project]);
   const tools = new ToolRuntime(workspace);
   const registry = new ProviderRegistry();
   registry.register(adapter());
+  return { runtime: new AgentRuntime(new ChatRuntime(registry, undefined, undefined, undefined, undefined, tools.listDefinitions()), tools, undefined, storage), tools };
+}
+
+test('migrates persisted approvals to the owning chat and run before exposing them', async () => {
   const storage = new MemoryStorage({
     'agent-runs.json': {
       version: 2,
@@ -42,10 +46,42 @@ test('migrates persisted approvals to the owning chat before exposing them', asy
       approvals: [approval],
     },
   });
-  const runtime = new AgentRuntime(new ChatRuntime(registry, undefined, undefined, undefined, undefined, tools.listDefinitions()), tools, undefined, storage);
+  const { runtime, tools } = createRuntime(storage);
 
   await runtime.init();
 
   const persisted = storage.value<{ approvals: ApprovalRequest[] }>('agent-runs.json');
   assert.equal(persisted?.approvals[0]?.chatId, chat.id);
+  assert.equal(persisted?.approvals[0]?.runId, 'run-recovered');
+  assert.deepEqual(tools.listApprovals({ chatId: chat.id, runId: 'run-recovered' }).map((item) => item.id), [approval.id]);
+  assert.deepEqual(tools.listApprovals({ chatId: chat.id, runId: 'other-run' }), []);
+  assert.equal(runtime.getPendingRunId(approval.id), 'run-recovered');
+});
+
+test('keeps approvals from two chats and runs isolated after recovery', async () => {
+  const chatA: ChatRecord = { ...chat, id: 'chat-a', title: 'A' };
+  const chatB: ChatRecord = { ...chat, id: 'chat-b', title: 'B' };
+  const callA: AIToolCall = { ...call, id: 'call-a' };
+  const callB: AIToolCall = { ...call, id: 'call-b' };
+  const approvalA: ApprovalRequest = { ...approval, id: 'approval-a', toolCall: callA };
+  const approvalB: ApprovalRequest = { ...approval, id: 'approval-b', toolCall: callB };
+  const storage = new MemoryStorage({
+    'agent-runs.json': {
+      version: 2,
+      runs: [
+        { runId: 'run-a', config, chat: chatA, projectContext: undefined, permission: 'ask', workingChat: chatA, pendingApprovalIds: [approvalA.id], approvalCalls: { [approvalA.id]: callA }, toolRounds: 1 },
+        { runId: 'run-b', config, chat: chatB, projectContext: undefined, permission: 'ask', workingChat: chatB, pendingApprovalIds: [approvalB.id], approvalCalls: { [approvalB.id]: callB }, toolRounds: 1 },
+      ],
+      approvals: [approvalA, approvalB],
+    },
+  });
+  const { runtime, tools } = createRuntime(storage);
+
+  await runtime.init();
+
+  assert.deepEqual(tools.listApprovals({ chatId: chatA.id, runId: 'run-a' }).map((item) => item.id), [approvalA.id]);
+  assert.deepEqual(tools.listApprovals({ chatId: chatA.id, runId: 'run-b' }), []);
+  assert.deepEqual(tools.listApprovals({ chatId: chatB.id, runId: 'run-b' }).map((item) => item.id), [approvalB.id]);
+  assert.equal(runtime.getPendingRunId(approvalA.id), 'run-a');
+  assert.equal(runtime.getPendingRunId(approvalB.id), 'run-b');
 });
