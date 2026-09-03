@@ -13,6 +13,15 @@ test('mantém execuções independentes por chat', () => {
   assert.notEqual(first.runId, second.runId);
 });
 
+test('preserva o runId autoritativo ao iniciar uma execução recuperada', () => {
+  const manager = new ExecutionManager();
+
+  const recovered = manager.start('chat-a', 1000, 'backend-run-123');
+
+  assert.equal(recovered.runId, 'backend-run-123');
+  assert.equal(manager.get('chat-a')?.runId, 'backend-run-123');
+});
+
 test('não permite duas execuções simultâneas no mesmo chat', () => {
   const manager = new ExecutionManager();
   manager.start('chat-a', 1000);
