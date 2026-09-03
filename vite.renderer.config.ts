@@ -18,6 +18,7 @@ export default defineConfig({
             { tag: 'script', attrs: { type: 'module', src: '/src/api-key-flow-polish.ts' }, injectTo: 'body' },
             { tag: 'script', attrs: { type: 'module', src: '/src/chat-api-key-settings-ui.ts' }, injectTo: 'body' },
             { tag: 'script', attrs: { type: 'module', src: '/src/execution-visibility.ts' }, injectTo: 'body' },
+            { tag: 'script', attrs: { type: 'module', src: '/src/thinking-ui.ts' }, injectTo: 'body' },
           ],
         };
       },
