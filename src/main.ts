@@ -157,7 +157,13 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 });
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
-ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
+ipcMain.handle('agent:list-approvals', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return toolRuntime.listApprovals();
+  const value = requireObject(filters, 'Filtro de aprovações');
+  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  return toolRuntime.listApprovals({ chatId, runId });
+});
 ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatId === undefined ? executionManager.list() : executionManager.get(requireIdentifier(chatId, 'Chat')) ?? null);
 ipcMain.handle('agent:list-recoverable-runs', async () => listRecoverableRuns(agentRuntime));
 ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
@@ -170,10 +176,13 @@ ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
   return result;
 });
 ipcMain.handle('agent:list-interrupted-provider-requests', async () => chatRuntime.listInterruptedProviderRequests());
-ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
-  const id = requireIdentifier(approvalId, 'Aprovação');
-  const approval = toolRuntime.listApprovals().find((item) => item.id === id);
-  if (!approval?.chatId) throw new Error('Aprovação sem chat associado.');
+ipcMain.handle('agent:approve', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Dados da aprovação');
+  const id = requireIdentifier(value.approvalId, 'Aprovação');
+  const chatIdFilter = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runIdFilter = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  const approval = toolRuntime.listApprovals({ chatId: chatIdFilter, runId: runIdFilter }).find((item) => item.id === id);
+  if (!approval?.chatId) throw new Error('Aprovação não pertence ao contexto informado.');
   const chatId = approval.chatId;
   const runId = agentRuntime.getPendingRunId(id);
   executionManager.update(chatId, { state: 'running', runId });
@@ -190,10 +199,13 @@ ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
     throw error;
   }
 });
-ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
-  const id = requireIdentifier(approvalId, 'Aprovação');
-  const approval = toolRuntime.listApprovals().find((item) => item.id === id);
-  if (!approval?.chatId) throw new Error('Aprovação sem chat associado.');
+ipcMain.handle('agent:deny', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Dados da aprovação');
+  const id = requireIdentifier(value.approvalId, 'Aprovação');
+  const chatIdFilter = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runIdFilter = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  const approval = toolRuntime.listApprovals({ chatId: chatIdFilter, runId: runIdFilter }).find((item) => item.id === id);
+  if (!approval?.chatId) throw new Error('Aprovação não pertence ao contexto informado.');
   const chatId = approval.chatId;
   const runId = agentRuntime.getPendingRunId(id);
   executionManager.update(chatId, { state: 'running', runId });
