@@ -14,7 +14,34 @@ export interface AgentRunResult { chatId: string; response: AIResponse; toolRoun
 export class AgentRuntime {
   private readonly pendingRuns = new Map<string, PendingRun>(); private readonly recoverableRuns = new Map<string, PendingRun>(); private persistenceWrite: Promise<void> = Promise.resolve();
   constructor(private readonly chatRuntime: ChatRuntime, private readonly tools: ToolRuntime, private readonly activity = new ActivityRuntime(), private readonly storage?: AgentStateStorage) {}
-  async init(): Promise<void> { if (!this.storage) return; const stored = await this.storage.read<PersistedAgentState | { version: 1; runs: PersistedPendingRun[]; approvals: ApprovalRequest[] }>(STATE_FILE, { version: 2, runs: [], approvals: [] }); if (!stored || !Array.isArray(stored.runs) || !Array.isArray(stored.approvals)) return; this.tools.restoreApprovals(stored.approvals); this.pendingRuns.clear(); this.recoverableRuns.clear(); const approvals = this.tools.listApprovals(); for (const run of stored.runs) { if (!run.chat?.id || !Array.isArray(run.pendingApprovalIds) || !Array.isArray(run.workingChat?.messages)) continue; const runId = run.runId || crypto.randomUUID(); if (run.pendingApprovalIds.length > 0) { const validIds = run.pendingApprovalIds.filter((id) => Boolean(run.approvalCalls?.[id]) && Boolean(approvals.find((approval) => approval.id === id))); if (!validIds.length) continue; const pending: PendingRun = { ...run, runId, pendingApprovalIds: validIds }; for (const id of validIds) this.pendingRuns.set(id, pending); } else this.recoverableRuns.set(runId, { ...run, runId }); } await this.persist(); }
+  async init(): Promise<void> {
+    if (!this.storage) return;
+    const stored = await this.storage.read<PersistedAgentState | { version: 1; runs: PersistedPendingRun[]; approvals: ApprovalRequest[] }>(STATE_FILE, { version: 2, runs: [], approvals: [] });
+    if (!stored || !Array.isArray(stored.runs) || !Array.isArray(stored.approvals)) return;
+    const approvalChatIds = new Map<string, string>();
+    for (const run of stored.runs) {
+      if (!run.chat?.id || !Array.isArray(run.pendingApprovalIds)) continue;
+      for (const approvalId of run.pendingApprovalIds) approvalChatIds.set(approvalId, run.chat.id);
+    }
+    const restoredApprovals = stored.approvals.map((approval) => {
+      const chatId = approval.chatId || approvalChatIds.get(approval.id);
+      return chatId && !approval.chatId ? { ...approval, chatId } : approval;
+    });
+    this.tools.restoreApprovals(restoredApprovals);
+    this.pendingRuns.clear(); this.recoverableRuns.clear();
+    const approvals = this.tools.listApprovals();
+    for (const run of stored.runs) {
+      if (!run.chat?.id || !Array.isArray(run.pendingApprovalIds) || !Array.isArray(run.workingChat?.messages)) continue;
+      const runId = run.runId || crypto.randomUUID();
+      if (run.pendingApprovalIds.length > 0) {
+        const validIds = run.pendingApprovalIds.filter((id) => Boolean(run.approvalCalls?.[id]) && Boolean(approvals.find((approval) => approval.id === id)));
+        if (!validIds.length) continue;
+        const pending: PendingRun = { ...run, runId, pendingApprovalIds: validIds };
+        for (const id of validIds) this.pendingRuns.set(id, pending);
+      } else this.recoverableRuns.set(runId, { ...run, runId });
+    }
+    await this.persist();
+  }
   hasPendingForChat(chatId: string): boolean { for (const pending of this.pendingRuns.values()) if (pending.chat.id === chatId) return true; return false; }
   listRecoverableRuns(): Array<{ runId: string; chatId: string; toolRounds: number }> { return [...this.recoverableRuns.values()].map((run) => ({ runId: run.runId, chatId: run.chat.id, toolRounds: run.toolRounds })); }
   async run(config: AIProviderConfig, chat: ChatRecord, projectContext: string | undefined, permission: PermissionLevel): Promise<AgentRunResult> { const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] }; const run: PendingRun = { runId: crypto.randomUUID(), config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0 }; this.recoverableRuns.set(run.runId, run); await this.persist(); return this.runLoop(run); }
