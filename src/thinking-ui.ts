@@ -15,10 +15,30 @@ const messages = () => document.querySelector<HTMLElement>('#messages');
 const STYLE_ID = 'auto-codez-thinking-ui';
 let active = false;
 let waitingApproval = false;
+let activeChatId: string | undefined;
 let runStartedAt = 0;
 let accumulatedMs = 0;
 let pausedAt = 0;
 let runToken = 0;
+
+function currentChatId(): string | undefined {
+  return document.querySelector<HTMLElement>('.chat-item.selected')?.dataset.chat;
+}
+
+function syncActiveChat(): void {
+  const chatId = currentChatId();
+  if (chatId === activeChatId) return;
+  activeChatId = chatId;
+  if (active) {
+    active = false;
+    waitingApproval = false;
+    runStartedAt = 0;
+    accumulatedMs = 0;
+    pausedAt = 0;
+    runToken += 1;
+    removeThinkingStatus();
+  }
+}
 
 function installStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
@@ -57,6 +77,7 @@ function formatSeconds(ms: number): string {
 }
 
 function ensureStatus(): HTMLElement | null {
+  syncActiveChat();
   const root = messages();
   if (!root) return null;
   const status = root.querySelector<HTMLElement>('.ac-thinking-status') || document.createElement('div');
@@ -109,7 +130,10 @@ function finishRun(): void {
 }
 
 function handleEvent(event: StreamEvent): void {
+  const chatId = currentChatId();
+  if (event.chatId && chatId && event.chatId !== chatId) return;
   if (event.type === 'start') {
+    activeChatId = event.chatId || chatId;
     active = true;
     waitingApproval = false;
     runStartedAt = Date.now();
@@ -157,13 +181,18 @@ function observeMessages(): void {
   const root = messages();
   if (!root) return;
   const observer = new MutationObserver(() => {
+    syncActiveChat();
     if (active) ensureStatus();
   });
   observer.observe(root, { childList: true, subtree: true });
+  const navObserver = new MutationObserver(syncActiveChat);
+  const nav = document.querySelector<HTMLElement>('#nav-panel');
+  if (nav) navObserver.observe(nav, { childList: true, subtree: true });
 }
 
 function initialize(): void {
   installStyle();
+  activeChatId = currentChatId();
   if (bridge?.onStreamEvent) bridge.onStreamEvent(handleEvent);
   observeMessages();
 }
