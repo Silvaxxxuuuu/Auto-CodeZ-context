@@ -19,12 +19,10 @@ function openSavedKeyChatSettings(chat: Chat, keys: SavedApiKey[]): void {
   if (!root) return;
   const referencedKey = chat.apiKeyId ? keys.find((key) => key.id === chat.apiKeyId) : undefined;
   const currentKey = referencedKey || (!chat.apiKeyId ? keys.find((key) => key.providerId === chat.providerId && key.active) : undefined);
-  const missingKey = Boolean(chat.apiKeyId && !referencedKey);
-  const missingOption = missingKey ? `<option value="" selected disabled>Credencial salva não encontrada</option>` : '';
   const options = keys.length
-    ? `${missingOption}${keys.map((key) => `<option value="${escapeHtml(key.id)}" ${key.id === currentKey?.id ? 'selected' : ''}>${escapeHtml(key.name)} · ${escapeHtml(key.providerName)}</option>`).join('')}`
-    : `<option value="${escapeHtml(chat.providerId)}">${escapeHtml(chat.providerId)}</option>`;
-  root.innerHTML = `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Configurações do chat</h2><p>Escolha exatamente qual credencial salva esta conversa deve usar.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><label>Chaves API salvas<select id="chat-provider">${options}</select></label>${missingKey ? '<p class="modal-error">A credencial usada por este chat foi removida. Selecione uma nova chave antes de salvar.</p>' : ''}<label>Modelo<select id="chat-model"><option value="">${missingKey ? 'Selecione uma nova chave' : 'Carregando modelos...'}</option></select></label><label>Nível de acesso<select id="chat-permission"><option value="read-only" ${chat.permissionLevel === 'read-only' ? 'selected' : ''}>Somente leitura</option><option value="safe" ${chat.permissionLevel === 'safe' ? 'selected' : ''}>Acesso seguro</option><option value="ask" ${chat.permissionLevel === 'ask' ? 'selected' : ''}>Acesso solicitado</option><option value="unrestricted" ${chat.permissionLevel === 'unrestricted' ? 'selected' : ''}>Acesso irrestrito</option></select></label><button class="primary-button" id="save-chat-settings" ${keys.length && !missingKey ? '' : 'disabled'}>Salvar configurações</button></div></div>`;
+    ? keys.map((key) => `<option value="${escapeHtml(key.id)}" ${key.id === currentKey?.id ? 'selected' : ''}>${escapeHtml(key.name)} · ${escapeHtml(key.providerName)}</option>`).join('')
+    : '<option value="">Nenhuma chave API salva</option>';
+  root.innerHTML = `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Configurações do chat</h2><p>Escolha exatamente qual credencial salva esta conversa deve usar.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><label>Chaves API salvas<select id="chat-provider">${options}</select></label><label>Modelo<select id="chat-model"><option value="">${currentKey ? 'Carregando modelos...' : 'Selecione uma chave API'}</option></select></label><label>Nível de acesso<select id="chat-permission"><option value="read-only" ${chat.permissionLevel === 'read-only' ? 'selected' : ''}>Somente leitura</option><option value="safe" ${chat.permissionLevel === 'safe' ? 'selected' : ''}>Acesso seguro</option><option value="ask" ${chat.permissionLevel === 'ask' ? 'selected' : ''}>Acesso solicitado</option><option value="unrestricted" ${chat.permissionLevel === 'unrestricted' ? 'selected' : ''}>Acesso irrestrito</option></select></label><button class="primary-button" id="save-chat-settings" ${currentKey ? '' : 'disabled'}>Salvar configurações</button></div></div>`;
   if (currentKey) void loadModels(currentKey.id, chat.model);
 }
 
@@ -63,6 +61,6 @@ document.addEventListener('change', (event) => {
   const chatModel = document.querySelector<HTMLSelectElement>('#chat-model');
   const saveButton = document.querySelector<HTMLButtonElement>('#save-chat-settings');
   if (!chatModel) return;
-  if (saveButton) saveButton.disabled = false;
-  void loadModels(target.value, '');
+  if (saveButton) saveButton.disabled = !target.value;
+  if (target.value) void loadModels(target.value, '');
 }, true);
