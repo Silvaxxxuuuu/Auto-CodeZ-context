@@ -2,8 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { ProjectRecord } from '../ai/types';
+import { SYSTEM_WORKSPACE_ID, getSystemWorkspaceRoot } from './system-workspace';
 
-export const SYSTEM_PROJECT_ID = '__system__';
+export const SYSTEM_PROJECT_ID = SYSTEM_WORKSPACE_ID;
 
 export interface CommandOutputEvent {
   stream: 'stdout' | 'stderr';
@@ -73,7 +74,7 @@ export class CommandRuntime {
     if (!normalizedCommand) throw new Error('O comando não pode estar vazio.');
 
     const cwd = projectId === SYSTEM_PROJECT_ID
-      ? process.cwd()
+      ? await fs.realpath(getSystemWorkspaceRoot())
       : await fs.realpath(path.resolve((await this.project(projectId)).rootPath));
     const { executable, args } = commandForPlatform(normalizedCommand);
     const startedAt = Date.now();
