@@ -18,7 +18,7 @@ export interface CommandResultSummary { command: string; exitCode: number; stdou
 export interface GitOperationSummary { operation: 'create_branch' | 'checkout' | 'stage' | 'stage_all' | 'commit'; branch: string; output: string; }
 export interface AIToolResult { toolCallId: string; ok: boolean; output?: string; error?: string; approvalId?: string; pendingApproval?: boolean; changes?: FileDiff[]; diffPlan?: DiffPlan; commandResult?: CommandResultSummary; gitResult?: GitOperationSummary; }
 export interface AIToolDefinition { name: ToolName; description: string; parameters: Record<string, unknown>; requiresWriteAccess: boolean; requiresApproval: boolean; }
-export interface ApprovalRequest { id: string; projectId: string; permissionLevel: PermissionLevel; toolCall: AIToolCall; createdAt: number; diffPlan?: DiffPlan; }
+export interface ApprovalRequest { id: string; projectId: string; chatId?: string; permissionLevel: PermissionLevel; toolCall: AIToolCall; createdAt: number; diffPlan?: DiffPlan; }
 export interface AIProviderAdapter { readonly id: ProviderId; readonly displayName: string; listModels(config: AIProviderConfig): Promise<AIModel[]>; send(config: AIProviderConfig, request: AIRequest): Promise<AIResponse>; stream?(config: AIProviderConfig, request: AIRequest): AsyncIterable<AIStreamEvent>; }
 export interface ProviderSummary { id: ProviderId; displayName: string; configured: boolean; apiKeyConfigured: boolean; selectedModel?: string; }
 export interface ChatRecord { id: string; title: string; projectId?: string; apiKeyId?: string; providerId: ProviderId; model: string; intelligence: IntelligenceLevel; permissionLevel: PermissionLevel; messages: AIMessage[]; createdAt: number; updatedAt: number; }
