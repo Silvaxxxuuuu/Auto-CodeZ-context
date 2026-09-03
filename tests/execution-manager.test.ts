@@ -35,6 +35,23 @@ test('preserva histórico de início e atualiza ferramenta/estado', () => {
   assert.equal(manager.listActive().length, 0);
 });
 
+test('recupera uma execução em memória quando uma retomada chega sem snapshot', () => {
+  const manager = new ExecutionManager();
+
+  const recovered = manager.update('chat-recovered', { state: 'running' }, 5000);
+
+  assert.equal(recovered.state, 'running');
+  assert.equal(recovered.chatId, 'chat-recovered');
+  assert.equal(recovered.startedAt, 5000);
+  assert.equal(manager.listActive().length, 1);
+});
+
+test('não cria uma execução implícita para estados terminais', () => {
+  const manager = new ExecutionManager();
+
+  assert.throws(() => manager.update('chat-missing', { state: 'completed' }, 5000), /Nenhuma execução encontrada/);
+});
+
 test('permite nova execução após uma execução terminal', () => {
   const manager = new ExecutionManager();
   const first = manager.start('chat-a', 1000);
