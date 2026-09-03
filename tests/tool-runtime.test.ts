@@ -6,6 +6,7 @@ import test from 'node:test';
 import { ToolRuntime } from '../src/agent/tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 import { CommandRuntime } from '../src/agent/command-runtime';
+import { ActivityRuntime } from '../src/agent/activity-runtime';
 import type { AIToolCall, ProjectRecord } from '../src/ai/types';
 
 async function createToolRuntime(commandRuntime?: CommandRuntime): Promise<{ root: string; runtime: ToolRuntime; cleanup: () => Promise<void> }> {
@@ -88,6 +89,24 @@ test('approvals created by different chats retain independent ownership', async 
     assert.equal(approvals.find((approval) => approval.id === first.approvalId)?.chatId, 'chat-a');
     assert.equal(approvals.find((approval) => approval.id === second.approvalId)?.chatId, 'chat-b');
   } finally { await fixture.cleanup(); }
+});
+
+test('activity summaries describe the concrete operation being executed', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-activity-test-'));
+  try {
+    const project: ProjectRecord = { id: 'project-test', name: 'Activity Test Project', rootPath: root, createdAt: Date.now(), updatedAt: Date.now() };
+    const workspace = new WorkspaceRuntime(async () => [project]);
+    const activity = new ActivityRuntime();
+    const events: Array<{ message: string; status: string }> = [];
+    activity.subscribe((event) => events.push({ message: event.message, status: event.status }));
+    const commands = new CommandRuntime(async () => [project]);
+    const runtime = new ToolRuntime(workspace, undefined, activity, undefined, commands);
+    const result = await runtime.execute('chat-test', 'project-test', 'unrestricted', call('call-activity', 'run_command', { command: 'mkdir activity-test' }));
+    assert.equal(result.ok, true);
+    assert.equal(events[0]?.message, 'Executando mkdir activity-test');
+    assert.equal(events[0]?.status, 'running');
+    assert.equal(events.some((event) => event.status === 'success' && event.message === 'Concluído: run_command'), true);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test('approving a write_file executes the approved plan and returns the resulting diff', async () => {
