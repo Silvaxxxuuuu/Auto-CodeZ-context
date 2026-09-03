@@ -13,7 +13,7 @@ type StreamBridge = {
   onStreamEvent: (listener: (event: StreamExecutionEvent) => void) => () => void;
 };
 
-const bridge = (window as unknown as { autoCodez?: StreamBridge });
+const bridge = (window as unknown as { autoCodez?: StreamBridge }).autoCodez;
 const manager = new ExecutionManager();
 const STYLE_ID = 'auto-codez-execution-visibility';
 
