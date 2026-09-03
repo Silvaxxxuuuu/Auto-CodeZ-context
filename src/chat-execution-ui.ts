@@ -13,11 +13,18 @@ type Approval = {
   id: string;
   toolCall: { name: string; input: Record<string, unknown> };
 };
+type RecoverableRun = {
+  runId: string;
+  chatId: string;
+  toolRounds: number;
+};
 
 type AutoCodeZBridge = {
   onActivity: (listener: (event: unknown) => void) => () => void;
   onStreamEvent: (listener: (event: unknown) => void) => () => void;
   listApprovals: () => Promise<Approval[]>;
+  listRecoverableRuns: () => Promise<RecoverableRun[]>;
+  resumeRecoveredRun: (runId: string) => Promise<{ chatId: string; pendingApprovalIds: string[] }>;
 };
 
 type RunState = {
@@ -33,10 +40,11 @@ const root = document.querySelector<HTMLElement>('.chat-area');
 if (!root) throw new Error('Área do chat não encontrada.');
 
 const bridge = (window as unknown as { autoCodez?: AutoCodeZBridge }).autoCodez;
-if (!bridge?.onActivity || !bridge.onStreamEvent || !bridge.listApprovals) throw new Error('Canal de execução não disponível.');
+if (!bridge?.onActivity || !bridge.onStreamEvent || !bridge.listApprovals || !bridge.listRecoverableRuns || !bridge.resumeRecoveredRun) throw new Error('Canal de execução não disponível.');
 
 const runs = new Map<string, RunState>();
 let pendingApprovals: Approval[] = [];
+let recoverableRuns: RecoverableRun[] = [];
 let activeChatId = '';
 const MAX_RUNS = 6;
 const MAX_STEPS = 8;
@@ -85,14 +93,21 @@ function approvalMarkup(approvals: Approval[]): string {
   return `<div class="execution-approval"><div class="execution-approval-head"><span class="execution-approval-status-dot"></span><span>Operação aguardando sua decisão</span></div>${cards}</div>`;
 }
 
+function recoveryMarkup(): string {
+  const current = recoverableRuns.filter((run) => run.chatId === activeChatId);
+  if (!current.length) return '';
+  return current.map((run) => `<article class="execution-run execution-status-pending" data-recovery-run="${escapeHtml(run.runId)}"><div class="execution-run-header"><div><div class="execution-run-kicker">Execução recuperável</div><div class="execution-run-title">Retomar execução</div></div><span class="execution-run-status">Interrompida</span></div><div class="execution-run-message">Uma execução anterior pode continuar do ponto persistido, sem repetir as ferramentas já concluídas.</div><div class="execution-approval-actions"><button data-recover-run="${escapeHtml(run.runId)}" class="primary-button">Retomar execução</button></div></article>`).join('');
+}
+
 function latestRun(): RunState | undefined {
   return [...runs.values()].sort((a, b) => b.updatedAt - a.updatedAt)[0];
 }
 
 function render(): void {
   const ordered = [...runs.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_RUNS);
-  container.hidden = ordered.length === 0 && pendingApprovals.length === 0;
-  container.innerHTML = ordered.map((run) => {
+  const recovery = recoveryMarkup();
+  container.hidden = ordered.length === 0 && pendingApprovals.length === 0 && !recovery;
+  container.innerHTML = recovery + ordered.map((run) => {
     const existingRun = container.querySelector<HTMLElement>(`[data-run-id="${CSS.escape(run.runId)}"]`);
     const detailsMarkup = existingRun?.querySelector<HTMLElement>('.execution-run-details')?.outerHTML || '<div class="execution-run-details"></div>';
     const approvalMarkupForRun = pendingApprovals.length && latestRun()?.runId === run.runId ? approvalMarkup(pendingApprovals) : '';
@@ -107,9 +122,6 @@ function render(): void {
     }).join('');
     return `<article class="execution-run ${statusClass(run.status)}" data-run-id="${escapeHtml(run.runId)}"><div class="execution-run-header"><div><div class="execution-run-kicker">Execução do agente</div><div class="execution-run-title">${escapeHtml(runTitle(run))}</div></div><span class="execution-run-status">${statusLabel(run.status)}</span></div><div class="execution-run-message">${escapeHtml(run.message)}</div><div class="execution-steps">${steps}</div>${detailsMarkup}${approvalMarkupForRun}</article>`;
   }).join('');
-  if (pendingApprovals.length && !ordered.length) {
-    container.innerHTML = `<article class="execution-run execution-status-pending" data-run-id="approval"><div class="execution-run-header"><div><div class="execution-run-kicker">Execução do agente</div><div class="execution-run-title">Operação em espera</div></div><span class="execution-run-status">Aguardando aprovação</span></div>${approvalMarkup(pendingApprovals)}</article>`;
-  }
   ordered.forEach((run) => window.dispatchEvent(new CustomEvent('auto-codez-execution-run-rendered', { detail: { runId: run.runId } })));
 }
 
@@ -156,6 +168,15 @@ async function refreshApprovals(): Promise<void> {
   render();
 }
 
+async function refreshRecoverableRuns(): Promise<void> {
+  try {
+    recoverableRuns = (await bridge.listRecoverableRuns()).filter((run) => run.chatId === activeChatId);
+  } catch {
+    recoverableRuns = [];
+  }
+  render();
+}
+
 function syncChatContext(): void {
   const selected = document.querySelector<HTMLElement>('.chat-item.selected');
   const nextChatId = selected?.dataset.chat || '';
@@ -163,9 +184,13 @@ function syncChatContext(): void {
   activeChatId = nextChatId;
   runs.clear();
   pendingApprovals = [];
+  recoverableRuns = [];
   container.hidden = true;
   container.innerHTML = '';
-  if (activeChatId) void refreshApprovals();
+  if (activeChatId) {
+    void refreshApprovals();
+    void refreshRecoverableRuns();
+  }
 }
 
 const chatContextObserver = new MutationObserver(syncChatContext);
@@ -203,6 +228,46 @@ bridge.onStreamEvent((value: unknown) => {
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
+  const recoveryButton = target.closest<HTMLButtonElement>('[data-recover-run]');
+  if (recoveryButton) {
+    const runId = recoveryButton.dataset.recoverRun;
+    if (!runId) return;
+    recoveryButton.disabled = true;
+    recoveryButton.textContent = 'Retomando…';
+    void bridge.resumeRecoveredRun(runId).then((result) => {
+      recoverableRuns = recoverableRuns.filter((run) => run.runId !== runId);
+      const now = Date.now();
+      runs.set(runId, {
+        runId,
+        status: result.pendingApprovalIds.length ? 'pending' : 'success',
+        startedAt: now,
+        updatedAt: now,
+        message: result.pendingApprovalIds.length ? 'A execução foi retomada e aguarda aprovação.' : 'Execução recuperada e concluída.',
+        steps: [],
+      });
+      window.dispatchEvent(new CustomEvent('auto-codez-execution-refresh', { detail: { chatId: result.chatId } }));
+      window.dispatchEvent(new CustomEvent('auto-codez-chat-refresh', { detail: { chatId: result.chatId } }));
+      void refreshApprovals();
+      void refreshRecoverableRuns();
+    }).catch((error: unknown) => {
+      recoveryButton.disabled = false;
+      recoveryButton.textContent = 'Retomar execução';
+      const message = error instanceof Error ? error.message : String(error);
+      const recovery = recoverableRuns.find((run) => run.runId === runId);
+      if (recovery) {
+        runs.set(runId, {
+          runId,
+          status: 'failed',
+          startedAt: Date.now(),
+          updatedAt: Date.now(),
+          message: `Falha ao retomar: ${message}`,
+          steps: [],
+        });
+      }
+      render();
+    });
+    return;
+  }
   if (target.closest('[data-approve], [data-deny]')) {
     window.setTimeout((): void => { void refreshApprovals(); }, 80);
   }
@@ -210,3 +275,4 @@ document.addEventListener('click', (event) => {
 
 syncChatContext();
 void refreshApprovals();
+void refreshRecoverableRuns();
