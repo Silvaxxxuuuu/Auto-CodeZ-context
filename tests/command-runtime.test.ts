@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { CommandRuntime } from '../src/agent/command-runtime';
+import { CommandRuntime, SYSTEM_PROJECT_ID } from '../src/agent/command-runtime';
 import type { ProjectRecord } from '../src/ai/types';
 
 async function createProject(): Promise<{ root: string; runtime: CommandRuntime; cleanup: () => Promise<void> }> {
@@ -88,4 +88,14 @@ test('command runtime isolates observer failures from command execution', async 
   } finally {
     await project.cleanup();
   }
+});
+
+test('command runtime executes a system command without a project context', async () => {
+  const runtime = new CommandRuntime(async () => []);
+  const result = await runtime.run(SYSTEM_PROJECT_ID, nodeCommand("process.stdout.write('system-ok')"));
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, 'system-ok');
+  assert.equal(result.stderr, '');
+  assert.equal(result.timedOut, false);
 });
