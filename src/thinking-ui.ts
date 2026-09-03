@@ -10,7 +10,7 @@ type StreamBridge = {
   onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
 };
 
-const bridge = (window as unknown as { autoCodez?: StreamBridge });
+const bridge = (window as unknown as { autoCodez?: StreamBridge }).autoCodez;
 const messages = () => document.querySelector<HTMLElement>('#messages');
 const STYLE_ID = 'auto-codez-thinking-ui';
 let active = false;
