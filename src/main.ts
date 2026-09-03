@@ -157,6 +157,7 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
 ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
+ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatId === undefined ? executionManager.list() : executionManager.get(requireIdentifier(chatId, 'Chat')) ?? null);
 ipcMain.handle('agent:list-interrupted-provider-requests', async () => chatRuntime.listInterruptedProviderRequests());
 ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
   const id = requireIdentifier(approvalId, 'Aprovação');
@@ -168,11 +169,8 @@ ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
     const result = await agentRuntime.resume(id);
     const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
     if (chat) await chatManager.update({ ...chat, messages: result.messages });
-    if (result.pendingApprovalIds.length) {
-      executionManager.update(chatId, { state: 'waiting_approval' });
-    } else {
-      executionManager.update(chatId, { state: 'completed' });
-    }
+    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval' });
+    else executionManager.update(chatId, { state: 'completed' });
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -190,11 +188,8 @@ ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
     const result = await agentRuntime.reject(id);
     const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
     if (chat) await chatManager.update({ ...chat, messages: result.messages });
-    if (result.pendingApprovalIds.length) {
-      executionManager.update(chatId, { state: 'waiting_approval' });
-    } else {
-      executionManager.update(chatId, { state: 'completed' });
-    }
+    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval' });
+    else executionManager.update(chatId, { state: 'completed' });
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
