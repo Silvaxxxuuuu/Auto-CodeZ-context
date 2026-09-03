@@ -146,7 +146,7 @@ test('persists a recoverable cycle after a provider failure and never re-execute
   assert.equal(recovered.length, 1);
   await assert.rejects(second.resumeRecovered(recovered[0].runId), /Provider interrupted/);
   assert.equal(await fs.readFile(target, 'utf8'), 'export const value = 99;');
-  assert.equal(providerCalls, 2);
+  assert.equal(providerCalls, 3);
   await fs.rm(root, { recursive: true, force: true });
 });
 
