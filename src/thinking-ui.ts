@@ -46,7 +46,7 @@ function finish(chatId: string): void {
   const state = stateFor(chatId); if (!state.active) return;
   state.accumulatedMs = elapsed(state); state.active = false; state.waitingApproval = false; state.pausedAt = 0;
   const token = state.token; const duration = state.accumulatedMs; if (chatId !== activeChatId) return;
-  removeLiveStatus(); const retry = () => insertThoughtTime(chatId, token, duration); retry(); window.setTimeout(retry, 0); window.setTimeout(retry, 60); window.setTimeout(retry, 250);
+  removeLiveStatus(); const retry = (): void => insertThoughtTime(chatId, token, duration); retry(); window.setTimeout(retry, 0); window.setTimeout(retry, 60); window.setTimeout(retry, 250);
 }
 function handleEvent(event: StreamEvent): void {
   const chatId = event.chatId || currentChatId(); if (!chatId) return;
@@ -67,7 +67,7 @@ function hydrate(): void {
     for (const [chatId, state] of states) if (!live.has(chatId)) state.active = false;
     for (const snapshot of live.values()) { const state = stateFor(snapshot.chatId); if (state.runId === snapshot.runId && state.active) continue; state.active = true; state.waitingApproval = snapshot.state === 'waiting_approval'; state.runId = snapshot.runId; state.startedAt = snapshot.startedAt; state.accumulatedMs = state.waitingApproval ? Math.max(0, snapshot.updatedAt - snapshot.startedAt) : 0; state.pausedAt = state.waitingApproval ? snapshot.updatedAt : 0; state.token += 1; }
     if (currentChatId() === activeChatId) renderLiveStatus();
-  }).catch(() => undefined);
+  }).catch((): undefined => undefined);
 }
 function syncChat(): void { const next = currentChatId(); if (next === activeChatId) return; activeChatId = next; removeLiveStatus(); if (next && stateFor(next).active) renderLiveStatus(); }
 function observe(): void {
