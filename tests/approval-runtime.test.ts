@@ -17,6 +17,17 @@ test('request creates a pending approval with a unique id', () => {
   assert.equal(runtime.list().length, 2);
 });
 
+test('chat ownership can be attached without changing the approval identity', () => {
+  const runtime = new ApprovalRuntime();
+  const approval = runtime.request({ projectId: 'project-a', permissionLevel: 'ask', toolCall: toolCall('call-1') });
+
+  const updated = runtime.setChatId(approval.id, 'chat-a');
+
+  assert.equal(updated.id, approval.id);
+  assert.equal(updated.chatId, 'chat-a');
+  assert.equal(runtime.get(approval.id)?.chatId, 'chat-a');
+});
+
 test('resolve consumes an approval exactly once', () => {
   const runtime = new ApprovalRuntime();
   const approval = runtime.request({ projectId: 'project-a', permissionLevel: 'ask', toolCall: toolCall('call-1') });
