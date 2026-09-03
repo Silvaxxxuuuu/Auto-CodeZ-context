@@ -18,6 +18,7 @@ import { ApprovalRuntime } from './agent/approval-runtime';
 import { CommandRuntime } from './agent/command-runtime';
 import { DiffRuntime } from './agent/diff-runtime';
 import { ExecutionManager } from './execution-manager';
+import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
 
@@ -128,9 +129,9 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 
   const emit = (event: AIStreamEvent): void => {
     try {
-      if (event.type === 'approval_required') executionManager.update(chatId, { state: 'waiting_approval' });
-      else if (event.type === 'error') executionManager.update(chatId, { state: 'failed', error: event.error });
-      else if (event.type === 'tool_call') executionManager.update(chatId, { state: 'running', currentTool: event.toolCall?.name });
+      if (event.type === 'approval_required') executionManager.update(chatId, { state: 'waiting_approval', runId: execution.runId });
+      else if (event.type === 'error') executionManager.update(chatId, { state: 'failed', error: event.error, runId: execution.runId });
+      else if (event.type === 'tool_call') executionManager.update(chatId, { state: 'running', currentTool: event.toolCall?.name, runId: execution.runId });
     } catch {
       // Execution bookkeeping must never interrupt the provider stream.
     }
@@ -144,12 +145,12 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
     const result = await agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit);
     await chatManager.update({ ...workingChat, messages: result.messages });
-    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval' });
-    else if (executionManager.get(chatId)?.state === 'running') executionManager.update(chatId, { state: 'completed' });
+    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId: execution.runId });
+    else if (executionManager.get(chatId)?.state === 'running') executionManager.update(chatId, { state: 'completed', runId: execution.runId });
     return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    executionManager.update(chatId, { state: 'failed', error: message });
+    executionManager.update(chatId, { state: 'failed', error: message, runId: execution.runId });
     emit({ type: 'error', error: message });
     return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: message };
   }
@@ -158,23 +159,34 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
 ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
 ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatId === undefined ? executionManager.list() : executionManager.get(requireIdentifier(chatId, 'Chat')) ?? null);
+ipcMain.handle('agent:list-recoverable-runs', async () => listRecoverableRuns(agentRuntime));
+ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
+  const id = requireIdentifier(runId, 'Execução recuperável');
+  const recoverable = listRecoverableRuns(agentRuntime).find((run) => run.runId === id);
+  if (!recoverable) throw new Error('Execução recuperável não encontrada.');
+  const { result } = await resumeRecoveredRun(agentRuntime, executionManager, recoverable);
+  const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+  if (chat) await chatManager.update({ ...chat, messages: result.messages });
+  return result;
+});
 ipcMain.handle('agent:list-interrupted-provider-requests', async () => chatRuntime.listInterruptedProviderRequests());
 ipcMain.handle('agent:approve', async (_event, approvalId: string) => {
   const id = requireIdentifier(approvalId, 'Aprovação');
   const approval = toolRuntime.listApprovals().find((item) => item.id === id);
   if (!approval?.chatId) throw new Error('Aprovação sem chat associado.');
   const chatId = approval.chatId;
-  executionManager.update(chatId, { state: 'running' });
+  const runId = agentRuntime.getPendingRunId(id);
+  executionManager.update(chatId, { state: 'running', runId });
   try {
     const result = await agentRuntime.resume(id);
     const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
     if (chat) await chatManager.update({ ...chat, messages: result.messages });
-    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval' });
-    else executionManager.update(chatId, { state: 'completed' });
+    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId });
+    else executionManager.update(chatId, { state: 'completed', runId });
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    executionManager.update(chatId, { state: 'failed', error: message });
+    executionManager.update(chatId, { state: 'failed', error: message, runId });
     throw error;
   }
 });
@@ -183,17 +195,18 @@ ipcMain.handle('agent:deny', async (_event, approvalId: string) => {
   const approval = toolRuntime.listApprovals().find((item) => item.id === id);
   if (!approval?.chatId) throw new Error('Aprovação sem chat associado.');
   const chatId = approval.chatId;
-  executionManager.update(chatId, { state: 'running' });
+  const runId = agentRuntime.getPendingRunId(id);
+  executionManager.update(chatId, { state: 'running', runId });
   try {
     const result = await agentRuntime.reject(id);
     const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
     if (chat) await chatManager.update({ ...chat, messages: result.messages });
-    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval' });
-    else executionManager.update(chatId, { state: 'completed' });
+    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId });
+    else executionManager.update(chatId, { state: 'completed', runId });
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    executionManager.update(chatId, { state: 'failed', error: message });
+    executionManager.update(chatId, { state: 'failed', error: message, runId });
     throw error;
   }
 });
