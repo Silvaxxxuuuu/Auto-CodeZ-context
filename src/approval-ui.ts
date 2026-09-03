@@ -1,8 +1,8 @@
 type ApprovalUiEvent = { type?: string; chatId?: string; runId?: string; pendingApprovalIds?: string[] };
 type ApprovalUiBridge = {
   onStreamEvent: (listener: (event: ApprovalUiEvent) => void) => () => void;
-  approveTool: (approvalId: string) => Promise<unknown>;
-  denyTool: (approvalId: string) => Promise<unknown>;
+  approveTool: (approvalId: string, filters?: { chatId?: string; runId?: string }) => Promise<unknown>;
+  denyTool: (approvalId: string, filters?: { chatId?: string; runId?: string }) => Promise<unknown>;
   listApprovals: (filters?: { chatId?: string; runId?: string }) => Promise<Array<{ id: string; chatId?: string; runId?: string; toolCall: { name: string; input: Record<string, unknown> } }>>;
 };
 
@@ -105,10 +105,13 @@ async function handleAction(event: Event): Promise<void> {
   if (!approvalId) return;
   button.disabled = true;
   try {
-    const approval = (await bridge.listApprovals({ chatId: currentChatId(), ...(activeRunId ? { runId: activeRunId } : {}) })).find((item) => item.id === approvalId);
-    if (!approval || approval.chatId !== currentChatId() || (activeRunId && approval.runId && approval.runId !== activeRunId)) throw new Error('Aprovação fora do contexto atual.');
-    if (button.dataset.acApprove) await bridge.approveTool(approvalId);
-    else await bridge.denyTool(approvalId);
+    const chatId = currentChatId();
+    const runId = activeRunId || currentRunId();
+    const approval = (await bridge.listApprovals({ chatId, ...(runId ? { runId } : {}) })).find((item) => item.id === approvalId);
+    if (!approval || approval.chatId !== chatId || (runId && approval.runId && approval.runId !== runId)) throw new Error('Aprovação fora do contexto atual.');
+    const scope = { chatId: approval.chatId, ...(approval.runId ? { runId: approval.runId } : {}) };
+    if (button.dataset.acApprove) await bridge.approveTool(approvalId, scope);
+    else await bridge.denyTool(approvalId, scope);
     if (approval.chatId) window.dispatchEvent(new CustomEvent('auto-codez-execution-refresh', { detail: { chatId: approval.chatId } }));
     await syncApprovals();
   } catch {
