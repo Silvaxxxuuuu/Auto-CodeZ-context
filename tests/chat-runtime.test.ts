@@ -69,7 +69,35 @@ test('send includes workspace context and tool definitions only when tools are s
   assert.equal(request.messages[2].content, 'Hello');
 });
 
-test('send does not expose workspace tools to a normal chat', async () => {
+test('send exposes only run_command to a normal chat and supplies the runtime OS', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry);
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    {
+      name: 'read_file',
+      description: 'Read a file',
+      parameters: { type: 'object' },
+      requiresWriteAccess: false,
+      requiresApproval: false,
+    },
+    {
+      name: 'run_command',
+      description: 'Execute a local command',
+      parameters: { type: 'object' },
+      requiresWriteAccess: false,
+      requiresApproval: true,
+    },
+  ]);
+
+  await runtime.send(config, chat('test-model', ''));
+  const request = requests[0] as { toolsEnabled: boolean; tools?: Array<{ name: string }>; messages: Array<{ content: string }> };
+  assert.equal(request.toolsEnabled, true);
+  assert.deepEqual(request.tools?.map((tool) => tool.name), ['run_command']);
+  assert.match(request.messages[0].content, /Runtime OS:/);
+  assert.match(request.messages[0].content, /direct, actionable request/i);
+});
+
+test('send does not expose workspace tools to a normal chat when run_command is unavailable', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
