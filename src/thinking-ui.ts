@@ -79,10 +79,11 @@ function renderStatus(): void {
   if (!card) return;
   const status = card.querySelector<HTMLElement>('.ac-thinking-status') || document.createElement('div');
   status.className = 'ac-thinking-status';
-  status.innerHTML = waitingApproval
+  const desired = waitingApproval
     ? '<span class="ac-thinking-label">Aguardando sua aprovação</span>'
     : '<span class="ac-thinking-label">Pensando</span><span class="ac-thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
-  card.prepend(status);
+  if (status.innerHTML !== desired) status.innerHTML = desired;
+  if (!status.parentElement) card.prepend(status);
 }
 
 function renderContext(): void {
@@ -95,7 +96,7 @@ function renderContext(): void {
     line.className = 'activity-line running ac-context-line';
     card.appendChild(line);
   }
-  line.textContent = lastActivity;
+  if (line.textContent !== lastActivity) line.textContent = lastActivity;
 }
 
 function removeThinkingStatus(): void {
