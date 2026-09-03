@@ -113,7 +113,7 @@ function initialize(): void {
   bridge?.onStreamEvent(handleStreamEvent);
   document.addEventListener('click', (event) => void handleAction(event), true);
   const nav = document.querySelector<HTMLElement>('#nav-panel');
-  if (nav) new MutationObserver(syncChat).observe(nav, { childList: true, subtree: true });
+  if (nav) new MutationObserver(syncChat).observe(nav, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
   void syncApprovals();
 }
 
