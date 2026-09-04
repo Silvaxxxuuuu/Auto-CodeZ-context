@@ -40,7 +40,7 @@ type DiffBridge = {
   onStreamEvent: (listener: (event: { type?: string; chatId?: string; runId?: string }) => void) => () => void;
 };
 
-type MonacoModule = typeof import('monaco-editor/esm/vs/editor/editor.api');
+type MonacoModule = typeof import('monaco-editor');
 type DiffEditor = ReturnType<MonacoModule['editor']['createDiffEditor']>;
 type TextModel = ReturnType<MonacoModule['editor']['createModel']>;
 
@@ -169,7 +169,7 @@ function disposeModels(): void {
 }
 
 async function loadMonaco(): Promise<MonacoModule> {
-  if (!monacoPromise) monacoPromise = import('monaco-editor/esm/vs/editor/editor.api');
+  if (!monacoPromise) monacoPromise = import('monaco-editor');
   return monacoPromise;
 }
 
@@ -300,7 +300,7 @@ async function refreshOpenReview(): Promise<void> {
     closeReview();
     return;
   }
-  const approvals = await bridge.listApprovals({ chatId }).catch(() => []);
+  const approvals = await bridge.listApprovals({ chatId }).catch((): Approval[] => []);
   const fresh = approvals.find((item) => item.id === approval.id);
   if (!fresh?.diffPlan?.changes.length) {
     closeReview();
@@ -336,7 +336,10 @@ document.addEventListener('auto-codez-open-diff-review', (event) => {
 
 root.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
-  if (target.closest('[data-approve], [data-deny]')) setProcessing(true);
+  if (!target.closest('[data-approve], [data-deny]')) return;
+  setProcessing(true);
+  window.setTimeout(() => { void refreshOpenReview(); }, 250);
+  window.setTimeout(() => { void refreshOpenReview(); }, 1200);
 }, true);
 
 bridge.onStreamEvent((event) => {
