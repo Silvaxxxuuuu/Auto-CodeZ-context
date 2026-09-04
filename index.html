@@ -17,42 +17,70 @@
   </head>
 
   <body>
-    <div id="auto-codez-static-diagnostic" style="position:fixed;left:16px;top:40px;z-index:2147483647;padding:10px 12px;background:#3b1010;color:#ffd6d6;border:1px solid #9c4040;border-radius:8px;font:12px/1.4 Consolas,monospace">JS EXECUTED · importing renderer</div>
     <div id="app"></div>
     <script>
       (() => {
-        const marker = document.getElementById('auto-codez-static-diagnostic');
-        const app = document.getElementById('app');
-        const stringify = (value) => {
-          if (value instanceof Error) return value.stack || value.message;
-          if (typeof value === 'string') return value;
-          try { return JSON.stringify(value); } catch { return String(value); }
-        };
-        const show = (title, detail = '') => {
-          if (marker) marker.textContent = title;
-          if (app && app.childElementCount === 0 && detail) {
-            app.innerHTML = `<pre style="box-sizing:border-box;margin:0;min-height:100vh;padding:72px 24px 24px;background:#0b0d11;color:#ffb4b4;font:13px/1.55 Consolas,monospace;white-space:pre-wrap;overflow:auto">${detail}</pre>`;
-          }
+        const load = (path) => import(path).then(
+          () => ({ path, ok: true }),
+          (error) => ({ path, ok: false, error }),
+        );
+
+        const showFailures = (failures) => {
+          if (!failures.length) return;
+          const marker = document.createElement('div');
+          marker.id = 'auto-codez-module-failures';
+          marker.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:520px;padding:10px 12px;background:#351414;color:#ffd4d4;border:1px solid #8d3f3f;border-radius:8px;font:12px/1.45 Consolas,monospace;white-space:pre-wrap;box-shadow:0 8px 28px #0008';
+          marker.textContent = `Falha em ${failures.length} módulo(s):\n${failures.map((item) => item.path).join('\n')}`;
+          document.body.appendChild(marker);
+          for (const failure of failures) console.error(`Falha ao inicializar ${failure.path}.`, failure.error);
         };
 
-        import('/src/renderer.ts').then(() => {
-          show('DYNAMIC IMPORT OK · renderer executou');
-          window.setTimeout(() => {
-            if (document.querySelector('.app-shell')) {
-              if (marker) marker.remove();
-            } else {
-              show('IMPORT OK · mas .app-shell não existe', 'O módulo /src/renderer.ts resolveu com sucesso, mas não criou .app-shell.');
+        load('/src/stream-performance.ts')
+          .then((streamResult) => {
+            if (!streamResult.ok) console.error('Falha ao inicializar /src/stream-performance.ts.', streamResult.error);
+            return load('/src/renderer.ts');
+          })
+          .then((rendererResult) => {
+            if (!rendererResult.ok) {
+              const app = document.getElementById('app');
+              if (app) {
+                app.innerHTML = '<pre style="box-sizing:border-box;margin:0;min-height:100vh;padding:24px;background:#0b0d11;color:#ffb4b4;font:13px/1.55 Consolas,monospace;white-space:pre-wrap">Falha ao carregar /src/renderer.ts.</pre>';
+              }
+              console.error('Falha ao inicializar /src/renderer.ts.', rendererResult.error);
+              return;
             }
-          }, 250);
-        }).catch((error) => {
-          show('DYNAMIC IMPORT FAILED', `Falha ao importar /src/renderer.ts\n\n${stringify(error)}\n\nlocation: ${location.href}\nautoCodez bridge: ${typeof window.autoCodez}`);
-        });
 
-        window.setTimeout(() => {
-          if (marker && marker.textContent === 'JS EXECUTED · importing renderer') {
-            show('DYNAMIC IMPORT PENDING > 5s', `A importação de /src/renderer.ts não resolveu nem rejeitou em 5 segundos.\n\nlocation: ${location.href}\nautoCodez bridge: ${typeof window.autoCodez}`);
-          }
-        }, 5000);
+            const modules = [
+              '/src/ui-polish.ts',
+              '/src/settings-ui.ts',
+              '/src/stop-control.ts',
+              '/src/composer-resilience.ts',
+              '/src/thinking-ui.ts',
+              '/src/chat-execution-ui.ts',
+              '/src/approval-ui.ts',
+              '/src/terminal-ui.ts',
+              '/src/activity-ui.ts',
+              '/src/diff-ui.ts',
+              '/src/git-ui.ts',
+              '/src/git-actions-ui.ts',
+              '/src/chat-rename-ui.ts',
+              '/src/api-settings-routing-ui.ts',
+              '/src/initial-chat-ui.ts',
+              '/src/profile-ui.ts',
+              '/src/chat-api-key-settings-ui.ts',
+              '/src/api-key-ui.ts',
+              '/src/error-recovery-ui.ts',
+              '/src/api-key-flow-polish.ts',
+              '/src/execution-visibility.ts',
+            ];
+
+            return Promise.all(modules.map(load)).then((results) => {
+              showFailures(results.filter((result) => !result.ok));
+            });
+          })
+          .catch((error) => {
+            console.error('Falha inesperada no carregamento da interface.', error);
+          });
       })();
     </script>
   </body>
