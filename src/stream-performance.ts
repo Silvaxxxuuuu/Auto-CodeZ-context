@@ -6,52 +6,48 @@ type StreamBridge = {
 
 const bridge = (window as unknown as { autoCodez?: StreamBridge }).autoCodez;
 
-if (bridge?.onStreamEvent && !(bridge.onStreamEvent as { __autoCodezBatched?: boolean }).__autoCodezBatched) {
+export function subscribeBatchedStreamEvents<T extends StreamEvent>(listener: (event: T) => void): () => void {
+  if (!bridge?.onStreamEvent) return () => undefined;
+
   const original = bridge.onStreamEvent.bind(bridge);
+  let queuedText = '';
+  let queuedEvent: StreamEvent | null = null;
+  let timer = 0;
+  let disposed = false;
 
-  const batched = (listener: (event: StreamEvent) => void): (() => void) => {
-    let queuedText = '';
-    let queuedEvent: StreamEvent | null = null;
-    let timer = 0;
-    let disposed = false;
-
-    const flush = (): void => {
-      timer = 0;
-      if (disposed || !queuedEvent) return;
-      const event = queuedEvent;
-      const text = queuedText;
-      queuedEvent = null;
-      queuedText = '';
-      listener(text ? { ...event, text } : event);
-    };
-
-    const flushNow = (): void => {
-      if (timer) {
-        window.clearTimeout(timer);
-        timer = 0;
-      }
-      flush();
-    };
-
-    const unsubscribe = original((event: StreamEvent) => {
-      if (event.type === 'delta' && event.text) {
-        queuedEvent = queuedEvent || event;
-        queuedText += event.text;
-        if (!timer) timer = window.setTimeout(flush, 33);
-        return;
-      }
-
-      flushNow();
-      listener(event);
-    });
-
-    return () => {
-      disposed = true;
-      flushNow();
-      unsubscribe();
-    };
+  const flush = (): void => {
+    timer = 0;
+    if (disposed || !queuedEvent) return;
+    const event = queuedEvent;
+    const text = queuedText;
+    queuedEvent = null;
+    queuedText = '';
+    listener((text ? { ...event, text } : event) as T);
   };
 
-  Object.defineProperty(batched, '__autoCodezBatched', { value: true });
-  bridge.onStreamEvent = batched;
+  const flushNow = (): void => {
+    if (timer) {
+      window.clearTimeout(timer);
+      timer = 0;
+    }
+    flush();
+  };
+
+  const unsubscribe = original((event: StreamEvent) => {
+    if (event.type === 'delta' && event.text) {
+      queuedEvent = queuedEvent || event;
+      queuedText += event.text;
+      if (!timer) timer = window.setTimeout(flush, 33);
+      return;
+    }
+
+    flushNow();
+    listener(event as T);
+  });
+
+  return () => {
+    disposed = true;
+    flushNow();
+    unsubscribe();
+  };
 }
