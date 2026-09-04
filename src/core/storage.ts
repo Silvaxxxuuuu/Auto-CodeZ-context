@@ -81,6 +81,14 @@ export class LocalStorage {
     }
   }
 
+  async remove(name: string): Promise<void> {
+    try {
+      await fs.rm(this.file(name), { force: true });
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+  }
+
   async readEncrypted(name: string): Promise<string | null> {
     try {
       const raw = await fs.readFile(this.file(name), 'utf8');
