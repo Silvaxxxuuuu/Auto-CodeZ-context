@@ -21,6 +21,18 @@ Core behavior:
 - If the user asks to create, modify, delete, rename, inspect, search, run, or manage something, map the request to the closest available tool instead of responding with generic instructions.
 - When the user gives a direct, actionable request that is supported by an available tool, issue the tool call immediately. Do not ask for information that Auto CodeZ already knows from its runtime context.
 - Never simulate a tool call, approval request, execution, or completion in natural-language text. Only actual tool calls and runtime events represent those states.
+- Never say that you are about to create, edit, run, inspect, search, or otherwise perform an action unless the same response actually contains the required tool call(s).
+- For multi-step requests, continue using tools until every requested step that can be performed with available tools is actually complete. Do not stop after the first successful operation merely to describe the remaining work.
+- Auto CodeZ supports multiple tool calls and multiple approval requests in one user request. When independent operations can be proposed together, issue all appropriate tool calls in the same response. When later operations depend on earlier results, continue with additional tool calls after the approved result is returned.
+- After an approval is granted and its tool result is returned, immediately continue the remaining requested work. A successful first tool result is not a final answer if the user's original task still contains unfinished actions.
+
+Live activity summaries:
+- Whenever your response contains one or more tool calls, the natural-language content of that response is not a user-facing answer. It is a short, dynamically generated live activity summary for the Auto CodeZ interface.
+- Generate that activity summary from the exact action you are taking now and the current context. Do not use a fixed generic label.
+- Keep it concise: normally one short sentence or phrase, in the user's language, with no markdown, no code block, and no long explanation.
+- Do not include file contents, planned future steps, or a completion claim in an activity summary.
+- Examples only illustrate the style and must not be copied mechanically: a repository lookup could become "Conferindo a implementação atual do provider"; a web action could become "Pesquisando a documentação do Vite"; a file operation could become "Montando os arquivos da página inicial".
+- The final natural-language answer is only produced after all requested tool work is complete or after a real limitation/error prevents further progress.
 
 Workspace and filesystem:
 - Contexto do workspace atual: when project context is supplied with this request, treat it as authoritative context for the active workspace.
@@ -56,6 +68,23 @@ async function nextWithAbortSignal<T>(signal: AbortSignal | undefined, next: () 
   if (!signal) return next();
   signal.throwIfAborted();
   return runWithAbortSignal(signal, next);
+}
+
+function activityEventForResponse(response: AIResponse): AIStreamEvent | undefined {
+  if (!response.toolCalls?.length) return undefined;
+  const message = response.content.trim().replace(/\s+/g, ' ').slice(0, 180);
+  if (!message) return undefined;
+  const firstTool = response.toolCalls[0];
+  return {
+    type: 'activity',
+    activity: {
+      type: 'thought',
+      message,
+      status: 'running',
+      toolCallId: firstTool.id,
+      toolName: firstTool.name,
+    },
+  };
 }
 
 export class ChatRuntime {
@@ -139,7 +168,14 @@ export class ChatRuntime {
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
       const journal = await this.requestJournal.begin(request);
-      if (journal.cachedResponse) { yield { type: 'start' }; if (journal.cachedResponse.content) yield { type: 'delta', text: journal.cachedResponse.content }; yield { type: 'complete', response: journal.cachedResponse, usage: journal.cachedResponse.usage }; return; }
+      if (journal.cachedResponse) {
+        yield { type: 'start' };
+        const cachedActivity = activityEventForResponse(journal.cachedResponse);
+        if (cachedActivity) yield cachedActivity;
+        if (journal.cachedResponse.content) yield { type: 'delta', text: journal.cachedResponse.content };
+        yield { type: 'complete', response: journal.cachedResponse, usage: journal.cachedResponse.usage };
+        return;
+      }
       let completed = false;
       try {
         if (adapter.stream) {
@@ -149,7 +185,15 @@ export class ChatRuntime {
             if (result.done) break;
             const event = result.value;
             if (event.type === 'activity' && event.activity) this.activity.emit(event.activity);
-            if (event.type === 'complete' && event.response) { await this.requestJournal.complete(journal.requestId, event.response); completed = true; }
+            if (event.type === 'complete' && event.response) {
+              const dynamicActivity = activityEventForResponse(event.response);
+              if (dynamicActivity?.activity) {
+                this.activity.emit(dynamicActivity.activity);
+                yield dynamicActivity;
+              }
+              await this.requestJournal.complete(journal.requestId, event.response);
+              completed = true;
+            }
             if (event.type === 'error' && !completed) await this.requestJournal.fail(journal.requestId, event.error || 'Erro durante o streaming.');
             yield event;
           }
@@ -158,6 +202,11 @@ export class ChatRuntime {
           await this.requestJournal.complete(journal.requestId, response);
           completed = true;
           yield { type: 'start' };
+          const dynamicActivity = activityEventForResponse(response);
+          if (dynamicActivity?.activity) {
+            this.activity.emit(dynamicActivity.activity);
+            yield dynamicActivity;
+          }
           if (response.content) yield { type: 'delta', text: response.content };
           yield { type: 'complete', response, usage: response.usage };
         }
