@@ -137,7 +137,7 @@ export class SessionManager
 
   async execute(
     session: AiSession,
-  ): Promise<AiSessionResult> {
+  ): Promise<AiSessionResult | null> {
     if (
       this.get(session.id) !==
       session
@@ -258,7 +258,7 @@ export class SessionManager
           session,
         );
 
-        throw error;
+        return null;
       }
 
       const message =
@@ -282,9 +282,7 @@ export class SessionManager
         session,
       );
 
-      throw new Error(
-        message,
-      );
+      return null;
     } finally {
       if (
         this.activeSessionId ===

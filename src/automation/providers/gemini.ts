@@ -5,109 +5,156 @@ import type {
 } from '../../ai/aiConnector';
 
 import {
-  findAiTab,
-  focusBrowserInput,
+  captureResponseReaderState,
+  readNewAiResponse,
+  type AiResponseReaderState,
+} from '../ai-response-reader';
+
+import {
+  verifyFocusedAiMessageInput,
+} from '../browser-input-verifier';
+
+import {
+  focusBrowserMessageInput,
   focusBrowserTab,
   pasteClipboardAndSend,
+  waitForAiTab,
 } from '../browser';
 
-export class GeminiConnector
-  implements AiConnector
-{
-  readonly provider =
-    'gemini' as const;
+import {
+  clipboard,
+  shell,
+} from 'electron';
+
+const GEMINI_URL = 'https://gemini.google.com/app';
+const GEMINI_TAB_TERMS = ['Gemini', 'gemini.google.com', 'Google Gemini'];
+
+export class GeminiConnector implements AiConnector {
+  readonly provider = 'gemini' as const;
+
+  private responseReader: AiResponseReaderState | null = null;
 
   async isAvailable(): Promise<boolean> {
-    const browserTab =
-      await findAiTab([
-        'Gemini',
-      ]);
-
-    return browserTab !== null;
+    return true;
   }
 
   async prepare(): Promise<boolean> {
-  const browserTab =
-    await findAiTab([
-      'Gemini',
-    ]);
+    const browserTab = await waitForAiTab(
+      GEMINI_TAB_TERMS,
+      2,
+      300,
+    );
 
-  return browserTab !== null;
-}
+    if (browserTab) {
+      return true;
+    }
 
-  async send(
-    request: AiRequest,
-  ): Promise<AiResponse> {
-    if (
-      request.provider !==
-      this.provider
-    ) {
+    try {
+      await shell.openExternal(GEMINI_URL);
+    }
+    catch {
+      return false;
+    }
+
+    const openedTab = await waitForAiTab(
+      GEMINI_TAB_TERMS,
+      30,
+      500,
+    );
+
+    return openedTab !== null;
+  }
+
+  async send(request: AiRequest): Promise<AiResponse> {
+    if (request.provider !== this.provider) {
       throw new Error(
         'O conector do Gemini recebeu um provider inválido.',
       );
     }
 
-    if (
-      !request.prompt.trim()
-    ) {
-      throw new Error(
-        'O prompt do Gemini está vazio.',
-      );
+    if (!request.prompt.trim()) {
+      throw new Error('O prompt do Gemini está vazio.');
     }
 
-    const browserTab =
-      await findAiTab([
-        'Gemini',
-      ]);
+    const browserTab = await waitForAiTab(
+      GEMINI_TAB_TERMS,
+      10,
+      300,
+    );
 
     if (!browserTab) {
       throw new Error(
-        'O Gemini não está aberto.',
+        'Não foi possível localizar a aba do Gemini no navegador.',
       );
     }
 
-    const selected =
-      await focusBrowserTab(
-        browserTab,
-      );
+    const selected = await focusBrowserTab(browserTab);
 
     if (!selected) {
       throw new Error(
-        'Não foi possível selecionar a aba do Gemini.',
+        'Não foi possível selecionar a aba correta do Gemini.',
       );
     }
 
-    const inputFocused =
-      await focusBrowserInput(
-        browserTab,
-      );
+    const inputFocused = await focusBrowserMessageInput(
+      browserTab,
+      this.provider,
+    );
 
     if (!inputFocused) {
       throw new Error(
-        'Não foi possível focar o campo de mensagem do Gemini.',
+        'O campo de mensagem do Gemini não foi identificado com segurança. O prompt não foi enviado.',
       );
     }
 
-    const sent =
-      await pasteClipboardAndSend();
+    const verifiedInput = await verifyFocusedAiMessageInput(
+      browserTab,
+      this.provider,
+    );
+
+    if (!verifiedInput) {
+      throw new Error(
+        'O foco do Gemini não foi confirmado no campo de mensagem. O prompt não foi enviado.',
+      );
+    }
+
+    clipboard.writeText(request.prompt);
+
+    this.responseReader = await captureResponseReaderState(
+      browserTab.handle,
+      request.prompt,
+    );
+
+    const sent = await pasteClipboardAndSend(
+      request.prompt,
+      browserTab,
+      this.provider,
+    );
 
     if (!sent) {
+      this.responseReader = null;
       throw new Error(
-        'Não foi possível enviar o prompt para o Gemini.',
+        'O Gemini não confirmou a inserção do prompt no campo de mensagem. O envio foi interrompido.',
       );
     }
 
     return {
-      provider:
-        this.provider,
-      content:
-        'Solicitação enviada ao Gemini.',
-      receivedAt:
-        Date.now(),
+      provider: this.provider,
+      content: 'Solicitação enviada ao Gemini.',
+      receivedAt: Date.now(),
     };
   }
 
   async readResponse(): Promise<AiResponse | null> {
-    return null;
+    const response = await readNewAiResponse(
+      this.responseReader,
+      this.provider,
+    );
+
+    if (response) {
+      this.responseReader = null;
+    }
+
+    return response;
   }
 }
