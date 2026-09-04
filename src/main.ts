@@ -17,6 +17,7 @@ import { ActivityRuntime } from './agent/activity-runtime';
 import { ApprovalRuntime } from './agent/approval-runtime';
 import { CommandRuntime } from './agent/command-runtime';
 import { DiffRuntime } from './agent/diff-runtime';
+import { ComputerContextRuntime } from './agent/computer-context';
 import { ExecutionManager } from './execution-manager';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
@@ -39,6 +40,7 @@ const diffRuntime = new DiffRuntime();
 const gitRuntime = new GitRuntime(() => projectManager.list());
 const gitService = new GitService(gitRuntime);
 const terminalService = new TerminalService(storage, () => projectManager.list());
+const computerContextRuntime = new ComputerContextRuntime();
 const toolRuntime = new ToolRuntime(workspaceRuntime, permissionRuntime, activityRuntime, approvalRuntime, commandRuntime, diffRuntime, storage);
 toolRuntime.configureGitRuntime(gitRuntime);
 const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefined, activityRuntime, undefined, toolRuntime.listDefinitions());
@@ -61,7 +63,8 @@ async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnTyp
   if (!chat) throw new Error('Chat não encontrado.');
   const config = chat.apiKeyId ? providerManager.getConfigForKey(chat.apiKeyId) : providerManager.getConfig(chat.providerId);
   if (chat.apiKeyId && config.id !== chat.providerId) throw new Error('A API key selecionada não pertence ao provider salvo neste chat.');
-  const projectContext = chat.projectId ? await projectManager.buildContext(chat.projectId) : undefined;
+  const computerContext = computerContextRuntime.build();
+  const projectContext = chat.projectId ? `${computerContext}\n\n${await projectManager.buildContext(chat.projectId)}` : computerContext;
   return { chat, config, projectContext };
 }
 
