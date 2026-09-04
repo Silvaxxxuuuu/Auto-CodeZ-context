@@ -20,6 +20,7 @@ const criticalEnhancements: Enhancement[] = [
   { name: 'approval-ui', load: () => import('./approval-ui') },
   { name: 'composer-resilience', load: () => import('./composer-resilience') },
   { name: 'live-activity-ui', load: () => import('./live-activity-ui') },
+  { name: 'provider-error-ui', load: () => import('./provider-error-ui') },
 ];
 
 const secondaryEnhancements: Enhancement[] = [
