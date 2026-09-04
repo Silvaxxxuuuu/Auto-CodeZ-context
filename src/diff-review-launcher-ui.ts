@@ -32,7 +32,7 @@ async function hydrate(): Promise<void> {
   const chatId = selectedChatId();
   const token = ++hydrateToken;
   if (!chatId) return;
-  const approvals = await bridge.listApprovals({ chatId }).catch(() => []);
+  const approvals = await bridge.listApprovals({ chatId }).catch((): Approval[] => []);
   if (token !== hydrateToken || selectedChatId() !== chatId) return;
   const reviewable = new Set(approvals.filter((approval) => approval.chatId === chatId && approval.diffPlan?.changes?.length).map((approval) => approval.id));
   document.querySelectorAll<HTMLElement>('[data-ac-approval]').forEach((card) => {
