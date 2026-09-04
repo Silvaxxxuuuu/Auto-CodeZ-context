@@ -12,6 +12,7 @@ const criticalEnhancements: Enhancement[] = [
   { name: 'settings-ui', load: () => import('./settings-ui') },
   { name: 'initial-chat-ui', load: () => import('./initial-chat-ui') },
   { name: 'profile-ui', load: () => import('./profile-ui') },
+  { name: 'chat-api-key-settings-ui', load: () => import('./chat-api-key-settings-ui') },
   { name: 'api-key-flow-polish', load: () => import('./api-key-flow-polish') },
   { name: 'api-settings-routing-ui', load: () => import('./api-settings-routing-ui') },
 ];
