@@ -15,6 +15,11 @@ const electronSecureStorage: SecureStorageAdapter = {
   decrypt: (value) => safeStorage.decryptString(value),
 };
 
+const SENSITIVE_JSON_FILES = new Set([
+  'agent-runs.json',
+  'tool-execution-journal.json',
+]);
+
 function isMissingFile(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
@@ -42,7 +47,7 @@ export class LocalStorage {
     return path.join(this.root, `.${name}.${crypto.randomUUID()}.tmp`);
   }
 
-  async read<T>(name: string, fallback: T): Promise<T> {
+  private async readPlain<T>(name: string, fallback: T): Promise<T> {
     try {
       const raw = await fs.readFile(this.file(name), 'utf8');
       return JSON.parse(raw) as T;
@@ -52,7 +57,25 @@ export class LocalStorage {
     }
   }
 
+  async read<T>(name: string, fallback: T): Promise<T> {
+    if (!SENSITIVE_JSON_FILES.has(name)) return this.readPlain(name, fallback);
+
+    try {
+      const encrypted = await this.readEncrypted(name);
+      if (encrypted !== null) return JSON.parse(encrypted) as T;
+    } catch {
+      // A legacy plaintext file is migrated on the next write.
+    }
+
+    return this.readPlain(name, fallback);
+  }
+
   async write<T>(name: string, value: T): Promise<void> {
+    if (SENSITIVE_JSON_FILES.has(name)) {
+      await this.writeEncrypted(name, JSON.stringify(value));
+      return;
+    }
+
     await fs.mkdir(this.root, { recursive: true });
     const destination = this.file(name);
     const temporary = this.temporaryFile(name);
