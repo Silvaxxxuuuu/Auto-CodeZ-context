@@ -52,7 +52,11 @@ test('agent recovery and tool journals are encrypted transparently', async () =>
     const storage = new LocalStorage(root, createSecureAdapter());
     await storage.init();
     const secret = 'sk-sensitive-runtime-copy';
-    const agentState = { version: 2, runs: [{ config: { apiKey: secret } }], approvals: [] };
+    const agentState: { version: number; runs: Array<{ config: { apiKey: string } }>; approvals: unknown[] } = {
+      version: 2,
+      runs: [{ config: { apiKey: secret } }],
+      approvals: [],
+    };
     const journal = [{ approvalId: 'approval-a', diffPlan: { changes: [{ after: 'private source code' }] } }];
 
     await storage.write('agent-runs.json', agentState);
@@ -71,7 +75,11 @@ test('legacy plaintext runtime state is read and migrated on the next write', as
   await withTempRoot(async (root) => {
     const storage = new LocalStorage(root, createSecureAdapter());
     await storage.init();
-    const legacy = { version: 2, runs: [{ runId: 'legacy-run' }], approvals: [] };
+    const legacy: { version: number; runs: Array<{ runId: string }>; approvals: unknown[] } = {
+      version: 2,
+      runs: [{ runId: 'legacy-run' }],
+      approvals: [],
+    };
     await writeFile(path.join(root, 'agent-runs.json'), JSON.stringify(legacy), 'utf8');
 
     assert.deepEqual(await storage.read('agent-runs.json', null), legacy);
