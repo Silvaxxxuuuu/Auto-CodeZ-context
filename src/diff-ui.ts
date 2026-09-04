@@ -1,4 +1,4 @@
-import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker.js?worker';
+import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 import 'monaco-editor/esm/vs/editor/editor.main.css';
 
 type DiffChange = {
