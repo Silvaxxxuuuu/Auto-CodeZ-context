@@ -107,16 +107,20 @@ function closeProfile(): void {
 document.addEventListener('click', (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
+
   if (target.closest('[data-action="profile"]')) {
     event.preventDefault();
+    event.stopImmediatePropagation();
     renderProfile();
     return;
   }
+
   if (target.closest('[data-profile-close]')) {
     event.preventDefault();
+    event.stopImmediatePropagation();
     closeProfile();
   }
-});
+}, true);
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && document.querySelector('.profile-overlay')) closeProfile();
