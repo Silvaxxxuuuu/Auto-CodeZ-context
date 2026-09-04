@@ -1,3 +1,5 @@
+import { currentAbortSignal } from './request-cancellation';
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 60_000;
 
@@ -8,7 +10,7 @@ export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestIn
     timedOut = true;
     controller.abort();
   }, timeoutMs);
-  const signal = init.signal;
+  const signal = init.signal ?? currentAbortSignal();
   const onAbort = (): void => controller.abort();
   signal?.addEventListener('abort', onAbort, { once: true });
   try {
