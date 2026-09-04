@@ -19,6 +19,7 @@ const criticalEnhancements: Enhancement[] = [
   { name: 'api-settings-routing-ui', load: () => import('./api-settings-routing-ui') },
   { name: 'approval-ui', load: () => import('./approval-ui') },
   { name: 'composer-resilience', load: () => import('./composer-resilience') },
+  { name: 'live-activity-ui', load: () => import('./live-activity-ui') },
 ];
 
 const secondaryEnhancements: Enhancement[] = [
