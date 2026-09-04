@@ -9,7 +9,7 @@ export interface TerminalOutputEvent { sessionId: string; stream: 'stdout' | 'st
 export interface TerminalExitEvent { sessionId: string; exitCode: number; signal?: string; }
 export interface TerminalSession { id: string; projectId: string; shell: TerminalShell; cwd: string; command: string; startedAt: number; finishedAt?: number; exitCode?: number; signal?: string; status: 'running' | 'exited' | 'failed' | 'killed'; }
 interface SessionEntry { session: TerminalSession; child: ChildProcessWithoutNullStreams; output: string; killRequested: boolean; }
-const MAX_SESSIONS = 12;
+const MAX_SESSIONS = 50;
 const MAX_OUTPUT_CHARS = 2_000_000;
 
 function shellCommand(shell: TerminalShell): { file: string; args: string[] } {
@@ -97,7 +97,7 @@ export class TerminalRuntime {
     child.stdout.on('data', (chunk) => append('stdout', chunk));
     child.stderr.on('data', (chunk) => append('stderr', chunk));
     child.once('error', (error) => this.finish(entry, entry.killRequested ? 'killed' : 'failed', 1, entry.killRequested ? 'SIGTERM' : error.message));
-    child.once('close', (exitCode, signal) => this.finish(entry, entry.killRequested || Boolean(signal) ? 'killed' : exitCode === 0 ? 'exited' : 'failed', exitCode ?? 1, signal ?? undefined));
+    child.once('close', (exitCode, signal) => this.finish(entry, entry.killRequested || Boolean(signal) ? 'killed' : exitCode === 0 ? 'exited' : 'failed', exitCode ?? 1, signal ?? (entry.killRequested ? 'SIGTERM' : undefined)));
   }
 
   private pruneFinishedSessions(): void {
