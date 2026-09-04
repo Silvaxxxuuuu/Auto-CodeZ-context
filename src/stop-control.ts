@@ -1,9 +1,7 @@
-declare global {
-  interface Window {
-    autoCodez: {
-      stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
-    };
-  }
+type StopBridge = { stopChat: (chatId: string) => Promise<{ stopped: boolean }> };
+
+function stopBridge(): StopBridge {
+  return (window as unknown as { autoCodez: StopBridge }).autoCodez;
 }
 
 function syncStopButton(): void {
@@ -40,7 +38,7 @@ function install(): void {
     event.preventDefault();
     event.stopImmediatePropagation();
     const chatId = selectedChatId();
-    if (chatId) void window.autoCodez.stopChat(chatId).catch(() => undefined);
+    if (chatId) void stopBridge().stopChat(chatId).catch(() => undefined);
   }, true);
 
   syncStopButton();
