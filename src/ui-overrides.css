@@ -59,6 +59,12 @@
 .chat-rename-input:focus { border-color: #667487; box-shadow: 0 0 0 2px #66748722; }
 .composer-wrap { padding-bottom: 18px; }
 
+.rail > .rail-spacer { order: 10; }
+.rail > .api-key-rail-button { order: 11; }
+.rail > .terminal-rail-button { order: 12; }
+.rail > .rail-button[data-action="profile"] { order: 13; }
+#ac-ai-recovery { display: none !important; }
+
 @media (max-width: 720px) {
   .message.user,.message.assistant,.message.tool,.message.system { width: 92%; }
   .topbar .top-action.icon-only[data-action="ai-settings"] { min-width: 38px; width: 38px; padding: 0; }
