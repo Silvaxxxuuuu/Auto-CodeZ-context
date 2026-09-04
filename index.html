@@ -18,6 +18,39 @@
 
   <body>
     <div id="app"></div>
+    <script>
+      (() => {
+        const failures = [];
+        const app = document.getElementById('app');
+        const stringify = (value) => {
+          if (value instanceof Error) return value.stack || value.message;
+          if (typeof value === 'string') return value;
+          try { return JSON.stringify(value); } catch { return String(value); }
+        };
+        const renderDiagnostic = (message) => {
+          failures.push(message);
+          if (!app || app.childElementCount > 0) return;
+          app.innerHTML = `<pre style="box-sizing:border-box;margin:0;min-height:100vh;padding:24px;background:#0b0d11;color:#ffb4b4;font:13px/1.55 Consolas,monospace;white-space:pre-wrap;overflow:auto">Auto CodeZ renderer diagnostic\n\n${failures.join('\n\n')}</pre>`;
+        };
+        window.addEventListener('error', (event) => {
+          const target = event.target;
+          if (target instanceof HTMLScriptElement) {
+            renderDiagnostic(`Falha ao carregar script: ${target.src}`);
+            return;
+          }
+          renderDiagnostic(`window.error\n${event.message || 'Erro desconhecido'}\n${event.filename || ''}:${event.lineno || 0}:${event.colno || 0}\n${stringify(event.error)}`);
+        }, true);
+        window.addEventListener('unhandledrejection', (event) => {
+          renderDiagnostic(`unhandledrejection\n${stringify(event.reason)}`);
+        });
+        window.setTimeout(() => {
+          if (app && app.childElementCount === 0) {
+            const scripts = Array.from(document.querySelectorAll('script[type="module"][src]')).map((script) => script.getAttribute('src')).join('\n');
+            renderDiagnostic(`O #app permaneceu vazio após 3000 ms.\nreadyState: ${document.readyState}\nlocation: ${location.href}\nautoCodez bridge: ${typeof window.autoCodez}\n\nMódulos declarados:\n${scripts}`);
+          }
+        }, 3000);
+      })();
+    </script>
     <script type="module" src="/src/settings-ui.ts"></script>
     <script type="module" src="/src/stream-performance.ts"></script>
     <script type="module" src="/src/renderer.ts"></script>
