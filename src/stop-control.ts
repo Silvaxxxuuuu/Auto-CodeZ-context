@@ -17,16 +17,15 @@ function syncStopButton(): void {
   button.classList.toggle('is-stop', stopping);
   button.title = stopping ? 'Parar' : 'Enviar';
   button.setAttribute('aria-label', stopping ? 'Parar' : 'Enviar');
-  button.replaceChildren();
   if (stopping) {
-    const icon = document.createElement('span');
-    icon.className = 'stop-icon';
-    icon.setAttribute('aria-hidden', 'true');
-    button.appendChild(icon);
+    if (!button.querySelector(':scope > .stop-icon')) {
+      button.replaceChildren(Object.assign(document.createElement('span'), { className: 'stop-icon' }));
+    }
     button.disabled = false;
-  } else {
-    button.disabled = !selectedChatId() || !prompt.value.trim();
+    return;
   }
+  if (button.querySelector(':scope > .stop-icon')) button.replaceChildren();
+  button.disabled = !selectedChatId() || !prompt.value.trim();
 }
 
 function disconnectObservers(): void {
@@ -48,7 +47,7 @@ function installWhenReady(): void {
   promptObserver = new MutationObserver(syncStopButton);
   promptObserver.observe(prompt, { attributes: true, attributeFilter: ['disabled'] });
   buttonObserver = new MutationObserver(syncStopButton);
-  buttonObserver.observe(button, { attributes: true, attributeFilter: ['disabled', 'class'] });
+  buttonObserver.observe(button, { attributes: true, childList: true });
   button.addEventListener('click', (event) => {
     if (!button.classList.contains('is-stop')) return;
     event.preventDefault();
