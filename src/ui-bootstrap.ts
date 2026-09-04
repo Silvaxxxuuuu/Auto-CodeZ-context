@@ -1,7 +1,6 @@
 const modules = [
   () => import('./renderer'),
   () => import('./settings-ui'),
-  () => import('./stream-performance'),
   () => import('./stop-control'),
   () => import('./composer-resilience'),
   () => import('./thinking-ui'),
