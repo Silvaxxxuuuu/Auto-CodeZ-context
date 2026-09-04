@@ -1,14 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import test from 'node:test';
 import { ComputerContextRuntime } from '../src/agent/computer-context';
 
-describe('ComputerContextRuntime', () => {
-  it('exposes stable local computer context without reading arbitrary file contents', () => {
-    const context = new ComputerContextRuntime().build();
+test('ComputerContextRuntime exposes stable local computer context without reading arbitrary file contents', () => {
+  const context = new ComputerContextRuntime().build();
 
-    expect(context).toContain('Local computer context:');
-    expect(context).toContain(`User: `);
-    expect(context).toContain('Home:');
-    expect(context).toContain('Drives:');
-    expect(context).not.toContain('password');
-  });
+  assert.match(context, /Local computer context:/);
+  assert.match(context, /User: /);
+  assert.match(context, /Home:/);
+  assert.match(context, /Drives:/);
+  assert.doesNotMatch(context, /password/i);
 });
