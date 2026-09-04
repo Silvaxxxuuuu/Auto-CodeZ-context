@@ -10,6 +10,10 @@
   content: none !important;
 }
 
+.send-button.is-stop > .ac-lucide-icon {
+  display: none !important;
+}
+
 .send-button.is-stop .stop-icon {
   display: block;
   width: 10px;
