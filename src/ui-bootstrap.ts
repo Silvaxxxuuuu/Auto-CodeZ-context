@@ -9,7 +9,6 @@ const modules = [
   () => import('./approval-ui'),
   () => import('./terminal-ui'),
   () => import('./activity-ui'),
-  () => import('./git-actions-ui'),
   () => import('./chat-rename-ui'),
   () => import('./api-settings-routing-ui'),
   () => import('./initial-chat-ui'),
