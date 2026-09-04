@@ -16,7 +16,6 @@ function relabelActiveBadges(root: ParentNode = document): void {
 function syncManager(): void {
   const backdrop = document.querySelector<HTMLElement>('.api-key-manager-backdrop');
   if (!backdrop) return;
-  backdrop.querySelector<HTMLElement>('.api-key-flow-status')?.remove();
   relabelActiveBadges(backdrop);
 }
 
