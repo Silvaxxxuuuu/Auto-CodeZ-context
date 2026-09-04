@@ -14,6 +14,11 @@ const modules = [
   () => import('./initial-chat-ui'),
   () => import('./profile-ui'),
   () => import('./chat-api-key-settings-ui'),
+  () => import('./api-key-ui'),
+  () => import('./ui-polish'),
+  () => import('./error-recovery-ui'),
+  () => import('./api-key-flow-polish'),
+  () => import('./execution-visibility'),
 ] as const;
 
 export async function bootstrap(): Promise<void> {
