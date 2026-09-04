@@ -77,13 +77,16 @@ export class ChatRuntime {
     return this.requestJournal.listInterrupted();
   }
 
-  private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string) {
+  private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal) {
     const adapter = this.registry.get(config.id);
     let model: AIModel;
     try {
-      const availableModels = await this.models.list(config);
+      signal?.throwIfAborted();
+      const availableModels = await runWithAbortSignal(signal, () => this.models.list(config));
+      signal?.throwIfAborted();
       model = this.models.find(availableModels, chat.model, config.id);
     } catch (error) {
+      if (isAbortError(error)) throw error;
       model = this.models.fallbackForConfiguredModel(config, chat.model);
       this.activity.emit({ type: 'action', message: `${adapter.displayName}: descoberta de modelos indisponível; usando o modelo já configurado (${model.id}).`, status: 'pending' });
     }
@@ -116,7 +119,7 @@ export class ChatRuntime {
   async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal): Promise<AIResponse> {
     try {
       signal?.throwIfAborted();
-      const { adapter, request, resolution } = await this.prepare(config, chat, projectContext);
+      const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal);
       this.activity.start('action', `Enviando mensagem para ${adapter.displayName}`);
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
@@ -149,7 +152,7 @@ export class ChatRuntime {
   async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal): AsyncGenerator<AIStreamEvent> {
     try {
       signal?.throwIfAborted();
-      const { adapter, request, resolution } = await this.prepare(config, chat, projectContext);
+      const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal);
       this.activity.start('action', `Transmitindo resposta de ${adapter.displayName}`);
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
