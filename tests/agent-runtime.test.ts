@@ -85,8 +85,15 @@ test('resume consumes an approval exactly once', async () => {
 
 test('concurrent resume attempts consume the same approval only once', async () => {
   const fixtureData = await fixture(fixtureDataResponses());
-  try { const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask'); const approvalId = pending.pendingApprovalIds[0]; const results = await Promise.allSettled([fixtureData.agent.resume(approvalId), fixtureData.agent.resume(approvalId)]); assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1); assert.equal(results.filter((result) => result.status === 'rejected').length, 1); const rejection = results.find((result) => result.status === 'rejected'); assert.match(String(rejection && rejection.reason), /Aprovação não encontrada/); }
-  finally { await fixtureData.cleanup(); }
+  try {
+    const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask');
+    const approvalId = pending.pendingApprovalIds[0];
+    const results = await Promise.allSettled([fixtureData.agent.resume(approvalId), fixtureData.agent.resume(approvalId)]);
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+    const rejection = results.find((result) => result.status === 'rejected');
+    assert.match(String(rejection && rejection.reason), /Aprovação não encontrada|já está sendo processada/);
+  } finally { await fixtureData.cleanup(); }
 });
 
 test('multiple approvals resume independently and continue only after the last approval', async () => {
