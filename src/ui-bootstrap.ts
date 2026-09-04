@@ -1,26 +1,26 @@
 const modules = [
-  './renderer',
-  './settings-ui',
-  './stream-performance',
-  './stop-control',
-  './composer-resilience',
-  './thinking-ui',
-  './chat-execution-ui',
-  './approval-ui',
-  './terminal-ui',
-  './activity-ui',
-  './diff-ui',
-  './git-ui',
-  './git-actions-ui',
-  './chat-rename-ui',
-  './api-settings-routing-ui',
-  './initial-chat-ui',
-  './profile-ui',
-  './chat-api-key-settings-ui',
+  () => import('./renderer'),
+  () => import('./settings-ui'),
+  () => import('./stream-performance'),
+  () => import('./stop-control'),
+  () => import('./composer-resilience'),
+  () => import('./thinking-ui'),
+  () => import('./chat-execution-ui'),
+  () => import('./approval-ui'),
+  () => import('./terminal-ui'),
+  () => import('./activity-ui'),
+  () => import('./diff-ui'),
+  () => import('./git-ui'),
+  () => import('./git-actions-ui'),
+  () => import('./chat-rename-ui'),
+  () => import('./api-settings-routing-ui'),
+  () => import('./initial-chat-ui'),
+  () => import('./profile-ui'),
+  () => import('./chat-api-key-settings-ui'),
 ] as const;
 
 async function bootstrap(): Promise<void> {
-  for (const modulePath of modules) await import(modulePath);
+  for (const loadModule of modules) await loadModule();
 }
 
 void bootstrap().catch((error: unknown) => {
