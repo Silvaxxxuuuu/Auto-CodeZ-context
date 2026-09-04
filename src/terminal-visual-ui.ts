@@ -1,5 +1,5 @@
 const ANSI_PATTERN = /\x1b\[([0-9;]*)m/g;
-const CONTROL_PATTERN = /\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -\/]*[@-~]/g;
+const CONTROL_PATTERN = /\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[\x20-\x2f]*[@-~]/g;
 
 const foreground: Record<number, string> = {
   30: '#7b8492', 31: '#e06c75', 32: '#98c379', 33: '#d19a66', 34: '#61afef', 35: '#c678dd', 36: '#56b6c2', 37: '#d7dce2',
