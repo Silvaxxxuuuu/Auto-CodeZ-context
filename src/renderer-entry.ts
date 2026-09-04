@@ -6,12 +6,12 @@ type Enhancement = {
 };
 
 const criticalEnhancements: Enhancement[] = [
+  { name: 'terminal-ui', load: () => import('./terminal-ui') },
+  { name: 'api-key-ui', load: () => import('./api-key-ui') },
   { name: 'ui-polish', load: () => import('./ui-polish') },
   { name: 'settings-ui', load: () => import('./settings-ui') },
   { name: 'initial-chat-ui', load: () => import('./initial-chat-ui') },
   { name: 'profile-ui', load: () => import('./profile-ui') },
-  { name: 'terminal-ui', load: () => import('./terminal-ui') },
-  { name: 'api-key-ui', load: () => import('./api-key-ui') },
   { name: 'api-key-flow-polish', load: () => import('./api-key-flow-polish') },
   { name: 'api-settings-routing-ui', load: () => import('./api-settings-routing-ui') },
 ];
