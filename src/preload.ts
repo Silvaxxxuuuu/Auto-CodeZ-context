@@ -78,6 +78,35 @@ type AiResponseResult = {
   error?: string;
 };
 
+type AiSessionResult = {
+  sessionId: string;
+  provider:
+    | 'chatgpt'
+    | 'claude'
+    | 'gemini';
+  response: {
+    provider:
+      | 'chatgpt'
+      | 'claude'
+      | 'gemini';
+    content: string;
+    receivedAt: number;
+  };
+  parsed: {
+    raw: string;
+    explanation: string;
+    files: Array<{
+      path: string;
+      content: string;
+    }>;
+  };
+};
+
+type AiSessionError = {
+  sessionId: string;
+  error: string;
+};
+
 contextBridge.exposeInMainWorld(
   'autoCodez',
   {
@@ -123,8 +152,13 @@ onAiSessionState: (
       state:
         | 'idle'
         | 'preparing'
+        | 'sending'
         | 'waiting'
         | 'receiving'
+        | 'analyzing'
+        | 'proposing'
+        | 'awaitingApproval'
+        | 'applying'
         | 'completed'
         | 'failed'
         | 'cancelled';
@@ -138,8 +172,13 @@ onAiSessionState: (
       state:
         | 'idle'
         | 'preparing'
+        | 'sending'
         | 'waiting'
         | 'receiving'
+        | 'analyzing'
+        | 'proposing'
+        | 'awaitingApproval'
+        | 'applying'
         | 'completed'
         | 'failed'
         | 'cancelled';
@@ -160,6 +199,57 @@ onAiSessionState: (
     );
   };
 },
+
+onAiSessionResult: (
+  callback: (
+    result: AiSessionResult,
+  ) => void,
+) => {
+  const listener = (
+    _event: Electron.IpcRendererEvent,
+    result: AiSessionResult,
+  ) => {
+    callback(result);
+  };
+
+  ipcRenderer.on(
+    'ai-session-result',
+    listener,
+  );
+
+  return () => {
+    ipcRenderer.removeListener(
+      'ai-session-result',
+      listener,
+    );
+  };
+},
+
+onAiSessionError: (
+  callback: (
+    error: AiSessionError,
+  ) => void,
+) => {
+  const listener = (
+    _event: Electron.IpcRendererEvent,
+    error: AiSessionError,
+  ) => {
+    callback(error);
+  };
+
+  ipcRenderer.on(
+    'ai-session-error',
+    listener,
+  );
+
+  return () => {
+    ipcRenderer.removeListener(
+      'ai-session-error',
+      listener,
+    );
+  };
+},
+
     sendAiRequest: (
   request: {
     provider:

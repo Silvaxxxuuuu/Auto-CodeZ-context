@@ -1,9 +1,8 @@
 import './index.css';
 import * as monaco from 'monaco-editor';
 
-import {
-  createAiSession,
-  type AiProviderId,
+import type {
+  AiProviderId,
 } from './core/ai-session';
 
 type ProjectFile = {
@@ -92,88 +91,133 @@ type AiProvider = {
   name: string;
 };
 
+type AiSessionResult = {
+  sessionId: string;
+  provider: AiProviderId;
+  response: {
+    provider: AiProviderId;
+    content: string;
+    receivedAt: number;
+  };
+  parsed: {
+    raw: string;
+    explanation: string;
+    files: Array<{
+      path: string;
+      content: string;
+    }>;
+  };
+};
+
+type AiSessionError = {
+  sessionId: string;
+  error: string;
+};
+
 declare global {
   interface Window {
     autoCodez: {
       createAiSession: (
-  request: {
-    provider:
-      | 'chatgpt'
-      | 'claude'
-      | 'gemini';
-    request: string;
-    projectRoot: string;
-    activeFile: {
-      path: string;
-      relativePath: string;
-      name: string;
-      content: string;
-    };
-    files: {
-      path: string;
-      relativePath: string;
-      name: string;
-      content: string;
-    }[];
-  },
-) => Promise<{
-  success: boolean;
-  sessionId?: string;
-  state?:
-    | 'idle'
-    | 'preparing'
-    | 'waiting'
-    | 'receiving'
-    | 'completed'
-    | 'failed'
-    | 'cancelled';
-  error?: string;
-}>;
+        request: {
+          provider:
+            | 'chatgpt'
+            | 'claude'
+            | 'gemini';
+          request: string;
+          projectRoot: string;
+          activeFile: {
+            path: string;
+            relativePath: string;
+            name: string;
+            content: string;
+          };
+          files: {
+            path: string;
+            relativePath: string;
+            name: string;
+            content: string;
+          }[];
+        },
+      ) => Promise<{
+        success: boolean;
+        sessionId?: string;
+        state?:
+          | 'idle'
+          | 'preparing'
+          | 'sending'
+          | 'waiting'
+          | 'receiving'
+          | 'analyzing'
+          | 'proposing'
+          | 'awaitingApproval'
+          | 'applying'
+          | 'completed'
+          | 'failed'
+          | 'cancelled';
+        error?: string;
+      }>;
 
-cancelAiSession: (
-  sessionId: string,
-) => Promise<{
-  success: boolean;
-  error?: string;
-}>;
+      cancelAiSession: (
+        sessionId: string,
+      ) => Promise<{
+        success: boolean;
+        error?: string;
+      }>;
 
-onAiSessionState: (
-  callback: (
-    state: {
-      sessionId: string;
-      state:
-        | 'idle'
-        | 'preparing'
-        | 'waiting'
-        | 'receiving'
-        | 'completed'
-        | 'failed'
-        | 'cancelled';
-    },
-  ) => void,
-) => () => void;
+      onAiSessionState: (
+        callback: (
+          state: {
+            sessionId: string;
+            state:
+              | 'idle'
+              | 'preparing'
+              | 'sending'
+              | 'waiting'
+              | 'receiving'
+              | 'analyzing'
+              | 'proposing'
+              | 'awaitingApproval'
+              | 'applying'
+              | 'completed'
+              | 'failed'
+              | 'cancelled';
+          },
+        ) => void,
+      ) => () => void;
+
+      onAiSessionResult: (
+        callback: (
+          result: AiSessionResult,
+        ) => void,
+      ) => () => void;
+
+      onAiSessionError: (
+        callback: (
+          error: AiSessionError,
+        ) => void,
+      ) => () => void;
 
       sendAiRequest: (
-  request: {
-    provider:
-      | 'chatgpt'
-      | 'claude'
-      | 'gemini';
-    prompt: string;
-    timeoutMs?: number;
-  },
-) => Promise<{
-  success: boolean;
-  response?: {
-    provider:
-      | 'chatgpt'
-      | 'claude'
-      | 'gemini';
-    content: string;
-    receivedAt: number;
-  };
-  error?: string;
-}>;
+        request: {
+          provider:
+            | 'chatgpt'
+            | 'claude'
+            | 'gemini';
+          prompt: string;
+          timeoutMs?: number;
+        },
+      ) => Promise<{
+        success: boolean;
+        response?: {
+          provider:
+            | 'chatgpt'
+            | 'claude'
+            | 'gemini';
+          content: string;
+          receivedAt: number;
+        };
+        error?: string;
+      }>;
       inspectExternalAi: (
         provider: string,
       ) => Promise<InspectExternalAiResult>;
@@ -599,6 +643,7 @@ let projectFiles: ProjectFile[] = [];
 let projectRootPath: string | null = null;
 let openTabs: OpenTab[] = [];
 let activeTabPath: string | null = null;
+let activeAiSessionId: string | null = null;
 
 let editorInstance:
   | monaco.editor.IStandaloneCodeEditor
@@ -662,6 +707,19 @@ window.autoCodez.onAiSessionState(
       state,
     );
 
+    if (
+      sessionId === activeAiSessionId &&
+      (
+        state === 'completed' ||
+        state === 'failed' ||
+        state === 'cancelled'
+      )
+    ) {
+      if (state !== 'completed') {
+        activeAiSessionId = null;
+      }
+    }
+
     switch (state) {
       case 'preparing':
         showStatus(
@@ -669,15 +727,45 @@ window.autoCodez.onAiSessionState(
         );
         break;
 
+      case 'sending':
+        showStatus(
+          'Enviando solicitação para a IA em segundo plano...',
+        );
+        break;
+
       case 'waiting':
         showStatus(
-          'Enviando solicitação para a IA...',
+          'Aguardando resposta da IA...',
         );
         break;
 
       case 'receiving':
         showStatus(
-          'Recebendo resposta...',
+          'Recebendo resposta da IA...',
+        );
+        break;
+
+      case 'analyzing':
+        showStatus(
+          'Analisando resposta da IA...',
+        );
+        break;
+
+      case 'proposing':
+        showStatus(
+          'Preparando alteração proposta...',
+        );
+        break;
+
+      case 'awaitingApproval':
+        showStatus(
+          'Aguardando sua aprovação...',
+        );
+        break;
+
+      case 'applying':
+        showStatus(
+          'Aplicando alteração...',
         );
         break;
 
@@ -692,6 +780,10 @@ window.autoCodez.onAiSessionState(
           'A sessão da IA falhou.',
           true,
         );
+        activeAiSessionId = null;
+        if (sendButton) {
+          sendButton.disabled = false;
+        }
         break;
 
       case 'cancelled':
@@ -699,8 +791,197 @@ window.autoCodez.onAiSessionState(
           'Solicitação cancelada.',
           true,
         );
+        activeAiSessionId = null;
+        if (sendButton) {
+          sendButton.disabled = false;
+        }
         break;
     }
+  },
+);
+
+window.autoCodez.onAiSessionResult(
+  (result) => {
+    if (
+      result.sessionId !==
+      activeAiSessionId
+    ) {
+      return;
+    }
+
+    const changes =
+      result.parsed.files;
+
+    if (
+      changes.length === 0
+    ) {
+      activeAiSessionId = null;
+      if (sendButton) {
+        sendButton.disabled = false;
+      }
+
+      showStatus(
+        result.parsed.explanation ||
+          'A IA respondeu, mas nenhuma alteração de arquivo foi identificada.',
+        true,
+      );
+
+      console.log(
+        'AI_SESSION_RESPONSE',
+        result.response.content,
+      );
+
+      return;
+    }
+
+    if (
+      changes.length > 1
+    ) {
+      activeAiSessionId = null;
+      if (sendButton) {
+        sendButton.disabled = false;
+      }
+
+      showStatus(
+        `A IA retornou alterações para ${changes.length} arquivos. A revisão de múltiplos arquivos ainda não está habilitada. Nenhuma alteração foi aplicada.`,
+        true,
+      );
+
+      console.log(
+        'AI_SESSION_RESPONSE',
+        result.response.content,
+      );
+
+      return;
+    }
+
+    const change =
+      changes[0];
+
+    const normalizedResponsePath =
+      change.path
+        .replaceAll('\\', '/')
+        .replace(/^\.\//, '')
+        .toLowerCase();
+
+    const activeTab =
+      activeTabPath
+        ? openTabs.find(
+            (tab) =>
+              tab.path ===
+              activeTabPath,
+          )
+        : null;
+
+    const activeMatches =
+      activeTab &&
+      (
+        activeTab.relativePath
+          .replaceAll('\\', '/')
+          .toLowerCase() ===
+          normalizedResponsePath ||
+        activeTab.path
+          .replaceAll('\\', '/')
+          .toLowerCase() ===
+          normalizedResponsePath
+      );
+
+    if (activeMatches) {
+      activeAiSessionId = null;
+      createProposal(
+        change.content,
+      );
+      showStatus(
+        'A IA retornou uma alteração. Revise a proposta.',
+      );
+      return;
+    }
+
+    const targetFile =
+      projectFiles.find(
+        (file) =>
+          file.type === 'file' &&
+          (
+            file.relativePath
+              .replaceAll('\\', '/')
+              .toLowerCase() ===
+              normalizedResponsePath ||
+            file.path
+              .replaceAll('\\', '/')
+              .toLowerCase() ===
+              normalizedResponsePath
+          ),
+      );
+
+    if (!targetFile) {
+      activeAiSessionId = null;
+      if (sendButton) {
+        sendButton.disabled = false;
+      }
+
+      showStatus(
+        `A IA respondeu com uma alteração para "${change.path}", mas esse arquivo não pertence ao projeto aberto.`,
+        true,
+      );
+      return;
+    }
+
+    void (async () => {
+      await openFile(targetFile);
+
+      const tab =
+        openTabs.find(
+          (item) =>
+            item.path ===
+            targetFile.path,
+        );
+
+      if (!tab) {
+        activeAiSessionId = null;
+        if (sendButton) {
+          sendButton.disabled = false;
+        }
+
+        showStatus(
+          'Não foi possível abrir o arquivo retornado pela IA.',
+          true,
+        );
+        return;
+      }
+
+      activeAiSessionId = null;
+      createProposal(
+        change.content,
+      );
+      showStatus(
+        'A IA retornou uma alteração. Revise a proposta.',
+      );
+    })();
+  },
+);
+
+window.autoCodez.onAiSessionError(
+  ({
+    sessionId,
+    error,
+  }) => {
+    if (
+      sessionId !==
+      activeAiSessionId
+    ) {
+      return;
+    }
+
+    activeAiSessionId = null;
+
+    if (sendButton) {
+      sendButton.disabled = false;
+    }
+
+    showStatus(
+      error,
+      true,
+    );
   },
 );
 
@@ -2345,6 +2626,14 @@ async function sendMessage() {
     return;
   }
 
+  if (activeAiSessionId) {
+    showStatus(
+      'A IA ainda está processando a solicitação anterior.',
+      true,
+    );
+    return;
+  }
+
   if (pendingProposal) {
     showStatus(
       'Aceite ou rejeite a alteração atual antes de enviar outra solicitação.',
@@ -2409,8 +2698,12 @@ async function sendMessage() {
         true,
       );
 
+      sendButton.disabled = false;
       return;
     }
+
+    activeAiSessionId =
+      result.sessionId || null;
 
     prompt.value = '';
 
@@ -2421,15 +2714,15 @@ async function sendMessage() {
       `Enviando para ${provider.name}...`,
     );
   } catch (error) {
+    activeAiSessionId = null;
+    sendButton.disabled = false;
+
     showStatus(
       error instanceof Error
         ? error.message
         : 'Não foi possível iniciar a sessão.',
       true,
     );
-  } finally {
-    sendButton!.disabled =
-      pendingProposal !== null;
   }
 }
 
