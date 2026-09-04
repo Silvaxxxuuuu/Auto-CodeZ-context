@@ -5,28 +5,30 @@ type Enhancement = {
   load: () => Promise<unknown>;
 };
 
-const enhancements: Enhancement[] = [
+const criticalEnhancements: Enhancement[] = [
   { name: 'ui-polish', load: () => import('./ui-polish') },
   { name: 'settings-ui', load: () => import('./settings-ui') },
-  { name: 'stop-control', load: () => import('./stop-control') },
+  { name: 'initial-chat-ui', load: () => import('./initial-chat-ui') },
+  { name: 'profile-ui', load: () => import('./profile-ui') },
+  { name: 'terminal-ui', load: () => import('./terminal-ui') },
+  { name: 'api-key-ui', load: () => import('./api-key-ui') },
+  { name: 'api-key-flow-polish', load: () => import('./api-key-flow-polish') },
+  { name: 'api-settings-routing-ui', load: () => import('./api-settings-routing-ui') },
+];
+
+const secondaryEnhancements: Enhancement[] = [
   { name: 'composer-resilience', load: () => import('./composer-resilience') },
   { name: 'thinking-ui', load: () => import('./thinking-ui') },
   { name: 'chat-execution-ui', load: () => import('./chat-execution-ui') },
   { name: 'approval-ui', load: () => import('./approval-ui') },
-  { name: 'terminal-ui', load: () => import('./terminal-ui') },
   { name: 'activity-ui', load: () => import('./activity-ui') },
   { name: 'diff-ui', load: () => import('./diff-ui') },
   { name: 'git-ui', load: () => import('./git-ui') },
   { name: 'git-actions-ui', load: () => import('./git-actions-ui') },
   { name: 'chat-rename-ui', load: () => import('./chat-rename-ui') },
-  { name: 'api-settings-routing-ui', load: () => import('./api-settings-routing-ui') },
-  { name: 'initial-chat-ui', load: () => import('./initial-chat-ui') },
-  { name: 'profile-ui', load: () => import('./profile-ui') },
-  { name: 'chat-api-key-settings-ui', load: () => import('./chat-api-key-settings-ui') },
-  { name: 'api-key-ui', load: () => import('./api-key-ui') },
   { name: 'error-recovery-ui', load: () => import('./error-recovery-ui') },
-  { name: 'api-key-flow-polish', load: () => import('./api-key-flow-polish') },
   { name: 'execution-visibility', load: () => import('./execution-visibility') },
+  { name: 'stop-control', load: () => import('./stop-control') },
   { name: 'stream-performance', load: () => import('./stream-performance') },
 ];
 
@@ -46,10 +48,19 @@ function renderFailures(): void {
   if (!existing) document.body.appendChild(marker);
 }
 
-for (const enhancement of enhancements) {
-  void enhancement.load().catch((error: unknown) => {
+async function loadEnhancement(enhancement: Enhancement): Promise<void> {
+  try {
+    await enhancement.load();
+  } catch (error) {
     failures.set(enhancement.name, error);
     console.error(`Falha ao inicializar ${enhancement.name}.`, error);
     renderFailures();
-  });
+  }
 }
+
+async function initializeEnhancements(): Promise<void> {
+  for (const enhancement of criticalEnhancements) await loadEnhancement(enhancement);
+  for (const enhancement of secondaryEnhancements) void loadEnhancement(enhancement);
+}
+
+void initializeEnhancements();
