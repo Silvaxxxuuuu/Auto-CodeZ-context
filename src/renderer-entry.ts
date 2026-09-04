@@ -18,6 +18,7 @@ const criticalEnhancements: Enhancement[] = [
   { name: 'api-key-manager-ux', load: () => import('./api-key-manager-ux') },
   { name: 'api-settings-routing-ui', load: () => import('./api-settings-routing-ui') },
   { name: 'approval-ui', load: () => import('./approval-ui') },
+  { name: 'diff-review-launcher-ui', load: () => import('./diff-review-launcher-ui') },
   { name: 'composer-resilience', load: () => import('./composer-resilience') },
   { name: 'live-activity-ui', load: () => import('./live-activity-ui') },
   { name: 'provider-error-ui', load: () => import('./provider-error-ui') },
