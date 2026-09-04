@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
     if (result.error) throw new Error(result.error);
     return result;
   },
+  stopChat: (chatId: string) => invoke('chat:stop', requireIdentifier(chatId, 'Chat')),
   onStreamEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('chat:stream-event', handler);
