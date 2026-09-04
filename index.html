@@ -18,43 +18,6 @@
 
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/stream-performance.ts"></script>
-    <script type="module" src="/src/renderer.ts"></script>
-    <script>
-      window.addEventListener('DOMContentLoaded', async () => {
-        const modules = [
-          '/src/ui-polish.ts',
-          '/src/settings-ui.ts',
-          '/src/stop-control.ts',
-          '/src/composer-resilience.ts',
-          '/src/thinking-ui.ts',
-          '/src/chat-execution-ui.ts',
-          '/src/approval-ui.ts',
-          '/src/terminal-ui.ts',
-          '/src/activity-ui.ts',
-          '/src/chat-rename-ui.ts',
-          '/src/api-settings-routing-ui.ts',
-          '/src/initial-chat-ui.ts',
-          '/src/profile-ui.ts',
-          '/src/chat-api-key-settings-ui.ts',
-          '/src/api-key-ui.ts',
-          '/src/error-recovery-ui.ts',
-          '/src/api-key-flow-polish.ts',
-          '/src/execution-visibility.ts',
-          '/src/diff-ui.ts',
-          '/src/git-ui.ts',
-          '/src/git-actions-ui.ts',
-        ];
-
-        for (const modulePath of modules) {
-          try {
-            await import(modulePath);
-          } catch (error) {
-            console.error(`Falha ao inicializar ${modulePath}.`, error);
-          }
-          await new Promise((resolve) => setTimeout(resolve, 0));
-        }
-      }, { once: true });
-    </script>
+    <script type="module" src="/src/renderer-bootstrap.ts"></script>
   </body>
 </html>
