@@ -4,30 +4,12 @@ import path from 'node:path';
 
 export const SYSTEM_WORKSPACE_ID = '__system__';
 
-function existingDirectory(candidates: string[]): string | undefined {
-  return candidates.map((candidate) => path.resolve(candidate)).find((candidate) => {
-    try {
-      return fs.statSync(candidate).isDirectory();
-    } catch {
-      return false;
-    }
-  });
-}
-
 export function getSystemWorkspaceRoot(): string {
-  const home = os.homedir();
-  const oneDriveCandidates = [
-    process.env.OneDriveConsumer,
-    process.env.OneDriveCommercial,
-    process.env.OneDrive,
-  ].filter((value): value is string => Boolean(value));
-
-  const desktop = existingDirectory([
-    ...oneDriveCandidates.map((root) => path.join(root, 'Desktop')),
-    path.join(home, 'Desktop'),
-  ]);
-
-  if (desktop) return desktop;
-
-  return path.resolve(path.join(home, 'Desktop'));
+  const home = path.resolve(os.homedir());
+  try {
+    if (fs.statSync(home).isDirectory()) return home;
+  } catch {
+    // Fall through to the normalized home path so callers still get a stable root.
+  }
+  return home;
 }
