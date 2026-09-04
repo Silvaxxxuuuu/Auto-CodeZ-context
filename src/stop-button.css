@@ -1,0 +1,18 @@
+.send-button.is-stop {
+  position: relative;
+  font-size: 0;
+}
+
+.send-button.is-stop::before {
+  content: '';
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.send-button.is-stop:disabled {
+  opacity: 1;
+  cursor: pointer;
+}
