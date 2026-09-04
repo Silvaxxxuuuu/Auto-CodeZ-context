@@ -7,6 +7,7 @@ import { ProviderRegistry } from './provider-registry';
 import { ProviderRequestJournal } from './provider-request-journal';
 import { formatProviderError, normalizeProviderError } from './provider-errors';
 import { SYSTEM_PROJECT_ID } from '../agent/command-runtime';
+import { runWithAbortSignal } from './request-cancellation';
 
 const AUTOCODEZ_SYSTEM_INSTRUCTIONS = `
 You are operating inside Auto CodeZ, a local desktop AI development agent. Auto CodeZ is not only a chat interface. When tools are provided, you have controlled access to the user's active local workspace and should use those tools to perform development tasks requested by the user.
@@ -45,6 +46,16 @@ function runtimePlatform(): string {
   if (process.platform === 'darwin') return 'macOS';
   if (process.platform === 'linux') return 'Linux';
   return process.platform;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+async function nextWithAbortSignal<T>(signal: AbortSignal | undefined, next: () => Promise<IteratorResult<T>>): Promise<IteratorResult<T>> {
+  if (!signal) return next();
+  signal.throwIfAborted();
+  return runWithAbortSignal(signal, next);
 }
 
 export class ChatRuntime {
@@ -102,8 +113,9 @@ export class ChatRuntime {
     };
   }
 
-  async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string): Promise<AIResponse> {
+  async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal): Promise<AIResponse> {
     try {
+      signal?.throwIfAborted();
       const { adapter, request, resolution } = await this.prepare(config, chat, projectContext);
       this.activity.start('action', `Enviando mensagem para ${adapter.displayName}`);
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
@@ -115,16 +127,18 @@ export class ChatRuntime {
         return journal.cachedResponse;
       }
       try {
-        const response = await adapter.send(config, request);
+        const response = await runWithAbortSignal(signal, () => adapter.send(config, request));
         await this.requestJournal.complete(journal.requestId, response);
         this.activity.success('complete', 'Resposta recebida.');
         return response;
       } catch (error) {
+        if (isAbortError(error)) throw error;
         const normalized = normalizeProviderError(adapter.displayName, 'request', error);
         await this.requestJournal.fail(journal.requestId, normalized.message);
         throw normalized;
       }
     } catch (error) {
+      if (isAbortError(error)) throw error;
       const normalized = normalizeProviderError(config.displayName, 'request', error);
       const message = formatProviderError(normalized);
       this.activity.failure('error', message);
@@ -132,8 +146,9 @@ export class ChatRuntime {
     }
   }
 
-  async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string): AsyncGenerator<AIStreamEvent> {
+  async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal): AsyncGenerator<AIStreamEvent> {
     try {
+      signal?.throwIfAborted();
       const { adapter, request, resolution } = await this.prepare(config, chat, projectContext);
       this.activity.start('action', `Transmitindo resposta de ${adapter.displayName}`);
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
@@ -150,7 +165,11 @@ export class ChatRuntime {
       let completed = false;
       try {
         if (adapter.stream) {
-          for await (const event of adapter.stream(config, request)) {
+          const iterator = adapter.stream(config, request)[Symbol.asyncIterator]();
+          while (true) {
+            const result = await nextWithAbortSignal(signal, () => iterator.next());
+            if (result.done) break;
+            const event = result.value;
             if (event.type === 'activity' && event.activity) this.activity.emit(event.activity);
             if (event.type === 'complete' && event.response) {
               await this.requestJournal.complete(journal.requestId, event.response);
@@ -160,7 +179,7 @@ export class ChatRuntime {
             yield event;
           }
         } else {
-          const response = await adapter.send(config, request);
+          const response = await runWithAbortSignal(signal, () => adapter.send(config, request));
           await this.requestJournal.complete(journal.requestId, response);
           completed = true;
           yield { type: 'start' };
@@ -169,6 +188,7 @@ export class ChatRuntime {
         }
         this.activity.success('complete', 'Resposta recebida.');
       } catch (error) {
+        if (isAbortError(error)) throw error;
         if (!completed) {
           const normalized = normalizeProviderError(adapter.displayName, 'stream', error);
           await this.requestJournal.fail(journal.requestId, normalized.message);
@@ -177,6 +197,7 @@ export class ChatRuntime {
         throw error;
       }
     } catch (error) {
+      if (isAbortError(error)) throw error;
       const normalized = normalizeProviderError(config.displayName, 'stream', error);
       const message = formatProviderError(normalized);
       this.activity.failure('error', message);
