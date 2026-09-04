@@ -52,6 +52,14 @@ let mainWindow: BrowserWindow | null = null;
 function sendTerminalEvent(event: unknown): void { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('terminal:event', event); }
 function sendActivity(event: unknown): void { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('agent:activity', event); }
 
+function alignExecutionRun(chatId: string, runId: string): void {
+  const current = executionManager.get(chatId);
+  if (current?.runId === runId) return;
+  const startedAt = current?.startedAt ?? Date.now();
+  if (current) executionManager.remove(chatId);
+  executionManager.start(chatId, startedAt, runId);
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({ width: 1440, height: 920, minWidth: 960, minHeight: 680, webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false } });
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
@@ -60,10 +68,30 @@ function createWindow(): void {
 }
 
 async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnType<ChatManager['list']>>[number]; config: AIProviderConfig; projectContext?: string }> {
-  const chat = (await chatManager.list()).find((item) => item.id === chatId);
-  if (!chat) throw new Error('Chat não encontrado.');
-  const config = chat.apiKeyId ? providerManager.getConfigForKey(chat.apiKeyId) : providerManager.getConfig(chat.providerId);
-  if (chat.apiKeyId && config.id !== chat.providerId) throw new Error('A API key selecionada não pertence ao provider salvo neste chat.');
+  const storedChat = (await chatManager.list()).find((item) => item.id === chatId);
+  if (!storedChat) throw new Error('Chat não encontrado.');
+
+  let chat = storedChat;
+  let config: AIProviderConfig;
+
+  if (chat.apiKeyId) {
+    const keys = await providerManager.listKeys();
+    const exactKey = keys.find((item) => item.id === chat.apiKeyId);
+    if (exactKey) {
+      config = providerManager.getConfigForKey(exactKey.id);
+    } else {
+      const legacyProviderReference = chat.apiKeyId === chat.providerId || keys.some((item) => item.providerId === chat.apiKeyId);
+      if (!legacyProviderReference) throw new Error('A IA salva selecionada neste chat não está mais disponível. Abra “IAs salvas” e escolha outra credencial.');
+      const replacement = keys.find((item) => item.providerId === chat.providerId && item.active) || keys.find((item) => item.providerId === chat.providerId);
+      if (!replacement) throw new Error('A IA salva usada por este chat não existe mais. Abra “IAs salvas” e escolha outra credencial.');
+      chat = await chatManager.updateSettings({ chatId: chat.id, providerId: chat.providerId, model: chat.model, apiKeyId: replacement.id, intelligence: chat.intelligence, permissionLevel: chat.permissionLevel });
+      config = providerManager.getConfigForKey(replacement.id);
+    }
+  } else {
+    config = providerManager.getConfig(chat.providerId);
+  }
+
+  if (config.id !== chat.providerId) throw new Error('A API key selecionada não pertence ao provider salvo neste chat.');
   const computerContext = computerContextRuntime.build();
   const projectContext = chat.projectId ? `${computerContext}\n\n${await projectManager.buildContext(chat.projectId)}` : computerContext;
   return { chat, config, projectContext };
@@ -142,14 +170,20 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
   activeStreamControllers.set(chatId, { runId: execution.runId, controller });
 
   const emit = (event: AIStreamEvent): void => {
+    if (event.runId && event.runId !== execution.runId) {
+      alignExecutionRun(chatId, event.runId);
+      execution.runId = event.runId;
+      activeStreamControllers.set(chatId, { runId: event.runId, controller });
+    }
+    const runId = event.runId || execution.runId;
     try {
-      if (event.type === 'approval_required') executionManager.update(chatId, { state: 'waiting_approval', runId: execution.runId });
-      else if (event.type === 'error') executionManager.update(chatId, { state: 'failed', error: event.error, runId: execution.runId });
-      else if (event.type === 'tool_call') executionManager.update(chatId, { state: 'running', currentTool: event.toolCall?.name, runId: execution.runId });
+      if (event.type === 'approval_required') executionManager.update(chatId, { state: 'waiting_approval', runId });
+      else if (event.type === 'error') executionManager.update(chatId, { state: 'failed', error: event.error, runId });
+      else if (event.type === 'tool_call') executionManager.update(chatId, { state: 'running', currentTool: event.toolCall?.name, runId });
     } catch {
       // Execution bookkeeping must never interrupt the provider stream.
     }
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', { ...event, chatId, runId: execution.runId });
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', { ...event, chatId, runId });
   };
 
   emit({ type: 'start' });
@@ -207,6 +241,7 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
   if (!approval?.chatId) throw new Error('Aprovação não pertence ao contexto informado.');
   const chatId = approval.chatId;
   const runId = agentRuntime.getPendingRunId(id);
+  alignExecutionRun(chatId, runId);
   executionManager.update(chatId, { state: 'running', runId });
   try {
     const result = await agentRuntime.resume(id);
@@ -230,6 +265,7 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
   if (!approval?.chatId) throw new Error('Aprovação não pertence ao contexto informado.');
   const chatId = approval.chatId;
   const runId = agentRuntime.getPendingRunId(id);
+  alignExecutionRun(chatId, runId);
   executionManager.update(chatId, { state: 'running', runId });
   try {
     const result = await agentRuntime.reject(id);
