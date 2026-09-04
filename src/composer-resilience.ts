@@ -29,18 +29,18 @@ async function verify(): Promise<void> {
 
 function startRecovery(): void {
   if (recoveryTimer !== null) return;
-  recoveryTimer = window.setInterval(() => {
+  recoveryTimer = window.setInterval((): void => {
     if (!prompt.disabled) { window.clearInterval(recoveryTimer!); recoveryTimer = null; return; }
     void verify();
   }, 750);
 }
 
-bridge.onStreamEvent((event) => {
+bridge.onStreamEvent((event): void => {
   if (event.chatId && event.chatId !== activeChatId()) return;
   if (event.type === 'start') startRecovery();
-  if (event.type === 'complete' || event.type === 'error' || event.type === 'cancelled') window.setTimeout(() => void verify(), 0);
+  if (event.type === 'complete' || event.type === 'error' || event.type === 'cancelled') window.setTimeout((): void => { void verify(); }, 0);
 });
 
-window.addEventListener('focus', () => void verify());
-document.addEventListener('visibilitychange', () => { if (!document.hidden) void verify(); });
+window.addEventListener('focus', (): void => { void verify(); });
+document.addEventListener('visibilitychange', (): void => { if (!document.hidden) void verify(); });
 startRecovery();
