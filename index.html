@@ -19,27 +19,34 @@
   <body>
     <div id="app"></div>
     <script type="module" src="/src/renderer.ts"></script>
-    <script type="module" src="/src/settings-ui.ts"></script>
-    <script type="module" src="/src/stream-performance.ts"></script>
-    <script type="module" src="/src/stop-control.ts"></script>
-    <script type="module" src="/src/composer-resilience.ts"></script>
-    <script type="module" src="/src/thinking-ui.ts"></script>
-    <script type="module" src="/src/chat-execution-ui.ts"></script>
-    <script type="module" src="/src/approval-ui.ts"></script>
-    <script type="module" src="/src/terminal-ui.ts"></script>
-    <script type="module" src="/src/activity-ui.ts"></script>
-    <script type="module" src="/src/chat-rename-ui.ts"></script>
-    <script type="module" src="/src/api-settings-routing-ui.ts"></script>
-    <script type="module" src="/src/initial-chat-ui.ts"></script>
-    <script type="module" src="/src/profile-ui.ts"></script>
-    <script type="module" src="/src/chat-api-key-settings-ui.ts"></script>
-    <script type="module" src="/src/api-key-ui.ts"></script>
-    <script type="module" src="/src/ui-polish.ts"></script>
-    <script type="module" src="/src/error-recovery-ui.ts"></script>
-    <script type="module" src="/src/api-key-flow-polish.ts"></script>
-    <script type="module" src="/src/execution-visibility.ts"></script>
-    <script type="module" src="/src/diff-ui.ts"></script>
-    <script type="module" src="/src/git-ui.ts"></script>
-    <script type="module" src="/src/git-actions-ui.ts"></script>
+    <script>
+      window.addEventListener('DOMContentLoaded', () => {
+        void Promise.all([
+          import('/src/settings-ui.ts'),
+          import('/src/stop-control.ts'),
+          import('/src/composer-resilience.ts'),
+          import('/src/thinking-ui.ts'),
+          import('/src/chat-execution-ui.ts'),
+          import('/src/approval-ui.ts'),
+          import('/src/terminal-ui.ts'),
+          import('/src/activity-ui.ts'),
+          import('/src/chat-rename-ui.ts'),
+          import('/src/api-settings-routing-ui.ts'),
+          import('/src/initial-chat-ui.ts'),
+          import('/src/profile-ui.ts'),
+          import('/src/chat-api-key-settings-ui.ts'),
+          import('/src/api-key-ui.ts'),
+          import('/src/ui-polish.ts'),
+          import('/src/error-recovery-ui.ts'),
+          import('/src/api-key-flow-polish.ts'),
+          import('/src/execution-visibility.ts'),
+          import('/src/diff-ui.ts'),
+          import('/src/git-ui.ts'),
+          import('/src/git-actions-ui.ts'),
+        ]).catch((error) => {
+          console.error('Falha ao inicializar módulos auxiliares da interface do Auto CodeZ.', error);
+        });
+      }, { once: true });
+    </script>
   </body>
 </html>
