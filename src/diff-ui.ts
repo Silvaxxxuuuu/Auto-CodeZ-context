@@ -209,7 +209,7 @@ function renderRecoveredApproval(approval: Approval): void {
 
 async function restorePendingApprovals(): Promise<void> {
   try {
-    const approvals = await window.autoCodez.listApprovals();
+    const approvals = await window.autoCodez.listApprovals() as unknown as Approval[];
     approvals.filter((approval) => approval.diffPlan).sort((a, b) => a.createdAt - b.createdAt).forEach(renderRecoveredApproval);
   } catch {
     // A recuperação visual não deve interromper a interface principal.
