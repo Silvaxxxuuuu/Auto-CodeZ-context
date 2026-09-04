@@ -8,7 +8,6 @@ export class ApprovalRuntime {
   private readonly inFlight = new Set<string>();
 
   request(input: Omit<ApprovalRequest, 'id' | 'createdAt'>): ApprovalRequest {
-    if (!input.chatId || !input.runId) throw new Error('Uma aprovação precisa pertencer a um chat e a uma execução.');
     const approval: ApprovalRequest = { ...input, id: crypto.randomUUID(), createdAt: Date.now() };
     this.pending.set(approval.id, approval);
     return approval;
