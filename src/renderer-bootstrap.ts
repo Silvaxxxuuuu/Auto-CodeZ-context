@@ -24,6 +24,12 @@ const enhancementModules: readonly ModuleLoader[] = [
   ['git-actions-ui', () => import('./git-actions-ui')],
 ];
 
+function setDevelopmentTitle(state: 'ready' | 'degraded'): void {
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    document.title = `Auto CodeZ · UI ${state}`;
+  }
+}
+
 function showBootstrapError(failures: string[]): void {
   const existing = document.getElementById('auto-codez-bootstrap-error');
   if (existing) existing.remove();
@@ -72,6 +78,7 @@ async function bootstrap(): Promise<void> {
     await import('./renderer');
   } catch (error) {
     console.error('Falha ao inicializar renderer.', error);
+    setDevelopmentTitle('degraded');
     showBootstrapError(['renderer']);
     return;
   }
@@ -86,7 +93,9 @@ async function bootstrap(): Promise<void> {
   }
 
   failures.push(...verifyCriticalUi().filter((name) => !failures.includes(name)));
-  document.documentElement.dataset.autoCodezUiRuntime = failures.length ? 'degraded' : 'ready';
+  const state = failures.length ? 'degraded' : 'ready';
+  document.documentElement.dataset.autoCodezUiRuntime = state;
+  setDevelopmentTitle(state);
 
   if (failures.length) showBootstrapError(failures);
 }
