@@ -1,5 +1,5 @@
-type ExecutionSnapshot = { state?: string } | null;
-type Approval = { id: string; chatId?: string };
+type ExecutionSnapshot = { state?: string; runId?: string; updatedAt?: number } | null;
+type Approval = { id: string; chatId?: string; runId?: string };
 type ComposerBridge = {
   listExecutions: (chatId?: string) => Promise<ExecutionSnapshot>;
   listApprovals: (filters?: { chatId?: string }) => Promise<Approval[]>;
@@ -11,75 +11,73 @@ const prompt = document.querySelector<HTMLTextAreaElement>('#prompt');
 const sendButton = document.querySelector<HTMLButtonElement>('#send-button');
 if (!prompt || !sendButton) throw new Error('Composer não encontrado.');
 
-let recoveryTimer: number | null = null;
-let checkInFlight = false;
+let syncToken = 0;
+let periodicTimer: number | null = null;
 
 function activeChatId(): string | undefined {
-  return document.querySelector<HTMLElement>('.chat-item.selected')?.dataset.chat;
+  return document.querySelector<HTMLElement>('.chat-item.selected[data-chat]')?.dataset.chat;
 }
 
-function release(): void {
-  prompt.disabled = false;
-  prompt.dataset.executionLocked = 'false';
-  sendButton.dataset.executionLocked = 'false';
-  sendButton.disabled = !activeChatId() || !prompt.value.trim();
+function applyLocked(locked: boolean): void {
+  prompt.disabled = locked;
+  prompt.dataset.executionLocked = String(locked);
+  sendButton.dataset.executionLocked = String(locked);
+  sendButton.disabled = locked || !activeChatId() || !prompt.value.trim();
 }
 
-async function verify(): Promise<void> {
-  if (!prompt.disabled || checkInFlight) return;
+async function sync(): Promise<void> {
   const chatId = activeChatId();
+  const token = ++syncToken;
   if (!chatId) {
-    release();
+    applyLocked(false);
     return;
   }
 
-  checkInFlight = true;
   try {
-    const execution = await bridge.listExecutions(chatId);
-    if (execution?.state === 'waiting_approval') {
-      const approvals = (await bridge.listApprovals({ chatId })).filter((approval) => approval.chatId === chatId);
-      if (!approvals.length) release();
-      return;
-    }
-    if (execution?.state !== 'running') release();
+    const [execution, approvals] = await Promise.all([
+      bridge.listExecutions(chatId),
+      bridge.listApprovals({ chatId }),
+    ]);
+    if (token !== syncToken || activeChatId() !== chatId) return;
+
+    const ownedApprovals = approvals.filter((approval) => approval.chatId === chatId);
+    const hasApprovals = ownedApprovals.length > 0;
+    const running = execution?.state === 'running';
+    const waiting = execution?.state === 'waiting_approval';
+    const locked = running || hasApprovals || (waiting && hasApprovals);
+    applyLocked(locked);
   } catch {
-    // Falhas transitórias de IPC não devem alterar uma execução realmente ativa.
-  } finally {
-    checkInFlight = false;
+    // Preserve the current UI state on transient IPC failures.
   }
 }
 
-function startRecovery(): void {
-  if (recoveryTimer !== null) return;
-  recoveryTimer = window.setInterval((): void => {
-    if (!prompt.disabled) {
-      window.clearInterval(recoveryTimer!);
-      recoveryTimer = null;
-      return;
-    }
-    void verify();
-  }, 750);
+function ensurePeriodicSync(): void {
+  if (periodicTimer !== null) return;
+  periodicTimer = window.setInterval(() => {
+    void sync();
+  }, 1500);
 }
 
 bridge.onStreamEvent((event): void => {
   if (event.chatId && event.chatId !== activeChatId()) return;
-  if (event.type === 'start' || event.type === 'approval_required') startRecovery();
-  if (event.type === 'complete' || event.type === 'error' || event.type === 'cancelled') {
-    window.setTimeout((): void => { void verify(); }, 0);
-  }
+  void sync();
+  if (event.type === 'start' || event.type === 'approval_required') ensurePeriodicSync();
 });
 
-window.addEventListener('focus', (): void => { void verify(); });
-document.addEventListener('visibilitychange', (): void => {
-  if (!document.hidden) void verify();
-});
+prompt.addEventListener('input', () => { void sync(); });
+window.addEventListener('focus', () => { void sync(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void sync(); });
+window.addEventListener('auto-codez-chat-refresh', () => { void sync(); });
+window.addEventListener('auto-codez-execution-refresh', () => { void sync(); });
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
-  if (target.closest('[data-approve], [data-deny]')) {
-    window.setTimeout((): void => { void verify(); }, 250);
-    window.setTimeout((): void => { void verify(); }, 900);
+  if (target.closest('[data-chat], [data-approve], [data-deny]')) {
+    window.setTimeout(() => { void sync(); }, 0);
+    window.setTimeout(() => { void sync(); }, 300);
+    window.setTimeout(() => { void sync(); }, 1200);
   }
 }, true);
 
-startRecovery();
+ensurePeriodicSync();
+void sync();
