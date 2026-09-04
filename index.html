@@ -17,11 +17,13 @@
   </head>
 
   <body>
+    <div id="auto-codez-static-diagnostic" style="position:fixed;left:16px;top:40px;z-index:2147483647;padding:10px 12px;background:#3b1010;color:#ffd6d6;border:1px solid #9c4040;border-radius:8px;font:12px/1.4 Consolas,monospace">STATIC HTML DIAGNOSTIC · 8c-current</div>
     <div id="app"></div>
     <script>
       (() => {
         const failures = [];
         const app = document.getElementById('app');
+        const marker = document.getElementById('auto-codez-static-diagnostic');
         const stringify = (value) => {
           if (value instanceof Error) return value.stack || value.message;
           if (typeof value === 'string') return value;
@@ -29,9 +31,11 @@
         };
         const renderDiagnostic = (message) => {
           failures.push(message);
+          if (marker) marker.textContent = `JS EXECUTED · ${message.split('\n')[0]}`;
           if (!app || app.childElementCount > 0) return;
           app.innerHTML = `<pre style="box-sizing:border-box;margin:0;min-height:100vh;padding:24px;background:#0b0d11;color:#ffb4b4;font:13px/1.55 Consolas,monospace;white-space:pre-wrap;overflow:auto">Auto CodeZ renderer diagnostic\n\n${failures.join('\n\n')}</pre>`;
         };
+        if (marker) marker.textContent = 'JS EXECUTED · waiting for renderer';
         window.addEventListener('error', (event) => {
           const target = event.target;
           if (target instanceof HTMLScriptElement) {
@@ -47,6 +51,8 @@
           if (app && app.childElementCount === 0) {
             const scripts = Array.from(document.querySelectorAll('script[type="module"][src]')).map((script) => script.getAttribute('src')).join('\n');
             renderDiagnostic(`O #app permaneceu vazio após 3000 ms.\nreadyState: ${document.readyState}\nlocation: ${location.href}\nautoCodez bridge: ${typeof window.autoCodez}\n\nMódulos declarados:\n${scripts}`);
+          } else if (marker) {
+            marker.remove();
           }
         }, 3000);
       })();
