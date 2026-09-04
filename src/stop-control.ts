@@ -26,17 +26,18 @@ function syncStopButton(): void {
     if (button.title !== title) button.title = title;
     if (button.getAttribute('aria-label') !== title) button.setAttribute('aria-label', title);
 
+    const stopIcon = button.querySelector<HTMLElement>(':scope > .stop-icon');
     if (stopping) {
-      if (!button.querySelector(':scope > .stop-icon')) {
-        const stopIcon = document.createElement('span');
-        stopIcon.className = 'stop-icon';
-        button.replaceChildren(stopIcon);
+      if (!stopIcon) {
+        const nextStopIcon = document.createElement('span');
+        nextStopIcon.className = 'stop-icon';
+        button.appendChild(nextStopIcon);
       }
       if (button.disabled) button.disabled = false;
       return;
     }
 
-    if (button.querySelector(':scope > .stop-icon')) button.replaceChildren();
+    stopIcon?.remove();
     const disabled = !selectedChatId() || !prompt.value.trim();
     if (button.disabled !== disabled) button.disabled = disabled;
   } finally {
