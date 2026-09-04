@@ -159,7 +159,7 @@ export class AgentRuntime {
     chat: ChatRecord,
     projectContext: string | undefined,
     permission: PermissionLevel,
-    runId = crypto.randomUUID(),
+    runId: string = crypto.randomUUID(),
   ): Promise<AgentRunResult> {
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
     const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0 };
@@ -175,7 +175,7 @@ export class AgentRuntime {
     permission: PermissionLevel,
     emit: StreamEmitter,
     signal?: AbortSignal,
-    runId = crypto.randomUUID(),
+    runId: string = crypto.randomUUID(),
   ): Promise<AgentRunResult> {
     signal?.throwIfAborted();
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
