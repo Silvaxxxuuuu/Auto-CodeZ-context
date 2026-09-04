@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 
 const rendererEntryTag = '<script type="module" src="/src/renderer-entry.ts"></script>';
 const monacoEditorWorker = fileURLToPath(new URL('./node_modules/monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url));
+const monacoEditorStyles = fileURLToPath(new URL('./node_modules/monaco-editor/esm/vs/editor/editor.main.css', import.meta.url));
 
 const devLoader = `<script>
   (() => {
@@ -36,6 +37,7 @@ export default defineConfig(({ command }) => ({
     alias: [
       { find: 'monaco-editor/esm/vs/editor/editor.worker.js?worker', replacement: `${monacoEditorWorker}?worker` },
       { find: 'monaco-editor/esm/vs/editor/editor.worker.js', replacement: monacoEditorWorker },
+      { find: 'monaco-editor/esm/vs/editor/editor.main.css', replacement: monacoEditorStyles },
     ],
   },
   optimizeDeps: {
