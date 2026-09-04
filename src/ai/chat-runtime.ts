@@ -87,6 +87,11 @@ function activityEventForResponse(response: AIResponse): AIStreamEvent | undefin
   };
 }
 
+function responseForAgent(response: AIResponse): AIResponse {
+  if (!response.toolCalls?.length || !response.content) return response;
+  return { ...response, content: '' };
+}
+
 export class ChatRuntime {
   constructor(
     private readonly registry: ProviderRegistry,
@@ -139,12 +144,18 @@ export class ChatRuntime {
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
       const journal = await this.requestJournal.begin(request);
-      if (journal.cachedResponse) { this.activity.emit({ type: 'action', message: 'Resposta recuperada do journal do provider.', status: 'success' }); return journal.cachedResponse; }
+      if (journal.cachedResponse) {
+        const cachedActivity = activityEventForResponse(journal.cachedResponse);
+        if (cachedActivity?.activity) this.activity.emit(cachedActivity.activity);
+        return responseForAgent(journal.cachedResponse);
+      }
       try {
         const response = await runWithAbortSignal(signal, () => adapter.send(config, request, signal));
         await this.requestJournal.complete(journal.requestId, response);
+        const dynamicActivity = activityEventForResponse(response);
+        if (dynamicActivity?.activity) this.activity.emit(dynamicActivity.activity);
         this.activity.success('complete', 'Resposta recebida.');
-        return response;
+        return responseForAgent(response);
       } catch (error) {
         if (isAbortError(error)) throw error;
         const normalized = normalizeProviderError(adapter.displayName, 'request', error);
@@ -173,7 +184,8 @@ export class ChatRuntime {
         const cachedActivity = activityEventForResponse(journal.cachedResponse);
         if (cachedActivity) yield cachedActivity;
         if (journal.cachedResponse.content) yield { type: 'delta', text: journal.cachedResponse.content };
-        yield { type: 'complete', response: journal.cachedResponse, usage: journal.cachedResponse.usage };
+        const cachedResponse = responseForAgent(journal.cachedResponse);
+        yield { type: 'complete', response: cachedResponse, usage: cachedResponse.usage };
         return;
       }
       let completed = false;
@@ -186,13 +198,17 @@ export class ChatRuntime {
             const event = result.value;
             if (event.type === 'activity' && event.activity) this.activity.emit(event.activity);
             if (event.type === 'complete' && event.response) {
-              const dynamicActivity = activityEventForResponse(event.response);
+              const originalResponse = event.response;
+              const dynamicActivity = activityEventForResponse(originalResponse);
               if (dynamicActivity?.activity) {
                 this.activity.emit(dynamicActivity.activity);
                 yield dynamicActivity;
               }
-              await this.requestJournal.complete(journal.requestId, event.response);
+              await this.requestJournal.complete(journal.requestId, originalResponse);
               completed = true;
+              const sanitizedResponse = responseForAgent(originalResponse);
+              yield { ...event, response: sanitizedResponse };
+              continue;
             }
             if (event.type === 'error' && !completed) await this.requestJournal.fail(journal.requestId, event.error || 'Erro durante o streaming.');
             yield event;
@@ -208,7 +224,8 @@ export class ChatRuntime {
             yield dynamicActivity;
           }
           if (response.content) yield { type: 'delta', text: response.content };
-          yield { type: 'complete', response, usage: response.usage };
+          const sanitizedResponse = responseForAgent(response);
+          yield { type: 'complete', response: sanitizedResponse, usage: sanitizedResponse.usage };
         }
         this.activity.success('complete', 'Resposta recebida.');
       } catch (error) {
