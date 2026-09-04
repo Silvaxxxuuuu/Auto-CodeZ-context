@@ -18,6 +18,7 @@
 
   <body>
     <div id="app"></div>
+    <script type="module" src="/src/stream-performance.ts"></script>
     <script type="module" src="/src/renderer.ts"></script>
     <script>
       window.addEventListener('DOMContentLoaded', async () => {
@@ -51,7 +52,7 @@
           } catch (error) {
             console.error(`Falha ao inicializar ${modulePath}.`, error);
           }
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
         }
       }, { once: true });
     </script>
