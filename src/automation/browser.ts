@@ -17,42 +17,64 @@ export type BrowserTab = {
   selected: boolean;
 };
 
+export type AiBrowserProvider =
+  | 'chatgpt'
+  | 'claude'
+  | 'gemini';
+
 type PowerShellResult = {
   success: boolean;
   stdout: string;
   stderr: string;
 };
 
-const browserProcesses:
-  BrowserName[] = [
-    'chrome',
-    'msedge',
-    'brave',
-    'firefox',
-    'opera',
-    'opera_gx',
-    'vivaldi',
-  ];
+const browserProcesses: BrowserName[] = [
+  'chrome',
+  'msedge',
+  'brave',
+  'firefox',
+  'opera',
+  'opera_gx',
+  'vivaldi',
+];
 
-function escapePowerShellString(
-  value: string,
-): string {
-  return value.replace(
-    /'/g,
-    "''",
-  );
+const messageInputTerms: Record<AiBrowserProvider, string[]> = {
+  chatgpt: [
+    'message chatgpt',
+    'send a message',
+    'message',
+    'prompt',
+  ],
+  claude: [
+    'write a message',
+    'reply',
+    'message',
+    'prompt',
+  ],
+  gemini: [
+    'enter a prompt here',
+    'enter a prompt',
+    'prompt',
+    'message',
+  ],
+};
+
+const forbiddenInputTerms = [
+  'address',
+  'search',
+  'find',
+  'url',
+  'omnibox',
+  'navigation',
+];
+
+function escapePowerShellString(value: string): string {
+  return value.replace(/'/g, "''");
 }
 
-function createPowerShellArray(
-  values: string[],
-): string {
+function createPowerShellArray(values: string[]): string {
   return values
-    .map(
-      (value) =>
-        `'${escapePowerShellString(
-          value,
-        )}'`,
-    )
+    .map((value) => `'${escapePowerShellString(value)}'`)
     .join(',');
 }
 
@@ -60,61 +82,42 @@ function runPowerShell(
   script: string,
   timeout = 10000,
 ): Promise<PowerShellResult> {
-  return new Promise(
-    (resolve) => {
-      execFile(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-ExecutionPolicy',
-          'Bypass',
-          '-Command',
-          script,
-        ],
-        {
-          windowsHide: true,
-          maxBuffer:
-            20 * 1024 * 1024,
-          timeout,
-        },
-        (
-          error,
-          stdout,
-          stderr,
-        ) => {
-          resolve({
-            success:
-              !error,
-            stdout:
-              stdout || '',
-            stderr:
-              stderr || '',
-          });
-        },
-      );
-    },
-  );
+  return new Promise((resolve) => {
+    execFile(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        script,
+      ],
+      {
+        windowsHide: true,
+        maxBuffer: 20 * 1024 * 1024,
+        timeout,
+      },
+      (error, stdout, stderr) => {
+        resolve({
+          success: !error,
+          stdout: stdout || '',
+          stderr: stderr || '',
+        });
+      },
+    );
+  });
 }
 
 export async function findAiTab(
   searchTerms: string[],
 ): Promise<BrowserTab | null> {
-  if (
-    searchTerms.length === 0
-  ) {
+  if (searchTerms.length === 0) {
     return null;
   }
 
-  const browserNames =
-    createPowerShellArray(
-      browserProcesses,
-    );
-
-  const terms =
-    createPowerShellArray(
-      searchTerms,
-    );
+  const browserNames = createPowerShellArray(browserProcesses);
+  const terms = createPowerShellArray(searchTerms);
 
   const script = `
 Add-Type -AssemblyName UIAutomationClient
@@ -133,51 +136,39 @@ $processes = @(
 $results = @()
 
 foreach ($process in $processes) {
-  if (
-    $process.MainWindowHandle -eq 0
-  ) {
+  if ($process.MainWindowHandle -eq 0) {
     continue
   }
 
   try {
-    $root =
-      [System.Windows.Automation.AutomationElement]::FromHandle(
-        $process.MainWindowHandle
-      )
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle(
+      $process.MainWindowHandle
+    )
 
     if ($null -eq $root) {
       continue
     }
 
-    $tabsCondition =
-      New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::TabItem
-      )
+    $tabsCondition = New-Object System.Windows.Automation.PropertyCondition(
+      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+      [System.Windows.Automation.ControlType]::TabItem
+    )
 
-    $tabs =
-      $root.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $tabsCondition
-      )
+    $tabs = $root.FindAll(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      $tabsCondition
+    )
 
     foreach ($tab in $tabs) {
       try {
-        $name =
-          [string]$tab.Current.Name
+        $name = [string]$tab.Current.Name
 
-        if (
-          [string]::IsNullOrWhiteSpace($name)
-        ) {
+        if ([string]::IsNullOrWhiteSpace($name)) {
           continue
         }
 
         foreach ($term in $terms) {
-          if (
-            $name.ToLowerInvariant().Contains(
-              $term.ToLowerInvariant()
-            )
-          ) {
+          if ($name.ToLowerInvariant().Contains($term.ToLowerInvariant())) {
             $results += [PSCustomObject]@{
               browser = [string]$process.ProcessName
               processId = [int]$process.Id
@@ -201,92 +192,73 @@ foreach ($process in $processes) {
 $results | ConvertTo-Json -Compress -Depth 5
 `;
 
-  const result =
-    await runPowerShell(
-      script,
-      7000,
-    );
+  const result = await runPowerShell(script, 7000);
 
-  if (
-    !result.success ||
-    !result.stdout.trim()
-  ) {
+  if (!result.success || !result.stdout.trim()) {
     return null;
   }
 
   try {
-    const parsed =
-      JSON.parse(
-        result.stdout.trim(),
-      );
-
-    const items =
-      Array.isArray(parsed)
-        ? parsed
-        : [parsed];
-
-    const first =
-      items.find(
-        (item) =>
-          item &&
-          Number(
-            item.handle,
-          ) > 0,
-      );
+    const parsed = JSON.parse(result.stdout.trim());
+    const items = Array.isArray(parsed) ? parsed : [parsed];
+    const first = items.find(
+      (item) => item && Number(item.handle) > 0,
+    );
 
     if (!first) {
       return null;
     }
 
     return {
-      browser:
-        String(
-          first.browser || '',
-        ).toLowerCase() as BrowserName,
-      processId:
-        Number(
-          first.processId,
-        ),
-      handle:
-        Number(
-          first.handle,
-        ),
-      title:
-        String(
-          first.title || '',
-        ),
-      selected:
-        Boolean(
-          first.selected,
-        ),
+      browser: String(first.browser || '').toLowerCase() as BrowserName,
+      processId: Number(first.processId),
+      handle: Number(first.handle),
+      title: String(first.title || ''),
+      selected: Boolean(first.selected),
     };
-  } catch {
+  }
+  catch {
     return null;
   }
+}
+
+export async function waitForAiTab(
+  searchTerms: string[],
+  attempts = 30,
+  delayMs = 500,
+): Promise<BrowserTab | null> {
+  const totalAttempts = Math.max(1, attempts);
+  const delay = Math.max(0, delayMs);
+
+  for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+    const tab = await findAiTab(searchTerms);
+
+    if (tab) {
+      return tab;
+    }
+
+    if (attempt < totalAttempts - 1 && delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+
+  return null;
 }
 
 export async function focusBrowserTab(
   tab: BrowserTab,
 ): Promise<boolean> {
-  return selectBrowserTab(
-    tab,
-  );
+  return selectBrowserTab(tab);
 }
 
 export async function selectBrowserTab(
   tab: BrowserTab,
 ): Promise<boolean> {
-  if (
-    !tab.handle ||
-    tab.handle <= 0
-  ) {
+  if (!tab.handle || tab.handle <= 0) {
     return false;
   }
 
-  const escapedTitle =
-    escapePowerShellString(
-      tab.title.toLowerCase(),
-    );
+  const escapedTitle = escapePowerShellString(tab.title.toLowerCase());
 
   const script = `
 Add-Type -AssemblyName UIAutomationClient
@@ -298,70 +270,50 @@ using System.Runtime.InteropServices;
 
 public static class AutoCodeZBrowserSelect {
     [DllImport("user32.dll")]
-    public static extern bool SetForegroundWindow(
-        IntPtr hWnd
-    );
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
-    public static extern bool ShowWindowAsync(
-        IntPtr hWnd,
-        int nCmdShow
-    );
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 
     [DllImport("user32.dll")]
-    public static extern bool IsIconic(
-        IntPtr hWnd
-    );
+    public static extern bool IsIconic(IntPtr hWnd);
 
     public const int SW_RESTORE = 9;
 }
 "@
 
-$handle =
-  [IntPtr]::new(${tab.handle})
-
-$root =
-  [System.Windows.Automation.AutomationElement]::FromHandle(
-    $handle
-  )
+$handle = [IntPtr]::new(${tab.handle})
+$root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
 
 if ($null -eq $root) {
   Write-Output "false"
   exit
 }
 
-$condition =
-  New-Object System.Windows.Automation.PropertyCondition(
-    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-    [System.Windows.Automation.ControlType]::TabItem
-  )
+$condition = New-Object System.Windows.Automation.PropertyCondition(
+  [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+  [System.Windows.Automation.ControlType]::TabItem
+)
 
-$tabs =
-  $root.FindAll(
-    [System.Windows.Automation.TreeScope]::Descendants,
-    $condition
-  )
+$tabs = $root.FindAll(
+  [System.Windows.Automation.TreeScope]::Descendants,
+  $condition
+)
 
 $matched = $false
 
 foreach ($candidate in $tabs) {
   try {
-    $name =
-      [string]$candidate.Current.Name
+    $name = [string]$candidate.Current.Name
 
-    if (
-      -not $name.ToLowerInvariant().Contains(
-        '${escapedTitle}'
-      )
-    ) {
+    if (-not $name.ToLowerInvariant().Contains('${escapedTitle}')) {
       continue
     }
 
     try {
-      $selection =
-        $candidate.GetCurrentPattern(
-          [System.Windows.Automation.SelectionItemPattern]::Pattern
-        )
+      $selection = $candidate.GetCurrentPattern(
+        [System.Windows.Automation.SelectionItemPattern]::Pattern
+      )
 
       if ($null -ne $selection) {
         $selection.Select()
@@ -377,20 +329,14 @@ foreach ($candidate in $tabs) {
   }
 }
 
-if (
-  [AutoCodeZBrowserSelect]::IsIconic(
-    $handle
-  )
-) {
+if ([AutoCodeZBrowserSelect]::IsIconic($handle)) {
   [AutoCodeZBrowserSelect]::ShowWindowAsync(
     $handle,
     [AutoCodeZBrowserSelect]::SW_RESTORE
   ) | Out-Null
 }
 
-[AutoCodeZBrowserSelect]::SetForegroundWindow(
-  $handle
-) | Out-Null
+[AutoCodeZBrowserSelect]::SetForegroundWindow($handle) | Out-Null
 
 if ($matched) {
   Write-Output "true"
@@ -400,84 +346,107 @@ else {
 }
 `;
 
-  const result =
-    await runPowerShell(
-      script,
-      7000,
-    );
+  const result = await runPowerShell(script, 7000);
 
   return (
     result.success &&
-    result.stdout
-      .trim()
-      .toLowerCase() ===
-      'true'
+    result.stdout.trim().toLowerCase() === 'true'
   );
 }
 
-export async function focusBrowserInput(
+export async function focusBrowserMessageInput(
   tab: BrowserTab,
+  provider: AiBrowserProvider,
 ): Promise<boolean> {
+  const terms = createPowerShellArray(
+    messageInputTerms[provider],
+  );
+  const forbidden = createPowerShellArray(
+    forbiddenInputTerms,
+  );
+
   const script = `
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 
-$handle =
-  [IntPtr]::new(${tab.handle})
-
-$root =
-  [System.Windows.Automation.AutomationElement]::FromHandle(
-    $handle
-  )
+$handle = [IntPtr]::new(${tab.handle})
+$root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
+$terms = @(${terms})
+$forbidden = @(${forbidden})
 
 if ($null -eq $root) {
   Write-Output "false"
   exit
 }
 
-$condition =
-  New-Object System.Windows.Automation.OrCondition(
-    (New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::Edit
-    )),
-    (New-Object System.Windows.Automation.PropertyCondition(
-      [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-      [System.Windows.Automation.ControlType]::Document
-    ))
-  )
+$condition = New-Object System.Windows.Automation.OrCondition(
+  (New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::Edit
+  )),
+  (New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::Document
+  ))
+)
 
-$elements =
-  $root.FindAll(
-    [System.Windows.Automation.TreeScope]::Descendants,
-    $condition
-  )
+$elements = $root.FindAll(
+  [System.Windows.Automation.TreeScope]::Descendants,
+  $condition
+)
+
+$candidates = @()
 
 foreach ($element in $elements) {
   try {
-    $current =
-      $element.Current
+    $current = $element.Current
 
-    if (
-      -not $current.IsEnabled
-    ) {
+    if (-not $current.IsEnabled -or $current.IsOffscreen) {
       continue
     }
 
-    if (
-      $current.IsOffscreen
-    ) {
+    $name = ([string]$current.Name).ToLowerInvariant()
+    $automationId = ([string]$current.AutomationId).ToLowerInvariant()
+    $helpText = ([string]$current.HelpText).ToLowerInvariant()
+    $localizedType = ([string]$current.LocalizedControlType).ToLowerInvariant()
+
+    $evidence = "$name $automationId $helpText $localizedType"
+
+    $isForbidden = $false
+
+    foreach ($term in $forbidden) {
+      if ($evidence.Contains($term.ToLowerInvariant())) {
+        $isForbidden = $true
+        break
+      }
+    }
+
+    if ($isForbidden) {
       continue
     }
 
-    try {
-      $element.SetFocus()
+    $matchesProvider = $false
 
-      Write-Output "true"
-      exit
+    foreach ($term in $terms) {
+      if ($evidence.Contains($term.ToLowerInvariant())) {
+        $matchesProvider = $true
+        break
+      }
     }
-    catch {
+
+    if ($matchesProvider) {
+      $candidates += $element
     }
+  }
+  catch {
+  }
+}
+
+foreach ($element in $candidates) {
+  try {
+    $element.SetFocus()
+    Write-Output "true"
+    exit
   }
   catch {
   }
@@ -486,35 +455,22 @@ foreach ($element in $elements) {
 Write-Output "false"
 `;
 
-  const result =
-    await runPowerShell(
-      script,
-      7000,
-    );
+  const result = await runPowerShell(script, 7000);
 
   return (
     result.success &&
-    result.stdout
-      .trim()
-      .toLowerCase() ===
-      'true'
+    result.stdout.trim().toLowerCase() === 'true'
   );
 }
 
 export async function pasteClipboardAndSend(): Promise<boolean> {
   const script = `
 try {
-  $shell =
-    New-Object -ComObject WScript.Shell
-
+  $shell = New-Object -ComObject WScript.Shell
   Start-Sleep -Milliseconds 50
-
   $shell.SendKeys("^v")
-
   Start-Sleep -Milliseconds 120
-
   $shell.SendKeys("{ENTER}")
-
   Write-Output "true"
 }
 catch {
@@ -522,17 +478,10 @@ catch {
 }
 `;
 
-  const result =
-    await runPowerShell(
-      script,
-      4000,
-    );
+  const result = await runPowerShell(script, 4000);
 
   return (
     result.success &&
-    result.stdout
-      .trim()
-      .toLowerCase() ===
-      'true'
+    result.stdout.trim().toLowerCase() === 'true'
   );
 }
