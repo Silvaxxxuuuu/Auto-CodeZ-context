@@ -58,6 +58,44 @@ test('migrates persisted approvals to the owning chat and run before exposing th
   assert.equal(runtime.getPendingRunId(approval.id), 'run-recovered');
 });
 
+test('discards orphan approvals that do not belong to a persisted run', async () => {
+  const orphan: ApprovalRequest = { ...approval, id: 'orphan-approval', chatId: chat.id, runId: 'missing-run' };
+  const storage = new MemoryStorage({
+    'agent-runs.json': {
+      version: 2,
+      runs: [],
+      approvals: [orphan],
+    },
+  });
+  const { runtime, tools } = createRuntime(storage);
+
+  await runtime.init();
+
+  assert.deepEqual(tools.listApprovals(), []);
+  assert.deepEqual(storage.value<{ approvals: ApprovalRequest[] }>('agent-runs.json')?.approvals, []);
+  assert.equal(runtime.hasPendingForChat(chat.id), false);
+});
+
+test('drops approvals whose persisted tool call no longer matches the owning run', async () => {
+  const mismatchedCall: AIToolCall = { ...call, id: 'different-call' };
+  const storedApproval: ApprovalRequest = { ...approval, chatId: chat.id, runId: 'run-recovered', toolCall: mismatchedCall };
+  const storage = new MemoryStorage({
+    'agent-runs.json': {
+      version: 2,
+      runs: [{ runId: 'run-recovered', config, chat, projectContext: undefined, permission: 'ask', workingChat: chat, pendingApprovalIds: [approval.id], approvalCalls: { [approval.id]: call }, toolRounds: 1 }],
+      approvals: [storedApproval],
+    },
+  });
+  const { runtime, tools } = createRuntime(storage);
+
+  await runtime.init();
+
+  const restored = tools.listApprovals({ chatId: chat.id, runId: 'run-recovered' });
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0]?.toolCall.id, call.id);
+  assert.equal(runtime.getPendingRunId(approval.id), 'run-recovered');
+});
+
 test('keeps approvals from two chats and runs isolated after recovery', async () => {
   const chatA: ChatRecord = { ...chat, id: 'chat-a', title: 'A' };
   const chatB: ChatRecord = { ...chat, id: 'chat-b', title: 'B' };
