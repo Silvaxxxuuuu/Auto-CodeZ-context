@@ -46,6 +46,7 @@ toolRuntime.configureGitRuntime(gitRuntime);
 const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefined, activityRuntime, undefined, toolRuntime.listDefinitions());
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const executionManager = new ExecutionManager();
+const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 let mainWindow: BrowserWindow | null = null;
 
 function sendTerminalEvent(event: unknown): void { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('terminal:event', event); }
@@ -111,6 +112,13 @@ async function executeChat(chatId: string, content: string): Promise<{ pendingAp
 }
 
 ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => { const value = requireObject(input, 'Mensagem'); return executeChat(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.content, 'Mensagem')); });
+ipcMain.handle('chat:stop', async (_event, chatId: string) => {
+  const id = requireIdentifier(chatId, 'Chat');
+  const active = activeStreamControllers.get(id);
+  if (!active) return { stopped: false };
+  active.controller.abort();
+  return { stopped: true };
+});
 ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
   const value = requireObject(input, 'Mensagem');
   const chatId = requireIdentifier(value.chatId, 'Chat');
@@ -130,6 +138,9 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     return { pendingApprovalIds: [], chat: current, error: message };
   }
 
+  const controller = new AbortController();
+  activeStreamControllers.set(chatId, { runId: execution.runId, controller });
+
   const emit = (event: AIStreamEvent): void => {
     try {
       if (event.type === 'approval_required') executionManager.update(chatId, { state: 'waiting_approval', runId: execution.runId });
@@ -146,16 +157,24 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     if (!isRetryOfPersistedUserMessage) await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const workingChat = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
-    const result = await agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit);
+    const result = await agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal);
     await chatManager.update({ ...workingChat, messages: result.messages });
     if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId: execution.runId });
     else if (executionManager.get(chatId)?.state === 'running') executionManager.update(chatId, { state: 'completed', runId: execution.runId });
     return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
   } catch (error) {
+    if (controller.signal.aborted) {
+      await agentRuntime.cancelChat(chatId);
+      executionManager.update(chatId, { state: 'completed', runId: execution.runId });
+      emit({ type: 'cancelled' });
+      return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
+    }
     const message = error instanceof Error ? error.message : String(error);
     executionManager.update(chatId, { state: 'failed', error: message, runId: execution.runId });
     emit({ type: 'error', error: message });
     return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: message };
+  } finally {
+    if (activeStreamControllers.get(chatId)?.runId === execution.runId) activeStreamControllers.delete(chatId);
   }
 });
 
@@ -241,7 +260,7 @@ ipcMain.handle('git:create-branch', async (_event, input: { projectId: string; n
 ipcMain.handle('git:checkout', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados do checkout'); return gitService.checkout(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Nome da branch')); });
 ipcMain.handle('git:stage', async (_event, input: { projectId: string; paths: string[] }) => { const value = requireObject(input, 'Dados do staging'); if (!Array.isArray(value.paths) || value.paths.some((item) => typeof item !== 'string')) throw new Error('Arquivos do staging inválidos.'); return gitService.stage(requireIdentifier(value.projectId, 'Projeto'), value.paths.map((item) => requireNonEmptyString(item, 'Arquivo'))); });
 ipcMain.handle('git:stage-all', async (_event, projectId: string) => gitService.stageAll(requireIdentifier(projectId, 'Projeto')));
-ipcMain.handle('git:commit', async (_event, input: { projectId: string; message: string }) => { const value = requireObject(input, 'Dados do commit'); return gitService.commit(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.message, 'Mensagem')); });
+ipcMain.handle('git:commit', async (_event, input: { projectId: string; message: string }) => { const value = requireObject(input, 'Dados do commit'); return gitService.commit(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.projectId, 'Mensagem')); });
 
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => { const value = requireObject(input, 'Dados do projeto'); return projectManager.create(requireNonEmptyString(value.name, 'Nome do projeto'), requireNonEmptyString(value.rootPath, 'Pasta do projeto')); });
 ipcMain.handle('projects:open-folder', async () => { if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.'); const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] }); return result.canceled ? null : result.filePaths[0] || null; });
