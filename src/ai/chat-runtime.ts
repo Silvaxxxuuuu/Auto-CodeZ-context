@@ -97,23 +97,9 @@ export class ChatRuntime {
     const messages = [...systemMessages, ...chat.messages];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
     if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
-    const tools = hasProject
-      ? this.toolDefinitions
-      : this.toolDefinitions.filter((tool) => tool.name === 'run_command');
+    const tools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => tool.name === 'run_command');
     const toolsEnabled = this.capabilities.supports(model, 'tools') && tools.length > 0;
-    return {
-      adapter,
-      request: {
-        providerId: config.id,
-        model: model.id,
-        messages,
-        intelligence: resolution.effective,
-        projectContext,
-        toolsEnabled,
-        tools: toolsEnabled ? tools.map((tool) => ({ ...tool })) : undefined,
-      },
-      resolution,
-    };
+    return { adapter, request: { providerId: config.id, model: model.id, messages, intelligence: resolution.effective, projectContext, toolsEnabled, tools: toolsEnabled ? tools.map((tool) => ({ ...tool })) : undefined }, resolution };
   }
 
   async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal): Promise<AIResponse> {
@@ -123,14 +109,10 @@ export class ChatRuntime {
       this.activity.start('action', `Enviando mensagem para ${adapter.displayName}`);
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
-
       const journal = await this.requestJournal.begin(request);
-      if (journal.cachedResponse) {
-        this.activity.emit({ type: 'action', message: 'Resposta recuperada do journal do provider.', status: 'success' });
-        return journal.cachedResponse;
-      }
+      if (journal.cachedResponse) { this.activity.emit({ type: 'action', message: 'Resposta recuperada do journal do provider.', status: 'success' }); return journal.cachedResponse; }
       try {
-        const response = await runWithAbortSignal(signal, () => adapter.send(config, request));
+        const response = await runWithAbortSignal(signal, () => adapter.send(config, request, signal));
         await this.requestJournal.complete(journal.requestId, response);
         this.activity.success('complete', 'Resposta recebida.');
         return response;
@@ -156,33 +138,23 @@ export class ChatRuntime {
       this.activity.start('action', `Transmitindo resposta de ${adapter.displayName}`);
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
-
       const journal = await this.requestJournal.begin(request);
-      if (journal.cachedResponse) {
-        yield { type: 'start' };
-        if (journal.cachedResponse.content) yield { type: 'delta', text: journal.cachedResponse.content };
-        yield { type: 'complete', response: journal.cachedResponse, usage: journal.cachedResponse.usage };
-        return;
-      }
-
+      if (journal.cachedResponse) { yield { type: 'start' }; if (journal.cachedResponse.content) yield { type: 'delta', text: journal.cachedResponse.content }; yield { type: 'complete', response: journal.cachedResponse, usage: journal.cachedResponse.usage }; return; }
       let completed = false;
       try {
         if (adapter.stream) {
-          const iterator = adapter.stream(config, request)[Symbol.asyncIterator]();
+          const iterator = adapter.stream(config, request, signal)[Symbol.asyncIterator]();
           while (true) {
             const result = await nextWithAbortSignal(signal, () => iterator.next());
             if (result.done) break;
             const event = result.value;
             if (event.type === 'activity' && event.activity) this.activity.emit(event.activity);
-            if (event.type === 'complete' && event.response) {
-              await this.requestJournal.complete(journal.requestId, event.response);
-              completed = true;
-            }
+            if (event.type === 'complete' && event.response) { await this.requestJournal.complete(journal.requestId, event.response); completed = true; }
             if (event.type === 'error' && !completed) await this.requestJournal.fail(journal.requestId, event.error || 'Erro durante o streaming.');
             yield event;
           }
         } else {
-          const response = await runWithAbortSignal(signal, () => adapter.send(config, request));
+          const response = await runWithAbortSignal(signal, () => adapter.send(config, request, signal));
           await this.requestJournal.complete(journal.requestId, response);
           completed = true;
           yield { type: 'start' };
@@ -192,11 +164,7 @@ export class ChatRuntime {
         this.activity.success('complete', 'Resposta recebida.');
       } catch (error) {
         if (isAbortError(error)) throw error;
-        if (!completed) {
-          const normalized = normalizeProviderError(adapter.displayName, 'stream', error);
-          await this.requestJournal.fail(journal.requestId, normalized.message);
-          throw normalized;
-        }
+        if (!completed) { const normalized = normalizeProviderError(adapter.displayName, 'stream', error); await this.requestJournal.fail(journal.requestId, normalized.message); throw normalized; }
         throw error;
       }
     } catch (error) {
