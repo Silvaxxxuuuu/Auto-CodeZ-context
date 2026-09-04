@@ -48,14 +48,14 @@ function installWhenReady(): void {
   promptObserver.observe(prompt, { attributes: true, attributeFilter: ['disabled'] });
   buttonObserver = new MutationObserver(syncStopButton);
   buttonObserver.observe(button, { attributes: true, childList: true });
-  button.addEventListener('click', (event) => {
+  button.addEventListener('click', (event): void => {
     if (!button.classList.contains('is-stop')) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     const chatId = selectedChatId();
     if (!chatId) return syncStopButton();
     button.disabled = true;
-    void bridge().stopChat(chatId).catch(() => undefined);
+    void bridge().stopChat(chatId).catch((): void => undefined);
   }, true);
   syncStopButton();
 }
