@@ -7,6 +7,7 @@ type Enhancement = {
 
 const criticalEnhancements: Enhancement[] = [
   { name: 'terminal-ui', load: () => import('./terminal-ui') },
+  { name: 'terminal-visual-ui', load: () => import('./terminal-visual-ui') },
   { name: 'api-key-ui', load: () => import('./api-key-ui') },
   { name: 'ui-polish', load: () => import('./ui-polish') },
   { name: 'settings-ui', load: () => import('./settings-ui') },
@@ -14,18 +15,17 @@ const criticalEnhancements: Enhancement[] = [
   { name: 'profile-ui', load: () => import('./profile-ui') },
   { name: 'chat-api-key-settings-ui', load: () => import('./chat-api-key-settings-ui') },
   { name: 'api-key-flow-polish', load: () => import('./api-key-flow-polish') },
+  { name: 'api-key-manager-ux', load: () => import('./api-key-manager-ux') },
   { name: 'api-settings-routing-ui', load: () => import('./api-settings-routing-ui') },
+  { name: 'approval-ui', load: () => import('./approval-ui') },
+  { name: 'composer-resilience', load: () => import('./composer-resilience') },
 ];
 
 const secondaryEnhancements: Enhancement[] = [
-  { name: 'composer-resilience', load: () => import('./composer-resilience') },
   { name: 'thinking-ui', load: () => import('./thinking-ui') },
   { name: 'chat-execution-ui', load: () => import('./chat-execution-ui') },
-  { name: 'approval-ui', load: () => import('./approval-ui') },
   { name: 'activity-ui', load: () => import('./activity-ui') },
   { name: 'diff-ui', load: () => import('./diff-ui') },
-  { name: 'git-ui', load: () => import('./git-ui') },
-  { name: 'git-actions-ui', load: () => import('./git-actions-ui') },
   { name: 'chat-rename-ui', load: () => import('./chat-rename-ui') },
   { name: 'error-recovery-ui', load: () => import('./error-recovery-ui') },
   { name: 'execution-visibility', load: () => import('./execution-visibility') },
