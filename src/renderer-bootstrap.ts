@@ -1,27 +1,27 @@
 type ModuleLoader = readonly [name: string, load: () => Promise<unknown>];
 
 const enhancementModules: readonly ModuleLoader[] = [
-  ['ui-polish', () => import('./ui-polish.ts')],
-  ['settings-ui', () => import('./settings-ui.ts')],
-  ['stop-control', () => import('./stop-control.ts')],
-  ['composer-resilience', () => import('./composer-resilience.ts')],
-  ['thinking-ui', () => import('./thinking-ui.ts')],
-  ['chat-execution-ui', () => import('./chat-execution-ui.ts')],
-  ['approval-ui', () => import('./approval-ui.ts')],
-  ['terminal-ui', () => import('./terminal-ui.ts')],
-  ['activity-ui', () => import('./activity-ui.ts')],
-  ['chat-rename-ui', () => import('./chat-rename-ui.ts')],
-  ['api-settings-routing-ui', () => import('./api-settings-routing-ui.ts')],
-  ['initial-chat-ui', () => import('./initial-chat-ui.ts')],
-  ['profile-ui', () => import('./profile-ui.ts')],
-  ['chat-api-key-settings-ui', () => import('./chat-api-key-settings-ui.ts')],
-  ['api-key-ui', () => import('./api-key-ui.ts')],
-  ['error-recovery-ui', () => import('./error-recovery-ui.ts')],
-  ['api-key-flow-polish', () => import('./api-key-flow-polish.ts')],
-  ['execution-visibility', () => import('./execution-visibility.ts')],
-  ['diff-ui', () => import('./diff-ui.ts')],
-  ['git-ui', () => import('./git-ui.ts')],
-  ['git-actions-ui', () => import('./git-actions-ui.ts')],
+  ['ui-polish', () => import('./ui-polish')],
+  ['settings-ui', () => import('./settings-ui')],
+  ['stop-control', () => import('./stop-control')],
+  ['composer-resilience', () => import('./composer-resilience')],
+  ['thinking-ui', () => import('./thinking-ui')],
+  ['chat-execution-ui', () => import('./chat-execution-ui')],
+  ['approval-ui', () => import('./approval-ui')],
+  ['terminal-ui', () => import('./terminal-ui')],
+  ['activity-ui', () => import('./activity-ui')],
+  ['chat-rename-ui', () => import('./chat-rename-ui')],
+  ['api-settings-routing-ui', () => import('./api-settings-routing-ui')],
+  ['initial-chat-ui', () => import('./initial-chat-ui')],
+  ['profile-ui', () => import('./profile-ui')],
+  ['chat-api-key-settings-ui', () => import('./chat-api-key-settings-ui')],
+  ['api-key-ui', () => import('./api-key-ui')],
+  ['error-recovery-ui', () => import('./error-recovery-ui')],
+  ['api-key-flow-polish', () => import('./api-key-flow-polish')],
+  ['execution-visibility', () => import('./execution-visibility')],
+  ['diff-ui', () => import('./diff-ui')],
+  ['git-ui', () => import('./git-ui')],
+  ['git-actions-ui', () => import('./git-actions-ui')],
 ];
 
 function showBootstrapError(failures: string[]): void {
@@ -62,14 +62,14 @@ async function bootstrap(): Promise<void> {
   const failures: string[] = [];
 
   try {
-    await import('./stream-performance.ts');
+    await import('./stream-performance');
   } catch (error) {
     console.error('Falha ao inicializar stream-performance.', error);
     failures.push('stream-performance');
   }
 
   try {
-    await import('./renderer.ts');
+    await import('./renderer');
   } catch (error) {
     console.error('Falha ao inicializar renderer.', error);
     showBootstrapError(['renderer']);
