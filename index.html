@@ -18,9 +18,21 @@
 
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/ui-bootstrap.ts"></script>
-    <script type="module" src="/src/diff-ui.ts"></script>
-    <script type="module" src="/src/git-ui.ts"></script>
-    <script type="module" src="/src/git-actions-ui.ts"></script>
+    <script type="module">
+      (async () => {
+        const { bootstrap } = await import('/src/ui-bootstrap.ts');
+        await bootstrap();
+        await import('/src/diff-ui.ts');
+        await import('/src/git-ui.ts');
+        await import('/src/git-actions-ui.ts');
+      })().catch((error) => {
+        console.error('Falha ao inicializar a interface do Auto CodeZ.', error);
+        const app = document.querySelector('#app');
+        if (app) {
+          const message = error instanceof Error ? error.message : String(error);
+          app.innerHTML = `<div style="height:100%;display:grid;place-items:center;padding:32px;background:#080a0e;color:#edf0f5;font-family:system-ui,sans-serif"><div><strong>Falha ao iniciar a interface.</strong><p style="color:#9aa3af">${message}</p></div></div>`;
+        }
+      });
+    </script>
   </body>
 </html>
