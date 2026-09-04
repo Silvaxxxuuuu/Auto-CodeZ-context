@@ -64,7 +64,7 @@ function installWhenReady(): void {
 
     prompt.disabled = false;
     prompt.focus();
-    void stopBridge().stopChat(chatId).catch(() => undefined);
+    void stopBridge().stopChat(chatId).catch((): void => undefined);
   }, true);
 
   syncStopButton();
