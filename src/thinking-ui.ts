@@ -28,11 +28,11 @@ function renderLiveStatus(): void {
   const messages = document.querySelector<HTMLElement>('#messages'); if (!messages) return;
   const status = document.createElement('div'); status.className = 'ac-thinking-status';
   status.innerHTML = state.waitingApproval ? '<span>Aguardando sua aprovação</span>' : '<span>Pensando</span><span class="ac-thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
+  const anchor = messages.querySelector('.message.assistant.streaming, .activity-card, .ac-approval-root');
   mutatingDom = true;
-  if (anchorForStatus(messages)) messages.insertBefore(status, anchorForStatus(messages)!); else messages.appendChild(status);
+  if (anchor) messages.insertBefore(status, anchor); else messages.appendChild(status);
   mutatingDom = false;
 }
-function anchorForStatus(messages: HTMLElement): HTMLElement | null { return messages.querySelector('.message.assistant.streaming, .activity-card, .ac-approval-root'); }
 function insertThoughtTime(chatId: string, token: number, durationMs: number): void {
   if (chatId !== activeChatId) return;
   const messages = document.querySelector<HTMLElement>('#messages'); if (!messages) return;
