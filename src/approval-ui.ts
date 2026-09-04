@@ -5,9 +5,10 @@ const bridge = (window as unknown as { autoCodez?: Bridge }).autoCodez;
 let activeChatId: string | undefined;
 let rootElement: HTMLElement | null = null;
 let syncInFlight = false;
+let syncQueued = false;
 
 function chatId(): string | undefined { return document.querySelector<HTMLElement>('.chat-item.selected')?.dataset.chat; }
-function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!)); }
+function escapeHtml(value: string): string { return value.replace(/[&<>\"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' }[char]!)); }
 function installStyle(): void {
   if (document.getElementById('auto-codez-approval-ui')) return;
   const style = document.createElement('style'); style.id = 'auto-codez-approval-ui';
@@ -20,15 +21,19 @@ function ensureRoot(): HTMLElement | null {
   return rootElement;
 }
 async function sync(): Promise<void> {
-  if (!bridge || syncInFlight) return; const selected = chatId();
+  if (!bridge || syncInFlight) { syncQueued = Boolean(bridge); return; }
+  const selected = chatId();
   if (!selected) { rootElement?.remove(); rootElement = null; return; }
   activeChatId = selected; syncInFlight = true;
   try {
     const approvals = (await bridge.listApprovals({ chatId: selected })).filter((approval) => approval.chatId === selected);
     const root = ensureRoot(); if (!root) return;
-    if (!approvals.length) { root.innerHTML = ''; return; }
-    root.innerHTML = approvals.map((approval) => `<article class="ac-approval-card" data-ac-approval="${escapeHtml(approval.id)}"><div class="ac-approval-heading">Aprovação necessária</div><div class="ac-approval-tool">${escapeHtml(approval.toolCall.name)}</div><div class="ac-approval-message">O Auto CodeZ está aguardando sua decisão para continuar esta execução.</div><pre class="ac-approval-input">${escapeHtml(JSON.stringify(approval.toolCall.input, null, 2))}</pre><div class="ac-approval-actions"><button data-ac-approve="${escapeHtml(approval.id)}">Aprovar</button><button class="deny" data-ac-deny="${escapeHtml(approval.id)}">Recusar</button></div></article>`).join('');
-  } catch { /* approval UI is best-effort */ } finally { syncInFlight = false; }
+    const nextMarkup = approvals.map((approval) => `<article class="ac-approval-card" data-ac-approval="${escapeHtml(approval.id)}"><div class="ac-approval-heading">Aprovação necessária</div><div class="ac-approval-tool">${escapeHtml(approval.toolCall.name)}</div><div class="ac-approval-message">O Auto CodeZ está aguardando sua decisão para continuar esta execução.</div><pre class="ac-approval-input">${escapeHtml(JSON.stringify(approval.toolCall.input, null, 2))}</pre><div class="ac-approval-actions"><button data-ac-approve="${escapeHtml(approval.id)}">Aprovar</button><button class="deny" data-ac-deny="${escapeHtml(approval.id)}">Recusar</button></div></article>`).join('');
+    if (root.innerHTML !== nextMarkup) root.innerHTML = nextMarkup;
+  } catch { /* approval UI is best-effort */ } finally {
+    syncInFlight = false;
+    if (syncQueued) { syncQueued = false; void sync(); }
+  }
 }
 async function action(event: Event): Promise<void> {
   const target = event.target as HTMLElement | null; const button = target?.closest<HTMLButtonElement>('[data-ac-approve],[data-ac-deny]'); if (!button || !bridge) return;
@@ -40,15 +45,21 @@ async function action(event: Event): Promise<void> {
     if (button.dataset.acApprove) await bridge.approveTool(id, scope); else await bridge.denyTool(id, scope);
     window.dispatchEvent(new CustomEvent('auto-codez-execution-refresh', { detail: { chatId: selected, runId: approval.runId } }));
     await sync();
-  } catch { button.disabled = false; }
+  } catch { button.disabled = false; } 
 }
 function initialize(): void {
-  installStyle(); activeChatId = chatId(); bridge?.onStreamEvent((event) => { if (event.chatId === activeChatId || event.type === 'approval_required') void sync(); });
+  if (!bridge) return;
+  installStyle(); activeChatId = chatId(); bridge.onStreamEvent((event) => { if (event.chatId === activeChatId || (event.type === 'approval_required' && !event.chatId)) void sync(); });
+  window.addEventListener('auto-codez-execution-refresh', (event) => {
+    const detail = (event as CustomEvent<{ chatId?: string }>).detail;
+    if (!detail?.chatId || detail.chatId === chatId()) void sync();
+  });
   document.addEventListener('click', (event) => void action(event), true);
-  const observer = new MutationObserver(() => { const next = chatId(); if (next !== activeChatId) { activeChatId = next; rootElement?.remove(); rootElement = null; } void sync(); });
+  const observer = new MutationObserver(() => {
+    const next = chatId();
+    if (next !== activeChatId) { activeChatId = next; rootElement?.remove(); rootElement = null; void sync(); }
+  });
   const nav = document.querySelector<HTMLElement>('#nav-panel'); if (nav) observer.observe(nav, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
-  const messages = document.querySelector<HTMLElement>('#messages'); if (messages) new MutationObserver(() => { if (!syncInFlight) void sync(); }).observe(messages, { childList: true, subtree: true });
-  window.setInterval(() => { if (chatId()) void sync(); }, 400);
   void sync();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true }); else initialize();
