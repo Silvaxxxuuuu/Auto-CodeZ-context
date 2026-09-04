@@ -38,7 +38,10 @@ function install(): void {
     event.preventDefault();
     event.stopImmediatePropagation();
     const chatId = selectedChatId();
-    if (chatId) void stopBridge().stopChat(chatId).catch(() => undefined);
+    if (!chatId) return;
+    prompt.disabled = false;
+    prompt.focus();
+    void stopBridge().stopChat(chatId).catch(() => undefined);
   }, true);
 
   syncStopButton();
