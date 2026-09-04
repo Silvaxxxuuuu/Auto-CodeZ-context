@@ -5,180 +5,129 @@ import type {
 } from '../../ai/aiConnector';
 
 import {
-  findAiTab,
-  focusBrowserInput,
+  captureResponseReaderState,
+  readNewAiResponse,
+  type AiResponseReaderState,
+} from '../ai-response-reader';
+
+import { focusAndSendChromiumAiPrompt } from '../chromium-ai-input';
+
+import {
   focusBrowserTab,
-  pasteClipboardAndSend,
+  waitForAiTab,
 } from '../browser';
 
 import {
-  findWindowHandleByTitle,
-  focusFirstEditableElement,
-  focusWindow,
-} from '../windows-ui';
+  clipboard,
+  shell,
+} from 'electron';
 
-export class ClaudeConnector
-  implements AiConnector
-{
-  readonly provider =
-    'claude' as const;
+const CLAUDE_URL = 'https://claude.ai/new';
+const CLAUDE_TAB_TERMS = ['Claude', 'claude.ai', 'Anthropic'];
+
+export class ClaudeConnector implements AiConnector {
+  readonly provider = 'claude' as const;
+
+  private responseReader: AiResponseReaderState | null = null;
 
   async isAvailable(): Promise<boolean> {
-    const browserTab =
-      await findAiTab([
-        'Claude',
-      ]);
+    return true;
+  }
+
+  async prepare(): Promise<boolean> {
+    const browserTab = await waitForAiTab(
+      CLAUDE_TAB_TERMS,
+      2,
+      300,
+    );
 
     if (browserTab) {
       return true;
     }
 
-    const appHandle =
-      await findWindowHandleByTitle([
-        'Claude',
-      ]);
+    try {
+      await shell.openExternal(CLAUDE_URL);
+    }
+    catch {
+      return false;
+    }
 
-    return appHandle !== null;
+    const openedTab = await waitForAiTab(
+      CLAUDE_TAB_TERMS,
+      30,
+      500,
+    );
+
+    return openedTab !== null;
   }
 
-  async prepare(): Promise<boolean> {
-  const browserTab =
-    await findAiTab([
-      'Claude',
-    ]);
-
-  if (browserTab) {
-    return true;
-  }
-
-  const appHandle =
-    await findWindowHandleByTitle([
-      'Claude',
-    ]);
-
-  return appHandle !== null;
-}
-
-  async send(
-    request: AiRequest,
-  ): Promise<AiResponse> {
-    if (
-      request.provider !==
-      this.provider
-    ) {
+  async send(request: AiRequest): Promise<AiResponse> {
+    if (request.provider !== this.provider) {
       throw new Error(
         'O conector do Claude recebeu um provider inválido.',
       );
     }
 
-    if (
-      !request.prompt.trim()
-    ) {
+    if (!request.prompt.trim()) {
+      throw new Error('O prompt do Claude está vazio.');
+    }
+
+    const browserTab = await waitForAiTab(
+      CLAUDE_TAB_TERMS,
+      10,
+      300,
+    );
+
+    if (!browserTab) {
       throw new Error(
-        'O prompt do Claude está vazio.',
+        'Não foi possível localizar a aba do Claude no navegador.',
       );
     }
 
-    const browserTab =
-      await findAiTab([
-        'Claude',
-      ]);
+    const selected = await focusBrowserTab(browserTab);
 
-    if (browserTab) {
-      const selected =
-        await focusBrowserTab(
-          browserTab,
-        );
-
-      if (!selected) {
-        throw new Error(
-          'Não foi possível selecionar a aba do Claude.',
-        );
-      }
-
-      const inputFocused =
-        await focusBrowserInput(
-          browserTab,
-        );
-
-      if (!inputFocused) {
-        throw new Error(
-          'Não foi possível focar o campo de mensagem do Claude.',
-        );
-      }
-
-      const sent =
-        await pasteClipboardAndSend();
-
-      if (!sent) {
-        throw new Error(
-          'Não foi possível enviar o prompt para o Claude.',
-        );
-      }
-
-      return {
-        provider:
-          this.provider,
-        content:
-          'Solicitação enviada ao Claude.',
-        receivedAt:
-          Date.now(),
-      };
-    }
-
-    const appHandle =
-      await findWindowHandleByTitle([
-        'Claude',
-      ]);
-
-    if (!appHandle) {
+    if (!selected) {
       throw new Error(
-        'O Claude não está aberto.',
+        'Não foi possível selecionar a aba correta do Claude.',
       );
     }
 
-    const focused =
-      await focusWindow(
-        appHandle,
-      );
+    clipboard.writeText(request.prompt);
 
-    if (!focused) {
-      throw new Error(
-        'Não foi possível focar o Claude.',
-      );
-    }
+    this.responseReader = await captureResponseReaderState(
+      browserTab.handle,
+      request.prompt,
+    );
 
-    const inputFocused =
-      await focusFirstEditableElement(
-        appHandle,
-      );
-
-    if (!inputFocused) {
-      throw new Error(
-        'Não foi possível focar o campo de mensagem do Claude.',
-      );
-    }
-
-    const sent =
-      await pasteClipboardAndSend();
+    const sent = await focusAndSendChromiumAiPrompt(
+      browserTab,
+      this.provider,
+    );
 
     if (!sent) {
+      this.responseReader = null;
       throw new Error(
-        'Não foi possível enviar o prompt para o Claude.',
+        'O campo de mensagem do Claude não foi identificado com segurança no conteúdo da página. O prompt não foi enviado.',
       );
     }
 
     return {
-      provider:
-        this.provider,
-      content:
-        'Solicitação enviada ao Claude.',
-      receivedAt:
-        Date.now(),
+      provider: this.provider,
+      content: 'Solicitação enviada ao Claude.',
+      receivedAt: Date.now(),
     };
   }
 
   async readResponse(): Promise<AiResponse | null> {
-    return null;
+    const response = await readNewAiResponse(
+      this.responseReader,
+      this.provider,
+    );
+
+    if (response) {
+      this.responseReader = null;
+    }
+
+    return response;
   }
 }
