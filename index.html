@@ -9,51 +9,29 @@
     <link rel="stylesheet" href="/src/ui-overrides.css" />
     <link rel="stylesheet" href="/src/ui-polish.css" />
     <link rel="stylesheet" href="/src/ui-final-polish.css" />
-    <link rel="stylesheet" href="/src/ui-v2-polish.css" />
     <link rel="stylesheet" href="/src/ui-execution-visibility.css" />
+    <link rel="stylesheet" href="/src/ui-v2-polish.css" />
     <link rel="stylesheet" href="/src/profile-ui.css" />
     <link rel="stylesheet" href="/src/settings-ui.css" />
-    <link rel="stylesheet" href="/src/stop-button.css" />
   </head>
 
   <body>
     <div id="app"></div>
+    <script type="module" src="/src/settings-ui.ts"></script>
+    <script type="module" src="/src/stream-performance.ts"></script>
     <script type="module" src="/src/renderer.ts"></script>
-    <script>
-      window.addEventListener('DOMContentLoaded', async () => {
-        const modules = [
-          '/src/ui-polish.ts',
-          '/src/settings-ui.ts',
-          '/src/stop-control.ts',
-          '/src/composer-resilience.ts',
-          '/src/thinking-ui.ts',
-          '/src/chat-execution-ui.ts',
-          '/src/approval-ui.ts',
-          '/src/terminal-ui.ts',
-          '/src/activity-ui.ts',
-          '/src/chat-rename-ui.ts',
-          '/src/api-settings-routing-ui.ts',
-          '/src/initial-chat-ui.ts',
-          '/src/profile-ui.ts',
-          '/src/chat-api-key-settings-ui.ts',
-          '/src/api-key-ui.ts',
-          '/src/error-recovery-ui.ts',
-          '/src/api-key-flow-polish.ts',
-          '/src/execution-visibility.ts',
-          '/src/diff-ui.ts',
-          '/src/git-ui.ts',
-          '/src/git-actions-ui.ts',
-        ];
-
-        for (const modulePath of modules) {
-          try {
-            await import(modulePath);
-          } catch (error) {
-            console.error(`Falha ao inicializar ${modulePath}.`, error);
-          }
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        }
-      }, { once: true });
-    </script>
+    <script type="module" src="/src/thinking-ui.ts"></script>
+    <script type="module" src="/src/chat-execution-ui.ts"></script>
+    <script type="module" src="/src/approval-ui.ts"></script>
+    <script type="module" src="/src/terminal-ui.ts"></script>
+    <script type="module" src="/src/activity-ui.ts"></script>
+    <script type="module" src="/src/diff-ui.ts"></script>
+    <script type="module" src="/src/git-ui.ts"></script>
+    <script type="module" src="/src/git-actions-ui.ts"></script>
+    <script type="module" src="/src/chat-rename-ui.ts"></script>
+    <script type="module" src="/src/api-settings-routing-ui.ts"></script>
+    <script type="module" src="/src/initial-chat-ui.ts"></script>
+    <script type="module" src="/src/profile-ui.ts"></script>
+    <script type="module" src="/src/chat-api-key-settings-ui.ts"></script>
   </body>
 </html>
