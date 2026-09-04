@@ -28,11 +28,11 @@ function renderLiveStatus(): void {
   const messages = document.querySelector<HTMLElement>('#messages'); if (!messages) return;
   const status = document.createElement('div'); status.className = 'ac-thinking-status';
   status.innerHTML = state.waitingApproval ? '<span>Aguardando sua aprovação</span>' : '<span>Pensando</span><span class="ac-thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
-  const anchor = messages.querySelector('.message.assistant.streaming, .activity-card, .ac-approval-root');
   mutatingDom = true;
-  if (anchor) messages.insertBefore(status, anchor); else messages.appendChild(status);
+  if (anchorForStatus(messages)) messages.insertBefore(status, anchorForStatus(messages)!); else messages.appendChild(status);
   mutatingDom = false;
 }
+function anchorForStatus(messages: HTMLElement): HTMLElement | null { return messages.querySelector('.message.assistant.streaming, .activity-card, .ac-approval-root'); }
 function insertThoughtTime(chatId: string, token: number, durationMs: number): void {
   if (chatId !== activeChatId) return;
   const messages = document.querySelector<HTMLElement>('#messages'); if (!messages) return;
@@ -71,8 +71,6 @@ function hydrate(): void {
 }
 function syncChat(): void { const next = currentChatId(); if (next === activeChatId) return; activeChatId = next; removeLiveStatus(); if (next && stateFor(next).active) renderLiveStatus(); }
 function observe(): void {
-  const messages = document.querySelector<HTMLElement>('#messages'); if (!messages) return;
-  new MutationObserver(() => { if (mutatingDom) return; syncChat(); const state = activeChatId ? stateFor(activeChatId) : undefined; if (state?.active) renderLiveStatus(); else if (state) { removeLiveStatus(); insertThoughtTime(activeChatId!, state.token, state.accumulatedMs); } }).observe(messages, { childList: true, subtree: true });
   const nav = document.querySelector<HTMLElement>('#nav-panel'); if (nav) new MutationObserver(() => { syncChat(); hydrate(); }).observe(nav, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
 }
 function initialize(): void { installStyle(); activeChatId = currentChatId(); bridge?.onStreamEvent(handleEvent); observe(); hydrate(); }
