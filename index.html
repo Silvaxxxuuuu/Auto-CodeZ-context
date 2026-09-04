@@ -20,32 +20,39 @@
     <div id="app"></div>
     <script type="module" src="/src/renderer.ts"></script>
     <script>
-      window.addEventListener('DOMContentLoaded', () => {
-        void Promise.all([
-          import('/src/settings-ui.ts'),
-          import('/src/stop-control.ts'),
-          import('/src/composer-resilience.ts'),
-          import('/src/thinking-ui.ts'),
-          import('/src/chat-execution-ui.ts'),
-          import('/src/approval-ui.ts'),
-          import('/src/terminal-ui.ts'),
-          import('/src/activity-ui.ts'),
-          import('/src/chat-rename-ui.ts'),
-          import('/src/api-settings-routing-ui.ts'),
-          import('/src/initial-chat-ui.ts'),
-          import('/src/profile-ui.ts'),
-          import('/src/chat-api-key-settings-ui.ts'),
-          import('/src/api-key-ui.ts'),
-          import('/src/ui-polish.ts'),
-          import('/src/error-recovery-ui.ts'),
-          import('/src/api-key-flow-polish.ts'),
-          import('/src/execution-visibility.ts'),
-          import('/src/diff-ui.ts'),
-          import('/src/git-ui.ts'),
-          import('/src/git-actions-ui.ts'),
-        ]).catch((error) => {
-          console.error('Falha ao inicializar módulos auxiliares da interface do Auto CodeZ.', error);
-        });
+      window.addEventListener('DOMContentLoaded', async () => {
+        const modules = [
+          '/src/ui-polish.ts',
+          '/src/settings-ui.ts',
+          '/src/stop-control.ts',
+          '/src/composer-resilience.ts',
+          '/src/thinking-ui.ts',
+          '/src/chat-execution-ui.ts',
+          '/src/approval-ui.ts',
+          '/src/terminal-ui.ts',
+          '/src/activity-ui.ts',
+          '/src/chat-rename-ui.ts',
+          '/src/api-settings-routing-ui.ts',
+          '/src/initial-chat-ui.ts',
+          '/src/profile-ui.ts',
+          '/src/chat-api-key-settings-ui.ts',
+          '/src/api-key-ui.ts',
+          '/src/error-recovery-ui.ts',
+          '/src/api-key-flow-polish.ts',
+          '/src/execution-visibility.ts',
+          '/src/diff-ui.ts',
+          '/src/git-ui.ts',
+          '/src/git-actions-ui.ts',
+        ];
+
+        for (const modulePath of modules) {
+          try {
+            await import(modulePath);
+          } catch (error) {
+            console.error(`Falha ao inicializar ${modulePath}.`, error);
+          }
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
       }, { once: true });
     </script>
   </body>
