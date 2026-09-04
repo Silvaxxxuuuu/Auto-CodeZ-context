@@ -60,6 +60,12 @@ function commandForPlatform(command: string): { executable: string; args: string
   return { executable: '/bin/sh', args: ['-lc', command] };
 }
 
+function commandFailureMessage(result: CommandResult): string {
+  const details = result.stderr.trim() || result.stdout.trim();
+  const suffix = details ? `\n${details}` : '';
+  return `O comando terminou com código ${result.exitCode}.${suffix}`;
+}
+
 export class CommandRuntime {
   constructor(private readonly projects: () => Promise<ProjectRecord[]>) {}
 
@@ -79,7 +85,7 @@ export class CommandRuntime {
     const { executable, args } = commandForPlatform(normalizedCommand);
     const startedAt = Date.now();
 
-    return new Promise((resolve, reject) => {
+    const result = await new Promise<CommandResult>((resolve, reject) => {
       const child = spawn(executable, args, {
         cwd,
         shell: false,
@@ -114,13 +120,13 @@ export class CommandRuntime {
         }, TERMINATION_GRACE_MS);
       }, TIMEOUT_MS);
 
-      const finish = (result: Omit<CommandResult, 'startedAt' | 'finishedAt' | 'durationMs'>): void => {
+      const finish = (partial: Omit<CommandResult, 'startedAt' | 'finishedAt' | 'durationMs'>): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
         if (killTimer) clearTimeout(killTimer);
         const finishedAt = Date.now();
-        resolve({ ...result, startedAt, finishedAt, durationMs: Math.max(0, finishedAt - startedAt) });
+        resolve({ ...partial, startedAt, finishedAt, durationMs: Math.max(0, finishedAt - startedAt) });
       };
 
       child.stdout?.on('data', (chunk: Buffer | string) => append('stdout', chunk));
@@ -139,5 +145,8 @@ export class CommandRuntime {
         timedOut,
       }));
     });
+
+    if (result.exitCode !== 0 || result.timedOut) throw new Error(commandFailureMessage(result));
+    return result;
   }
 }
