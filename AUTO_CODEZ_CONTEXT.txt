@@ -81,7 +81,7 @@ O baseline anterior de Settings/API keys continua relevante:
 dbdd37a5b882aad35686ef915c8584f08acf9329
 fix(chat): load saved API key chat settings UI
 
-cc5d91c86501224221715e0557d825f62e4171eb2
+cc5d91c86501224221715e0557d825f62e4171eb
 fix(chat): hide deleted saved credential from settings
 
 e31094c660a1d8e3445c28605afd2352e0773664
@@ -421,7 +421,7 @@ Automação total significa autonomia operacional controlada, não acesso irrest
 8. SANDBOX E SEGURANÇA DE EXECUÇÃO — FUTURO PRIORITÁRIO
 ============================================================
 
-O sandbox é uma das próximas grandes áreas arquitetônicas porque o Auto CodeZ pretende permitir que a IA edite o PC e execute ferramentas.
+O sandbox é uma das próximas grandes áreas arquiteturais porque o Auto CodeZ pretende permitir que a IA edite o PC e execute ferramentas.
 
 Objetivo:
 IA -> tool call -> policy/permission -> sandbox ou executor controlado -> filesystem/processo -> resultado observável.
@@ -555,7 +555,7 @@ API Key Manager possui provider, nome, API Key, modelo opcional, base URL opcion
 
 Duplicação de terminal-ui.ts, api-key-ui.ts e ui-polish.ts no index.html + Vite foi removida.
 Commit:
-060941fef86385e9a2ea3f6d10851a9aa162b5ac
+060941fef86385e2a9ea3f6d10851a9aa162b5ac
 
 Observer global permanente de api-key-flow-polish.ts foi removido/restringido.
 Commit:
