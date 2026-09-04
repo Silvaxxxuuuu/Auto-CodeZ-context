@@ -1,6 +1,8 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 
 const rendererEntryTag = '<script type="module" src="/src/renderer-entry.ts"></script>';
+const monacoEditorWorker = fileURLToPath(new URL('./node_modules/monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url));
 
 const devLoader = `<script>
   (() => {
@@ -30,6 +32,11 @@ const devLoader = `<script>
 </script>`;
 
 export default defineConfig(({ command }) => ({
+  resolve: {
+    alias: {
+      'monaco-editor/esm/vs/editor/editor.worker.js': monacoEditorWorker,
+    },
+  },
   optimizeDeps: {
     exclude: ['monaco-editor'],
   },
