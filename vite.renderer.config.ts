@@ -33,9 +33,10 @@ const devLoader = `<script>
 
 export default defineConfig(({ command }) => ({
   resolve: {
-    alias: {
-      'monaco-editor/esm/vs/editor/editor.worker.js': monacoEditorWorker,
-    },
+    alias: [
+      { find: 'monaco-editor/esm/vs/editor/editor.worker.js?worker', replacement: `${monacoEditorWorker}?worker` },
+      { find: 'monaco-editor/esm/vs/editor/editor.worker.js', replacement: monacoEditorWorker },
+    ],
   },
   optimizeDeps: {
     exclude: ['monaco-editor'],
