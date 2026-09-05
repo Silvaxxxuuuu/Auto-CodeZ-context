@@ -100,6 +100,7 @@ let activeSessionId = '';
 let open = false;
 let fitFrame = 0;
 let renderToken = 0;
+let interruptPending = false;
 const outputBuffers = new Map<string, string>();
 
 function activeSession(): TerminalSession | undefined {
@@ -122,7 +123,7 @@ function renderTabs(): void {
 
 function renderStatus(): void {
   const session = activeSession();
-  killButton.disabled = session?.status !== 'running';
+  killButton.disabled = session?.status !== 'running' || !session.interactive || interruptPending;
   clearButton.disabled = !session;
   status.textContent = session ? sessionLabel(session) : 'Nenhuma sessão ativa';
   placeholder.classList.toggle('hidden', Boolean(session));
@@ -173,6 +174,24 @@ async function openSession(shell: TerminalShell): Promise<void> {
   }
 }
 
+async function interruptActiveSession(): Promise<void> {
+  const session = activeSession();
+  if (!session || session.status !== 'running' || !session.interactive || interruptPending) return;
+  interruptPending = true;
+  renderStatus();
+  try {
+    const updated = await terminalApi.writeInput({ sessionId: session.id, data: '\x03' });
+    const index = sessions.findIndex((item) => item.id === updated.id);
+    if (index >= 0) sessions[index] = updated;
+  } catch (error) {
+    status.textContent = error instanceof Error ? error.message : 'Não foi possível interromper o comando.';
+  } finally {
+    interruptPending = false;
+    renderStatus();
+    xterm.focus();
+  }
+}
+
 function scheduleFit(): void {
   if (!open || !activeSession()) return;
   if (fitFrame) cancelAnimationFrame(fitFrame);
@@ -195,6 +214,14 @@ function setOpen(value: boolean): void {
     xterm.focus();
   });
 }
+
+xterm.attachCustomKeyEventHandler((event) => {
+  if (event.type !== 'keydown') return true;
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'c') return true;
+  if (xterm.hasSelection()) return true;
+  void interruptActiveSession();
+  return false;
+});
 
 xterm.onData((data) => {
   const session = activeSession();
@@ -219,17 +246,7 @@ button.addEventListener('click', () => setOpen(!open));
 closeButton.addEventListener('click', () => setOpen(false));
 shellSelect.addEventListener('change', () => void openSession(shellSelect.value as TerminalShell));
 newButton.addEventListener('click', () => void openSession(shellSelect.value as TerminalShell));
-killButton.addEventListener('click', () => {
-  const session = activeSession();
-  if (!session) return;
-  void terminalApi.kill(session.id).then((updated) => {
-    const index = sessions.findIndex((item) => item.id === updated.id);
-    if (index >= 0) sessions[index] = updated;
-    renderStatus();
-  }).catch((error) => {
-    status.textContent = error instanceof Error ? error.message : 'Não foi possível encerrar o terminal.';
-  });
-});
+killButton.addEventListener('click', () => void interruptActiveSession());
 clearButton.addEventListener('click', () => {
   const session = activeSession();
   if (!session) return;
