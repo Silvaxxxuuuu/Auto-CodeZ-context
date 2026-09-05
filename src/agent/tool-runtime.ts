@@ -120,6 +120,12 @@ export class ToolRuntime {
     try { validateToolInput(definition, normalizedCall.input); } catch (error) { return { toolCallId: normalizedCall.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
     const decision = this.permissions.decide(permission, normalizedCall.name);
     if (decision === 'deny') return { toolCallId: normalizedCall.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
+    const pending = this.approvals.list({ chatId, runId });
+    if (pending.length) {
+      const error = 'Operação adiada porque uma operação anterior deste ciclo ainda aguarda aprovação. Se ela continuar necessária após a decisão do usuário, solicite a operação novamente.';
+      this.activity.emit({ type: 'action', message: `Adiado: ${normalizedCall.name}`, status: 'pending', toolCallId: normalizedCall.id, toolName: normalizedCall.name, chatId, runId });
+      return { toolCallId: normalizedCall.id, ok: false, error };
+    }
     if (decision === 'ask') {
       let diffPlan: DiffPlan | undefined;
       try { diffPlan = await this.preview(projectId, normalizedCall); } catch (error) {
