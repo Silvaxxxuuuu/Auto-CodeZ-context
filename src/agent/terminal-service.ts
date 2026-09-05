@@ -1,6 +1,7 @@
 import type { ProjectRecord } from '../ai/types';
 import type { LocalStorage } from '../core/storage';
 import { TerminalHistory, type TerminalHistoryRecord } from './terminal-history';
+import { loadNodePtyInteractiveTerminalProcessFactory } from './terminal-node-pty';
 import type { InteractiveTerminalProcessFactory } from './terminal-process';
 import { TerminalRuntime, type TerminalExitEvent, type TerminalOutputEvent, type TerminalSession } from './terminal-runtime';
 
@@ -15,6 +16,7 @@ export class TerminalService {
   private readonly history: TerminalHistory;
   private readonly runtime: TerminalRuntime;
   private readonly listeners = new Set<(event: TerminalEvent) => void>();
+  private readonly hasInjectedInteractiveFactory: boolean;
 
   constructor(
     private readonly storage: LocalStorage,
@@ -22,6 +24,7 @@ export class TerminalService {
     interactiveFactory?: InteractiveTerminalProcessFactory,
   ) {
     this.history = new TerminalHistory(storage);
+    this.hasInjectedInteractiveFactory = Boolean(interactiveFactory);
     this.runtime = new TerminalRuntime(projects, (event) => {
       if ('text' in event) {
         this.publish({ type: 'output', event });
@@ -33,6 +36,9 @@ export class TerminalService {
 
   async init(): Promise<void> {
     await this.history.init();
+    if (this.hasInjectedInteractiveFactory) return;
+    const nodePtyFactory = await loadNodePtyInteractiveTerminalProcessFactory();
+    if (nodePtyFactory) this.runtime.configureInteractiveFactory(nodePtyFactory);
   }
 
   configureInteractiveFactory(factory: InteractiveTerminalProcessFactory): void {
