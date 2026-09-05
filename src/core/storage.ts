@@ -18,6 +18,7 @@ const electronSecureStorage: SecureStorageAdapter = {
 const SENSITIVE_JSON_FILES = new Set([
   'agent-runs.json',
   'tool-execution-journal.json',
+  'provider-requests.json',
 ]);
 
 function isMissingFile(error: unknown): boolean {
