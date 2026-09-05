@@ -20,7 +20,7 @@ import { ApprovalRuntime } from './agent/approval-runtime';
 import { CommandRuntime } from './agent/command-runtime';
 import { DiffRuntime } from './agent/diff-runtime';
 import { ComputerContextRuntime } from './agent/computer-context';
-import { ExecutionManager } from './execution-manager';
+import { ExecutionManager, type ExecutionChange } from './execution-manager';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
@@ -64,6 +64,12 @@ function sendActivity(event: unknown): void {
 function sendStreamEvent(event: AIStreamEvent): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', event);
 }
+
+function sendExecutionChange(change: ExecutionChange): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution:event', change);
+}
+
+executionManager.subscribe(sendExecutionChange);
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';

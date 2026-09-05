@@ -97,6 +97,11 @@ contextBridge.exposeInMainWorld('autoCodez', {
   listTools: () => invoke('agent:list-tools'),
   listApprovals: (filters?: ApprovalScope) => invoke('agent:list-approvals', requireApprovalScope(filters)),
   listExecutions: (chatId?: string) => invoke('agent:list-executions', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  onExecutionEvent: (listener: (event: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+    ipcRenderer.on('execution:event', handler);
+    return () => ipcRenderer.removeListener('execution:event', handler);
+  },
   listRecoverableRuns: () => invoke('agent:list-recoverable-runs'),
   resumeRecoveredRun: (runId: string) => invoke('agent:resume-recovered', requireIdentifier(runId, 'Execução recuperável')),
   listInterruptedProviderRequests: () => invoke('agent:list-interrupted-provider-requests'),
