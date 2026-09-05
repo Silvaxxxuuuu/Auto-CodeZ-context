@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ChatRuntime } from '../src/ai/chat-runtime';
 import { ProviderRegistry } from '../src/ai/provider-registry';
-import type { AIProviderAdapter, AIProviderConfig, AIResponse, AIStreamEvent, ChatRecord } from '../src/ai/types';
+import type { AIProviderAdapter, AIProviderConfig, AIResponse, AIStreamEvent, ChatRecord, ToolName } from '../src/ai/types';
 
 const config: AIProviderConfig = {
   id: 'test-provider',
@@ -44,7 +44,7 @@ function registerAdapter(registry: ProviderRegistry, capabilities: ('text' | 'to
   return { requests, responses };
 }
 
-function tool(name: 'read_file' | 'write_file' | 'create_file' | 'delete_file' | 'rename_file' | 'search_files' | 'run_command' | 'git_status', requiresWriteAccess: boolean, requiresApproval: boolean) {
+function tool(name: ToolName, requiresWriteAccess: boolean, requiresApproval: boolean) {
   return { name, description: name, parameters: { type: 'object' }, requiresWriteAccess, requiresApproval };
 }
 
@@ -74,6 +74,9 @@ test('send exposes protected file tools and run_command to a normal chat but exc
     tool('read_file', false, false),
     tool('write_file', true, true),
     tool('create_file', true, true),
+    tool('replace_range', true, true),
+    tool('insert_before', true, true),
+    tool('insert_after', true, true),
     tool('delete_file', true, true),
     tool('rename_file', true, true),
     tool('search_files', false, false),
@@ -84,11 +87,13 @@ test('send exposes protected file tools and run_command to a normal chat but exc
   await runtime.send(config, chat('test-model', ''));
   const request = requests[0] as { toolsEnabled: boolean; tools?: Array<{ name: string }>; messages: Array<{ content: string }> };
   assert.equal(request.toolsEnabled, true);
-  assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'write_file', 'create_file', 'delete_file', 'rename_file', 'search_files', 'run_command']);
+  assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'write_file', 'create_file', 'replace_range', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']);
   assert.equal(request.tools?.some((item) => item.name === 'git_status'), false);
   assert.match(request.messages[0].content, /Runtime OS:/);
   assert.match(request.messages[0].content, /protected system workspace rooted at the user's Home directory/i);
   assert.match(request.messages[0].content, /Desktop\/Novo site\/index\.html/i);
+  assert.match(request.messages[0].content, /localized edits, prefer replace_range, insert_before or insert_after/i);
+  assert.match(request.messages[0].content, /Use write_file when most or all of a file genuinely needs replacement/i);
 });
 
 test('send keeps available protected file tools in a normal chat even when run_command is unavailable', async () => {
@@ -97,12 +102,13 @@ test('send keeps available protected file tools in a normal chat even when run_c
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
     tool('read_file', false, false),
     tool('create_file', true, true),
+    tool('replace_range', true, true),
   ]);
 
   await runtime.send(config, chat('test-model', ''));
   const request = requests[0] as { toolsEnabled: boolean; tools?: Array<{ name: string }> };
   assert.equal(request.toolsEnabled, true);
-  assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'create_file']);
+  assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'create_file', 'replace_range']);
 });
 
 test('send disables tools for models without tool capability', async () => {
