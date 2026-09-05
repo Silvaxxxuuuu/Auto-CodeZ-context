@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { CommandRuntime, SYSTEM_PROJECT_ID } from '../src/agent/command-runtime';
+import { runWithAbortSignal } from '../src/ai/request-cancellation';
 import type { ProjectRecord } from '../src/ai/types';
 
 async function createProject(): Promise<{ root: string; runtime: CommandRuntime; cleanup: () => Promise<void> }> {
@@ -96,6 +97,20 @@ test('command runtime aborts a running process tree', async () => {
   try {
     const startedAt = Date.now();
     const running = project.runtime.run('project-test', nodeCommand("setTimeout(() => process.stdout.write('late'), 30000)"), { signal: controller.signal });
+    setTimeout(() => controller.abort(), 100);
+    await assert.rejects(running, (error: unknown) => error instanceof Error && error.name === 'AbortError');
+    assert.ok(Date.now() - startedAt < 5000);
+  } finally {
+    await project.cleanup();
+  }
+});
+
+test('command runtime inherits cancellation from the active execution context', async () => {
+  const project = await createProject();
+  const controller = new AbortController();
+  try {
+    const startedAt = Date.now();
+    const running = runWithAbortSignal(controller.signal, () => project.runtime.run('project-test', nodeCommand("setTimeout(() => process.stdout.write('late'), 30000)")));
     setTimeout(() => controller.abort(), 100);
     await assert.rejects(running, (error: unknown) => error instanceof Error && error.name === 'AbortError');
     assert.ok(Date.now() - startedAt < 5000);
