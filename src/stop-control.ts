@@ -4,13 +4,24 @@ let installed = false;
 let syncing = false;
 let promptObserver: MutationObserver | null = null;
 let buttonObserver: MutationObserver | null = null;
+let approvalObserver: MutationObserver | null = null;
 let domObserver: MutationObserver | null = null;
 
 function bridge(): StopBridge { return (window as unknown as { autoCodez: StopBridge }).autoCodez; }
 function selectedChatId(): string | undefined { return document.querySelector<HTMLElement>('.chat-item.selected')?.dataset.chat; }
 
+function visibleApprovalRoot(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.ac-approval-root:not([hidden])');
+}
+
 function hasVisibleApproval(): boolean {
-  return Boolean(document.querySelector('.ac-approval-root:not([hidden]) [data-approve], .ac-approval-root:not([hidden]) [data-deny]'));
+  const root = visibleApprovalRoot();
+  return Boolean(root?.querySelector('[data-approve], [data-deny]'));
+}
+
+function approvalIsProcessing(): boolean {
+  const root = visibleApprovalRoot();
+  return Boolean(root?.querySelector('[data-processing="true"]'));
 }
 
 function syncStopButton(): void {
@@ -23,7 +34,8 @@ function syncStopButton(): void {
   try {
     const executionLocked = prompt.dataset.executionLocked === 'true' || button.dataset.executionLocked === 'true';
     const approvalVisible = hasVisibleApproval();
-    const stopping = (prompt.disabled || executionLocked) && !approvalVisible;
+    const approvalProcessing = approvalIsProcessing();
+    const stopping = (prompt.disabled || executionLocked) && (!approvalVisible || approvalProcessing);
 
     if (button.classList.contains('is-stop') !== stopping) button.classList.toggle('is-stop', stopping);
 
@@ -53,9 +65,11 @@ function syncStopButton(): void {
 function disconnectObservers(): void {
   promptObserver?.disconnect();
   buttonObserver?.disconnect();
+  approvalObserver?.disconnect();
   domObserver?.disconnect();
   promptObserver = null;
   buttonObserver = null;
+  approvalObserver = null;
   domObserver = null;
 }
 
@@ -73,6 +87,17 @@ function installWhenReady(): void {
 
   buttonObserver = new MutationObserver(syncStopButton);
   buttonObserver.observe(button, { attributes: true, attributeFilter: ['disabled', 'data-execution-locked'], childList: true });
+
+  const approvalRoot = document.querySelector<HTMLElement>('.ac-approval-root');
+  if (approvalRoot) {
+    approvalObserver = new MutationObserver(syncStopButton);
+    approvalObserver.observe(approvalRoot, {
+      attributes: true,
+      attributeFilter: ['hidden', 'data-processing'],
+      childList: true,
+      subtree: true,
+    });
+  }
 
   prompt.addEventListener('input', syncStopButton);
 
