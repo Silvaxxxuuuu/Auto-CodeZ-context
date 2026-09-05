@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PermissionRuntime } from '../src/agent/permission-runtime';
 
-const safeWrites = ['write_file', 'create_file', 'replace_range', 'replace_text', 'insert_before', 'insert_after'] as const;
+const safeWrites = ['write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after'] as const;
 const sensitiveWrites = ['delete_file', 'rename_file', 'run_command'] as const;
 const allWrites = [...safeWrites, ...sensitiveWrites] as const;
 
