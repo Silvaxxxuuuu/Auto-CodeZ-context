@@ -101,6 +101,7 @@ let open = false;
 let fitFrame = 0;
 let renderToken = 0;
 let interruptPending = false;
+let openingDefaultSession = false;
 const outputBuffers = new Map<string, string>();
 
 function activeSession(): TerminalSession | undefined {
@@ -127,6 +128,7 @@ function renderStatus(): void {
   clearButton.disabled = !session;
   status.textContent = session ? sessionLabel(session) : 'Nenhuma sessão ativa';
   placeholder.classList.toggle('hidden', Boolean(session));
+  if (session) shellSelect.value = session.shell;
 }
 
 function writeActiveSnapshot(): void {
@@ -192,6 +194,45 @@ async function interruptActiveSession(): Promise<void> {
   }
 }
 
+async function copySelection(): Promise<void> {
+  const selection = xterm.getSelection();
+  if (!selection) return;
+  try {
+    await navigator.clipboard.writeText(selection);
+  } catch {
+    status.textContent = 'Não foi possível copiar o texto selecionado.';
+  }
+}
+
+async function pasteClipboard(): Promise<void> {
+  const session = activeSession();
+  if (!session || session.status !== 'running' || !session.interactive) return;
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text) return;
+    await terminalApi.writeInput({ sessionId: session.id, data: text });
+    xterm.focus();
+  } catch {
+    status.textContent = 'Não foi possível colar o conteúdo da área de transferência.';
+  }
+}
+
+async function clearActiveSession(): Promise<void> {
+  const session = activeSession();
+  if (!session) return;
+  outputBuffers.set(session.id, '');
+  xterm.reset();
+  if (session.status === 'running' && session.interactive) {
+    try {
+      const clearCommand = session.shell === 'powershell' ? 'Clear-Host\r' : 'cls\r';
+      await terminalApi.writeInput({ sessionId: session.id, data: clearCommand });
+    } catch (error) {
+      status.textContent = error instanceof Error ? error.message : 'Não foi possível limpar o terminal.';
+    }
+  }
+  xterm.focus();
+}
+
 function scheduleFit(): void {
   if (!open || !activeSession()) return;
   if (fitFrame) cancelAnimationFrame(fitFrame);
@@ -209,7 +250,16 @@ function setOpen(value: boolean): void {
   button.setAttribute('aria-expanded', String(open));
   button.classList.toggle('active', open);
   if (!open) return;
-  void refreshSessions().then(() => {
+  void refreshSessions().then(async () => {
+    if (!activeSession() && !openingDefaultSession) {
+      openingDefaultSession = true;
+      shellSelect.value = 'powershell';
+      try {
+        await openSession('powershell');
+      } finally {
+        openingDefaultSession = false;
+      }
+    }
     scheduleFit();
     xterm.focus();
   });
@@ -217,10 +267,22 @@ function setOpen(value: boolean): void {
 
 xterm.attachCustomKeyEventHandler((event) => {
   if (event.type !== 'keydown') return true;
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'c') return true;
-  if (xterm.hasSelection()) return true;
-  void interruptActiveSession();
-  return false;
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return true;
+  const key = event.key.toLowerCase();
+  if (key === 'a') {
+    xterm.selectAll();
+    return false;
+  }
+  if (key === 'c') {
+    if (xterm.hasSelection()) void copySelection();
+    else void interruptActiveSession();
+    return false;
+  }
+  if (key === 'v') {
+    void pasteClipboard();
+    return false;
+  }
+  return true;
 });
 
 xterm.onData((data) => {
@@ -247,14 +309,7 @@ closeButton.addEventListener('click', () => setOpen(false));
 shellSelect.addEventListener('change', () => void openSession(shellSelect.value as TerminalShell));
 newButton.addEventListener('click', () => void openSession(shellSelect.value as TerminalShell));
 killButton.addEventListener('click', () => void interruptActiveSession());
-clearButton.addEventListener('click', () => {
-  const session = activeSession();
-  if (!session) return;
-  outputBuffers.set(session.id, '');
-  xterm.clear();
-  xterm.reset();
-  xterm.focus();
-});
+clearButton.addEventListener('click', () => void clearActiveSession());
 tabs.addEventListener('click', (event) => {
   const target = (event.target as HTMLElement).closest<HTMLElement>('[data-terminal-session]');
   if (!target?.dataset.terminalSession) return;
