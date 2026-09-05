@@ -10,7 +10,7 @@ export type WorkspacePathPolicyResult = {
   reasons: string[];
 };
 
-const mutationTools = new Set<ToolName>([
+const fileMutationTools = new Set<ToolName>([
   'write_file',
   'create_file',
   'replace_range',
@@ -21,6 +21,8 @@ const mutationTools = new Set<ToolName>([
   'delete_file',
   'rename_file',
 ]);
+
+const sensitiveMutationTools = new Set<ToolName>([...fileMutationTools, 'git_stage']);
 
 function normalizePath(value: string): string {
   return value.trim().replaceAll('\\', '/').replace(/^\.\//, '').replace(/^\/+/, '').toLowerCase();
@@ -100,17 +102,9 @@ export class WorkspacePathPolicy {
       const result = classifyPath(path);
       if (result.classification === 'normal') continue;
 
-      if (result.classification === 'protected') {
-        classification = 'protected';
-        const pathDecision: PermissionDecision = mutationTools.has(tool) ? 'deny' : 'ask';
-        decision = stronger(decision, pathDecision);
-      } else if (classification === 'normal') {
-        classification = 'sensitive';
-        decision = stronger(decision, 'ask');
-      } else {
-        decision = stronger(decision, 'ask');
-      }
-
+      const pathDecision: PermissionDecision = sensitiveMutationTools.has(tool) ? 'deny' : 'ask';
+      decision = stronger(decision, pathDecision);
+      if (result.classification === 'protected' || classification === 'normal') classification = result.classification;
       if (result.reason && !reasons.includes(result.reason)) reasons.push(result.reason);
     }
 
