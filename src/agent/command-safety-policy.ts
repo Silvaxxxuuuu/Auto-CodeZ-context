@@ -24,7 +24,7 @@ function stronger(left: PermissionDecision, right: PermissionDecision): Permissi
 function candidateTokens(command: string): string[] {
   return command
     .split(/[\s"'`=<>|;&(),]+/)
-    .map((token) => token.trim().replace(/^[\[\]{}]+|[\[\]{}:]+$/g, ''))
+    .map((token) => token.trim().replace(/^[{}]+|[{}:]+$/g, ''))
     .filter(Boolean);
 }
 
