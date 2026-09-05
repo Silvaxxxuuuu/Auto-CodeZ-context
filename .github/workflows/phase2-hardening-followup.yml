@@ -1,0 +1,60 @@
+name: Apply execution hardening follow-up
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/phase2-hardening-followup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - name: Apply focused follow-up fixes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          planner = Path('src/execution-planner.ts')
+          text = planner.read_text(encoding='utf-8')
+          old = "const steps: ExecutionPlanStep[] = stepTitles.map((title) => ({"
+          new = "const steps = stepTitles.map<ExecutionPlanStep>((title) => ({"
+          if text.count(old) != 1:
+              raise SystemExit('Planner contextual typing anchor mismatch')
+          planner.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          main = Path('src/main.ts')
+          text = main.read_text(encoding='utf-8')
+          old = """    if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);\n    else executionCoordinator.complete(chatId, runId);\n    return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };\n"""
+          new = """    if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);\n    else {\n      const completion = executionCoordinator.complete(chatId, runId);\n      if (completion.error) throw new Error(completion.error);\n    }\n    return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };\n"""
+          if text.count(old) != 1:
+              raise SystemExit('executeChat completion anchor mismatch')
+          text = text.replace(old, new, 1)
+
+          old = """    if (controller.signal.aborted || isAbortError(error)) {\n      approvalRuntime.remove({ chatId });\n      await agentRuntime.cancelChat(chatId);\n      executionManager.remove(chatId);\n      emit({ type: 'cancelled', chatId, runId });\n"""
+          new = """    if (controller.signal.aborted || isAbortError(error)) {\n      await clearChatExecution(chatId);\n      emit({ type: 'cancelled', chatId, runId });\n"""
+          if text.count(old) != 1:
+              raise SystemExit('stream cancellation anchor mismatch')
+          main.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          git diff --check
+          git diff -- src/execution-planner.ts src/main.ts
+      - name: Commit fixes and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git rm .github/workflows/phase2-hardening-followup.yml
+          git add src/execution-planner.ts src/main.ts
+          git commit -m "fix(execution): close hardening integration gaps"
+          git push origin HEAD:feature/ui-hierarchy-polish
