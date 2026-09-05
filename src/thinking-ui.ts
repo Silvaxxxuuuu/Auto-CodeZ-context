@@ -6,7 +6,6 @@ type ThinkingState = { active: boolean; waitingApproval: boolean; runId?: string
 const bridge = (window as unknown as { autoCodez?: Bridge }).autoCodez;
 const states = new Map<string, ThinkingState>();
 let activeChatId: string | undefined;
-let mutatingDom = false;
 
 function currentChatId(): string | undefined { return document.querySelector<HTMLElement>('.chat-item.selected')?.dataset.chat; }
 function stateFor(chatId: string): ThinkingState { const existing = states.get(chatId); if (existing) return existing; const state: ThinkingState = { active: false, waitingApproval: false, startedAt: 0, accumulatedMs: 0, pausedAt: 0, token: 0 }; states.set(chatId, state); return state; }
@@ -29,9 +28,7 @@ function renderLiveStatus(): void {
   const status = document.createElement('div'); status.className = 'ac-thinking-status';
   status.innerHTML = state.waitingApproval ? '<span>Aguardando sua aprovação</span>' : '<span>Pensando</span><span class="ac-thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
   const anchor = messages.querySelector('.message.assistant.streaming, .activity-card, .ac-approval-root');
-  mutatingDom = true;
   if (anchor) messages.insertBefore(status, anchor); else messages.appendChild(status);
-  mutatingDom = false;
 }
 function insertThoughtTime(chatId: string, token: number, durationMs: number): void {
   if (chatId !== activeChatId) return;
@@ -40,7 +37,7 @@ function insertThoughtTime(chatId: string, token: number, durationMs: number): v
   const assistant = [...messages.querySelectorAll<HTMLElement>('.message.assistant:not(.streaming)')].at(-1); if (!assistant) return;
   if (assistant.querySelector(`[data-ac-thought-token="${token}"]`)) return;
   const label = document.createElement('div'); label.className = 'ac-thought-time'; label.dataset.acThoughtToken = String(token); label.textContent = `Pensou por ${seconds(durationMs)}`;
-  mutatingDom = true; assistant.prepend(label); mutatingDom = false;
+  assistant.prepend(label);
 }
 function finish(chatId: string): void {
   const state = stateFor(chatId); if (!state.active) return;
@@ -48,13 +45,27 @@ function finish(chatId: string): void {
   const token = state.token; const duration = state.accumulatedMs; if (chatId !== activeChatId) return;
   removeLiveStatus(); const retry = (): void => insertThoughtTime(chatId, token, duration); retry(); window.setTimeout(retry, 0); window.setTimeout(retry, 60); window.setTimeout(retry, 250);
 }
+function resumeThinking(chatId: string, state: ThinkingState): void {
+  if (!state.active || !state.waitingApproval) return;
+  state.waitingApproval = false;
+  state.startedAt = Date.now();
+  state.pausedAt = 0;
+  if (chatId === activeChatId) renderLiveStatus();
+}
 function handleEvent(event: StreamEvent): void {
   const chatId = event.chatId || currentChatId(); if (!chatId) return;
   const state = stateFor(chatId);
-  if (event.type === 'start') { state.active = true; state.waitingApproval = false; state.startedAt = Date.now(); state.accumulatedMs = 0; state.pausedAt = 0; state.runId = event.runId; state.token += 1; if (chatId === activeChatId) renderLiveStatus(); return; }
+  if (event.type === 'start') {
+    if (state.active && state.runId && event.runId === state.runId) {
+      resumeThinking(chatId, state);
+      return;
+    }
+    state.active = true; state.waitingApproval = false; state.startedAt = Date.now(); state.accumulatedMs = 0; state.pausedAt = 0; state.runId = event.runId; state.token += 1; if (chatId === activeChatId) renderLiveStatus(); return;
+  }
   if (event.runId && state.runId && event.runId !== state.runId) return;
   if (event.type === 'approval_required') { state.accumulatedMs = elapsed(state); state.waitingApproval = true; state.pausedAt = Date.now(); if (chatId === activeChatId) renderLiveStatus(); return; }
-  if (event.type === 'tool_call' && state.waitingApproval) { state.waitingApproval = false; state.startedAt = Date.now(); state.pausedAt = 0; if (chatId === activeChatId) renderLiveStatus(); return; }
+  if (event.type === 'tool_call' && state.waitingApproval) { resumeThinking(chatId, state); return; }
+  if (event.type === 'activity' && state.waitingApproval && /^(Aprovado|Recusado):/.test(event.activity?.message ?? '')) { resumeThinking(chatId, state); return; }
   if (event.type === 'activity' && event.activity?.type === 'complete' && event.activity.status === 'success') { finish(chatId); return; }
   if (event.type === 'complete' || event.type === 'error' || event.type === 'cancelled') finish(chatId);
 }
