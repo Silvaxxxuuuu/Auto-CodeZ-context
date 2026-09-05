@@ -5,8 +5,9 @@ export type ExecutionTimelineEvent = {
   chatId: string;
   runId: string;
   at: number;
-  type: 'started' | 'state_changed' | 'tool_changed' | 'error' | 'removed';
+  type: 'started' | 'recovered' | 'state_changed' | 'tool_changed' | 'error' | 'removed';
   state?: ExecutionSnapshot['state'];
+  startedAt?: number;
   currentTool?: string;
   error?: string;
 };
@@ -16,7 +17,7 @@ type TimelineCursor = {
   signature: string;
 };
 
-const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'state_changed', 'tool_changed', 'error', 'removed']);
+const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'recovered', 'state_changed', 'tool_changed', 'error', 'removed']);
 const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
 
 function snapshotSignature(snapshot: ExecutionSnapshot): string {
@@ -29,6 +30,14 @@ function snapshotSignature(snapshot: ExecutionSnapshot): string {
   ]);
 }
 
+function sameObservableState(left: ExecutionSnapshot, right: ExecutionSnapshot): boolean {
+  return left.runId === right.runId
+    && left.state === right.state
+    && left.startedAt === right.startedAt
+    && left.currentTool === right.currentTool
+    && left.error === right.error;
+}
+
 function cloneEvent(event: ExecutionTimelineEvent): ExecutionTimelineEvent {
   return { ...event };
 }
@@ -36,7 +45,7 @@ function cloneEvent(event: ExecutionTimelineEvent): ExecutionTimelineEvent {
 function isValidEvent(value: unknown): value is ExecutionTimelineEvent {
   if (!value || typeof value !== 'object') return false;
   const event = value as Partial<ExecutionTimelineEvent>;
-  return Number.isInteger(event.sequence)
+  const validBase = Number.isInteger(event.sequence)
     && Number(event.sequence) > 0
     && typeof event.chatId === 'string'
     && event.chatId.length > 0
@@ -48,8 +57,12 @@ function isValidEvent(value: unknown): value is ExecutionTimelineEvent {
     && typeof event.type === 'string'
     && EVENT_TYPES.has(event.type as ExecutionTimelineEvent['type'])
     && (event.state === undefined || EXECUTION_STATES.has(event.state))
+    && (event.startedAt === undefined || (typeof event.startedAt === 'number' && Number.isFinite(event.startedAt) && event.startedAt >= 0))
     && (event.currentTool === undefined || typeof event.currentTool === 'string')
     && (event.error === undefined || typeof event.error === 'string');
+  if (!validBase) return false;
+  if (event.type === 'recovered') return event.state !== undefined && event.startedAt !== undefined && event.startedAt <= event.at;
+  return event.startedAt === undefined;
 }
 
 export class ExecutionTimeline {
@@ -82,6 +95,27 @@ export class ExecutionTimeline {
   record(change: ExecutionChange): ExecutionTimelineEvent[] {
     if (change.type === 'remove') return this.recordRemoval(change.chatId, change.runId);
     return this.recordSnapshot(change.snapshot);
+  }
+
+  recordRecovery(snapshot: ExecutionSnapshot, at = this.now()): ExecutionTimelineEvent[] {
+    if (typeof at !== 'number' || !Number.isFinite(at) || at < 0) throw new Error('Data de recuperação inválida.');
+    const current = this.cursors.get(snapshot.chatId);
+    if (current && sameObservableState(current.snapshot, snapshot)) return [];
+
+    const recoveredAt = Math.max(at, snapshot.updatedAt, snapshot.startedAt);
+    const recoveredSnapshot: ExecutionSnapshot = { ...snapshot, updatedAt: recoveredAt };
+    const event = this.append({
+      chatId: snapshot.chatId,
+      runId: snapshot.runId,
+      at: recoveredAt,
+      type: 'recovered',
+      state: snapshot.state,
+      startedAt: snapshot.startedAt,
+      currentTool: snapshot.currentTool,
+      error: snapshot.error,
+    });
+    this.cursors.set(snapshot.chatId, { snapshot: recoveredSnapshot, signature: snapshotSignature(recoveredSnapshot) });
+    return [event];
   }
 
   list(chatId?: string, runId?: string): ExecutionTimelineEvent[] {
@@ -188,6 +222,20 @@ export class ExecutionTimeline {
       }
 
       const current = this.cursors.get(event.chatId);
+      if (event.type === 'recovered') {
+        if (!event.state || event.startedAt === undefined) continue;
+        const snapshot: ExecutionSnapshot = {
+          chatId: event.chatId,
+          runId: event.runId,
+          state: event.state,
+          startedAt: event.startedAt,
+          updatedAt: event.at,
+          currentTool: event.currentTool,
+          error: event.error,
+        };
+        this.cursors.set(event.chatId, { snapshot, signature: snapshotSignature(snapshot) });
+        continue;
+      }
       if (event.type === 'started' || !current || current.snapshot.runId !== event.runId) {
         if (event.type !== 'started' || !event.state) continue;
         const snapshot: ExecutionSnapshot = {
