@@ -1,0 +1,66 @@
+name: Structural integration once
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/structural-integration-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - name: Apply deterministic structural patch
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          def once(text, old, new, path):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one target in {path}, found {count}: {old[:100]}')
+              return text.replace(old, new, 1)
+          p = Path('src/agent/tool-runtime.ts')
+          s = p.read_text(encoding='utf-8')
+          s = once(s, "import { applyIncrementalEdit, type IncrementalEditToolName } from './incremental-file-edit';", "import { applyIncrementalEdit, type IncrementalEditToolName } from './incremental-file-edit';\nimport { StructuralEditRuntime, type StructuralSymbolKind } from './structural-edit-runtime';\nimport { TypeScriptStructuralLocator } from './typescript-structural-locator';", str(p))
+          old = "  { name: 'replace_text', description: 'Replace one exact unique text fragment in an existing UTF-8 file. The oldText fragment must occur exactly once; otherwise the operation fails instead of guessing. Prefer this when you have just read the exact code to change.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, oldText: { type: 'string', description: 'Exact current text fragment. It must be unique in the file.' }, newText: { type: 'string', description: 'Replacement text, which may be empty to remove the fragment.' } }, required: ['path', 'oldText', 'newText'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },"
+          new = old + "\n  { name: 'replace_symbol', description: 'Replace one uniquely named TypeScript or JavaScript syntax symbol using the real TypeScript AST. Supported kinds are function, method, class, interface, type and enum. Use this when replacing an entire named declaration; ambiguity or unsupported files fail instead of guessing.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative TypeScript or JavaScript file path.' }, symbol: { type: 'string', description: 'Exact declared symbol name.' }, kind: { type: 'string', enum: ['function', 'method', 'class', 'interface', 'type', 'enum'], description: 'Declared syntax kind.' }, content: { type: 'string', description: 'Complete replacement declaration for the selected symbol.' } }, required: ['path', 'symbol', 'kind', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },"
+          s = once(s, old, new, str(p))
+          s = once(s, "    case 'replace_text': return value('path') ? `Substituindo trecho exato de ${value('path')}` : 'Substituindo trecho exato do arquivo.';", "    case 'replace_text': return value('path') ? `Substituindo trecho exato de ${value('path')}` : 'Substituindo trecho exato do arquivo.';\n    case 'replace_symbol': return value('path') && value('symbol') ? `Substituindo símbolo ${value('symbol')} em ${value('path')}` : 'Substituindo símbolo do arquivo.';", str(p))
+          s = once(s, "  constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage) {}", "  constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()])) {}", str(p))
+          s = once(s, "normalizedCall.name === 'replace_range' || normalizedCall.name === 'replace_text' || normalizedCall.name === 'insert_before'", "normalizedCall.name === 'replace_range' || normalizedCall.name === 'replace_text' || normalizedCall.name === 'replace_symbol' || normalizedCall.name === 'insert_before'", str(p))
+          s = once(s, "private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'replace_text' || name === 'insert_before'", "private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'replace_text' || name === 'replace_symbol' || name === 'insert_before'", str(p))
+          old = "      case 'replace_range':\n      case 'replace_text':\n      case 'insert_before':\n      case 'insert_after': {\n        const path = this.stringValue(call.input, 'path');\n        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.');\n        const before = await this.workspace.readFile(projectId, path);\n        const after = applyIncrementalEdit(call.name as IncrementalEditToolName, call.input, before);\n        if (after === before) throw new Error('A edição incremental não produziria nenhuma alteração.');\n        return this.diffs.createPlan([this.diffs.create(path, 'modified', before, after)]);\n      }\n"
+          add = "      case 'replace_symbol': {\n        const path = this.stringValue(call.input, 'path');\n        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.');\n        const before = await this.workspace.readFile(projectId, path);\n        const symbol = this.stringValue(call.input, 'symbol');\n        const kind = this.stringValue(call.input, 'kind') as StructuralSymbolKind;\n        const content = call.input.content;\n        if (typeof content !== 'string') throw new Error(\"Parâmetro 'content' inválido.\");\n        const result = await this.structuralEdits.replaceSymbol(path, before, { name: symbol, kind }, content);\n        return this.diffs.createPlan([this.diffs.create(path, 'modified', before, result.after)]);\n      }\n"
+          s = once(s, old, old + add, str(p))
+          old = "      case 'replace_range':\n      case 'replace_text':\n      case 'insert_before':\n      case 'insert_after': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const before = await this.workspace.readFile(projectId, path); const after = applyIncrementalEdit(name as IncrementalEditToolName, input, before); if (after === before) throw new Error('A edição incremental não produziria nenhuma alteração.'); await this.workspace.writeFile(projectId, path, after); const persisted = await this.workspace.readFile(projectId, path); return { output: 'Trecho do arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] }; }\n"
+          add = "      case 'replace_symbol': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const before = await this.workspace.readFile(projectId, path); const symbol = this.stringValue(input, 'symbol'); const kind = this.stringValue(input, 'kind') as StructuralSymbolKind; const content = input.content; if (typeof content !== 'string') throw new Error(\"Parâmetro 'content' inválido.\"); const result = await this.structuralEdits.replaceSymbol(path, before, { name: symbol, kind }, content); await this.workspace.writeFile(projectId, path, result.after); const persisted = await this.workspace.readFile(projectId, path); return { output: 'Símbolo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] }; }\n"
+          s = once(s, old, old + add, str(p))
+          p.write_text(s, encoding='utf-8', newline='')
+          p = Path('src/ai/chat-runtime.ts')
+          s = p.read_text(encoding='utf-8')
+          s = once(s, 'File tools such as read_file, write_file, create_file, replace_range, replace_text, insert_before, insert_after, delete_file, rename_file, and search_files', 'File tools such as read_file, write_file, create_file, replace_range, replace_text, replace_symbol, insert_before, insert_after, delete_file, rename_file, and search_files', str(p))
+          s = once(s, 'For localized edits, prefer replace_text when you have an exact unique fragment from a recent read; otherwise use replace_range, insert_before or insert_after instead of rewriting the whole file with write_file.', 'For a complete named TypeScript or JavaScript declaration, prefer replace_symbol when its supported syntax kind is known. For smaller localized edits, prefer replace_text when you have an exact unique fragment from a recent read; otherwise use replace_range, insert_before or insert_after instead of rewriting the whole file with write_file.', str(p))
+          s = once(s, 'prefer create_file/write_file/replace_range/replace_text/insert_before/insert_after/delete_file/rename_file over run_command', 'prefer create_file/write_file/replace_range/replace_text/replace_symbol/insert_before/insert_after/delete_file/rename_file over run_command', str(p))
+          s = once(s, "const SYSTEM_CHAT_TOOL_NAMES = new Set(['read_file', 'write_file', 'create_file', 'replace_range', 'replace_text', 'insert_before'", "const SYSTEM_CHAT_TOOL_NAMES = new Set(['read_file', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before'", str(p))
+          p.write_text(s, encoding='utf-8', newline='')
+          '@ | Set-Content -Encoding utf8 .patch_structural.py
+          python .patch_structural.py
+          Remove-Item .patch_structural.py
+          git diff --check
+      - name: Commit patch
+        shell: pwsh
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git add src/agent/tool-runtime.ts src/ai/chat-runtime.ts
+          git commit -m "feat(agent): wire AST-backed symbol replacement"
+          git push origin HEAD:feature/ui-hierarchy-polish
