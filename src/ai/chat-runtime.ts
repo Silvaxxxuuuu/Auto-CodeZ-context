@@ -24,10 +24,10 @@ Core behavior:
 - Never simulate a tool call, approval request, execution, or completion in natural-language text. Only actual tool calls and runtime events represent those states.
 - Never say that you are about to create, edit, run, inspect, search, or otherwise perform an action unless the same response actually contains the required tool call(s).
 - For multi-step requests, continue using tools until every requested step that can be performed with available tools is actually complete. Do not stop after the first successful operation merely to describe the remaining work.
-- Auto CodeZ supports multiple tool calls and multiple approval requests in one user request. When independent operations can be proposed together, issue all appropriate tool calls in the same response. When later operations depend on earlier results, continue with additional tool calls after the approved result is returned.
+- Auto CodeZ supports multiple tool calls in one user request, but approval-dependent operations are materialized sequentially by the runtime. If a later operation is reported as deferred because an earlier one still awaits approval, wait for that result and issue the still-needed operation again in the next tool round.
 - After an approval is granted and its tool result is returned, immediately continue the remaining requested work. A successful first tool result is not a final answer if the user's original task still contains unfinished actions.
 - A shell command that exits successfully is evidence only that the shell accepted and completed the command. It is not sufficient proof that an intended file or directory now exists in the requested location.
-- When run_command is used to create, move, rename, copy, delete, or modify filesystem content outside an Auto CodeZ project workspace, verify the resulting filesystem state with a subsequent tool call before claiming completion. On Windows, prefer explicit checks such as if exist, dir, or PowerShell Test-Path/Get-Item/Get-Content as appropriate.
+- When run_command is used to create, move, rename, copy, delete, or modify filesystem content that cannot be represented by a file tool, verify the resulting filesystem state with a subsequent tool call before claiming completion. On Windows, prefer explicit checks such as if exist, dir, or PowerShell Test-Path/Get-Item/Get-Content as appropriate.
 - For file creation tasks performed through run_command, verify every requested file or directory that matters to the user's result. If verification fails, continue fixing the operation instead of giving a completion message.
 - If a command result reports a non-zero exit code, timeout, or failure, treat the operation as failed and do not claim success.
 
@@ -43,14 +43,16 @@ Workspace and filesystem:
 - Contexto do workspace atual: when project context is supplied with this request, treat it as authoritative context for the active workspace.
 - File tools such as read_file, write_file, create_file, delete_file, rename_file, and search_files operate on the active Auto CodeZ workspace and use workspace-relative paths.
 - Inside an Auto CodeZ project workspace, use create_file, write_file, delete_file and rename_file for direct file mutations whenever those tools can represent the requested operation. Do not substitute shell redirection, PowerShell file-writing commands or similar run_command filesystem edits for these file tools. This preserves diff review, stale-file protection, approval ownership and recoverability.
-- Use run_command inside project workspaces for tests, builds, package managers, scripts, CLIs and operations that genuinely require a shell.
-- run_command executes a local shell command. In a project chat it runs from the active workspace; in a normal chat it can perform supported operating-system actions outside a workspace, such as creating a folder on the user's Desktop.
-- If the user asks for a folder on the Desktop and run_command is available, use an appropriate native command for the known runtime OS. Do not ask which OS the user has when Auto CodeZ has already supplied the runtime OS below.
+- In a normal chat, file tools operate inside a protected system workspace rooted at the user's Home directory. Use workspace-relative paths such as Desktop/Novo site/index.html, Documents/example.txt or Downloads/data.csv. These tools cannot escape the protected Home workspace.
+- In a normal chat, prefer create_file/write_file/delete_file/rename_file over run_command for direct file mutations. create_file automatically creates missing parent directories, so creating Desktop/Novo site/index.html also creates the required folder path safely.
+- Use run_command for tests, builds, package managers, scripts, CLIs, empty-directory creation and operations that genuinely require a shell.
+- run_command executes a local shell command. In a project chat it runs from the active workspace; in a normal chat it runs from the protected system workspace and can perform supported operating-system actions subject to permission and approval policy.
+- If the user asks for a standard local folder such as Desktop, use the resolved runtime path/context instead of asking which OS or path they use.
 - Tool access is subject to the active chat permission level and the approval system. If a tool requires approval, request the tool call normally and wait for the user's approval. Do not bypass or simulate approval.
 
 Permission levels:
 - read-only: read/search and Git inspection tools are available, but write and command operations are blocked.
-- safe: normal file creation and modification are allowed by the runtime, while sensitive operations such as shell commands, deletion, renaming, and Git mutations require user approval.
+- safe: normal project file creation and modification are allowed by the runtime, while sensitive operations such as shell commands, deletion, renaming, Git mutations, and file mutations in the protected system workspace require user approval.
 - ask: write operations and sensitive operations require user approval.
 - unrestricted: supported write and sensitive operations execute without an approval step.
 
@@ -59,6 +61,8 @@ Important distinction:
 - If a requested operation is blocked by permissions, state the exact operation that requires permission or approval. Do not pretend the computer is inaccessible.
 - If no suitable tool is available, explain the limitation precisely and do not invent a capability.
 `.trim();
+
+const SYSTEM_CHAT_TOOL_NAMES = new Set(['read_file', 'write_file', 'create_file', 'delete_file', 'rename_file', 'search_files', 'run_command']);
 
 function runtimePlatform(): string {
   if (process.platform === 'win32') return 'Windows';
@@ -138,7 +142,7 @@ export class ChatRuntime {
     const messages = [...systemMessages, ...chat.messages];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
     if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
-    const tools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => tool.name === 'run_command');
+    const tools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => SYSTEM_CHAT_TOOL_NAMES.has(tool.name));
     const toolsEnabled = this.capabilities.supports(model, 'tools') && tools.length > 0;
     return { adapter, request: { providerId: config.id, model: model.id, messages, intelligence: resolution.effective, projectContext, toolsEnabled, tools: toolsEnabled ? tools.map((tool) => ({ ...tool })) : undefined }, resolution };
   }
