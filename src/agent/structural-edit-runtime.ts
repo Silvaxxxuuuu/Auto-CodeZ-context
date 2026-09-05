@@ -26,6 +26,12 @@ export interface StructuralSymbolLocator {
   validateReplacement(filePath: string, content: string, query: StructuralSymbolQuery, replacementRange: StructuralReplacementRange): Promise<void> | void;
 }
 
+export interface StructuralReadResult {
+  content: string;
+  match: StructuralSymbolMatch;
+  locatorId: string;
+}
+
 export interface StructuralReplacementResult {
   before: string;
   after: string;
@@ -51,10 +57,33 @@ export class StructuralEditRuntime {
     return this.locators.map((locator) => locator.id);
   }
 
+  async readSymbol(filePath: string, content: string, query: StructuralSymbolQuery): Promise<StructuralReadResult> {
+    const resolved = await this.resolveSymbol(filePath, content, query);
+    return {
+      content: content.slice(resolved.match.startOffset, resolved.match.endOffset),
+      match: { ...resolved.match },
+      locatorId: resolved.locator.id,
+    };
+  }
+
   async replaceSymbol(filePath: string, content: string, query: StructuralSymbolQuery, replacement: string): Promise<StructuralReplacementResult> {
+    if (typeof replacement !== 'string') throw new Error('O conteúdo de substituição deve ser texto.');
+
+    const resolved = await this.resolveSymbol(filePath, content, query);
+    const after = content.slice(0, resolved.match.startOffset) + replacement + content.slice(resolved.match.endOffset);
+    if (after === content) throw new Error('A substituição estrutural não produziria nenhuma alteração.');
+
+    await resolved.locator.validateReplacement(filePath, after, resolved.query, {
+      startOffset: resolved.match.startOffset,
+      endOffset: resolved.match.startOffset + replacement.length,
+    });
+
+    return { before: content, after, match: { ...resolved.match }, locatorId: resolved.locator.id };
+  }
+
+  private async resolveSymbol(filePath: string, content: string, query: StructuralSymbolQuery): Promise<{ locator: StructuralSymbolLocator; query: StructuralSymbolQuery; match: StructuralSymbolMatch }> {
     if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('O caminho do arquivo deve ser informado.');
     if (typeof content !== 'string') throw new Error('O conteúdo atual do arquivo deve ser texto.');
-    if (typeof replacement !== 'string') throw new Error('O conteúdo de substituição deve ser texto.');
 
     const normalizedQuery = requireQuery(query);
     const locator = this.locators.find((candidate) => candidate.supports(filePath));
@@ -70,14 +99,6 @@ export class StructuralEditRuntime {
     if (match.name !== normalizedQuery.name) throw new Error(`O localizador retornou '${match.name}' quando '${normalizedQuery.name}' foi solicitado.`);
     if (normalizedQuery.kind && match.kind !== normalizedQuery.kind) throw new Error(`O símbolo '${normalizedQuery.name}' foi encontrado como '${match.kind}', não como '${normalizedQuery.kind}'.`);
 
-    const after = content.slice(0, match.startOffset) + replacement + content.slice(match.endOffset);
-    if (after === content) throw new Error('A substituição estrutural não produziria nenhuma alteração.');
-
-    await locator.validateReplacement(filePath, after, normalizedQuery, {
-      startOffset: match.startOffset,
-      endOffset: match.startOffset + replacement.length,
-    });
-
-    return { before: content, after, match: { ...match }, locatorId: locator.id };
+    return { locator, query: normalizedQuery, match };
   }
 }
