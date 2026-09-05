@@ -17,6 +17,10 @@ export function listRecoverableRuns(agentRuntime: AgentRuntime): RecoverableRun[
   return agentRuntime.listRecoverableRuns();
 }
 
+function recoveryJournalRetained(agentRuntime: AgentRuntime, recoverable: RecoverableRun): boolean {
+  return agentRuntime.listRecoverableRuns().some((run) => run.runId === recoverable.runId && run.chatId === recoverable.chatId);
+}
+
 export async function resumeRecoveredRun(
   agentRuntime: AgentRuntime,
   executionManager: ExecutionManager,
@@ -52,11 +56,10 @@ export async function resumeRecoveredRun(
       throw error;
     }
     const message = error instanceof Error ? error.message : String(error);
-    const execution = executionManager.update(recoverable.chatId, {
-      state: 'failed',
-      error: message,
-      runId: recoverable.runId,
-    });
-    throw Object.assign(error instanceof Error ? error : new Error(message), { execution });
+    const retained = recoveryJournalRetained(agentRuntime, recoverable);
+    const execution = executionManager.update(recoverable.chatId, retained
+      ? { state: 'interrupted', runId: recoverable.runId }
+      : { state: 'failed', error: message, runId: recoverable.runId });
+    throw Object.assign(error instanceof Error ? error : new Error(message), { execution, recoverable: retained });
   }
 }
