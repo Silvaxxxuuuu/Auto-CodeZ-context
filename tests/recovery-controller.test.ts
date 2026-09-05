@@ -36,6 +36,29 @@ test('recovery-controller restores the persisted run identity in ExecutionManage
   assert.equal(execution.startedAt, 123);
 });
 
+test('recovery-controller preserves original startedAt when interrupted snapshot already exists', async () => {
+  const agentRuntime = createRuntime({ chatId: 'chat-test', pendingApprovalIds: [] });
+  const executionManager = new ExecutionManager();
+  executionManager.hydrate([{
+    chatId: 'chat-test',
+    runId: 'persisted-run',
+    state: 'interrupted',
+    startedAt: 100,
+    updatedAt: 200,
+  }]);
+
+  const { execution } = await resumeRecoveredRun(
+    agentRuntime,
+    executionManager,
+    { runId: 'persisted-run', chatId: 'chat-test', toolRounds: 2 },
+    500,
+  );
+
+  assert.equal(execution.runId, 'persisted-run');
+  assert.equal(execution.state, 'completed');
+  assert.equal(execution.startedAt, 100);
+});
+
 test('recovery-controller does not replace an active execution', async () => {
   const agentRuntime = createRuntime({ chatId: 'chat-test', pendingApprovalIds: [] });
   const executionManager = new ExecutionManager();
@@ -52,6 +75,31 @@ test('recovery-controller does not replace an active execution', async () => {
   );
 
   assert.equal(executionManager.get('chat-test')?.runId, 'active-run');
+});
+
+test('recovery-controller does not replace an unrelated terminal snapshot', async () => {
+  const agentRuntime = createRuntime({ chatId: 'chat-test', pendingApprovalIds: [] });
+  const executionManager = new ExecutionManager();
+  executionManager.hydrate([{
+    chatId: 'chat-test',
+    runId: 'other-run',
+    state: 'completed',
+    startedAt: 100,
+    updatedAt: 200,
+  }]);
+
+  await assert.rejects(
+    resumeRecoveredRun(
+      agentRuntime,
+      executionManager,
+      { runId: 'persisted-run', chatId: 'chat-test', toolRounds: 1 },
+      300,
+    ),
+    /não corresponde ao snapshot atual/i,
+  );
+
+  assert.equal(executionManager.get('chat-test')?.runId, 'other-run');
+  assert.equal(executionManager.get('chat-test')?.state, 'completed');
 });
 
 test('recovery-controller keeps the authoritative run identity when recovery fails', async () => {
@@ -78,6 +126,36 @@ test('recovery-controller keeps the authoritative run identity when recovery fai
   assert.equal(execution?.state, 'failed');
   assert.equal(execution?.startedAt, 300);
   assert.equal(execution?.error, 'Provider indisponível.');
+});
+
+test('recovery-controller keeps original startedAt when resumed recovery fails', async () => {
+  const agentRuntime = {
+    resumeRecovered: async () => {
+      throw new Error('Falha após retomada.');
+    },
+  } as unknown as AgentRuntime;
+  const executionManager = new ExecutionManager();
+  executionManager.hydrate([{
+    chatId: 'chat-test',
+    runId: 'persisted-run',
+    state: 'interrupted',
+    startedAt: 100,
+    updatedAt: 200,
+  }]);
+
+  await assert.rejects(
+    resumeRecoveredRun(
+      agentRuntime,
+      executionManager,
+      { runId: 'persisted-run', chatId: 'chat-test', toolRounds: 3 },
+      500,
+    ),
+    /Falha após retomada\./,
+  );
+
+  const execution = executionManager.get('chat-test');
+  assert.equal(execution?.state, 'failed');
+  assert.equal(execution?.startedAt, 100);
 });
 
 test('recovery-controller removes the active snapshot when recovery is cancelled', async () => {
