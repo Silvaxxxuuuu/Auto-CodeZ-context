@@ -16,6 +16,12 @@ function requireApprovalScope(input: ApprovalScope | undefined): ApprovalScope |
   };
 }
 
+function requireTerminalDimension(value: unknown, label: string): number {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) throw new Error(`${label} do terminal inválido.`);
+  return number;
+}
+
 contextBridge.exposeInMainWorld('autoCodez', {
   getState: () => invoke<{ providers: unknown[]; chats: unknown[]; projects: unknown[] }>('app:get-state'),
   listModels: (providerId: string) => invoke('providers:list-models', requireIdentifier(providerId, 'Provider')),
@@ -105,6 +111,19 @@ contextBridge.exposeInMainWorld('autoCodez', {
     start: (input: { projectId: string; command: string }) => {
       const value = requireObject(input, 'Dados do terminal');
       return invoke('terminal:start', { projectId: requireIdentifier(value.projectId, 'Projeto'), command: requireNonEmptyString(value.command, 'Comando') });
+    },
+    writeInput: (input: { sessionId: string; data: string }) => {
+      const value = requireObject(input, 'Entrada do terminal');
+      if (typeof value.data !== 'string') throw new Error('Entrada do terminal inválida.');
+      return invoke('terminal:write-input', { sessionId: requireIdentifier(value.sessionId, 'Sessão do terminal'), data: value.data });
+    },
+    resize: (input: { sessionId: string; cols: number; rows: number }) => {
+      const value = requireObject(input, 'Tamanho do terminal');
+      return invoke('terminal:resize', {
+        sessionId: requireIdentifier(value.sessionId, 'Sessão do terminal'),
+        cols: requireTerminalDimension(value.cols, 'Número de colunas'),
+        rows: requireTerminalDimension(value.rows, 'Número de linhas'),
+      });
     },
     kill: (sessionId: string) => invoke('terminal:kill', requireIdentifier(sessionId, 'Sessão do terminal')),
     listSessions: () => invoke('terminal:list-sessions'),
