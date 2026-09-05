@@ -1,4 +1,4 @@
-import type { ExecutionChange, ExecutionSnapshot } from './execution-manager';
+import type { ExecutionChange, ExecutionSnapshot, ExecutionState } from './execution-manager';
 
 export type ExecutionTimelineEvent = {
   sequence: number;
@@ -16,6 +16,9 @@ type TimelineCursor = {
   signature: string;
 };
 
+const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'state_changed', 'tool_changed', 'error', 'removed']);
+const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
+
 function snapshotSignature(snapshot: ExecutionSnapshot): string {
   return JSON.stringify([
     snapshot.runId,
@@ -26,13 +29,54 @@ function snapshotSignature(snapshot: ExecutionSnapshot): string {
   ]);
 }
 
+function cloneEvent(event: ExecutionTimelineEvent): ExecutionTimelineEvent {
+  return { ...event };
+}
+
+function isValidEvent(value: unknown): value is ExecutionTimelineEvent {
+  if (!value || typeof value !== 'object') return false;
+  const event = value as Partial<ExecutionTimelineEvent>;
+  return Number.isInteger(event.sequence)
+    && Number(event.sequence) > 0
+    && typeof event.chatId === 'string'
+    && event.chatId.length > 0
+    && typeof event.runId === 'string'
+    && event.runId.length > 0
+    && typeof event.at === 'number'
+    && Number.isFinite(event.at)
+    && event.at >= 0
+    && typeof event.type === 'string'
+    && EVENT_TYPES.has(event.type as ExecutionTimelineEvent['type'])
+    && (event.state === undefined || EXECUTION_STATES.has(event.state))
+    && (event.currentTool === undefined || typeof event.currentTool === 'string')
+    && (event.error === undefined || typeof event.error === 'string');
+}
+
 export class ExecutionTimeline {
   private sequence = 0;
   private readonly events: ExecutionTimelineEvent[] = [];
   private readonly cursors = new Map<string, TimelineCursor>();
 
-  constructor(private readonly maxEvents = 1000) {
+  constructor(
+    private readonly maxEvents = 1000,
+    private readonly now: () => number = () => Date.now(),
+  ) {
     if (!Number.isInteger(maxEvents) || maxEvents < 1) throw new Error('maxEvents deve ser um inteiro positivo.');
+  }
+
+  restore(events: ExecutionTimelineEvent[]): void {
+    if (!Array.isArray(events)) throw new Error('Timeline persistida inválida.');
+    const normalized = events
+      .filter(isValidEvent)
+      .sort((left, right) => left.sequence - right.sequence)
+      .filter((event, index, list) => index === 0 || event.sequence !== list[index - 1].sequence)
+      .slice(-this.maxEvents)
+      .map(cloneEvent);
+
+    this.events.length = 0;
+    this.events.push(...normalized);
+    this.sequence = normalized.reduce((highest, event) => Math.max(highest, event.sequence), 0);
+    this.rebuildCursors();
   }
 
   record(change: ExecutionChange): ExecutionTimelineEvent[] {
@@ -43,7 +87,7 @@ export class ExecutionTimeline {
   list(chatId?: string, runId?: string): ExecutionTimelineEvent[] {
     return this.events
       .filter((event) => (chatId === undefined || event.chatId === chatId) && (runId === undefined || event.runId === runId))
-      .map((event) => ({ ...event }));
+      .map(cloneEvent);
   }
 
   clear(chatId?: string): void {
@@ -121,7 +165,7 @@ export class ExecutionTimeline {
     return [this.append({
       chatId,
       runId: current.snapshot.runId,
-      at: Math.max(Date.now(), current.snapshot.updatedAt),
+      at: Math.max(this.now(), current.snapshot.updatedAt),
       type: 'removed',
       state: current.snapshot.state,
     })];
@@ -131,6 +175,39 @@ export class ExecutionTimeline {
     const stored: ExecutionTimelineEvent = { sequence: ++this.sequence, ...event };
     this.events.push(stored);
     while (this.events.length > this.maxEvents) this.events.shift();
-    return { ...stored };
+    return cloneEvent(stored);
+  }
+
+  private rebuildCursors(): void {
+    this.cursors.clear();
+    for (const event of this.events) {
+      if (event.type === 'removed') {
+        const current = this.cursors.get(event.chatId);
+        if (current?.snapshot.runId === event.runId) this.cursors.delete(event.chatId);
+        continue;
+      }
+
+      const current = this.cursors.get(event.chatId);
+      if (event.type === 'started' || !current || current.snapshot.runId !== event.runId) {
+        if (event.type !== 'started' || !event.state) continue;
+        const snapshot: ExecutionSnapshot = {
+          chatId: event.chatId,
+          runId: event.runId,
+          state: event.state,
+          startedAt: event.at,
+          updatedAt: event.at,
+          currentTool: event.currentTool,
+          error: event.error,
+        };
+        this.cursors.set(event.chatId, { snapshot, signature: snapshotSignature(snapshot) });
+        continue;
+      }
+
+      const snapshot: ExecutionSnapshot = { ...current.snapshot, updatedAt: event.at };
+      if (event.type === 'state_changed' && event.state) snapshot.state = event.state;
+      if (event.type === 'tool_changed') snapshot.currentTool = event.currentTool;
+      if (event.type === 'error') snapshot.error = event.error;
+      this.cursors.set(event.chatId, { snapshot, signature: snapshotSignature(snapshot) });
+    }
   }
 }
