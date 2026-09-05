@@ -17,12 +17,24 @@ export type ExecutionUpdate = {
   runId?: string;
 };
 
+export type ExecutionChange =
+  | { type: 'upsert'; snapshot: ExecutionSnapshot }
+  | { type: 'remove'; chatId: string; runId?: string };
+
+export type ExecutionListener = (change: ExecutionChange) => void;
+
 function createRunId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export class ExecutionManager {
   private readonly executions = new Map<string, ExecutionSnapshot>();
+  private readonly listeners = new Set<ExecutionListener>();
+
+  subscribe(listener: ExecutionListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   start(chatId: string, now = Date.now(), runId = createRunId()): ExecutionSnapshot {
     const existing = this.executions.get(chatId);
@@ -38,6 +50,7 @@ export class ExecutionManager {
       updatedAt: now,
     };
     this.executions.set(chatId, snapshot);
+    this.emit({ type: 'upsert', snapshot: { ...snapshot } });
     return { ...snapshot };
   }
 
@@ -59,6 +72,7 @@ export class ExecutionManager {
       error: update.error,
     };
     this.executions.set(chatId, next);
+    this.emit({ type: 'upsert', snapshot: { ...next } });
     return { ...next };
   }
 
@@ -76,6 +90,19 @@ export class ExecutionManager {
   }
 
   remove(chatId: string): void {
+    const current = this.executions.get(chatId);
+    if (!current) return;
     this.executions.delete(chatId);
+    this.emit({ type: 'remove', chatId, runId: current.runId });
+  }
+
+  private emit(change: ExecutionChange): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(change.type === 'upsert' ? { type: 'upsert', snapshot: { ...change.snapshot } } : { ...change });
+      } catch {
+        // Execution observers must never interrupt the authoritative state transition.
+      }
+    }
   }
 }
