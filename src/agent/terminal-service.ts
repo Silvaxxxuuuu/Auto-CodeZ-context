@@ -59,7 +59,7 @@ export class TerminalService {
 
     const shellMatch = SHELL_MARKER.exec(command.trim());
     const session = await this.runtime.start(projectId, command);
-    if (shellMatch && session.status === 'running') {
+    if (shellMatch && session.status === 'running' && !session.pty) {
       const setup = session.shell === 'powershell'
         ? "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);[Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;$env:TERM='xterm-256color';$env:FORCE_COLOR='1';$env:CLICOLOR_FORCE='1'"
         : 'chcp 65001>nul & set TERM=xterm-256color & set FORCE_COLOR=1 & set CLICOLOR_FORCE=1';
