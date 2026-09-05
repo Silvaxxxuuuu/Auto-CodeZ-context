@@ -1,0 +1,104 @@
+name: Integrate semantic change budget
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/integrate-change-budget.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - name: Integrate change budget runtime
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('src/agent/tool-runtime.ts')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old: str, new: str):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'ToolRuntime anchor count {count}: {old[:120]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "import { ExecutionPlanner, type ExecutionPlan } from '../execution-planner';\n",
+              "import { ExecutionPlanner, type ExecutionPlan } from '../execution-planner';\nimport { ExecutionChangeBudgetRuntime, type ExecutionChangeBudget, type ExecutionChangeUsage } from '../execution-change-budget';\n",
+          )
+          replace_once(
+              "  private gitRuntime?: GitRuntime;\n  private executionPlanner?: ExecutionPlanner;\n",
+              "  private gitRuntime?: GitRuntime;\n  private executionPlanner?: ExecutionPlanner;\n  private executionChangeBudget?: ExecutionChangeBudgetRuntime;\n",
+          )
+          replace_once(
+              "  configureExecutionPlanner(runtime: ExecutionPlanner): void { this.executionPlanner = runtime; }\n  getExecutionPlan(chatId: string, runId: string): ExecutionPlan | undefined { return this.executionPlanner?.get(chatId, runId); }\n",
+              "  configureExecutionPlanner(runtime: ExecutionPlanner): void { this.executionPlanner = runtime; }\n  configureExecutionChangeBudget(runtime: ExecutionChangeBudgetRuntime): void { this.executionChangeBudget = runtime; }\n  configureChangeBudget(chatId: string, runId: string, budget: ExecutionChangeBudget): ExecutionChangeBudget {\n    if (!this.executionChangeBudget) throw new Error('O runtime de Change Budget não foi configurado.');\n    return this.executionChangeBudget.configure(chatId, runId, budget);\n  }\n  getChangeBudgetUsage(chatId: string, runId: string): ExecutionChangeUsage {\n    return this.executionChangeBudget?.getUsage(chatId, runId) ?? { files: [], changedLines: 0, commands: 0, toolCalls: 0 };\n  }\n  getExecutionPlan(chatId: string, runId: string): ExecutionPlan | undefined { return this.executionPlanner?.get(chatId, runId); }\n",
+          )
+          replace_once(
+              "      const approval = this.approvals.request({ projectId, chatId, runId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });\n",
+              "      this.assertChangeBudget(chatId, runId, normalizedCall, diffPlan);\n      const approval = this.approvals.request({ projectId, chatId, runId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });\n",
+          )
+          replace_once(
+              "    return this.executeNow(projectId, normalizedCall, undefined, undefined, { chatId, runId });\n",
+              "    let directDiffPlan: DiffPlan | undefined;\n    if (this.hasChangeBudget(chatId, runId) && this.isMutation(normalizedCall.name)) directDiffPlan = await this.preview(projectId, normalizedCall);\n    this.assertChangeBudget(chatId, runId, normalizedCall, directDiffPlan);\n    return this.executeNow(projectId, normalizedCall, undefined, directDiffPlan, { chatId, runId });\n",
+          )
+          replace_once(
+              "      await this.assertPrecondition(approval.projectId, approval.diffPlan);\n      const result = await this.executeNow(approval.projectId, approval.toolCall, approvalId, approval.diffPlan, { chatId: approval.chatId, runId: approval.runId });\n",
+              "      await this.assertPrecondition(approval.projectId, approval.diffPlan);\n      this.assertChangeBudget(approval.chatId, approval.runId, approval.toolCall, approval.diffPlan);\n      const result = await this.executeNow(approval.projectId, approval.toolCall, approvalId, approval.diffPlan, { chatId: approval.chatId, runId: approval.runId });\n",
+          )
+          replace_once(
+              "  private stringValue(input: Record<string, unknown>, key: string): string { const value = input[key]; if (typeof value !== 'string' || !value.trim()) throw new Error(`Parâmetro '${key}' inválido.`); return value.trim(); }\n\n  private async executeNow",
+              "  private stringValue(input: Record<string, unknown>, key: string): string { const value = input[key]; if (typeof value !== 'string' || !value.trim()) throw new Error(`Parâmetro '${key}' inválido.`); return value.trim(); }\n\n  private hasChangeBudget(chatId?: string, runId?: string): boolean {\n    return Boolean(this.executionChangeBudget && chatId && runId && this.executionChangeBudget.getBudget(chatId, runId));\n  }\n\n  private assertChangeBudget(chatId: string | undefined, runId: string | undefined, call: AIToolCall, diffPlan?: DiffPlan): void {\n    if (!this.executionChangeBudget || !chatId || !runId) return;\n    this.executionChangeBudget.assertAllowed(chatId, runId, { toolName: call.name, ...(diffPlan ? { diffPlan } : {}) });\n  }\n\n  private recordChangeBudget(context: ActivityContext, call: AIToolCall, execution: ToolExecution): void {\n    if (!this.executionChangeBudget || !context.chatId || !context.runId) return;\n    this.executionChangeBudget.record(context.chatId, context.runId, { toolName: call.name, ...(execution.changes ? { changes: execution.changes } : {}) });\n  }\n\n  private async executeNow",
+          )
+          replace_once(
+              "      if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);\n      const execution = await this.executeAllowed(projectId, call.name, call.input, context);\n      this.recordPlanEvidence(context, call, execution);\n",
+              "      this.assertChangeBudget(context.chatId, context.runId, call, diffPlan);\n      if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);\n      const execution = await this.executeAllowed(projectId, call.name, call.input, context);\n      this.recordChangeBudget(context, call, execution);\n      this.recordPlanEvidence(context, call, execution);\n",
+          )
+          path.write_text(text, encoding='utf-8')
+
+          main = Path('src/main.ts')
+          text = main.read_text(encoding='utf-8')
+          def main_replace(old: str, new: str):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Main anchor count {count}: {old[:120]!r}')
+              text = text.replace(old, new, 1)
+
+          main_replace(
+              "import { ExecutionTaskCapsulePersistence, ExecutionTaskCapsuleStore } from './execution-task-capsule-store';\n",
+              "import { ExecutionTaskCapsulePersistence, ExecutionTaskCapsuleStore } from './execution-task-capsule-store';\nimport { ExecutionChangeBudgetRuntime } from './execution-change-budget';\n",
+          )
+          main_replace(
+              "const executionPlanner = new ExecutionPlanner();\nconst executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);\ntoolRuntime.configureExecutionPlanner(executionPlanner);\n",
+              "const executionPlanner = new ExecutionPlanner();\nconst executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);\nconst executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();\ntoolRuntime.configureExecutionPlanner(executionPlanner);\ntoolRuntime.configureExecutionChangeBudget(executionChangeBudgetRuntime);\n",
+          )
+          main_replace(
+              "  if (executionTaskCapsuleRuntime.removeChat(id) && executionTaskCapsulePersistenceEnabled) executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());\n  return chatManager.remove(id);\n",
+              "  if (executionTaskCapsuleRuntime.removeChat(id) && executionTaskCapsulePersistenceEnabled) executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());\n  executionChangeBudgetRuntime.removeChat(id);\n  return chatManager.remove(id);\n",
+          )
+          main.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+          git diff -- src/agent/tool-runtime.ts src/main.ts
+      - name: Commit integration and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git rm .github/workflows/integrate-change-budget.yml
+          git add src/agent/tool-runtime.ts src/main.ts
+          git commit -m "feat(execution): enforce semantic change budgets"
+          git push origin HEAD:feature/ui-hierarchy-polish
