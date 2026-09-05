@@ -113,3 +113,8 @@ test('optional loader falls back cleanly when node-pty is missing or malformed',
   assert.equal(await loadNodePtyInteractiveTerminalProcessFactory(async () => { throw new Error('MODULE_NOT_FOUND'); }), undefined);
   assert.equal(await loadNodePtyInteractiveTerminalProcessFactory(async () => ({ default: {} })), undefined);
 });
+
+test('installed node-pty module is loadable by the runtime adapter', async () => {
+  const factory = await loadNodePtyInteractiveTerminalProcessFactory();
+  assert.ok(factory);
+});
