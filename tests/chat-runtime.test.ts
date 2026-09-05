@@ -44,17 +44,15 @@ function registerAdapter(registry: ProviderRegistry, capabilities: ('text' | 'to
   return { requests, responses };
 }
 
+function tool(name: 'read_file' | 'write_file' | 'create_file' | 'delete_file' | 'rename_file' | 'search_files' | 'run_command' | 'git_status', requiresWriteAccess: boolean, requiresApproval: boolean) {
+  return { name, description: name, parameters: { type: 'object' }, requiresWriteAccess, requiresApproval };
+}
+
 test('send includes workspace context and tool definitions only when tools are supported', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
-    {
-      name: 'read_file',
-      description: 'Read a file',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: false,
-    },
+    tool('read_file', false, false),
   ]);
 
   await runtime.send(config, chat(), 'src/index.ts contains the current implementation.');
@@ -69,64 +67,49 @@ test('send includes workspace context and tool definitions only when tools are s
   assert.equal(request.messages[2].content, 'Hello');
 });
 
-test('send exposes only run_command to a normal chat and supplies the runtime OS', async () => {
+test('send exposes protected file tools and run_command to a normal chat but excludes Git', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
-    {
-      name: 'read_file',
-      description: 'Read a file',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: false,
-    },
-    {
-      name: 'run_command',
-      description: 'Execute a local command',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: true,
-    },
+    tool('read_file', false, false),
+    tool('write_file', true, true),
+    tool('create_file', true, true),
+    tool('delete_file', true, true),
+    tool('rename_file', true, true),
+    tool('search_files', false, false),
+    tool('run_command', false, true),
+    tool('git_status', false, false),
   ]);
 
   await runtime.send(config, chat('test-model', ''));
   const request = requests[0] as { toolsEnabled: boolean; tools?: Array<{ name: string }>; messages: Array<{ content: string }> };
   assert.equal(request.toolsEnabled, true);
-  assert.deepEqual(request.tools?.map((tool) => tool.name), ['run_command']);
+  assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'write_file', 'create_file', 'delete_file', 'rename_file', 'search_files', 'run_command']);
+  assert.equal(request.tools?.some((item) => item.name === 'git_status'), false);
   assert.match(request.messages[0].content, /Runtime OS:/);
-  assert.match(request.messages[0].content, /direct, actionable request/i);
+  assert.match(request.messages[0].content, /protected system workspace rooted at the user's Home directory/i);
+  assert.match(request.messages[0].content, /Desktop\/Novo site\/index\.html/i);
 });
 
-test('send does not expose workspace tools to a normal chat when run_command is unavailable', async () => {
+test('send keeps available protected file tools in a normal chat even when run_command is unavailable', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
-    {
-      name: 'read_file',
-      description: 'Read a file',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: false,
-    },
+    tool('read_file', false, false),
+    tool('create_file', true, true),
   ]);
 
   await runtime.send(config, chat('test-model', ''));
-  const request = requests[0] as { toolsEnabled: boolean; tools?: unknown[] };
-  assert.equal(request.toolsEnabled, false);
-  assert.equal(request.tools, undefined);
+  const request = requests[0] as { toolsEnabled: boolean; tools?: Array<{ name: string }> };
+  assert.equal(request.toolsEnabled, true);
+  assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'create_file']);
 });
 
 test('send disables tools for models without tool capability', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry, ['text']);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
-    {
-      name: 'read_file',
-      description: 'Read a file',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: false,
-    },
+    tool('read_file', false, false),
   ]);
 
   await runtime.send(config, chat());
