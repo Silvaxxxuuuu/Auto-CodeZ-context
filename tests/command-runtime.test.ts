@@ -90,6 +90,20 @@ test('command runtime isolates observer failures from command execution', async 
   }
 });
 
+test('command runtime aborts a running process tree', async () => {
+  const project = await createProject();
+  const controller = new AbortController();
+  try {
+    const startedAt = Date.now();
+    const running = project.runtime.run('project-test', nodeCommand("setTimeout(() => process.stdout.write('late'), 30000)"), { signal: controller.signal });
+    setTimeout(() => controller.abort(), 100);
+    await assert.rejects(running, (error: unknown) => error instanceof Error && error.name === 'AbortError');
+    assert.ok(Date.now() - startedAt < 5000);
+  } finally {
+    await project.cleanup();
+  }
+});
+
 test('command runtime executes a system command without a project context', async () => {
   const runtime = new CommandRuntime(async () => []);
   const result = await runtime.run(SYSTEM_PROJECT_ID, nodeCommand("process.stdout.write('system-ok')"));
