@@ -6,6 +6,7 @@ import { WorkspaceRuntime } from './workspace-runtime';
 import { CommandRuntime } from './command-runtime';
 import { DiffRuntime } from './diff-runtime';
 import { GitRuntime } from './git-runtime';
+import { SYSTEM_WORKSPACE_ID } from './system-workspace';
 
 const definitions: AIToolDefinition[] = [
   { name: 'read_file', description: 'Read a UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -118,7 +119,8 @@ export class ToolRuntime {
     const definition = definitions.find((item) => item.name === normalizedCall.name);
     if (!definition) return { toolCallId: normalizedCall.id, ok: false, error: `Ferramenta desconhecida: ${normalizedCall.name}` };
     try { validateToolInput(definition, normalizedCall.input); } catch (error) { return { toolCallId: normalizedCall.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
-    const decision = this.permissions.decide(permission, normalizedCall.name);
+    let decision = this.permissions.decide(permission, normalizedCall.name);
+    if (projectId === SYSTEM_WORKSPACE_ID && permission === 'safe' && (normalizedCall.name === 'create_file' || normalizedCall.name === 'write_file')) decision = 'ask';
     if (decision === 'deny') return { toolCallId: normalizedCall.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
     const pending = this.approvals.list({ chatId, runId });
     if (pending.length) {
