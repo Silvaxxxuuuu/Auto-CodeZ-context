@@ -9,6 +9,10 @@ let domObserver: MutationObserver | null = null;
 function bridge(): StopBridge { return (window as unknown as { autoCodez: StopBridge }).autoCodez; }
 function selectedChatId(): string | undefined { return document.querySelector<HTMLElement>('.chat-item.selected')?.dataset.chat; }
 
+function hasVisibleApproval(): boolean {
+  return Boolean(document.querySelector('.ac-approval-root:not([hidden]) [data-approve], .ac-approval-root:not([hidden]) [data-deny]'));
+}
+
 function syncStopButton(): void {
   if (syncing) return;
   const prompt = document.querySelector<HTMLTextAreaElement>('#prompt');
@@ -17,8 +21,9 @@ function syncStopButton(): void {
 
   syncing = true;
   try {
-    const approvalVisible = Boolean(document.querySelector('[data-approve], [data-deny]'));
-    const stopping = prompt.disabled && !approvalVisible;
+    const executionLocked = prompt.dataset.executionLocked === 'true' || button.dataset.executionLocked === 'true';
+    const approvalVisible = hasVisibleApproval();
+    const stopping = (prompt.disabled || executionLocked) && !approvalVisible;
 
     if (button.classList.contains('is-stop') !== stopping) button.classList.toggle('is-stop', stopping);
 
@@ -38,7 +43,7 @@ function syncStopButton(): void {
     }
 
     stopIcon?.remove();
-    const disabled = !selectedChatId() || !prompt.value.trim();
+    const disabled = executionLocked || !selectedChatId() || !prompt.value.trim();
     if (button.disabled !== disabled) button.disabled = disabled;
   } finally {
     syncing = false;
@@ -64,10 +69,10 @@ function installWhenReady(): void {
   disconnectObservers();
 
   promptObserver = new MutationObserver(syncStopButton);
-  promptObserver.observe(prompt, { attributes: true, attributeFilter: ['disabled'] });
+  promptObserver.observe(prompt, { attributes: true, attributeFilter: ['disabled', 'data-execution-locked'] });
 
   buttonObserver = new MutationObserver(syncStopButton);
-  buttonObserver.observe(button, { attributes: true, attributeFilter: ['disabled'], childList: true });
+  buttonObserver.observe(button, { attributes: true, attributeFilter: ['disabled', 'data-execution-locked'], childList: true });
 
   prompt.addEventListener('input', syncStopButton);
 
@@ -80,7 +85,7 @@ function installWhenReady(): void {
       syncStopButton();
       return;
     }
-    if (!button.disabled) button.disabled = true;
+    button.disabled = true;
     void bridge().stopChat(chatId).catch((): undefined => undefined);
   }, true);
 
