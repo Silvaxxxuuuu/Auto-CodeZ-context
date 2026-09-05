@@ -3,6 +3,7 @@ import type { ActivityEvent, ToolName } from './ai/types';
 type StreamEvent = {
   type?: string;
   chatId?: string;
+  text?: string;
   activity?: Partial<ActivityEvent>;
   toolCall?: {
     id: string;
