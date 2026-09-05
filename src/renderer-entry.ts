@@ -28,6 +28,7 @@ const secondaryEnhancements: Enhancement[] = [
   { name: 'thinking-ui', load: () => import('./thinking-ui') },
   { name: 'chat-execution-ui', load: () => import('./chat-execution-ui') },
   { name: 'activity-ui', load: () => import('./activity-ui') },
+  { name: 'execution-graph-ui', load: () => import('./execution-graph-ui') },
   { name: 'diff-ui', load: () => import('./diff-ui') },
   { name: 'chat-rename-ui', load: () => import('./chat-rename-ui') },
   { name: 'error-recovery-ui', load: () => import('./error-recovery-ui') },
