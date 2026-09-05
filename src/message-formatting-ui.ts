@@ -72,7 +72,7 @@ function rawText(element: HTMLElement): string {
 function applyMarkup(element: HTMLElement, html: string): void {
   if (!element.isConnected || !messages.contains(element)) return;
   if (element.innerHTML !== html) element.innerHTML = html;
-  renderedMarkup.set(element, html);
+  renderedMarkup.set(element, element.innerHTML);
 }
 
 function formatAssistant(element: HTMLElement): void {
@@ -127,7 +127,6 @@ messages.addEventListener('click', (event) => {
 });
 
 window.addEventListener('auto-codez-chat-refresh', enqueueCurrentMessages);
-window.addEventListener('focus', enqueueCurrentMessages);
 window.addEventListener('beforeunload', () => {
   observer.disconnect();
   if (frameId !== null) window.cancelAnimationFrame(frameId);
