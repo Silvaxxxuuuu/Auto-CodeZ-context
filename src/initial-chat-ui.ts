@@ -6,6 +6,12 @@ const EMPTY_STATE_HTML = `
   </div>
 `;
 
+const style = document.createElement('style');
+style.textContent = `
+.composer-wrap.ac-empty-chat-hidden{display:none!important}
+`;
+document.head.appendChild(style);
+
 function syncEmptyState(): void {
   const messages = document.querySelector<HTMLElement>('#messages');
   const composer = document.querySelector<HTMLElement>('.composer-wrap');
@@ -15,7 +21,7 @@ function syncEmptyState(): void {
   if (welcome) welcome.outerHTML = EMPTY_STATE_HTML;
 
   const empty = Boolean(messages.querySelector(':scope > .ac-empty-chat'));
-  composer?.toggleAttribute('hidden', empty);
+  composer?.classList.toggle('ac-empty-chat-hidden', empty);
 }
 
 function initialize(): void {
