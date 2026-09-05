@@ -183,3 +183,27 @@ test('hidratação é atômica diante de snapshot inválido ou chat duplicado', 
   ]), /mais de um snapshot/i);
   assert.equal(manager.get('existing')?.runId, 'run-existing');
 });
+
+test('resumeInterrupted preserva runId e startedAt e publica retomada como running', () => {
+  const manager = new ExecutionManager();
+  const changes: ExecutionChange[] = [];
+  manager.hydrate([{ chatId: 'chat-a', runId: 'run-a', state: 'interrupted', startedAt: 1000, updatedAt: 1500 }]);
+  manager.subscribe((change) => changes.push(change));
+
+  const resumed = manager.resumeInterrupted('chat-a', 'run-a', 5000);
+
+  assert.deepEqual(resumed, { chatId: 'chat-a', runId: 'run-a', state: 'running', startedAt: 1000, updatedAt: 5000, currentTool: undefined, error: undefined });
+  assert.equal(changes.length, 1);
+  assert.deepEqual(changes[0], { type: 'upsert', snapshot: resumed });
+});
+
+test('resumeInterrupted rejeita run diferente, estado não interrompido e tempo obsoleto', () => {
+  const manager = new ExecutionManager();
+  manager.hydrate([{ chatId: 'chat-a', runId: 'run-a', state: 'interrupted', startedAt: 1000, updatedAt: 1500 }]);
+
+  assert.throws(() => manager.resumeInterrupted('chat-a', 'run-b', 2000), /não corresponde/i);
+  assert.throws(() => manager.resumeInterrupted('chat-a', 'run-a', 1400), /obsoleta/i);
+
+  manager.resumeInterrupted('chat-a', 'run-a', 2000);
+  assert.throws(() => manager.resumeInterrupted('chat-a', 'run-a', 2100), /não está interrompida/i);
+});
