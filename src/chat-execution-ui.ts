@@ -151,7 +151,8 @@ function handleActivity(value: unknown): void {
     steps: [],
   };
   if (run.chatId !== chatId || run.chatId !== activeChatId) return;
-  run.status = event.type === 'complete' ? status : status === 'failed' ? 'failed' : status === 'pending' ? 'pending' : run.status === 'pending' && status === 'running' ? 'running' : run.status;
+  const isFinalCompletion = event.type === 'complete' && event.message === 'Execução concluída.';
+  run.status = isFinalCompletion ? status : status === 'failed' ? 'failed' : status === 'pending' ? 'pending' : run.status === 'pending' && status === 'running' ? 'running' : run.status;
   if (event.message) run.message = event.message;
   run.updatedAt = now;
   if (event.toolName || event.commandResult || event.gitResult || event.type === 'action' || event.type === 'tool') {
