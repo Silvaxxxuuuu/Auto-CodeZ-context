@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { StructuralEditRuntime, type StructuralSymbolLocator, type StructuralSymbolMatch } from '../src/agent/structural-edit-runtime';
 
-function locator(matches: StructuralSymbolMatch[], supported = true): StructuralSymbolLocator {
+function locator(matches: StructuralSymbolMatch[], supported = true, validateReplacement: StructuralSymbolLocator['validateReplacement'] = () => undefined): StructuralSymbolLocator {
   return {
     id: 'test-locator',
     supports: () => supported,
     locate: () => matches.map((match) => ({ ...match })),
+    validateReplacement,
   };
 }
 
@@ -22,6 +23,25 @@ test('structural edit replaces exactly one parser-provided symbol range', async 
   assert.equal(result.before, content);
   assert.equal(result.after, 'before\nfunction greet() { return 2; }\nafter\n');
   assert.deepEqual(result.match, { name: 'greet', kind: 'function', startOffset, endOffset, startLine: 2, endLine: 2 });
+});
+
+test('structural edit delegates validation of the resulting replacement to the selected locator', async () => {
+  const content = 'function greet() { return 1; }';
+  let validated = false;
+  const runtime = new StructuralEditRuntime([locator(
+    [{ name: 'greet', kind: 'function', startOffset: 0, endOffset: content.length }],
+    true,
+    (filePath, after, query, range) => {
+      validated = true;
+      assert.equal(filePath, 'src/example.ts');
+      assert.equal(after, 'function greet() { return 2; }');
+      assert.deepEqual(query, { name: 'greet', kind: 'function' });
+      assert.deepEqual(range, { startOffset: 0, endOffset: after.length });
+    },
+  )]);
+
+  await runtime.replaceSymbol('src/example.ts', content, { name: 'greet', kind: 'function' }, 'function greet() { return 2; }');
+  assert.equal(validated, true);
 });
 
 test('structural edit fails closed when no locator supports the file', async () => {
@@ -58,8 +78,8 @@ test('structural edit rejects no-op replacements', async () => {
 
 test('structural edit exposes locator ids without leaking mutable locator state', () => {
   const runtime = new StructuralEditRuntime([
-    { id: 'typescript', supports: () => true, locate: () => [] },
-    { id: 'tree-sitter', supports: () => true, locate: () => [] },
+    { id: 'typescript', supports: () => true, locate: () => [], validateReplacement: () => undefined },
+    { id: 'tree-sitter', supports: () => true, locate: () => [], validateReplacement: () => undefined },
   ]);
   const ids = runtime.listLocatorIds();
   assert.deepEqual(ids, ['typescript', 'tree-sitter']);
