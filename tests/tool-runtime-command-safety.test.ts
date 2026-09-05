@@ -77,7 +77,8 @@ test('mutação direta de segredo via shell é bloqueada antes da execução', a
 
   assert.equal(result.ok, false);
   assert.equal(result.pendingApproval, undefined);
-  assert.match(result.error ?? '', /política de segurança de comandos/i);
+  assert.match(result.error ?? '', /política de segurança/i);
+  assert.match(result.error ?? '', /variáveis de ambiente/i);
   assert.deepEqual(commands.executed, []);
   assert.equal(runtime.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
 });
