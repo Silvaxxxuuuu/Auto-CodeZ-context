@@ -1,6 +1,6 @@
 import type { ToolName } from '../ai/types';
 
-export type IncrementalEditToolName = Extract<ToolName, 'replace_range' | 'insert_before' | 'insert_after'>;
+export type IncrementalEditToolName = Extract<ToolName, 'replace_range' | 'replace_text' | 'insert_before' | 'insert_after'>;
 
 function requirePositiveInteger(value: unknown, label: string): number {
   if (!Number.isInteger(value) || Number(value) < 1) throw new Error(`${label} deve ser um inteiro maior ou igual a 1.`);
@@ -9,6 +9,11 @@ function requirePositiveInteger(value: unknown, label: string): number {
 
 function requireContent(value: unknown): string {
   if (typeof value !== 'string') throw new Error("Parâmetro 'content' deve ser texto.");
+  return value;
+}
+
+function requireText(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !value.length) throw new Error(`Parâmetro '${label}' deve ser um texto não vazio.`);
   return value;
 }
 
@@ -35,7 +40,28 @@ function joinLines(lines: string[], eol: '\r\n' | '\n', trailingEol: boolean): s
   return lines.join(eol) + (trailingEol ? eol : '');
 }
 
+function countOccurrences(source: string, target: string): number {
+  let count = 0;
+  let cursor = 0;
+  while (cursor <= source.length - target.length) {
+    const index = source.indexOf(target, cursor);
+    if (index === -1) break;
+    count += 1;
+    cursor = index + target.length;
+  }
+  return count;
+}
+
 export function applyIncrementalEdit(name: IncrementalEditToolName, input: Record<string, unknown>, before: string): string {
+  if (name === 'replace_text') {
+    const oldText = requireText(input.oldText, 'oldText');
+    const newText = typeof input.newText === 'string' ? input.newText : (() => { throw new Error("Parâmetro 'newText' deve ser texto."); })();
+    const occurrences = countOccurrences(before, oldText);
+    if (occurrences === 0) throw new Error('O trecho informado em oldText não foi encontrado no arquivo atual.');
+    if (occurrences > 1) throw new Error(`O trecho informado em oldText é ambíguo: ${occurrences} ocorrências encontradas. Use um trecho maior e único.`);
+    return before.replace(oldText, newText);
+  }
+
   const { lines, eol, trailingEol } = splitLines(before);
   const contentLines = splitInsertedContent(requireContent(input.content));
 
