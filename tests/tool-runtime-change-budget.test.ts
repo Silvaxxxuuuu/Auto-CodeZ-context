@@ -43,6 +43,12 @@ test('sem Change Budget configurado preserva execução irrestrita', async () =>
     );
     assert.equal(result.ok, true);
     assert.equal(await fs.readFile(path.join(current.root, 'notes.txt'), 'utf8'), 'after');
+    assert.deepEqual(current.runtime.getChangeBudgetUsage('chat-a', 'run-a'), {
+      files: [],
+      changedLines: 0,
+      commands: 0,
+      toolCalls: 0,
+    });
   } finally {
     await current.cleanup();
   }
