@@ -1,0 +1,73 @@
+name: Patch execution planner integration
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/patch-execution-planner-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - name: Patch main and preload
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          main_path = Path('src/main.ts')
+          main = main_path.read_text(encoding='utf-8')
+
+          old = "import { ExecutionTimeline } from './execution-timeline';\n"
+          new = "import { ExecutionTimeline } from './execution-timeline';\nimport { ExecutionPlanner, type ExecutionPlanChange } from './execution-planner';\nimport { ExecutionPlanPersistence, ExecutionPlanStore } from './execution-plan-store';\n"
+          assert old in main
+          main = main.replace(old, new, 1)
+
+          old = "const executionTimeline = new ExecutionTimeline();\nlet executionPersistenceEnabled = false;\n"
+          new = "const executionTimeline = new ExecutionTimeline();\nconst executionPlanner = new ExecutionPlanner();\nconst executionPlanStore = new ExecutionPlanStore(storage);\nconst executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore);\nlet executionPersistenceEnabled = false;\nlet executionPlanPersistenceEnabled = false;\n"
+          assert old in main
+          main = main.replace(old, new, 1)
+
+          old = "function sendExecutionChange(change: ExecutionChange): void {\n  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution:event', change);\n}\n\nexecutionManager.subscribe((change) => {\n"
+          new = "function sendExecutionChange(change: ExecutionChange): void {\n  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution:event', change);\n}\n\nfunction sendExecutionPlanChange(change: ExecutionPlanChange): void {\n  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution-plan:event', change);\n}\n\nexecutionPlanner.subscribe((change) => {\n  sendExecutionPlanChange(change);\n  if (executionPlanPersistenceEnabled) executionPlanPersistence.schedule(executionPlanner.list());\n});\n\nexecutionManager.subscribe((change) => {\n"
+          assert old in main
+          main = main.replace(old, new, 1)
+
+          old = "ipcMain.handle('agent:list-execution-timeline', async (_event, filters?: { chatId?: string; runId?: string }) => {\n  if (filters === undefined) return executionTimeline.list();\n  const value = requireObject(filters, 'Filtro da timeline de execução');\n  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');\n  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');\n  return executionTimeline.list(chatId, runId);\n});\n"
+          new = old + "ipcMain.handle('agent:list-execution-plans', async (_event, filters?: { chatId?: string; runId?: string }) => {\n  if (filters === undefined) return executionPlanner.list();\n  const value = requireObject(filters, 'Filtro dos planos de execução');\n  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');\n  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');\n  if (chatId !== undefined) {\n    const plan = executionPlanner.get(chatId, runId);\n    return plan ? [plan] : [];\n  }\n  return executionPlanner.list().filter((plan) => runId === undefined || plan.runId === runId);\n});\n"
+          assert old in main
+          main = main.replace(old, new, 1)
+
+          old = "  await restorePersistedExecutionSnapshots();\n  restoreExecutionSnapshots();\n  executionPersistenceEnabled = true;\n  executionStatePersistence.schedule(executionManager.list());\n"
+          new = "  await restorePersistedExecutionSnapshots();\n  restoreExecutionSnapshots();\n  executionPlanner.restore(await executionPlanStore.load());\n  executionPersistenceEnabled = true;\n  executionPlanPersistenceEnabled = true;\n  executionStatePersistence.schedule(executionManager.list());\n  executionPlanPersistence.schedule(executionPlanner.list());\n"
+          assert old in main
+          main = main.replace(old, new, 1)
+          main_path.write_text(main, encoding='utf-8')
+
+          preload_path = Path('src/preload.ts')
+          preload = preload_path.read_text(encoding='utf-8')
+          old = "  listExecutionTimeline: (filters?: ApprovalScope) => invoke('agent:list-execution-timeline', requireApprovalScope(filters)),\n  onExecutionEvent: (listener: (event: unknown) => void) => {\n"
+          new = "  listExecutionTimeline: (filters?: ApprovalScope) => invoke('agent:list-execution-timeline', requireApprovalScope(filters)),\n  listExecutionPlans: (filters?: ApprovalScope) => invoke('agent:list-execution-plans', requireApprovalScope(filters)),\n  onExecutionPlanEvent: (listener: (event: unknown) => void) => {\n    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);\n    ipcRenderer.on('execution-plan:event', handler);\n    return () => ipcRenderer.removeListener('execution-plan:event', handler);\n  },\n  onExecutionEvent: (listener: (event: unknown) => void) => {\n"
+          assert old in preload
+          preload = preload.replace(old, new, 1)
+          preload_path.write_text(preload, encoding='utf-8')
+          PY
+          git diff --check
+          git diff -- src/main.ts src/preload.ts
+      - name: Commit integration
+        shell: bash
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git add src/main.ts src/preload.ts
+          git commit -m "feat(execution): persist and expose execution plans"
+          git push origin HEAD:feature/ui-hierarchy-polish
