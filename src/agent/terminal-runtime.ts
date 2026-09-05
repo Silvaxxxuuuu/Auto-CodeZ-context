@@ -61,12 +61,22 @@ function validateSize(cols: number, rows: number): void {
 
 export class TerminalRuntime {
   private readonly sessions = new Map<string, SessionEntry>();
+  private interactiveFactory: InteractiveTerminalProcessFactory;
 
   constructor(
     private readonly projects: () => Promise<ProjectRecord[]>,
     private readonly emit: (event: TerminalOutputEvent | TerminalExitEvent) => void,
-    private readonly interactiveFactory: InteractiveTerminalProcessFactory = new PipeInteractiveTerminalProcessFactory(),
-  ) {}
+    interactiveFactory: InteractiveTerminalProcessFactory = new PipeInteractiveTerminalProcessFactory(),
+  ) {
+    this.interactiveFactory = interactiveFactory;
+  }
+
+  configureInteractiveFactory(factory: InteractiveTerminalProcessFactory): void {
+    if ([...this.sessions.values()].some((entry) => entry.session.status === 'running' && entry.session.interactive)) {
+      throw new Error('Não é possível trocar o transporte do terminal com uma sessão interativa ativa.');
+    }
+    this.interactiveFactory = factory;
+  }
 
   async list(): Promise<TerminalSession[]> {
     return [...this.sessions.values()]
