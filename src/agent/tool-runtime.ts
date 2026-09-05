@@ -11,6 +11,7 @@ import { applyIncrementalEdit, type IncrementalEditToolName } from './incrementa
 import { StructuralEditRuntime, type StructuralSymbolKind } from './structural-edit-runtime';
 import { TypeScriptStructuralLocator } from './typescript-structural-locator';
 import { ExecutionPlanner, type ExecutionPlan } from '../execution-planner';
+import { ExecutionChangeBudgetRuntime, type ExecutionChangeBudget, type ExecutionChangeUsage } from '../execution-change-budget';
 
 const definitions: AIToolDefinition[] = [
   { name: 'plan_execution', description: 'Declare a concrete execution plan for a multi-step task. Auto CodeZ starts the first step immediately. Use this before substantial multi-step tool work, then execute real tools and call complete_plan_step only after the current step has runtime-recorded evidence.', parameters: { type: 'object', properties: { objective: { type: 'string', description: 'Concrete objective of this execution.' }, steps: { type: 'array', items: { type: 'string' }, description: 'Ordered, concise execution steps.' } }, required: ['objective', 'steps'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -117,11 +118,20 @@ export class ToolRuntime {
   private journalWrite: Promise<void> = Promise.resolve();
   private gitRuntime?: GitRuntime;
   private executionPlanner?: ExecutionPlanner;
+  private executionChangeBudget?: ExecutionChangeBudgetRuntime;
 
   constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()])) {}
 
   configureGitRuntime(runtime: GitRuntime): void { this.gitRuntime = runtime; }
   configureExecutionPlanner(runtime: ExecutionPlanner): void { this.executionPlanner = runtime; }
+  configureExecutionChangeBudget(runtime: ExecutionChangeBudgetRuntime): void { this.executionChangeBudget = runtime; }
+  configureChangeBudget(chatId: string, runId: string, budget: ExecutionChangeBudget): ExecutionChangeBudget {
+    if (!this.executionChangeBudget) throw new Error('O runtime de Change Budget não foi configurado.');
+    return this.executionChangeBudget.configure(chatId, runId, budget);
+  }
+  getChangeBudgetUsage(chatId: string, runId: string): ExecutionChangeUsage {
+    return this.executionChangeBudget?.getUsage(chatId, runId) ?? { files: [], changedLines: 0, commands: 0, toolCalls: 0 };
+  }
   getExecutionPlan(chatId: string, runId: string): ExecutionPlan | undefined { return this.executionPlanner?.get(chatId, runId); }
   async init(): Promise<void> {
     if (!this.journalStorage) return;
@@ -164,11 +174,15 @@ export class ToolRuntime {
           } catch {}
         }
       }
+      this.assertChangeBudget(chatId, runId, normalizedCall, diffPlan);
       const approval = this.approvals.request({ projectId, chatId, runId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });
       this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${normalizedCall.name}.`, status: 'pending', toolCallId: normalizedCall.id, toolName: normalizedCall.name, chatId, runId, ...(diffPlan ? { diffPlan } : {}) });
       return { toolCallId: normalizedCall.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
     }
-    return this.executeNow(projectId, normalizedCall, undefined, undefined, { chatId, runId });
+    let directDiffPlan: DiffPlan | undefined;
+    if (this.hasChangeBudget(chatId, runId) && this.isMutation(normalizedCall.name)) directDiffPlan = await this.preview(projectId, normalizedCall);
+    this.assertChangeBudget(chatId, runId, normalizedCall, directDiffPlan);
+    return this.executeNow(projectId, normalizedCall, undefined, directDiffPlan, { chatId, runId });
   }
 
   async approve(approvalId: string): Promise<AIToolResult> {
@@ -180,6 +194,7 @@ export class ToolRuntime {
     }
     try {
       await this.assertPrecondition(approval.projectId, approval.diffPlan);
+      this.assertChangeBudget(approval.chatId, approval.runId, approval.toolCall, approval.diffPlan);
       const result = await this.executeNow(approval.projectId, approval.toolCall, approvalId, approval.diffPlan, { chatId: approval.chatId, runId: approval.runId });
       this.approvals.resolve(approvalId);
       return result;
@@ -274,12 +289,28 @@ export class ToolRuntime {
 
   private stringValue(input: Record<string, unknown>, key: string): string { const value = input[key]; if (typeof value !== 'string' || !value.trim()) throw new Error(`Parâmetro '${key}' inválido.`); return value.trim(); }
 
+  private hasChangeBudget(chatId?: string, runId?: string): boolean {
+    return Boolean(this.executionChangeBudget && chatId && runId && this.executionChangeBudget.getBudget(chatId, runId));
+  }
+
+  private assertChangeBudget(chatId: string | undefined, runId: string | undefined, call: AIToolCall, diffPlan?: DiffPlan): void {
+    if (!this.executionChangeBudget || !chatId || !runId) return;
+    this.executionChangeBudget.assertAllowed(chatId, runId, { toolName: call.name, ...(diffPlan ? { diffPlan } : {}) });
+  }
+
+  private recordChangeBudget(context: ActivityContext, call: AIToolCall, execution: ToolExecution): void {
+    if (!this.executionChangeBudget || !context.chatId || !context.runId) return;
+    this.executionChangeBudget.record(context.chatId, context.runId, { toolName: call.name, ...(execution.changes ? { changes: execution.changes } : {}) });
+  }
+
   private async executeNow(projectId: string, call: AIToolCall, approvalId?: string, diffPlan?: DiffPlan, context: ActivityContext = {}): Promise<AIToolResult> {
     const activityType = call.name === 'run_command' ? 'action' : 'tool';
     this.activity.emit({ type: activityType, message: executionActivityMessage(call), status: 'running', toolCallId: call.id, toolName: call.name, ...context });
     try {
+      this.assertChangeBudget(context.chatId, context.runId, call, diffPlan);
       if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);
       const execution = await this.executeAllowed(projectId, call.name, call.input, context);
+      this.recordChangeBudget(context, call, execution);
       this.recordPlanEvidence(context, call, execution);
       const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, ...(execution.changes ? { changes: execution.changes } : {}), ...(execution.commandResult ? { commandResult: execution.commandResult } : {}) };
       this.activity.emit({ type: 'action', message: `Concluído: ${call.name}`, status: 'success', toolCallId: call.id, toolName: call.name, ...context, ...(execution.commandResult ? { commandResult: execution.commandResult } : {}), ...(execution.changes ? { changes: execution.changes } : {}), ...(diffPlan ? { diffPlan } : {}) });

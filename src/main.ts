@@ -34,6 +34,7 @@ import { ExecutionQualityGateRuntime, type ExecutionQualityGateRequirement } fro
 import { ExecutionQualityGatePersistence, ExecutionQualityGateStore } from './execution-quality-gate-store';
 import { ExecutionTaskCapsuleRuntime } from './execution-task-capsule';
 import { ExecutionTaskCapsulePersistence, ExecutionTaskCapsuleStore } from './execution-task-capsule-store';
+import { ExecutionChangeBudgetRuntime } from './execution-change-budget';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
@@ -69,7 +70,9 @@ const executionTimelineStore = new ExecutionTimelineStore(storage);
 const executionTimelinePersistence = new ExecutionTimelinePersistence(executionTimelineStore);
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
+const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
 toolRuntime.configureExecutionPlanner(executionPlanner);
+toolRuntime.configureExecutionChangeBudget(executionChangeBudgetRuntime);
 const executionPlanStore = new ExecutionPlanStore(storage);
 const executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore);
 const executionPlanHistory = new ExecutionPlanHistory();
@@ -306,6 +309,7 @@ ipcMain.handle('chat:delete', async (_event, chatId: string) => {
   if (executionPlanHistory.purgeChat(id) && executionPlanHistoryPersistenceEnabled) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
   if (executionQualityGateRuntime.removeChat(id) && executionQualityGatePersistenceEnabled) executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
   if (executionTaskCapsuleRuntime.removeChat(id) && executionTaskCapsulePersistenceEnabled) executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
+  executionChangeBudgetRuntime.removeChat(id);
   return chatManager.remove(id);
 });
 ipcMain.handle('chat:rename', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome do chat'); return chatManager.rename(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.title, 'Nome do chat')); });
