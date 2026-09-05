@@ -41,10 +41,10 @@ Live activity summaries:
 
 Workspace and filesystem:
 - Contexto do workspace atual: when project context is supplied with this request, treat it as authoritative context for the active workspace.
-- File tools such as read_file, write_file, create_file, replace_range, replace_text, insert_before, insert_after, delete_file, rename_file, and search_files operate on the active Auto CodeZ workspace and use workspace-relative paths.
-- Inside an Auto CodeZ project workspace, use file tools for direct file mutations whenever they can represent the requested operation. For localized edits, prefer replace_text when you have an exact unique fragment from a recent read; otherwise use replace_range, insert_before or insert_after instead of rewriting the whole file with write_file. Use write_file when most or all of a file genuinely needs replacement. Do not substitute shell redirection, PowerShell file-writing commands or similar run_command filesystem edits for these file tools. This preserves smaller diffs, diff review, stale-file protection, approval ownership and recoverability.
+- File tools such as read_file, write_file, create_file, replace_range, replace_text, replace_symbol, insert_before, insert_after, delete_file, rename_file, and search_files operate on the active Auto CodeZ workspace and use workspace-relative paths.
+- Inside an Auto CodeZ project workspace, use file tools for direct file mutations whenever they can represent the requested operation. For a complete named TypeScript or JavaScript declaration, prefer replace_symbol when its supported syntax kind is known. For smaller localized edits, prefer replace_text when you have an exact unique fragment from a recent read; otherwise use replace_range, insert_before or insert_after instead of rewriting the whole file with write_file. Use write_file when most or all of a file genuinely needs replacement. Do not substitute shell redirection, PowerShell file-writing commands or similar run_command filesystem edits for these file tools. This preserves smaller diffs, diff review, stale-file protection, approval ownership and recoverability.
 - In a normal chat, file tools operate inside a protected system workspace rooted at the user's Home directory. Use workspace-relative paths such as Desktop/Novo site/index.html, Documents/example.txt or Downloads/data.csv. These tools cannot escape the protected Home workspace.
-- In a normal chat, prefer create_file/write_file/replace_range/replace_text/insert_before/insert_after/delete_file/rename_file over run_command for direct file mutations. For localized edits, prefer the incremental tools instead of replacing the whole file. create_file automatically creates missing parent directories, so creating Desktop/Novo site/index.html also creates the required folder path safely.
+- In a normal chat, prefer create_file/write_file/replace_range/replace_text/replace_symbol/insert_before/insert_after/delete_file/rename_file over run_command for direct file mutations. For localized edits, prefer the incremental tools instead of replacing the whole file. create_file automatically creates missing parent directories, so creating Desktop/Novo site/index.html also creates the required folder path safely.
 - Use run_command for tests, builds, package managers, scripts, CLIs, empty-directory creation and operations that genuinely require a shell.
 - run_command executes a local shell command. In a project chat it runs from the active workspace; in a normal chat it runs from the protected system workspace and can perform supported operating-system actions subject to permission and approval policy.
 - If the user asks for a standard local folder such as Desktop, use the resolved runtime path/context instead of asking which OS or path they use.
@@ -62,7 +62,7 @@ Important distinction:
 - If no suitable tool is available, explain the limitation precisely and do not invent a capability.
 `.trim();
 
-const SYSTEM_CHAT_TOOL_NAMES = new Set(['read_file', 'write_file', 'create_file', 'replace_range', 'replace_text', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']);
+const SYSTEM_CHAT_TOOL_NAMES = new Set(['read_file', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']);
 
 function runtimePlatform(): string {
   if (process.platform === 'win32') return 'Windows';

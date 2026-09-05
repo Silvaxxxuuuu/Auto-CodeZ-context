@@ -8,12 +8,15 @@ import { DiffRuntime } from './diff-runtime';
 import { GitRuntime } from './git-runtime';
 import { SYSTEM_WORKSPACE_ID } from './system-workspace';
 import { applyIncrementalEdit, type IncrementalEditToolName } from './incremental-file-edit';
+import { StructuralEditRuntime, type StructuralSymbolKind } from './structural-edit-runtime';
+import { TypeScriptStructuralLocator } from './typescript-structural-locator';
 
 const definitions: AIToolDefinition[] = [
   { name: 'read_file', description: 'Read a UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'write_file', description: 'Replace the contents of an existing UTF-8 text file inside the active workspace. Use this only when replacing most or all of a file; prefer replace_range, insert_before or insert_after for localized edits so diffs stay small.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Complete replacement file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'replace_range', description: 'Replace an inclusive 1-based line range in an existing UTF-8 text file. Prefer this for localized edits instead of rewriting the whole file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, startLine: { type: 'number', description: 'First 1-based line to replace.' }, endLine: { type: 'number', description: 'Last 1-based line to replace, inclusive.' }, content: { type: 'string', description: 'Replacement line content.' } }, required: ['path', 'startLine', 'endLine', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'replace_text', description: 'Replace one exact unique text fragment in an existing UTF-8 file. The oldText fragment must occur exactly once; otherwise the operation fails instead of guessing. Prefer this when you have just read the exact code to change.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, oldText: { type: 'string', description: 'Exact current text fragment. It must be unique in the file.' }, newText: { type: 'string', description: 'Replacement text, which may be empty to remove the fragment.' } }, required: ['path', 'oldText', 'newText'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'replace_symbol', description: 'Replace one uniquely named TypeScript or JavaScript syntax symbol using the real TypeScript AST. Supported kinds are function, method, class, interface, type and enum. Use this when replacing an entire named declaration; ambiguity or unsupported files fail instead of guessing.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative TypeScript or JavaScript file path.' }, symbol: { type: 'string', description: 'Exact declared symbol name.' }, kind: { type: 'string', enum: ['function', 'method', 'class', 'interface', 'type', 'enum'], description: 'Declared syntax kind.' }, content: { type: 'string', description: 'Complete replacement declaration for the selected symbol.' } }, required: ['path', 'symbol', 'kind', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'insert_before', description: 'Insert one or more lines immediately before a 1-based line in an existing UTF-8 text file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, line: { type: 'number', description: '1-based line before which content is inserted.' }, content: { type: 'string', description: 'Line content to insert.' } }, required: ['path', 'line', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'insert_after', description: 'Insert one or more lines immediately after a 1-based line in an existing UTF-8 text file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, line: { type: 'number', description: '1-based line after which content is inserted.' }, content: { type: 'string', description: 'Line content to insert.' } }, required: ['path', 'line', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'create_file', description: 'Create a new UTF-8 text file inside the active workspace. Prefer this tool over shell commands for workspace file creation so Auto CodeZ can preview and review the exact diff.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
@@ -83,6 +86,7 @@ function executionActivityMessage(call: AIToolCall): string {
     case 'write_file': return value('path') ? `Editando ${value('path')}` : 'Editando arquivo.';
     case 'replace_range': return value('path') ? `Editando trecho de ${value('path')}` : 'Editando trecho do arquivo.';
     case 'replace_text': return value('path') ? `Substituindo trecho exato de ${value('path')}` : 'Substituindo trecho exato do arquivo.';
+    case 'replace_symbol': return value('path') && value('symbol') ? `Substituindo símbolo ${value('symbol')} em ${value('path')}` : 'Substituindo símbolo do arquivo.';
     case 'insert_before': return value('path') ? `Inserindo conteúdo em ${value('path')}` : 'Inserindo conteúdo no arquivo.';
     case 'insert_after': return value('path') ? `Inserindo conteúdo em ${value('path')}` : 'Inserindo conteúdo no arquivo.';
     case 'create_file': return value('path') ? `Criando ${value('path')}` : 'Criando arquivo.';
@@ -106,7 +110,7 @@ export class ToolRuntime {
   private journalWrite: Promise<void> = Promise.resolve();
   private gitRuntime?: GitRuntime;
 
-  constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage) {}
+  constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()])) {}
 
   configureGitRuntime(runtime: GitRuntime): void { this.gitRuntime = runtime; }
   async init(): Promise<void> {
@@ -129,7 +133,7 @@ export class ToolRuntime {
     if (!definition) return { toolCallId: normalizedCall.id, ok: false, error: `Ferramenta desconhecida: ${normalizedCall.name}` };
     try { validateToolInput(definition, normalizedCall.input); } catch (error) { return { toolCallId: normalizedCall.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
     let decision = this.permissions.decide(permission, normalizedCall.name);
-    const systemFileTool = normalizedCall.name === 'read_file' || normalizedCall.name === 'write_file' || normalizedCall.name === 'create_file' || normalizedCall.name === 'replace_range' || normalizedCall.name === 'replace_text' || normalizedCall.name === 'insert_before' || normalizedCall.name === 'insert_after' || normalizedCall.name === 'delete_file' || normalizedCall.name === 'rename_file' || normalizedCall.name === 'search_files';
+    const systemFileTool = normalizedCall.name === 'read_file' || normalizedCall.name === 'write_file' || normalizedCall.name === 'create_file' || normalizedCall.name === 'replace_range' || normalizedCall.name === 'replace_text' || normalizedCall.name === 'replace_symbol' || normalizedCall.name === 'insert_before' || normalizedCall.name === 'insert_after' || normalizedCall.name === 'delete_file' || normalizedCall.name === 'rename_file' || normalizedCall.name === 'search_files';
     if (projectId === SYSTEM_WORKSPACE_ID && permission !== 'unrestricted' && decision !== 'deny' && systemFileTool) decision = 'ask';
     if (decision === 'deny') return { toolCallId: normalizedCall.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
     const pending = this.approvals.list({ chatId, runId });
@@ -205,6 +209,17 @@ export class ToolRuntime {
         if (after === before) throw new Error('A edição incremental não produziria nenhuma alteração.');
         return this.diffs.createPlan([this.diffs.create(path, 'modified', before, after)]);
       }
+      case 'replace_symbol': {
+        const path = this.stringValue(call.input, 'path');
+        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.');
+        const before = await this.workspace.readFile(projectId, path);
+        const symbol = this.stringValue(call.input, 'symbol');
+        const kind = this.stringValue(call.input, 'kind') as StructuralSymbolKind;
+        const content = call.input.content;
+        if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido.");
+        const result = await this.structuralEdits.replaceSymbol(path, before, { name: symbol, kind }, content);
+        return this.diffs.createPlan([this.diffs.create(path, 'modified', before, result.after)]);
+      }
       case 'create_file': {
         const path = this.stringValue(call.input, 'path');
         if (await this.workspace.exists(projectId, path)) throw new Error('O arquivo já existe. Use write_file para substituí-lo.');
@@ -267,7 +282,7 @@ export class ToolRuntime {
     }
   }
 
-  private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'replace_text' || name === 'insert_before' || name === 'insert_after' || name === 'delete_file' || name === 'rename_file'; }
+  private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'replace_text' || name === 'replace_symbol' || name === 'insert_before' || name === 'insert_after' || name === 'delete_file' || name === 'rename_file'; }
   private async beginJournal(approvalId: string, projectId: string, toolCall: AIToolCall, diffPlan: DiffPlan): Promise<void> { if (!this.journalStorage) return; if (!this.journal.has(approvalId)) { this.journal.set(approvalId, { approvalId, projectId, toolCall, diffPlan, status: 'executing' }); await this.persistJournal(); } }
   private async finishJournal(approvalId: string): Promise<void> { if (!this.journalStorage) return; this.journal.delete(approvalId); await this.persistJournal(); }
   private async getCompletedJournalResult(approvalId: string): Promise<AIToolResult | undefined> { const entry = this.journal.get(approvalId); if (!entry) return undefined; if (!(await this.matchesExpectedState(entry))) return undefined; const result = await this.buildJournalResult(entry); await this.finishJournal(approvalId); return result; }
@@ -284,6 +299,7 @@ export class ToolRuntime {
       case 'replace_text':
       case 'insert_before':
       case 'insert_after': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const before = await this.workspace.readFile(projectId, path); const after = applyIncrementalEdit(name as IncrementalEditToolName, input, before); if (after === before) throw new Error('A edição incremental não produziria nenhuma alteração.'); await this.workspace.writeFile(projectId, path, after); const persisted = await this.workspace.readFile(projectId, path); return { output: 'Trecho do arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] }; }
+      case 'replace_symbol': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const before = await this.workspace.readFile(projectId, path); const symbol = this.stringValue(input, 'symbol'); const kind = this.stringValue(input, 'kind') as StructuralSymbolKind; const content = input.content; if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido."); const result = await this.structuralEdits.replaceSymbol(path, before, { name: symbol, kind }, content); await this.workspace.writeFile(projectId, path, result.after); const persisted = await this.workspace.readFile(projectId, path); return { output: 'Símbolo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] }; }
       case 'create_file': { const path = this.stringValue(input, 'path'); const content = String(input.content ?? ''); await this.workspace.createFile(projectId, path, content); const after = await this.workspace.readFile(projectId, path); return { output: 'Arquivo criado.', changes: [this.diffs.create(path, 'created', '', after)] }; }
       case 'delete_file': { const path = this.stringValue(input, 'path'); const before = await this.workspace.readFile(projectId, path); await this.workspace.deleteFile(projectId, path); return { output: 'Arquivo excluído.', changes: [this.diffs.create(path, 'deleted', before, '')] }; }
       case 'rename_file': { const from = this.stringValue(input, 'from'); const to = this.stringValue(input, 'to'); const before = await this.workspace.readFile(projectId, from); await this.workspace.renameFile(projectId, from, to); const after = await this.workspace.readFile(projectId, to); return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] }; }
