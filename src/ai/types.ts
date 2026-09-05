@@ -3,7 +3,7 @@ export type IntelligenceLevel = 'low' | 'normal' | 'high' | 'maximum';
 export type PermissionLevel = 'read-only' | 'safe' | 'ask' | 'unrestricted';
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 export type Capability = 'text' | 'vision' | 'image' | 'video' | 'audio' | 'reasoning' | 'tools' | 'streaming';
-export type ToolName = 'read_file' | 'read_symbol' | 'write_file' | 'create_file' | 'replace_range' | 'replace_text' | 'replace_symbol' | 'insert_before' | 'insert_after' | 'delete_file' | 'rename_file' | 'search_files' | 'run_command' | 'git_status' | 'git_diff' | 'git_log' | 'git_branches' | 'git_create_branch' | 'git_checkout' | 'git_stage' | 'git_stage_all' | 'git_commit';
+export type ToolName = 'plan_execution' | 'complete_plan_step' | 'read_file' | 'read_symbol' | 'write_file' | 'create_file' | 'replace_range' | 'replace_text' | 'replace_symbol' | 'insert_before' | 'insert_after' | 'delete_file' | 'rename_file' | 'search_files' | 'run_command' | 'git_status' | 'git_diff' | 'git_log' | 'git_branches' | 'git_create_branch' | 'git_checkout' | 'git_stage' | 'git_stage_all' | 'git_commit';
 export interface AIMessage { role: MessageRole; content: string; createdAt?: number; toolCallId?: string; toolName?: ToolName; toolCalls?: AIToolCall[]; changes?: FileDiff[]; diffPlan?: DiffPlan; commandResult?: CommandResultSummary; gitResult?: GitOperationSummary; }
 export interface AIModel { id: string; name: string; providerId: ProviderId; capabilities: Capability[]; contextWindow?: number; reasoningLevels?: IntelligenceLevel[]; }
 export interface AIProviderConfig { id: ProviderId; displayName: string; apiKey: string; baseUrl?: string; selectedModel?: string; enabled: boolean; }
