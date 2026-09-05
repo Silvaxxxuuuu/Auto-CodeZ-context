@@ -23,6 +23,7 @@ export type ExecutionChange =
 
 export type ExecutionListener = (change: ExecutionChange) => void;
 
+const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
 const ACTIVE_STATES = new Set<ExecutionState>(['running', 'waiting_approval']);
 const TERMINAL_STATES = new Set<ExecutionState>(['completed', 'failed', 'interrupted']);
 const ALLOWED_TRANSITIONS: Readonly<Record<ExecutionState, ReadonlySet<ExecutionState>>> = {
@@ -48,6 +49,35 @@ function requireTime(value: number, label: string): number {
   return value;
 }
 
+function normalizeSnapshot(snapshot: ExecutionSnapshot): ExecutionSnapshot {
+  if (!snapshot || typeof snapshot !== 'object') throw new Error('Snapshot de execução inválido.');
+  const chatId = requireId(snapshot.chatId, 'Chat');
+  const runId = requireId(snapshot.runId, 'Execução');
+  if (!EXECUTION_STATES.has(snapshot.state)) throw new Error(`Estado de execução inválido para ${runId}.`);
+  const startedAt = requireTime(snapshot.startedAt, 'Data de início');
+  const updatedAt = requireTime(snapshot.updatedAt, 'Data da atualização');
+  if (updatedAt < startedAt) throw new Error(`Snapshot da execução ${runId} possui atualização anterior ao início.`);
+  if (snapshot.currentTool !== undefined && (typeof snapshot.currentTool !== 'string' || !snapshot.currentTool.trim())) {
+    throw new Error(`Ferramenta atual inválida para a execução ${runId}.`);
+  }
+  if (snapshot.error !== undefined && typeof snapshot.error !== 'string') throw new Error(`Erro inválido para a execução ${runId}.`);
+  if (!ACTIVE_STATES.has(snapshot.state) && snapshot.currentTool !== undefined) {
+    throw new Error(`Execução terminal ${runId} não pode manter ferramenta ativa.`);
+  }
+  if (snapshot.state !== 'failed' && snapshot.error !== undefined) {
+    throw new Error(`Somente execução com falha pode manter erro no snapshot ${runId}.`);
+  }
+  return {
+    chatId,
+    runId,
+    state: snapshot.state,
+    startedAt,
+    updatedAt,
+    ...(snapshot.currentTool !== undefined ? { currentTool: snapshot.currentTool } : {}),
+    ...(snapshot.error !== undefined ? { error: snapshot.error } : {}),
+  };
+}
+
 function isIdempotentTerminalUpdate(current: ExecutionSnapshot, update: ExecutionUpdate): boolean {
   return update.state === current.state
     && update.currentTool === current.currentTool
@@ -61,6 +91,18 @@ export class ExecutionManager {
   subscribe(listener: ExecutionListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  hydrate(snapshots: ExecutionSnapshot[]): void {
+    if (!Array.isArray(snapshots)) throw new Error('Lista de snapshots de execução inválida.');
+    const normalized = snapshots.map(normalizeSnapshot);
+    const chats = new Set<string>();
+    for (const snapshot of normalized) {
+      if (chats.has(snapshot.chatId)) throw new Error(`Mais de um snapshot encontrado para o chat ${snapshot.chatId}.`);
+      chats.add(snapshot.chatId);
+    }
+    this.executions.clear();
+    for (const snapshot of normalized) this.executions.set(snapshot.chatId, { ...snapshot });
   }
 
   start(chatId: string, now = Date.now(), runId = createRunId()): ExecutionSnapshot {
