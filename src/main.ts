@@ -38,6 +38,7 @@ import { ExecutionCheckpointRuntime } from './execution-checkpoint';
 import { ExecutionCheckpointPersistence, ExecutionCheckpointStore } from './execution-checkpoint-store';
 import { ExecutionCheckpointController } from './execution-checkpoint-controller';
 import { ExecutionChangeBudgetRuntime } from './execution-change-budget';
+import { reconcileExecutionBootstrapState } from './execution-bootstrap-state';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
@@ -231,33 +232,13 @@ async function cancelledRunResult(chatId: string) {
   };
 }
 
-async function restorePersistedExecutionSnapshots(): Promise<void> {
-  const snapshots = await executionStateStore.load();
-  for (const snapshot of snapshots) {
-    executionManager.remove(snapshot.chatId);
-    executionManager.start(snapshot.chatId, snapshot.startedAt, snapshot.runId);
-    executionManager.update(snapshot.chatId, {
-      state: snapshot.state,
-      currentTool: snapshot.currentTool,
-      error: snapshot.error,
-      runId: snapshot.runId,
-    }, snapshot.updatedAt);
-  }
-}
-
-function restoreExecutionSnapshots(): void {
-  for (const run of agentRuntime.listPendingRuns()) {
-    executionManager.remove(run.chatId);
-    executionManager.start(run.chatId, Date.now(), run.runId);
-    executionManager.update(run.chatId, { state: 'waiting_approval', runId: run.runId });
-  }
-  for (const run of listRecoverableRuns(agentRuntime)) {
-    const current = executionManager.get(run.chatId);
-    if (current?.runId === run.runId && current.state === 'interrupted') continue;
-    executionManager.remove(run.chatId);
-    executionManager.start(run.chatId, Date.now(), run.runId);
-    executionManager.update(run.chatId, { state: 'interrupted', runId: run.runId });
-  }
+async function restoreExecutionBootstrapState(): Promise<void> {
+  const snapshots = reconcileExecutionBootstrapState({
+    persisted: await executionStateStore.load(),
+    pendingRuns: agentRuntime.listPendingRuns(),
+    recoverableRuns: listRecoverableRuns(agentRuntime),
+  });
+  executionManager.hydrate(snapshots);
 }
 
 async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnType<ChatManager['list']>>[number]; config: AIProviderConfig; projectContext?: string }> {
@@ -698,9 +679,8 @@ app.whenReady().then(async () => {
   executionQualityGateRuntime.restore(await executionQualityGateStore.load());
   executionTaskCapsuleRuntime.restore(await executionTaskCapsuleStore.load());
   executionCheckpointRuntime.hydrate(await executionCheckpointStore.load());
-  await restorePersistedExecutionSnapshots();
   executionPlanner.restore(await executionPlanStore.load());
-  restoreExecutionSnapshots();
+  await restoreExecutionBootstrapState();
   for (const run of agentRuntime.listPendingRuns()) executionCoordinator.resumePlan(run.chatId, run.runId);
   for (const run of listRecoverableRuns(agentRuntime)) executionCoordinator.resumePlan(run.chatId, run.runId);
   executionPersistenceEnabled = true;
