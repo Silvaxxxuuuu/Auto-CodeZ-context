@@ -13,6 +13,7 @@ const definitions: AIToolDefinition[] = [
   { name: 'read_file', description: 'Read a UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'write_file', description: 'Replace the contents of an existing UTF-8 text file inside the active workspace. Use this only when replacing most or all of a file; prefer replace_range, insert_before or insert_after for localized edits so diffs stay small.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Complete replacement file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'replace_range', description: 'Replace an inclusive 1-based line range in an existing UTF-8 text file. Prefer this for localized edits instead of rewriting the whole file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, startLine: { type: 'number', description: 'First 1-based line to replace.' }, endLine: { type: 'number', description: 'Last 1-based line to replace, inclusive.' }, content: { type: 'string', description: 'Replacement line content.' } }, required: ['path', 'startLine', 'endLine', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'replace_text', description: 'Replace one exact unique text fragment in an existing UTF-8 file. The oldText fragment must occur exactly once; otherwise the operation fails instead of guessing. Prefer this when you have just read the exact code to change.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, oldText: { type: 'string', description: 'Exact current text fragment. It must be unique in the file.' }, newText: { type: 'string', description: 'Replacement text, which may be empty to remove the fragment.' } }, required: ['path', 'oldText', 'newText'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'insert_before', description: 'Insert one or more lines immediately before a 1-based line in an existing UTF-8 text file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, line: { type: 'number', description: '1-based line before which content is inserted.' }, content: { type: 'string', description: 'Line content to insert.' } }, required: ['path', 'line', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'insert_after', description: 'Insert one or more lines immediately after a 1-based line in an existing UTF-8 text file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, line: { type: 'number', description: '1-based line after which content is inserted.' }, content: { type: 'string', description: 'Line content to insert.' } }, required: ['path', 'line', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'create_file', description: 'Create a new UTF-8 text file inside the active workspace. Prefer this tool over shell commands for workspace file creation so Auto CodeZ can preview and review the exact diff.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
@@ -81,6 +82,7 @@ function executionActivityMessage(call: AIToolCall): string {
     case 'read_file': return value('path') ? `Lendo ${value('path')}` : 'Lendo arquivo.';
     case 'write_file': return value('path') ? `Editando ${value('path')}` : 'Editando arquivo.';
     case 'replace_range': return value('path') ? `Editando trecho de ${value('path')}` : 'Editando trecho do arquivo.';
+    case 'replace_text': return value('path') ? `Substituindo trecho exato de ${value('path')}` : 'Substituindo trecho exato do arquivo.';
     case 'insert_before': return value('path') ? `Inserindo conteúdo em ${value('path')}` : 'Inserindo conteúdo no arquivo.';
     case 'insert_after': return value('path') ? `Inserindo conteúdo em ${value('path')}` : 'Inserindo conteúdo no arquivo.';
     case 'create_file': return value('path') ? `Criando ${value('path')}` : 'Criando arquivo.';
@@ -127,7 +129,7 @@ export class ToolRuntime {
     if (!definition) return { toolCallId: normalizedCall.id, ok: false, error: `Ferramenta desconhecida: ${normalizedCall.name}` };
     try { validateToolInput(definition, normalizedCall.input); } catch (error) { return { toolCallId: normalizedCall.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
     let decision = this.permissions.decide(permission, normalizedCall.name);
-    const systemFileTool = normalizedCall.name === 'read_file' || normalizedCall.name === 'write_file' || normalizedCall.name === 'create_file' || normalizedCall.name === 'replace_range' || normalizedCall.name === 'insert_before' || normalizedCall.name === 'insert_after' || normalizedCall.name === 'delete_file' || normalizedCall.name === 'rename_file' || normalizedCall.name === 'search_files';
+    const systemFileTool = normalizedCall.name === 'read_file' || normalizedCall.name === 'write_file' || normalizedCall.name === 'create_file' || normalizedCall.name === 'replace_range' || normalizedCall.name === 'replace_text' || normalizedCall.name === 'insert_before' || normalizedCall.name === 'insert_after' || normalizedCall.name === 'delete_file' || normalizedCall.name === 'rename_file' || normalizedCall.name === 'search_files';
     if (projectId === SYSTEM_WORKSPACE_ID && permission !== 'unrestricted' && decision !== 'deny' && systemFileTool) decision = 'ask';
     if (decision === 'deny') return { toolCallId: normalizedCall.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
     const pending = this.approvals.list({ chatId, runId });
@@ -193,6 +195,7 @@ export class ToolRuntime {
         return this.diffs.createPlan([this.diffs.create(path, 'modified', before, content)]);
       }
       case 'replace_range':
+      case 'replace_text':
       case 'insert_before':
       case 'insert_after': {
         const path = this.stringValue(call.input, 'path');
@@ -264,7 +267,7 @@ export class ToolRuntime {
     }
   }
 
-  private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'insert_before' || name === 'insert_after' || name === 'delete_file' || name === 'rename_file'; }
+  private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'replace_text' || name === 'insert_before' || name === 'insert_after' || name === 'delete_file' || name === 'rename_file'; }
   private async beginJournal(approvalId: string, projectId: string, toolCall: AIToolCall, diffPlan: DiffPlan): Promise<void> { if (!this.journalStorage) return; if (!this.journal.has(approvalId)) { this.journal.set(approvalId, { approvalId, projectId, toolCall, diffPlan, status: 'executing' }); await this.persistJournal(); } }
   private async finishJournal(approvalId: string): Promise<void> { if (!this.journalStorage) return; this.journal.delete(approvalId); await this.persistJournal(); }
   private async getCompletedJournalResult(approvalId: string): Promise<AIToolResult | undefined> { const entry = this.journal.get(approvalId); if (!entry) return undefined; if (!(await this.matchesExpectedState(entry))) return undefined; const result = await this.buildJournalResult(entry); await this.finishJournal(approvalId); return result; }
