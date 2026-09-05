@@ -29,7 +29,7 @@ function fakeWorkspace() {
     renameFile: async () => {
       writes += 1;
     },
-    searchFiles: async () => [],
+    searchFiles: async (): Promise<string[]> => [],
   } as unknown as WorkspaceRuntime;
   return { workspace, reads: () => reads, writes: () => writes };
 }
