@@ -4,7 +4,7 @@ import { CapabilityResolver } from './capability-resolver';
 import { IntelligenceRuntime } from './intelligence-runtime';
 import { ModelResolver } from './model-resolver';
 import { ProviderRegistry } from './provider-registry';
-import { ProviderRequestJournal } from './provider-request-journal';
+import { fingerprintProviderScope, ProviderRequestJournal } from './provider-request-journal';
 import { formatProviderError, normalizeProviderError } from './provider-errors';
 import { SYSTEM_PROJECT_ID } from '../agent/command-runtime';
 import { runWithAbortSignal } from './request-cancellation';
@@ -149,7 +149,7 @@ export class ChatRuntime {
       this.activity.start('action', `Enviando mensagem para ${adapter.displayName}`);
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
-      const journal = await this.requestJournal.begin(request);
+      const journal = await this.requestJournal.begin(request, fingerprintProviderScope(config));
       if (journal.cachedResponse) {
         const cachedActivity = activityEventForResponse(journal.cachedResponse);
         if (cachedActivity?.activity) this.activity.emit(cachedActivity.activity);
@@ -184,7 +184,7 @@ export class ChatRuntime {
       this.activity.start('action', `Transmitindo resposta de ${adapter.displayName}`);
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
-      const journal = await this.requestJournal.begin(request);
+      const journal = await this.requestJournal.begin(request, fingerprintProviderScope(config));
       if (journal.cachedResponse) {
         yield { type: 'start' };
         const cachedActivity = activityEventForResponse(journal.cachedResponse);
