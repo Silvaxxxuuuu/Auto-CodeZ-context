@@ -1,0 +1,47 @@
+name: Apply replace_text execution patch
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/replace-text-execution-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - name: Patch ToolRuntime execution switch
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          path = Path('src/agent/tool-runtime.ts')
+          text = path.read_text(encoding='utf-8')
+          old = "      case 'replace_range':\n      case 'insert_before':\n      case 'insert_after': { const path = this.stringValue(input, 'path');"
+          new = "      case 'replace_range':\n      case 'replace_text':\n      case 'insert_before':\n      case 'insert_after': { const path = this.stringValue(input, 'path');"
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one execution switch target, found {count}.')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8', newline='')
+          '@ | Set-Content -Encoding utf8 .patch_replace_text_execution.py
+          python .patch_replace_text_execution.py
+          Remove-Item .patch_replace_text_execution.py
+          git diff --check
+          git diff -- src/agent/tool-runtime.ts
+      - name: Commit execution patch
+        shell: pwsh
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git add src/agent/tool-runtime.ts
+          git commit -m "fix(agent): execute exact text replacement after approval"
+          git push origin HEAD:feature/ui-hierarchy-polish
