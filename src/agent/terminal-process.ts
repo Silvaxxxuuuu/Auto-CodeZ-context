@@ -57,7 +57,10 @@ class PipeInteractiveTerminalProcess implements InteractiveTerminalProcess {
     this.child.stdin.write(data);
   }
 
-  resize(_cols: number, _rows: number): void {}
+  resize(cols: number, rows: number): void {
+    void cols;
+    void rows;
+  }
 
   kill(): void {
     this.child.kill();
