@@ -7,7 +7,6 @@ type Enhancement = {
 
 const criticalEnhancements: Enhancement[] = [
   { name: 'terminal-ui', load: () => import('./terminal-ui') },
-  { name: 'terminal-visual-ui', load: () => import('./terminal-visual-ui') },
   { name: 'api-key-ui', load: () => import('./api-key-ui') },
   { name: 'ui-polish', load: () => import('./ui-polish') },
   { name: 'settings-ui', load: () => import('./settings-ui') },
