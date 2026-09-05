@@ -43,6 +43,8 @@ const definitions: AIToolDefinition[] = [
 interface ToolExecution { output: string; changes?: FileDiff[]; commandResult?: CommandResultSummary; }
 interface ToolJournalStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
 type JournalEntry = { approvalId: string; projectId: string; toolCall: AIToolCall; diffPlan: DiffPlan; status: 'executing'; };
+type ExecutionCheckpointRecord = { chatId: string; runId: string; projectId: string; toolCallId: string; changes: FileDiff[] };
+type ExecutionCheckpointRecorder = (record: ExecutionCheckpointRecord) => void;
 const JOURNAL_FILE = 'tool-execution-journal.json';
 
 type ActivityContext = { chatId?: string; runId?: string };
@@ -119,12 +121,14 @@ export class ToolRuntime {
   private gitRuntime?: GitRuntime;
   private executionPlanner?: ExecutionPlanner;
   private executionChangeBudget?: ExecutionChangeBudgetRuntime;
+  private executionCheckpointRecorder?: ExecutionCheckpointRecorder;
 
   constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()])) {}
 
   configureGitRuntime(runtime: GitRuntime): void { this.gitRuntime = runtime; }
   configureExecutionPlanner(runtime: ExecutionPlanner): void { this.executionPlanner = runtime; }
   configureExecutionChangeBudget(runtime: ExecutionChangeBudgetRuntime): void { this.executionChangeBudget = runtime; }
+  configureExecutionCheckpointRecorder(recorder: ExecutionCheckpointRecorder): void { this.executionCheckpointRecorder = recorder; }
   configureChangeBudget(chatId: string, runId: string, budget: ExecutionChangeBudget): ExecutionChangeBudget {
     if (!this.executionChangeBudget) throw new Error('O runtime de Change Budget não foi configurado.');
     return this.executionChangeBudget.configure(chatId, runId, budget);
@@ -199,7 +203,7 @@ export class ToolRuntime {
 
   async approve(approvalId: string): Promise<AIToolResult> {
     const approval = this.approvals.claim(approvalId);
-    const journalResult = await this.getCompletedJournalResult(approvalId);
+    const journalResult = await this.getCompletedJournalResult(approval);
     if (journalResult) {
       this.approvals.resolve(approvalId);
       return journalResult;
@@ -315,6 +319,16 @@ export class ToolRuntime {
     this.executionChangeBudget.record(context.chatId, context.runId, { toolName: call.name, ...(execution.changes ? { changes: execution.changes } : {}) });
   }
 
+  private recordCheckpoint(projectId: string, context: ActivityContext, call: AIToolCall, execution: ToolExecution): void {
+    if (!this.executionCheckpointRecorder || !context.chatId || !context.runId || !this.isMutation(call.name) || !execution.changes?.length) return;
+    try {
+      this.executionCheckpointRecorder({ chatId: context.chatId, runId: context.runId, projectId, toolCallId: call.id, changes: execution.changes });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.activity.emit({ type: 'action', message: `Checkpoint não registrado para ${call.name}: ${message}`, status: 'failed', toolCallId: call.id, toolName: call.name, ...context, error: message, changes: execution.changes });
+    }
+  }
+
   private async executeNow(projectId: string, call: AIToolCall, approvalId?: string, diffPlan?: DiffPlan, context: ActivityContext = {}): Promise<AIToolResult> {
     const activityType = call.name === 'run_command' ? 'action' : 'tool';
     this.activity.emit({ type: activityType, message: executionActivityMessage(call), status: 'running', toolCallId: call.id, toolName: call.name, ...context });
@@ -323,6 +337,7 @@ export class ToolRuntime {
       if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);
       const execution = await this.executeAllowed(projectId, call.name, call.input, context);
       this.recordChangeBudget(context, call, execution);
+      this.recordCheckpoint(projectId, context, call, execution);
       this.recordPlanEvidence(context, call, execution);
       const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, ...(execution.changes ? { changes: execution.changes } : {}), ...(execution.commandResult ? { commandResult: execution.commandResult } : {}) };
       this.activity.emit({ type: 'action', message: `Concluído: ${call.name}`, status: 'success', toolCallId: call.id, toolName: call.name, ...context, ...(execution.commandResult ? { commandResult: execution.commandResult } : {}), ...(execution.changes ? { changes: execution.changes } : {}), ...(diffPlan ? { diffPlan } : {}) });
@@ -360,7 +375,15 @@ export class ToolRuntime {
   private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'replace_text' || name === 'replace_symbol' || name === 'insert_before' || name === 'insert_after' || name === 'delete_file' || name === 'rename_file'; }
   private async beginJournal(approvalId: string, projectId: string, toolCall: AIToolCall, diffPlan: DiffPlan): Promise<void> { if (!this.journalStorage) return; if (!this.journal.has(approvalId)) { this.journal.set(approvalId, { approvalId, projectId, toolCall, diffPlan, status: 'executing' }); await this.persistJournal(); } }
   private async finishJournal(approvalId: string): Promise<void> { if (!this.journalStorage) return; this.journal.delete(approvalId); await this.persistJournal(); }
-  private async getCompletedJournalResult(approvalId: string): Promise<AIToolResult | undefined> { const entry = this.journal.get(approvalId); if (!entry) return undefined; if (!(await this.matchesExpectedState(entry))) return undefined; const result = await this.buildJournalResult(entry); await this.finishJournal(approvalId); return result; }
+  private async getCompletedJournalResult(approval: ApprovalRequest): Promise<AIToolResult | undefined> {
+    const entry = this.journal.get(approval.id);
+    if (!entry) return undefined;
+    if (!(await this.matchesExpectedState(entry))) return undefined;
+    const result = await this.buildJournalResult(entry);
+    if (result.changes?.length && approval.chatId && approval.runId) this.recordCheckpoint(approval.projectId, { chatId: approval.chatId, runId: approval.runId }, approval.toolCall, { output: result.output ?? '', changes: result.changes });
+    await this.finishJournal(approval.id);
+    return result;
+  }
   private async buildJournalResult(entry: JournalEntry): Promise<AIToolResult> { const changes: FileDiff[] = []; for (const change of entry.diffPlan.changes) { if (change.type === 'deleted') changes.push(this.diffs.create(change.path, 'deleted', change.before, '')); else if (change.type === 'renamed') changes.push(this.diffs.create(change.path, 'renamed', change.before, change.after, change.renamedFrom)); else changes.push(this.diffs.create(change.path, change.type, change.before, change.after)); } return { toolCallId: entry.toolCall.id, ok: true, output: 'Operação recuperada após uma interrupção.', changes, diffPlan: entry.diffPlan }; }
   private async matchesExpectedState(entry: JournalEntry): Promise<boolean> { for (const change of entry.diffPlan.changes) { if (change.type === 'deleted') { if (await this.workspace.exists(entry.projectId, change.path)) return false; continue; } if (change.type === 'renamed') { const from = change.renamedFrom; if (!from || await this.workspace.exists(entry.projectId, from) || !(await this.workspace.exists(entry.projectId, change.path))) return false; if (await this.workspace.readFile(entry.projectId, change.path) !== change.after) return false; continue; } if (!(await this.workspace.exists(entry.projectId, change.path))) return false; if (await this.workspace.readFile(entry.projectId, change.path) !== change.after) return false; } return true; }
   private async reconcileJournal(): Promise<void> { for (const [approvalId, entry] of this.journal) if (await this.matchesExpectedState(entry)) this.activity.emit({ type: 'action', message: `Operação ${approvalId} concluída durante uma interrupção anterior.`, status: 'success', toolCallId: entry.toolCall.id, toolName: entry.toolCall.name }); await this.persistJournal(); }
