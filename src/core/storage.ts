@@ -12,6 +12,7 @@ const SENSITIVE_JSON_FILES = new Set([
   'agent-runs.json',
   'tool-execution-journal.json',
   'provider-requests.json',
+  'execution-plans.json',
 ]);
 
 function isMissingFile(error: unknown): boolean {
