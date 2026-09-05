@@ -41,12 +41,13 @@ test('sem budget configurado preserva o comportamento atual', () => {
 
   assert.equal(evaluation.allowed, true);
   assert.equal(evaluation.budget, undefined);
+  assert.equal(evaluation.elapsedMs, 0);
 });
 
 test('budget é imutável por execução e repetição idêntica é idempotente', () => {
   const runtime = new ExecutionChangeBudgetRuntime();
-  const first = runtime.configure('chat-a', 'run-a', { maxFiles: 3, maxChangedLines: 40, maxCommands: 2, maxToolCalls: 6 });
-  const repeated = runtime.configure('chat-a', 'run-a', { maxFiles: 3, maxChangedLines: 40, maxCommands: 2, maxToolCalls: 6 });
+  const first = runtime.configure('chat-a', 'run-a', { maxFiles: 3, maxChangedLines: 40, maxCommands: 2, maxToolCalls: 6, maxDurationMs: 30_000 });
+  const repeated = runtime.configure('chat-a', 'run-a', { maxFiles: 3, maxChangedLines: 40, maxCommands: 2, maxToolCalls: 6, maxDurationMs: 30_000 });
 
   assert.deepEqual(repeated, first);
   assert.throws(() => runtime.configure('chat-a', 'run-a', { maxFiles: 4 }), /imutável/i);
@@ -117,9 +118,33 @@ test('controles de plano não consomem orçamento de tool calls', () => {
   assert.equal(runtime.evaluate('chat-a', 'run-a', { toolName: 'read_file' }).allowed, true);
 });
 
+test('limite temporal usa o mesmo relógio determinístico da execução', () => {
+  let now = 1_000;
+  const runtime = new ExecutionChangeBudgetRuntime(() => now);
+  runtime.configure('chat-a', 'run-a', { maxDurationMs: 5_000 });
+
+  now = 5_999;
+  const withinBudget = runtime.evaluate('chat-a', 'run-a', { toolName: 'read_file' });
+  assert.equal(withinBudget.allowed, true);
+  assert.equal(withinBudget.elapsedMs, 4_999);
+
+  now = 6_001;
+  const expired = runtime.evaluate('chat-a', 'run-a', { toolName: 'read_file' });
+  assert.equal(expired.allowed, false);
+  assert.equal(expired.elapsedMs, 5_001);
+  assert.match(expired.violations.join(' '), /Duração: 5001ms\/5000ms/);
+  assert.throws(() => runtime.record('chat-a', 'run-a', { toolName: 'read_file' }), /Change Budget excedido/i);
+});
+
+test('relógio inválido é rejeitado ao configurar o budget', () => {
+  const runtime = new ExecutionChangeBudgetRuntime(() => Number.NaN);
+  assert.throws(() => runtime.configure('chat-a', 'run-a', { maxDurationMs: 1000 }), /Relógio inválido/i);
+});
+
 test('limites inválidos são rejeitados e removeChat isola execuções', () => {
   const runtime = new ExecutionChangeBudgetRuntime();
   assert.throws(() => runtime.configure('chat-a', 'run-a', { maxFiles: -1 }), /inteiro não negativo/i);
+  assert.throws(() => runtime.configure('chat-a', 'run-a', { maxDurationMs: -1 }), /inteiro não negativo/i);
 
   runtime.configure('chat-a', 'run-a', { maxFiles: 1 });
   runtime.configure('chat-a', 'run-b', { maxFiles: 2 });
@@ -127,5 +152,5 @@ test('limites inválidos são rejeitados e removeChat isola execuções', () => 
 
   assert.equal(runtime.removeChat('chat-a'), 2);
   assert.equal(runtime.getBudget('chat-a', 'run-a'), undefined);
-  assert.deepEqual(runtime.getBudget('chat-b', 'run-c'), { maxFiles: 3, maxChangedLines: undefined, maxCommands: undefined, maxToolCalls: undefined });
+  assert.deepEqual(runtime.getBudget('chat-b', 'run-c'), { maxFiles: 3, maxChangedLines: undefined, maxCommands: undefined, maxToolCalls: undefined, maxDurationMs: undefined });
 });
