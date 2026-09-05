@@ -8,6 +8,7 @@ import { ProjectManager } from './project/project-manager';
 import { ToolRuntime } from './agent/tool-runtime';
 import { AgentRuntime } from './agent/agent-runtime';
 import { ChatRuntime } from './ai/chat-runtime';
+import { ProviderRequestJournal } from './ai/provider-request-journal';
 import { runWithAbortSignal } from './ai/request-cancellation';
 import { TerminalService, type TerminalEvent } from './agent/terminal-service';
 import { GitRuntime } from './agent/git-runtime';
@@ -44,7 +45,8 @@ const terminalService = new TerminalService(storage, () => projectManager.list()
 const computerContextRuntime = new ComputerContextRuntime();
 const toolRuntime = new ToolRuntime(workspaceRuntime, permissionRuntime, activityRuntime, approvalRuntime, commandRuntime, diffRuntime, storage);
 toolRuntime.configureGitRuntime(gitRuntime);
-const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefined, activityRuntime, undefined, toolRuntime.listDefinitions());
+const providerRequestJournal = new ProviderRequestJournal(storage);
+const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefined, activityRuntime, undefined, toolRuntime.listDefinitions(), providerRequestJournal);
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const executionManager = new ExecutionManager();
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
