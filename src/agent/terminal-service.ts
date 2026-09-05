@@ -35,6 +35,10 @@ export class TerminalService {
     await this.history.init();
   }
 
+  configureInteractiveFactory(factory: InteractiveTerminalProcessFactory): void {
+    this.runtime.configureInteractiveFactory(factory);
+  }
+
   async start(projectId: string, command: string): Promise<TerminalSession> {
     if (command.startsWith(WRITE_MARKER)) {
       let input: { sessionId?: unknown; command?: unknown };
