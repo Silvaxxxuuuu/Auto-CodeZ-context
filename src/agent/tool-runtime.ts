@@ -9,12 +9,12 @@ import { GitRuntime } from './git-runtime';
 
 const definitions: AIToolDefinition[] = [
   { name: 'read_file', description: 'Read a UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
-  { name: 'write_file', description: 'Replace the contents of an existing UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Complete replacement file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
-  { name: 'create_file', description: 'Create a new UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
-  { name: 'delete_file', description: 'Delete a file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
-  { name: 'rename_file', description: 'Rename or move a file inside the active workspace.', parameters: { type: 'object', properties: { from: { type: 'string', description: 'Current workspace-relative path.' }, to: { type: 'string', description: 'Destination workspace-relative path.' } }, required: ['from', 'to'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'write_file', description: 'Replace the contents of an existing UTF-8 text file inside the active workspace. Prefer this tool over shell commands for workspace file edits so Auto CodeZ can preview and review the exact diff.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Complete replacement file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'create_file', description: 'Create a new UTF-8 text file inside the active workspace. Prefer this tool over shell commands for workspace file creation so Auto CodeZ can preview and review the exact diff.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'delete_file', description: 'Delete a file inside the active workspace. Prefer this tool over shell commands for workspace file deletion so Auto CodeZ can preview and review the exact change.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'rename_file', description: 'Rename or move a file inside the active workspace. Prefer this tool over shell commands for workspace file renames so Auto CodeZ can preview and review the exact change.', parameters: { type: 'object', properties: { from: { type: 'string', description: 'Current workspace-relative path.' }, to: { type: 'string', description: 'Destination workspace-relative path.' } }, required: ['from', 'to'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'search_files', description: 'Search workspace file names for a text query.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'Text to search for in workspace file names.' } }, required: ['query'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
-  { name: 'run_command', description: 'Execute a local shell command from the active workspace. In read-only mode it is blocked. In safe and ask modes it requires explicit user approval. In unrestricted mode it executes directly.', parameters: { type: 'object', properties: { command: { type: 'string', description: 'Exact local shell command to execute.' } }, required: ['command'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'run_command', description: 'Execute a local shell command from the active workspace. Use it for tests, builds, package managers, scripts, CLIs and operations that genuinely require a shell. Do not use it to create, edit, delete or rename workspace files when create_file, write_file, delete_file or rename_file can represent the operation, because those file tools provide diff review and stale-file protection. In read-only mode it is blocked. In safe and ask modes it requires explicit user approval. In unrestricted mode it executes directly.', parameters: { type: 'object', properties: { command: { type: 'string', description: 'Exact local shell command to execute.' } }, required: ['command'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'git_status', description: 'Read the current Git branch and working tree status.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_diff', description: 'Read the current unstaged Git diff.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_log', description: 'Read recent Git commits from the active workspace.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Number of commits to return.' } }, required: ['limit'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -32,6 +32,10 @@ type JournalEntry = { approvalId: string; projectId: string; toolCall: AIToolCal
 const JOURNAL_FILE = 'tool-execution-journal.json';
 
 type ActivityContext = { chatId?: string; runId?: string };
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
 
 function validateToolInput(definition: AIToolDefinition, input: Record<string, unknown>): void {
   const schema = definition.parameters;
@@ -125,7 +129,7 @@ export class ToolRuntime {
             const path = this.stringValue(normalizedCall.input, 'path');
             const content = normalizedCall.input.content;
             if (typeof content === 'string' && !(await this.workspace.exists(projectId, path))) diffPlan = this.diffs.createPlan([this.diffs.create(path, 'created', '', content)]);
-          } catch { /* keep the approval without a preview when validation itself fails */ }
+          } catch {}
         }
       }
       const approval = this.approvals.request({ projectId, chatId, runId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });
@@ -149,6 +153,7 @@ export class ToolRuntime {
       return result;
     } catch (error) {
       this.approvals.release(approvalId);
+      if (isAbortError(error)) throw error;
       const message = error instanceof Error ? error.message : String(error);
       return { toolCallId: approval.toolCall.id, ok: false, error: message, ...(approval.diffPlan ? { diffPlan: approval.diffPlan } : {}) };
     }
@@ -226,6 +231,7 @@ export class ToolRuntime {
       if (approvalId) await this.finishJournal(approvalId);
       return result;
     } catch (error) {
+      if (isAbortError(error)) throw error;
       const message = error instanceof Error ? error.message : String(error);
       this.activity.emit({ type: activityType, message: `Falha em ${call.name}: ${message}`, status: 'failed', toolCallId: call.id, toolName: call.name, ...context, error: message, ...(diffPlan ? { diffPlan } : {}) });
       return { toolCallId: call.id, ok: false, error: message };
