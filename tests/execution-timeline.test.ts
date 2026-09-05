@@ -117,3 +117,46 @@ test('clear remove somente o histórico solicitado', () => {
   assert.deepEqual(timeline.list('chat-a'), []);
   assert.equal(timeline.list('chat-b').length, 1);
 });
+
+test('recuperação registra recovered sem fabricar novo started', () => {
+  const timeline = new ExecutionTimeline(100, () => 5000);
+  timeline.record({ type: 'upsert', snapshot: snapshot() });
+
+  const recovered = timeline.recordRecovery(snapshot({ state: 'interrupted', currentTool: undefined }), 5000);
+  const events = timeline.list('chat-a', 'run-a');
+
+  assert.equal(recovered.length, 1);
+  assert.equal(recovered[0].type, 'recovered');
+  assert.equal(recovered[0].at, 5000);
+  assert.equal(recovered[0].startedAt, 1000);
+  assert.equal(recovered[0].state, 'interrupted');
+  assert.deepEqual(events.map((event) => event.type), ['started', 'recovered']);
+});
+
+test('recuperação idempotente não duplica fato histórico', () => {
+  const timeline = new ExecutionTimeline(100, () => 5000);
+  const interrupted = snapshot({ state: 'interrupted' });
+
+  assert.equal(timeline.recordRecovery(interrupted, 5000).length, 1);
+  assert.equal(timeline.recordRecovery(interrupted, 6000).length, 0);
+  assert.equal(timeline.list('chat-a', 'run-a').length, 1);
+});
+
+test('restore usa recovered como cursor e próxima transição não cria started', () => {
+  const timeline = new ExecutionTimeline();
+  timeline.restore([{
+    sequence: 7,
+    chatId: 'chat-a',
+    runId: 'run-a',
+    at: 5000,
+    type: 'recovered',
+    state: 'interrupted',
+    startedAt: 1000,
+  }]);
+
+  const next = timeline.record({ type: 'upsert', snapshot: snapshot({ state: 'running', updatedAt: 6000 }) });
+
+  assert.equal(next.length, 1);
+  assert.equal(next[0].type, 'state_changed');
+  assert.deepEqual(timeline.list().map((event) => event.sequence), [7, 8]);
+});
