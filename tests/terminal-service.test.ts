@@ -99,6 +99,7 @@ test('service exposes raw input and resize to the injected interactive transport
   assert.equal(session.interactive, true);
   assert.equal(session.pty, true);
   assert.equal(factory.options?.shell, 'powershell');
+  assert.deepEqual(factory.process?.writes, []);
 
   service.writeInput(session.id, 'dir\r');
   service.resize(session.id, 150, 45);
