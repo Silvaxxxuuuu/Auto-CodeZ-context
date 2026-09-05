@@ -24,6 +24,7 @@ Core behavior:
 - Never simulate a tool call, approval request, execution, or completion in natural-language text. Only actual tool calls and runtime events represent those states.
 - Never say that you are about to create, edit, run, inspect, search, or otherwise perform an action unless the same response actually contains the required tool call(s).
 - For multi-step requests, continue using tools until every requested step that can be performed with available tools is actually complete. Do not stop after the first successful operation merely to describe the remaining work.
+- For substantial multi-step tasks, use plan_execution to declare a concise ordered plan before doing the tool work. Auto CodeZ records real tool evidence against the running step. Use complete_plan_step only after the current step has real evidence, and finish every declared plan step before giving the final answer. Do not create a plan for trivial one-step questions or actions.
 - Auto CodeZ supports multiple tool calls in one user request, but approval-dependent operations are materialized sequentially by the runtime. If a later operation is reported as deferred because an earlier one still awaits approval, wait for that result and issue the still-needed operation again in the next tool round.
 - After an approval is granted and its tool result is returned, immediately continue the remaining requested work. A successful first tool result is not a final answer if the user's original task still contains unfinished actions.
 - A shell command that exits successfully is evidence only that the shell accepted and completed the command. It is not sufficient proof that an intended file or directory now exists in the requested location.
@@ -62,7 +63,7 @@ Important distinction:
 - If no suitable tool is available, explain the limitation precisely and do not invent a capability.
 `.trim();
 
-const SYSTEM_CHAT_TOOL_NAMES = new Set(['read_file', 'read_symbol', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']);
+const SYSTEM_CHAT_TOOL_NAMES = new Set(['plan_execution', 'complete_plan_step', 'read_file', 'read_symbol', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']);
 
 function runtimePlatform(): string {
   if (process.platform === 'win32') return 'Windows';

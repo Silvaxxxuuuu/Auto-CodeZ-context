@@ -57,6 +57,7 @@ const executionStateStore = new ExecutionStateStore(storage);
 const executionStatePersistence = new ExecutionStatePersistence(executionStateStore);
 const executionTimeline = new ExecutionTimeline();
 const executionPlanner = new ExecutionPlanner();
+toolRuntime.configureExecutionPlanner(executionPlanner);
 const executionPlanStore = new ExecutionPlanStore(storage);
 const executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore);
 let executionPersistenceEnabled = false;

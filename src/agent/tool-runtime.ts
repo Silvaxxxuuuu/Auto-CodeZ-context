@@ -10,8 +10,11 @@ import { SYSTEM_WORKSPACE_ID } from './system-workspace';
 import { applyIncrementalEdit, type IncrementalEditToolName } from './incremental-file-edit';
 import { StructuralEditRuntime, type StructuralSymbolKind } from './structural-edit-runtime';
 import { TypeScriptStructuralLocator } from './typescript-structural-locator';
+import { ExecutionPlanner, type ExecutionPlan } from '../execution-planner';
 
 const definitions: AIToolDefinition[] = [
+  { name: 'plan_execution', description: 'Declare a concrete execution plan for a multi-step task. Auto CodeZ starts the first step immediately. Use this before substantial multi-step tool work, then execute real tools and call complete_plan_step only after the current step has runtime-recorded evidence.', parameters: { type: 'object', properties: { objective: { type: 'string', description: 'Concrete objective of this execution.' }, steps: { type: 'array', items: { type: 'string' }, description: 'Ordered, concise execution steps.' } }, required: ['objective', 'steps'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'complete_plan_step', description: 'Complete the currently running execution-plan step. Auto CodeZ rejects this unless the current step already contains evidence produced by a real successful tool execution. When successful, the next pending step starts automatically.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'read_file', description: 'Read a UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'read_symbol', description: 'Read one uniquely named TypeScript or JavaScript syntax symbol using the real TypeScript AST. Supported kinds are function, method, class, interface, type and enum. Use this when only one complete named declaration is needed; ambiguity or unsupported files fail instead of guessing.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative TypeScript or JavaScript file path.' }, symbol: { type: 'string', description: 'Exact declared symbol name.' }, kind: { type: 'string', enum: ['function', 'method', 'class', 'interface', 'type', 'enum'], description: 'Declared syntax kind.' } }, required: ['path', 'symbol', 'kind'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'write_file', description: 'Replace the contents of an existing UTF-8 text file inside the active workspace. Use this only when replacing most or all of a file; prefer replace_range, insert_before or insert_after for localized edits so diffs stay small.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, content: { type: 'string', description: 'Complete replacement file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
@@ -82,6 +85,8 @@ const unavailableCommandRuntime = new CommandRuntime(async () => { throw new Err
 function executionActivityMessage(call: AIToolCall): string {
   const value = (key: string): string | undefined => typeof call.input[key] === 'string' && String(call.input[key]).trim() ? String(call.input[key]).trim() : undefined;
   switch (call.name) {
+    case 'plan_execution': return 'Criando plano de execução.';
+    case 'complete_plan_step': return 'Concluindo passo do plano.';
     case 'run_command': return value('command') ? `Executando ${value('command')}` : 'Executando comando.';
     case 'read_file': return value('path') ? `Lendo ${value('path')}` : 'Lendo arquivo.';
     case 'read_symbol': return value('path') && value('symbol') ? `Lendo símbolo ${value('symbol')} em ${value('path')}` : 'Lendo símbolo do arquivo.';
@@ -111,10 +116,13 @@ export class ToolRuntime {
   private readonly journal = new Map<string, JournalEntry>();
   private journalWrite: Promise<void> = Promise.resolve();
   private gitRuntime?: GitRuntime;
+  private executionPlanner?: ExecutionPlanner;
 
   constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()])) {}
 
   configureGitRuntime(runtime: GitRuntime): void { this.gitRuntime = runtime; }
+  configureExecutionPlanner(runtime: ExecutionPlanner): void { this.executionPlanner = runtime; }
+  getExecutionPlan(chatId: string, runId: string): ExecutionPlan | undefined { return this.executionPlanner?.get(chatId, runId); }
   async init(): Promise<void> {
     if (!this.journalStorage) return;
     const stored = await this.journalStorage.read<JournalEntry[]>(JOURNAL_FILE, []);
@@ -271,7 +279,8 @@ export class ToolRuntime {
     this.activity.emit({ type: activityType, message: executionActivityMessage(call), status: 'running', toolCallId: call.id, toolName: call.name, ...context });
     try {
       if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);
-      const execution = await this.executeAllowed(projectId, call.name, call.input);
+      const execution = await this.executeAllowed(projectId, call.name, call.input, context);
+      this.recordPlanEvidence(context, call, execution);
       const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, ...(execution.changes ? { changes: execution.changes } : {}), ...(execution.commandResult ? { commandResult: execution.commandResult } : {}) };
       this.activity.emit({ type: 'action', message: `Concluído: ${call.name}`, status: 'success', toolCallId: call.id, toolName: call.name, ...context, ...(execution.commandResult ? { commandResult: execution.commandResult } : {}), ...(execution.changes ? { changes: execution.changes } : {}), ...(diffPlan ? { diffPlan } : {}) });
       if (approvalId) await this.finishJournal(approvalId);
@@ -284,6 +293,27 @@ export class ToolRuntime {
     }
   }
 
+  private recordPlanEvidence(context: ActivityContext, call: AIToolCall, execution: ToolExecution): void {
+    if (!this.executionPlanner || !context.chatId || !context.runId || call.name === 'plan_execution' || call.name === 'complete_plan_step') return;
+    if (execution.commandResult && execution.commandResult.exitCode !== 0) return;
+    const plan = this.executionPlanner.get(context.chatId, context.runId);
+    if (!plan?.steps.some((step) => step.status === 'running')) return;
+    let type: 'tool' | 'test' | 'build' | 'file' = execution.changes?.length ? 'file' : 'tool';
+    let reference: string | undefined;
+    if (execution.commandResult) {
+      const command = execution.commandResult.command;
+      reference = command;
+      if (/\b(test|vitest|jest|pytest|cargo test|go test)\b/i.test(command)) type = 'test';
+      else if (/\b(build|compile|tsc)\b/i.test(command)) type = 'build';
+    } else if (execution.changes?.length) {
+      reference = execution.changes.map((change) => change.path).join(', ');
+    } else if (typeof call.input.path === 'string') reference = call.input.path;
+    else if (typeof call.input.symbol === 'string') reference = call.input.symbol;
+    try {
+      this.executionPlanner.recordEvidence(context.chatId, context.runId, { type, summary: `${call.name} concluído`, ...(reference ? { reference } : {}) });
+    } catch {}
+  }
+
   private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'replace_text' || name === 'replace_symbol' || name === 'insert_before' || name === 'insert_after' || name === 'delete_file' || name === 'rename_file'; }
   private async beginJournal(approvalId: string, projectId: string, toolCall: AIToolCall, diffPlan: DiffPlan): Promise<void> { if (!this.journalStorage) return; if (!this.journal.has(approvalId)) { this.journal.set(approvalId, { approvalId, projectId, toolCall, diffPlan, status: 'executing' }); await this.persistJournal(); } }
   private async finishJournal(approvalId: string): Promise<void> { if (!this.journalStorage) return; this.journal.delete(approvalId); await this.persistJournal(); }
@@ -293,8 +323,33 @@ export class ToolRuntime {
   private async reconcileJournal(): Promise<void> { for (const [approvalId, entry] of this.journal) if (await this.matchesExpectedState(entry)) this.activity.emit({ type: 'action', message: `Operação ${approvalId} concluída durante uma interrupção anterior.`, status: 'success', toolCallId: entry.toolCall.id, toolName: entry.toolCall.name }); await this.persistJournal(); }
   private async persistJournal(): Promise<void> { if (!this.journalStorage) return; const snapshot = [...this.journal.values()]; const write = this.journalWrite.then(() => this.journalStorage!.write(JOURNAL_FILE, snapshot)); this.journalWrite = write.catch(() => {}); await write; }
 
-  private async executeAllowed(projectId: string, name: ToolName, input: Record<string, unknown>): Promise<ToolExecution> {
+  private async executeAllowed(projectId: string, name: ToolName, input: Record<string, unknown>, context: ActivityContext = {}): Promise<ToolExecution> {
     switch (name) {
+      case 'plan_execution': {
+        if (!this.executionPlanner) throw new Error('O planner de execução não foi configurado.');
+        if (!context.chatId || !context.runId) throw new Error('Contexto da execução indisponível para o planner.');
+        const objective = this.stringValue(input, 'objective');
+        const steps = input.steps;
+        if (!Array.isArray(steps) || steps.length === 0 || steps.some((step) => typeof step !== 'string' || !step.trim())) throw new Error("Parâmetro 'steps' inválido.");
+        const created = this.executionPlanner.create(context.chatId, context.runId, objective, steps.map((step) => String(step).trim()));
+        const started = this.executionPlanner.startStep(context.chatId, context.runId, created.steps[0].id);
+        return { output: JSON.stringify(started) };
+      }
+      case 'complete_plan_step': {
+        if (!this.executionPlanner) throw new Error('O planner de execução não foi configurado.');
+        if (!context.chatId || !context.runId) throw new Error('Contexto da execução indisponível para o planner.');
+        const current = this.executionPlanner.get(context.chatId, context.runId);
+        if (!current) throw new Error('Plano da execução não encontrado.');
+        const running = current.steps.find((step) => step.status === 'running');
+        if (!running) throw new Error('Nenhum passo do plano está em execução.');
+        if (!running.evidence.length) throw new Error('O passo atual ainda não possui evidência real de execução.');
+        let updated = this.executionPlanner.completeStep(context.chatId, context.runId, running.id);
+        if (updated.status !== 'completed' && updated.status !== 'failed') {
+          const next = updated.steps.find((step) => step.status === 'pending');
+          if (next) updated = this.executionPlanner.startStep(context.chatId, context.runId, next.id);
+        }
+        return { output: JSON.stringify(updated) };
+      }
       case 'read_file': return { output: await this.workspace.readFile(projectId, this.stringValue(input, 'path')) };
       case 'read_symbol': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const source = await this.workspace.readFile(projectId, path); const symbol = this.stringValue(input, 'symbol'); const kind = this.stringValue(input, 'kind') as StructuralSymbolKind; const result = await this.structuralEdits.readSymbol(path, source, { name: symbol, kind }); return { output: result.content }; }
       case 'write_file': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.'); const before = await this.workspace.readFile(projectId, path); const content = input.content; if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido."); await this.workspace.writeFile(projectId, path, content); const after = await this.workspace.readFile(projectId, path); return { output: 'Arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, after)] }; }

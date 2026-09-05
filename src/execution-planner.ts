@@ -253,6 +253,20 @@ export class ExecutionPlanner {
     return this.transition(plan, step, 'skipped');
   }
 
+  recordEvidence(chatId: string, runId: string, evidence: Omit<ExecutionStepEvidence, 'createdAt'>): ExecutionPlan {
+    const plan = this.plansByChat.get(chatId);
+    if (!plan || plan.runId !== runId) throw new Error('Plano da execução não encontrado.');
+    if (plan.status === 'completed' || plan.status === 'failed') throw new Error('O plano já está em estado terminal.');
+    const step = plan.steps.find((item) => item.status === 'running');
+    if (!step) throw new Error('Nenhum passo do plano está em execução.');
+    this.appendEvidence(step, [evidence]);
+    const updatedAt = this.now();
+    step.updatedAt = updatedAt;
+    plan.updatedAt = updatedAt;
+    this.publish({ type: 'upsert', plan });
+    return clonePlan(plan);
+  }
+
   remove(chatId: string, runId?: string): boolean {
     const current = this.plansByChat.get(chatId);
     if (!current || (runId !== undefined && current.runId !== runId)) return false;
