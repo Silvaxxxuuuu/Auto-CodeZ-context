@@ -149,6 +149,24 @@ executionManager.subscribe((change) => {
   if (executionTimelinePersistenceEnabled && timelineEvents.length) executionTimelinePersistence.schedule(executionTimeline.list());
 });
 
+function recordConsumedApprovalDecision(
+  approval: { id: string; chatId?: string; runId?: string; toolCall: { id: string; name: string } },
+  decision: 'approved' | 'denied',
+  at: number,
+): void {
+  if (!approval.chatId || !approval.runId) return;
+  const events = executionTimeline.recordApprovalDecision({
+    chatId: approval.chatId,
+    runId: approval.runId,
+    approvalId: approval.id,
+    toolCallId: approval.toolCall.id,
+    toolName: approval.toolCall.name,
+    decision,
+    at,
+  });
+  if (executionTimelinePersistenceEnabled && events.length) executionTimelinePersistence.schedule(executionTimeline.list());
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
@@ -565,8 +583,11 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
   return withApprovalRunLock(chatId, runId, async (signal) => {
     ensureApprovalExecution(chatId, runId);
     executionManager.update(chatId, { state: 'running', runId });
+    const decisionAt = Date.now();
     try {
       const result = await agentRuntime.resume(id, signal);
+      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
+      if (!stillPending) recordConsumedApprovalDecision(approval, 'approved', decisionAt);
       const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
       if (chat) await chatManager.update({ ...chat, messages: result.messages });
       if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
@@ -576,13 +597,14 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
       }
       return result;
     } catch (error) {
+      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
+      if (!stillPending) recordConsumedApprovalDecision(approval, 'approved', decisionAt);
       if (signal.aborted || isAbortError(error)) {
         await clearChatExecution(chatId);
         sendStreamEvent({ type: 'cancelled', chatId, runId });
         return cancelledRunResult(chatId);
       }
       const message = error instanceof Error ? error.message : String(error);
-      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
       if (stillPending) executionCoordinator.waitingApproval(chatId, runId);
       else executionCoordinator.fail(chatId, runId, message);
       throw error;
@@ -603,8 +625,11 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
   return withApprovalRunLock(chatId, runId, async (signal) => {
     ensureApprovalExecution(chatId, runId);
     executionManager.update(chatId, { state: 'running', runId });
+    const decisionAt = Date.now();
     try {
       const result = await agentRuntime.reject(id, signal);
+      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
+      if (!stillPending) recordConsumedApprovalDecision(approval, 'denied', decisionAt);
       const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
       if (chat) await chatManager.update({ ...chat, messages: result.messages });
       if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
@@ -614,13 +639,14 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
       }
       return result;
     } catch (error) {
+      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
+      if (!stillPending) recordConsumedApprovalDecision(approval, 'denied', decisionAt);
       if (signal.aborted || isAbortError(error)) {
         await clearChatExecution(chatId);
         sendStreamEvent({ type: 'cancelled', chatId, runId });
         return cancelledRunResult(chatId);
       }
       const message = error instanceof Error ? error.message : String(error);
-      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
       if (stillPending) executionCoordinator.waitingApproval(chatId, runId);
       else executionCoordinator.fail(chatId, runId, message);
       throw error;
