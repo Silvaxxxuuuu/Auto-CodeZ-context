@@ -32,7 +32,7 @@ function basename(value: string): string {
 }
 
 function isExampleEnv(name: string): boolean {
-  return name === '.env.example' || name === '.env.sample' || name === '.env.template';
+  return /^\.env(?:\.[^.]+)*\.(?:example|sample|template)$/.test(name);
 }
 
 function classifyPath(value: string): { classification: WorkspacePathClassification; reason?: string } {
