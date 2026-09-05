@@ -2,6 +2,7 @@ import type { ApprovalRequest, AIToolCall, AIToolDefinition, AIToolResult, Comma
 import { ActivityRuntime } from './activity-runtime';
 import { ApprovalRuntime } from './approval-runtime';
 import { PermissionRuntime } from './permission-runtime';
+import { WorkspacePathPolicy } from './workspace-path-policy';
 import { WorkspaceRuntime } from './workspace-runtime';
 import { CommandRuntime } from './command-runtime';
 import { DiffRuntime } from './diff-runtime';
@@ -83,6 +84,32 @@ function normalizeToolCall(call: AIToolCall): AIToolCall {
   return { ...call, input: { command } };
 }
 
+function policyPaths(call: AIToolCall): string[] {
+  if (call.name === 'rename_file') {
+    const from = typeof call.input.from === 'string' ? call.input.from : '';
+    const to = typeof call.input.to === 'string' ? call.input.to : '';
+    return [from, to].filter(Boolean);
+  }
+  if (call.name === 'git_stage') {
+    return Array.isArray(call.input.paths) ? call.input.paths.filter((item): item is string => typeof item === 'string') : [];
+  }
+  if (
+    call.name === 'read_file'
+    || call.name === 'read_symbol'
+    || call.name === 'write_file'
+    || call.name === 'create_file'
+    || call.name === 'replace_range'
+    || call.name === 'replace_text'
+    || call.name === 'replace_symbol'
+    || call.name === 'insert_before'
+    || call.name === 'insert_after'
+    || call.name === 'delete_file'
+  ) {
+    return typeof call.input.path === 'string' ? [call.input.path] : [];
+  }
+  return [];
+}
+
 const unavailableCommandRuntime = new CommandRuntime(async () => { throw new Error('O runtime de comandos não foi configurado para esta instância.'); });
 
 function executionActivityMessage(call: AIToolCall): string {
@@ -123,7 +150,7 @@ export class ToolRuntime {
   private executionChangeBudget?: ExecutionChangeBudgetRuntime;
   private executionCheckpointRecorder?: ExecutionCheckpointRecorder;
 
-  constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()])) {}
+  constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()]), private readonly workspacePathPolicy = new WorkspacePathPolicy()) {}
 
   configureGitRuntime(runtime: GitRuntime): void { this.gitRuntime = runtime; }
   configureExecutionPlanner(runtime: ExecutionPlanner): void { this.executionPlanner = runtime; }
@@ -156,10 +183,18 @@ export class ToolRuntime {
     const definition = definitions.find((item) => item.name === normalizedCall.name);
     if (!definition) return { toolCallId: normalizedCall.id, ok: false, error: `Ferramenta desconhecida: ${normalizedCall.name}` };
     try { validateToolInput(definition, normalizedCall.input); } catch (error) { return { toolCallId: normalizedCall.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
-    let decision = this.permissions.decide(permission, normalizedCall.name);
+    const permissionDecision = this.permissions.decide(permission, normalizedCall.name);
+    const pathPolicy = this.workspacePathPolicy.evaluate(normalizedCall.name, policyPaths(normalizedCall));
+    let decision = permissionDecision;
+    if (pathPolicy.decision === 'deny' || (pathPolicy.decision === 'ask' && decision === 'allow')) decision = pathPolicy.decision;
     const systemFileTool = normalizedCall.name === 'read_file' || normalizedCall.name === 'write_file' || normalizedCall.name === 'create_file' || normalizedCall.name === 'replace_range' || normalizedCall.name === 'replace_text' || normalizedCall.name === 'replace_symbol' || normalizedCall.name === 'insert_before' || normalizedCall.name === 'insert_after' || normalizedCall.name === 'delete_file' || normalizedCall.name === 'rename_file' || normalizedCall.name === 'search_files';
     if (projectId === SYSTEM_WORKSPACE_ID && permission !== 'unrestricted' && decision !== 'deny' && systemFileTool) decision = 'ask';
-    if (decision === 'deny') return { toolCallId: normalizedCall.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
+    if (decision === 'deny') {
+      const error = pathPolicy.decision === 'deny'
+        ? `Operação bloqueada pela política de segurança do workspace${pathPolicy.reasons.length ? `: ${pathPolicy.reasons.join(' · ')}` : ''}.`
+        : 'Operação bloqueada pelas permissões do chat.';
+      return { toolCallId: normalizedCall.id, ok: false, error };
+    }
     const pending = this.approvals.list({ chatId, runId });
     if (pending.length) {
       const error = 'Operação adiada porque uma operação anterior deste ciclo ainda aguarda aprovação. Se ela continuar necessária após a decisão do usuário, solicite a operação novamente.';
@@ -186,7 +221,8 @@ export class ToolRuntime {
         return { toolCallId: normalizedCall.id, ok: false, error: message, ...(diffPlan ? { diffPlan } : {}) };
       }
       const approval = this.approvals.request({ projectId, chatId, runId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });
-      this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${normalizedCall.name}.`, status: 'pending', toolCallId: normalizedCall.id, toolName: normalizedCall.name, chatId, runId, ...(diffPlan ? { diffPlan } : {}) });
+      const securityReason = pathPolicy.decision === 'ask' && pathPolicy.reasons.length ? ` Segurança: ${pathPolicy.reasons.join(' · ')}.` : '';
+      this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${normalizedCall.name}.${securityReason}`, status: 'pending', toolCallId: normalizedCall.id, toolName: normalizedCall.name, chatId, runId, ...(diffPlan ? { diffPlan } : {}) });
       return { toolCallId: normalizedCall.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
     }
     let directDiffPlan: DiffPlan | undefined;
