@@ -318,10 +318,22 @@ ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
   const id = requireIdentifier(runId, 'Execução recuperável');
   const recoverable = listRecoverableRuns(agentRuntime).find((run) => run.runId === id);
   if (!recoverable) throw new Error('Execução recuperável não encontrada.');
-  const { result } = await resumeRecoveredRun(agentRuntime, executionManager, recoverable);
-  const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
-  if (chat) await chatManager.update({ ...chat, messages: result.messages });
-  return result;
+  return withApprovalRunLock(recoverable.chatId, id, async (signal) => {
+    sendStreamEvent({ type: 'start', chatId: recoverable.chatId, runId: id });
+    try {
+      const { result } = await resumeRecoveredRun(agentRuntime, executionManager, recoverable, Date.now(), signal);
+      const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+      if (chat) await chatManager.update({ ...chat, messages: result.messages });
+      return result;
+    } catch (error) {
+      if (signal.aborted || isAbortError(error)) {
+        await clearChatExecution(recoverable.chatId);
+        sendStreamEvent({ type: 'cancelled', chatId: recoverable.chatId, runId: id });
+        return cancelledRunResult(recoverable.chatId);
+      }
+      throw error;
+    }
+  });
 });
 ipcMain.handle('agent:list-interrupted-provider-requests', async () => chatRuntime.listInterruptedProviderRequests());
 ipcMain.handle('agent:approve', async (_event, input: unknown) => {
