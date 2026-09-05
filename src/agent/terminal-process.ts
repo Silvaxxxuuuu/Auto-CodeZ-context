@@ -31,7 +31,7 @@ export interface InteractiveTerminalProcessFactory {
   create(options: TerminalProcessOptions): InteractiveTerminalProcess;
 }
 
-function shellCommand(shell: TerminalShell): { file: string; args: string[] } {
+export function resolveTerminalShell(shell: TerminalShell): { file: string; args: string[] } {
   if (shell === 'powershell') {
     return {
       file: process.env.SystemRoot
@@ -91,7 +91,7 @@ class PipeInteractiveTerminalProcess implements InteractiveTerminalProcess {
 
 export class PipeInteractiveTerminalProcessFactory implements InteractiveTerminalProcessFactory {
   create(options: TerminalProcessOptions): InteractiveTerminalProcess {
-    const spec = shellCommand(options.shell);
+    const spec = resolveTerminalShell(options.shell);
     const child = spawn(spec.file, spec.args, {
       cwd: options.cwd,
       windowsHide: true,
