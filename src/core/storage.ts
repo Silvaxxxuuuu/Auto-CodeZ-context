@@ -8,23 +8,6 @@ export interface SecureStorageAdapter {
   decrypt(value: Buffer): string;
 }
 
-type ElectronRuntime = typeof import('electron');
-
-let electronRuntime: ElectronRuntime | undefined;
-
-function getElectronRuntime(): ElectronRuntime {
-  if (!electronRuntime) electronRuntime = require('electron') as ElectronRuntime;
-  return electronRuntime;
-}
-
-function electronSecureStorage(): SecureStorageAdapter {
-  return {
-    isEncryptionAvailable: () => getElectronRuntime().safeStorage.isEncryptionAvailable(),
-    encrypt: (value) => getElectronRuntime().safeStorage.encryptString(value),
-    decrypt: (value) => getElectronRuntime().safeStorage.decryptString(value),
-  };
-}
-
 const SENSITIVE_JSON_FILES = new Set([
   'agent-runs.json',
   'tool-execution-journal.json',
@@ -36,20 +19,39 @@ function isMissingFile(error: unknown): boolean {
 }
 
 export class LocalStorage {
-  private readonly secureStorage: SecureStorageAdapter;
+  private resolvedRoot?: string;
+  private secureStorage?: SecureStorageAdapter;
 
   constructor(
-    private readonly rootPath?: string,
+    rootPath?: string,
     secureStorage?: SecureStorageAdapter,
   ) {
-    this.secureStorage = secureStorage ?? electronSecureStorage();
+    this.resolvedRoot = rootPath;
+    this.secureStorage = secureStorage;
   }
 
   private get root(): string {
-    return this.rootPath || path.join(getElectronRuntime().app.getPath('userData'), 'data');
+    if (!this.resolvedRoot) throw new Error('Armazenamento local ainda não foi inicializado.');
+    return this.resolvedRoot;
+  }
+
+  private get encryption(): SecureStorageAdapter {
+    if (!this.secureStorage) throw new Error('Armazenamento seguro ainda não foi inicializado.');
+    return this.secureStorage;
   }
 
   async init(): Promise<void> {
+    if (!this.resolvedRoot || !this.secureStorage) {
+      const { app, safeStorage } = await import('electron');
+      if (!this.resolvedRoot) this.resolvedRoot = path.join(app.getPath('userData'), 'data');
+      if (!this.secureStorage) {
+        this.secureStorage = {
+          isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+          encrypt: (value) => safeStorage.encryptString(value),
+          decrypt: (value) => safeStorage.decryptString(value),
+        };
+      }
+    }
     await fs.mkdir(this.root, { recursive: true });
   }
 
@@ -130,8 +132,8 @@ export class LocalStorage {
   async readEncrypted(name: string): Promise<string | null> {
     try {
       const raw = await fs.readFile(this.file(name), 'utf8');
-      if (!this.secureStorage.isEncryptionAvailable()) return null;
-      return this.secureStorage.decrypt(Buffer.from(raw, 'base64'));
+      if (!this.encryption.isEncryptionAvailable()) return null;
+      return this.encryption.decrypt(Buffer.from(raw, 'base64'));
     } catch (error) {
       if (isMissingFile(error)) return null;
       throw error;
@@ -139,11 +141,11 @@ export class LocalStorage {
   }
 
   async writeEncrypted(name: string, value: string): Promise<void> {
-    if (!this.secureStorage.isEncryptionAvailable()) throw new Error('Sistema de armazenamento seguro indisponível.');
+    if (!this.encryption.isEncryptionAvailable()) throw new Error('Sistema de armazenamento seguro indisponível.');
     await fs.mkdir(this.root, { recursive: true });
     const destination = this.file(name);
     const temporary = this.temporaryFile(name);
-    const encrypted = this.secureStorage.encrypt(value).toString('base64');
+    const encrypted = this.encryption.encrypt(value).toString('base64');
     let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
     try {
       handle = await fs.open(temporary, 'wx');
