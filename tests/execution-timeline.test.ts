@@ -82,6 +82,20 @@ test('filtra por chat e run e devolve cópias', () => {
   assert.equal(timeline.list('chat-a')[0].error, undefined);
 });
 
+test('filtro combinado não vaza o mesmo runId entre chats diferentes', () => {
+  const timeline = new ExecutionTimeline();
+  timeline.record({ type: 'upsert', snapshot: snapshot({ chatId: 'chat-a', runId: 'shared-run' }) });
+  timeline.record({ type: 'upsert', snapshot: snapshot({ chatId: 'chat-b', runId: 'shared-run', startedAt: 2000, updatedAt: 2000 }) });
+
+  const chatA = timeline.list('chat-a', 'shared-run');
+  const chatB = timeline.list('chat-b', 'shared-run');
+
+  assert.equal(chatA.length, 1);
+  assert.equal(chatB.length, 1);
+  assert.equal(chatA[0].chatId, 'chat-a');
+  assert.equal(chatB[0].chatId, 'chat-b');
+});
+
 test('limita memória sem reutilizar sequence', () => {
   const timeline = new ExecutionTimeline(2);
   timeline.record({ type: 'upsert', snapshot: snapshot() });
