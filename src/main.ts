@@ -34,6 +34,8 @@ import { ExecutionQualityGateRuntime, type ExecutionQualityGateRequirement } fro
 import { ExecutionQualityGatePersistence, ExecutionQualityGateStore } from './execution-quality-gate-store';
 import { ExecutionTaskCapsuleRuntime } from './execution-task-capsule';
 import { ExecutionTaskCapsulePersistence, ExecutionTaskCapsuleStore } from './execution-task-capsule-store';
+import { ExecutionCheckpointRuntime } from './execution-checkpoint';
+import { ExecutionCheckpointPersistence, ExecutionCheckpointStore } from './execution-checkpoint-store';
 import { ExecutionChangeBudgetRuntime } from './execution-change-budget';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
@@ -85,12 +87,20 @@ const executionQualityGatePersistence = new ExecutionQualityGatePersistence(exec
 const executionTaskCapsuleRuntime = new ExecutionTaskCapsuleRuntime();
 const executionTaskCapsuleStore = new ExecutionTaskCapsuleStore(storage);
 const executionTaskCapsulePersistence = new ExecutionTaskCapsulePersistence(executionTaskCapsuleStore);
+const executionCheckpointRuntime = new ExecutionCheckpointRuntime();
+const executionCheckpointStore = new ExecutionCheckpointStore(storage);
+const executionCheckpointPersistence = new ExecutionCheckpointPersistence(executionCheckpointStore);
 let executionPersistenceEnabled = false;
 let executionTimelinePersistenceEnabled = false;
 let executionPlanPersistenceEnabled = false;
 let executionPlanHistoryPersistenceEnabled = false;
 let executionQualityGatePersistenceEnabled = false;
 let executionTaskCapsulePersistenceEnabled = false;
+let executionCheckpointPersistenceEnabled = false;
+toolRuntime.configureExecutionCheckpointRecorder((record) => {
+  executionCheckpointRuntime.record(record);
+  if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
+});
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 const approvalRunLocks = new Set<string>();
 let mainWindow: BrowserWindow | null = null;
@@ -309,6 +319,7 @@ ipcMain.handle('chat:delete', async (_event, chatId: string) => {
   if (executionPlanHistory.purgeChat(id) && executionPlanHistoryPersistenceEnabled) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
   if (executionQualityGateRuntime.removeChat(id) && executionQualityGatePersistenceEnabled) executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
   if (executionTaskCapsuleRuntime.removeChat(id) && executionTaskCapsulePersistenceEnabled) executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
+  if (executionCheckpointRuntime.removeChat(id) && executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
   executionChangeBudgetRuntime.removeChat(id);
   return chatManager.remove(id);
 });
@@ -662,6 +673,7 @@ app.whenReady().then(async () => {
   executionPlanHistory.restore(await executionPlanHistoryStore.load());
   executionQualityGateRuntime.restore(await executionQualityGateStore.load());
   executionTaskCapsuleRuntime.restore(await executionTaskCapsuleStore.load());
+  executionCheckpointRuntime.hydrate(await executionCheckpointStore.load());
   await restorePersistedExecutionSnapshots();
   executionPlanner.restore(await executionPlanStore.load());
   restoreExecutionSnapshots();
@@ -673,12 +685,14 @@ app.whenReady().then(async () => {
   executionPlanHistoryPersistenceEnabled = true;
   executionQualityGatePersistenceEnabled = true;
   executionTaskCapsulePersistenceEnabled = true;
+  executionCheckpointPersistenceEnabled = true;
   executionStatePersistence.schedule(executionManager.list());
   executionTimelinePersistence.schedule(executionTimeline.list());
   executionPlanPersistence.schedule(executionPlanner.list());
   executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
   executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
   executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
+  executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
   activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
