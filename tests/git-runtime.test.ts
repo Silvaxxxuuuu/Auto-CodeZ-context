@@ -136,6 +136,50 @@ test('GitRuntime commits staged changes and preserves the branch', async () => {
   }
 });
 
+test('GitRuntime blocks selected staging of sensitive files before invoking git add', async () => {
+  const repository = await makeRepository();
+  try {
+    await fs.writeFile(path.join(repository.root, '.env'), 'TOKEN=secret\n', 'utf8');
+    const runtime = new GitRuntime(async () => [repository.project]);
+    await assert.rejects(() => runtime.stage(repository.project.id, ['.env']), /política de segurança do workspace/i);
+    const status = await runtime.status(repository.project.id);
+    assert.equal(status.files.find((file) => file.path === '.env')?.index, ' ');
+    assert.equal(status.files.find((file) => file.path === '.env')?.worktree, '?');
+  } finally {
+    await fs.rm(repository.root, { recursive: true, force: true });
+  }
+});
+
+test('GitRuntime blocks stageAll when the working tree contains a sensitive file', async () => {
+  const repository = await makeRepository();
+  try {
+    await fs.writeFile(path.join(repository.root, 'README.md'), '# Safe change\n', 'utf8');
+    await fs.writeFile(path.join(repository.root, '.env.local'), 'TOKEN=secret\n', 'utf8');
+    const runtime = new GitRuntime(async () => [repository.project]);
+    await assert.rejects(() => runtime.stageAll(repository.project.id), /variáveis de ambiente/i);
+    const status = await runtime.status(repository.project.id);
+    assert.equal(status.files.find((file) => file.path === 'README.md')?.index, ' ');
+    assert.equal(status.files.find((file) => file.path === 'README.md')?.worktree, 'M');
+  } finally {
+    await fs.rm(repository.root, { recursive: true, force: true });
+  }
+});
+
+test('GitRuntime blocks commit when sensitive content was staged outside Auto CodeZ', async () => {
+  const repository = await makeRepository();
+  try {
+    await fs.writeFile(path.join(repository.root, '.env'), 'TOKEN=secret\n', 'utf8');
+    execFileSync('git', ['add', '.env'], { cwd: repository.root });
+    const runtime = new GitRuntime(async () => [repository.project]);
+    await assert.rejects(() => runtime.commit(repository.project.id, 'should not commit secret'), /política de segurança do workspace/i);
+    const history = await runtime.log(repository.project.id, 2);
+    assert.equal(history.length, 1);
+    assert.equal(history[0]?.subject, 'initial');
+  } finally {
+    await fs.rm(repository.root, { recursive: true, force: true });
+  }
+});
+
 test('GitRuntime rejects unknown projects', async () => {
   const runtime = new GitRuntime(async () => []);
   await assert.rejects(() => runtime.status('missing'), /Projeto não encontrado/);
