@@ -1,0 +1,116 @@
+name: Integrate execution persistence
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/execution-persistence-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - name: Patch canonical execution persistence
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          path = Path('src/main.ts')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_exact(old: str, new: str):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one match, found {count}: {old[:180]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_exact(
+              "import { ExecutionManager, type ExecutionChange } from './execution-manager';\n",
+              "import { ExecutionManager, type ExecutionChange } from './execution-manager';\nimport { ExecutionStatePersistence, ExecutionStateStore } from './execution-state-store';\nimport { ExecutionTimeline } from './execution-timeline';\n",
+          )
+
+          replace_exact(
+              "const executionManager = new ExecutionManager();\nconst activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();\n",
+              "const executionManager = new ExecutionManager();\nconst executionStateStore = new ExecutionStateStore(storage);\nconst executionStatePersistence = new ExecutionStatePersistence(executionStateStore);\nconst executionTimeline = new ExecutionTimeline();\nlet executionPersistenceEnabled = false;\nconst activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();\n",
+          )
+
+          replace_exact(
+              "executionManager.subscribe(sendExecutionChange);\n",
+              "executionManager.subscribe((change) => {\n  sendExecutionChange(change);\n  executionTimeline.record(change);\n  if (executionPersistenceEnabled) executionStatePersistence.schedule(executionManager.list());\n});\n",
+          )
+
+          old_restore = """function restoreExecutionSnapshots(): void {
+  for (const run of agentRuntime.listPendingRuns()) {
+    executionManager.remove(run.chatId);
+    executionManager.start(run.chatId, Date.now(), run.runId);
+    executionManager.update(run.chatId, { state: 'waiting_approval', runId: run.runId });
+  }
+  for (const run of listRecoverableRuns(agentRuntime)) {
+    if (executionManager.get(run.chatId)) continue;
+    executionManager.start(run.chatId, Date.now(), run.runId);
+    executionManager.update(run.chatId, { state: 'interrupted', runId: run.runId });
+  }
+}
+"""
+          new_restore = """async function restorePersistedExecutionSnapshots(): Promise<void> {
+  const snapshots = await executionStateStore.load();
+  for (const snapshot of snapshots) {
+    executionManager.remove(snapshot.chatId);
+    executionManager.start(snapshot.chatId, snapshot.startedAt, snapshot.runId);
+    executionManager.update(snapshot.chatId, {
+      state: snapshot.state,
+      currentTool: snapshot.currentTool,
+      error: snapshot.error,
+      runId: snapshot.runId,
+    }, snapshot.updatedAt);
+  }
+}
+
+function restoreExecutionSnapshots(): void {
+  for (const run of agentRuntime.listPendingRuns()) {
+    executionManager.remove(run.chatId);
+    executionManager.start(run.chatId, Date.now(), run.runId);
+    executionManager.update(run.chatId, { state: 'waiting_approval', runId: run.runId });
+  }
+  for (const run of listRecoverableRuns(agentRuntime)) {
+    const current = executionManager.get(run.chatId);
+    if (current?.runId === run.runId && current.state === 'interrupted') continue;
+    executionManager.remove(run.chatId);
+    executionManager.start(run.chatId, Date.now(), run.runId);
+    executionManager.update(run.chatId, { state: 'interrupted', runId: run.runId });
+  }
+}
+"""
+          replace_exact(old_restore, new_restore)
+
+          replace_exact(
+              "  await toolRuntime.init();\n  await agentRuntime.init();\n  restoreExecutionSnapshots();\n",
+              "  await toolRuntime.init();\n  await agentRuntime.init();\n  await restorePersistedExecutionSnapshots();\n  restoreExecutionSnapshots();\n  executionPersistenceEnabled = true;\n  executionStatePersistence.schedule(executionManager.list());\n",
+          )
+
+          path.write_text(text, encoding='utf-8', newline='')
+          '@ | Set-Content -Encoding utf8 .patch_execution_persistence.py
+          python .patch_execution_persistence.py
+          Remove-Item .patch_execution_persistence.py
+          git diff --check
+          npm run typecheck
+          npm test
+      - name: Commit integration and remove workflow
+        shell: pwsh
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git add src/main.ts
+          git rm .github/workflows/execution-persistence-integration.yml
+          git commit -m "feat(execution): persist canonical execution snapshots"
+          git push origin HEAD:feature/ui-hierarchy-polish
