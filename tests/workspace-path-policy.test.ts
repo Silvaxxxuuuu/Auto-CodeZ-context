@@ -33,7 +33,7 @@ test('segredos conhecidos exigem aprovação inclusive para leitura', () => {
 });
 
 test('modelos de env explicitamente destinados a exemplo não são tratados como segredo', () => {
-  for (const path of ['.env.example', '.env.sample', '.env.template']) {
+  for (const path of ['.env.example', '.env.sample', '.env.template', '.env.production.example', '.env.local.template']) {
     const result = policy.evaluate('write_file', [path]);
     assert.equal(result.decision, 'allow', path);
     assert.equal(result.classification, 'normal', path);
