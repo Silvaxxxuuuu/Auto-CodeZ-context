@@ -1,0 +1,100 @@
+name: Wire structural symbol reads
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/read-symbol-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - name: Patch read_symbol integration
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          def replace_exact(path_name: str, old: str, new: str, expected: int = 1):
+              path = Path(path_name)
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f'{path_name}: expected {expected} occurrence(s), found {count}: {old[:120]!r}')
+              path.write_text(text.replace(old, new, expected), encoding='utf-8', newline='')
+
+          tool_runtime = 'src/agent/tool-runtime.ts'
+          replace_exact(
+              tool_runtime,
+              "  { name: 'read_file', description: 'Read a UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },\n",
+              "  { name: 'read_file', description: 'Read a UTF-8 text file inside the active workspace.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },\n  { name: 'read_symbol', description: 'Read one uniquely named TypeScript or JavaScript syntax symbol using the real TypeScript AST. Supported kinds are function, method, class, interface, type and enum. Use this when only one complete named declaration is needed; ambiguity or unsupported files fail instead of guessing.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative TypeScript or JavaScript file path.' }, symbol: { type: 'string', description: 'Exact declared symbol name.' }, kind: { type: 'string', enum: ['function', 'method', 'class', 'interface', 'type', 'enum'], description: 'Declared syntax kind.' } }, required: ['path', 'symbol', 'kind'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },\n",
+          )
+          replace_exact(
+              tool_runtime,
+              "    case 'read_file': return value('path') ? `Lendo ${value('path')}` : 'Lendo arquivo.';\n",
+              "    case 'read_file': return value('path') ? `Lendo ${value('path')}` : 'Lendo arquivo.';\n    case 'read_symbol': return value('path') && value('symbol') ? `Lendo símbolo ${value('symbol')} em ${value('path')}` : 'Lendo símbolo do arquivo.';\n",
+          )
+          replace_exact(
+              tool_runtime,
+              "      case 'read_file': return { output: await this.workspace.readFile(projectId, this.stringValue(input, 'path')) };\n",
+              "      case 'read_file': return { output: await this.workspace.readFile(projectId, this.stringValue(input, 'path')) };\n      case 'read_symbol': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const source = await this.workspace.readFile(projectId, path); const symbol = this.stringValue(input, 'symbol'); const kind = this.stringValue(input, 'kind') as StructuralSymbolKind; const result = await this.structuralEdits.readSymbol(path, source, { name: symbol, kind }); return { output: result.content }; }\n",
+          )
+
+          chat_runtime = 'src/ai/chat-runtime.ts'
+          replace_exact(
+              chat_runtime,
+              'File tools such as read_file, write_file, create_file, replace_range, replace_text, replace_symbol, insert_before, insert_after, delete_file, rename_file, and search_files operate on the active Auto CodeZ workspace and use workspace-relative paths.',
+              'File tools such as read_file, read_symbol, write_file, create_file, replace_range, replace_text, replace_symbol, insert_before, insert_after, delete_file, rename_file, and search_files operate on the active Auto CodeZ workspace and use workspace-relative paths.',
+          )
+          replace_exact(
+              chat_runtime,
+              'Inside an Auto CodeZ project workspace, use file tools for direct file mutations whenever they can represent the requested operation. For a complete named TypeScript or JavaScript declaration, prefer replace_symbol when its supported syntax kind is known. For smaller localized edits, prefer replace_text when you have an exact unique fragment from a recent read; otherwise use replace_range, insert_before or insert_after instead of rewriting the whole file with write_file.',
+              'Inside an Auto CodeZ project workspace, use file tools for direct file mutations whenever they can represent the requested operation. When you only need one complete named TypeScript or JavaScript declaration, prefer read_symbol over read_file when its supported syntax kind is known. For replacing a complete named TypeScript or JavaScript declaration, prefer replace_symbol. For smaller localized edits, prefer replace_text when you have an exact unique fragment from a recent read; otherwise use replace_range, insert_before or insert_after instead of rewriting the whole file with write_file.',
+          )
+          replace_exact(
+              chat_runtime,
+              "const SYSTEM_CHAT_TOOL_NAMES = new Set(['read_file', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']);",
+              "const SYSTEM_CHAT_TOOL_NAMES = new Set(['read_file', 'read_symbol', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']);",
+          )
+
+          chat_tests = 'tests/chat-runtime.test.ts'
+          replace_exact(chat_tests, "    tool('read_file', false, false),\n    tool('write_file', true, true),", "    tool('read_file', false, false),\n    tool('read_symbol', false, false),\n    tool('write_file', true, true),")
+          replace_exact(chat_tests, "['read_file', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']", "['read_file', 'read_symbol', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']")
+          replace_exact(chat_tests, "    tool('read_file', false, false),\n    tool('create_file', true, true),", "    tool('read_file', false, false),\n    tool('read_symbol', false, false),\n    tool('create_file', true, true),")
+          replace_exact(chat_tests, "['read_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol']", "['read_file', 'read_symbol', 'create_file', 'replace_range', 'replace_text', 'replace_symbol']")
+          replace_exact(
+              chat_tests,
+              "  assert.match(request.messages[0].content, /complete named TypeScript or JavaScript declaration, prefer replace_symbol/i);",
+              "  assert.match(request.messages[0].content, /only need one complete named TypeScript or JavaScript declaration, prefer read_symbol/i);\n  assert.match(request.messages[0].content, /replacing a complete named TypeScript or JavaScript declaration, prefer replace_symbol/i);",
+          )
+
+          structural_tests = Path('tests/structural-tool-runtime.test.ts')
+          text = structural_tests.read_text(encoding='utf-8')
+          marker = "test('replace_symbol definition exposes a strict AST-backed write schema'"
+          if text.count(marker) != 1:
+              raise SystemExit('structural-tool-runtime.test.ts marker mismatch')
+          addition = '''test('read_symbol reads one exact AST declaration in read-only mode without approval', async () => {\n  const value = await fixture();\n  try {\n    const file = path.join(value.root, 'read.ts');\n    const source = '// header\\nexport function greet(name: string) {\\n  return `Hi ${name}`;\\n}\\n\\nconst tail = true;\\n';\n    await fs.writeFile(file, source);\n\n    const result = await value.runtime.execute('chat-a', 'project-test', 'read-only', {\n      id: 'structural-read',\n      name: 'read_symbol',\n      input: { path: 'read.ts', symbol: 'greet', kind: 'function' },\n    });\n\n    assert.equal(result.ok, true);\n    assert.equal(result.output, 'export function greet(name: string) {\\n  return `Hi ${name}`;\\n}');\n    assert.equal(result.approvalId, undefined);\n    assert.equal(result.pendingApproval, undefined);\n    assert.equal(await fs.readFile(file, 'utf8'), source);\n  } finally { await value.cleanup(); }\n});\n\n'''
+          text = text.replace(marker, addition + marker, 1)
+          structural_tests.write_text(text, encoding='utf-8', newline='')
+          '@ | Set-Content -Encoding utf8 .patch_read_symbol.py
+          python .patch_read_symbol.py
+          Remove-Item .patch_read_symbol.py
+          git diff --check
+          git diff -- src/agent/tool-runtime.ts src/ai/chat-runtime.ts tests/chat-runtime.test.ts tests/structural-tool-runtime.test.ts
+      - name: Commit read_symbol integration
+        shell: pwsh
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git add src/agent/tool-runtime.ts src/ai/chat-runtime.ts tests/chat-runtime.test.ts tests/structural-tool-runtime.test.ts
+          git commit -m "feat(agent): expose structural symbol reads"
+          git push origin HEAD:feature/ui-hierarchy-polish
