@@ -5,6 +5,7 @@ export type ExecutionChangeBudget = {
   maxChangedLines?: number;
   maxCommands?: number;
   maxToolCalls?: number;
+  maxDurationMs?: number;
 };
 
 export type ExecutionChangeUsage = {
@@ -20,6 +21,7 @@ export type ExecutionChangeBudgetEvaluation = {
   budget?: ExecutionChangeBudget;
   usage: ExecutionChangeUsage;
   projected: ExecutionChangeUsage;
+  elapsedMs: number;
   allowed: boolean;
   violations: string[];
 };
@@ -30,6 +32,7 @@ type RunBudgetState = {
   changedLines: number;
   commands: number;
   toolCalls: number;
+  startedAt: number;
 };
 
 function keyOf(chatId: string, runId: string): string {
@@ -54,6 +57,7 @@ function normalizeBudget(budget: ExecutionChangeBudget): ExecutionChangeBudget {
     maxChangedLines: normalizeLimit(budget.maxChangedLines, 'Limite de linhas alteradas'),
     maxCommands: normalizeLimit(budget.maxCommands, 'Limite de comandos'),
     maxToolCalls: normalizeLimit(budget.maxToolCalls, 'Limite de ferramentas'),
+    maxDurationMs: normalizeLimit(budget.maxDurationMs, 'Limite de duração'),
   };
 }
 
@@ -61,7 +65,8 @@ function sameBudget(left: ExecutionChangeBudget, right: ExecutionChangeBudget): 
   return left.maxFiles === right.maxFiles
     && left.maxChangedLines === right.maxChangedLines
     && left.maxCommands === right.maxCommands
-    && left.maxToolCalls === right.maxToolCalls;
+    && left.maxToolCalls === right.maxToolCalls
+    && left.maxDurationMs === right.maxDurationMs;
 }
 
 function cloneBudget(budget: ExecutionChangeBudget): ExecutionChangeBudget {
@@ -109,18 +114,21 @@ function projectedUsage(
   };
 }
 
-function violationsFor(budget: ExecutionChangeBudget | undefined, usage: ExecutionChangeUsage): string[] {
+function violationsFor(budget: ExecutionChangeBudget | undefined, usage: ExecutionChangeUsage, elapsedMs: number): string[] {
   if (!budget) return [];
   const violations: string[] = [];
   if (budget.maxFiles !== undefined && usage.files.length > budget.maxFiles) violations.push(`Arquivos: ${usage.files.length}/${budget.maxFiles}`);
   if (budget.maxChangedLines !== undefined && usage.changedLines > budget.maxChangedLines) violations.push(`Linhas alteradas: ${usage.changedLines}/${budget.maxChangedLines}`);
   if (budget.maxCommands !== undefined && usage.commands > budget.maxCommands) violations.push(`Comandos: ${usage.commands}/${budget.maxCommands}`);
   if (budget.maxToolCalls !== undefined && usage.toolCalls > budget.maxToolCalls) violations.push(`Ferramentas: ${usage.toolCalls}/${budget.maxToolCalls}`);
+  if (budget.maxDurationMs !== undefined && elapsedMs > budget.maxDurationMs) violations.push(`Duração: ${elapsedMs}ms/${budget.maxDurationMs}ms`);
   return violations;
 }
 
 export class ExecutionChangeBudgetRuntime {
   private readonly runs = new Map<string, RunBudgetState>();
+
+  constructor(private readonly now: () => number = () => Date.now()) {}
 
   configure(chatId: string, runId: string, budget: ExecutionChangeBudget): ExecutionChangeBudget {
     const normalizedChatId = requireId(chatId, 'Chat');
@@ -132,12 +140,15 @@ export class ExecutionChangeBudgetRuntime {
       if (sameBudget(existing.budget, normalizedBudget)) return cloneBudget(existing.budget);
       throw new Error(`O Change Budget da execução ${normalizedRunId} é imutável depois de configurado.`);
     }
+    const startedAt = this.now();
+    if (!Number.isFinite(startedAt) || startedAt < 0) throw new Error('Relógio inválido para o Change Budget.');
     this.runs.set(key, {
       budget: normalizedBudget,
       files: new Set(),
       changedLines: 0,
       commands: 0,
       toolCalls: 0,
+      startedAt,
     });
     return cloneBudget(normalizedBudget);
   }
@@ -158,13 +169,16 @@ export class ExecutionChangeBudgetRuntime {
   ): ExecutionChangeBudgetEvaluation {
     const state = this.runs.get(keyOf(chatId, runId));
     const projected = projectedUsage(state, input);
-    const violations = violationsFor(state?.budget, projected);
+    const now = this.now();
+    const elapsedMs = state ? Math.max(0, now - state.startedAt) : 0;
+    const violations = violationsFor(state?.budget, projected, elapsedMs);
     return {
       chatId,
       runId,
       budget: state ? cloneBudget(state.budget) : undefined,
       usage: usageOf(state),
       projected,
+      elapsedMs,
       allowed: violations.length === 0,
       violations,
     };
@@ -188,7 +202,9 @@ export class ExecutionChangeBudgetRuntime {
     const state = this.runs.get(keyOf(chatId, runId));
     if (!state) return usageOf(undefined);
     const projected = projectedUsage(state, input);
-    const violations = violationsFor(state.budget, projected);
+    const now = this.now();
+    const elapsedMs = Math.max(0, now - state.startedAt);
+    const violations = violationsFor(state.budget, projected, elapsedMs);
     if (violations.length) throw new Error(`Change Budget excedido: ${violations.join(' · ')}.`);
     state.files = new Set(projected.files);
     state.changedLines = projected.changedLines;
