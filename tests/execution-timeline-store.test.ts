@@ -44,6 +44,29 @@ test('timeline é persistida criptografada e restaurada', async () => {
   }
 });
 
+test('timeline persiste baseline recovered com startedAt original', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'auto-codez-timeline-recovery-'));
+  try {
+    const storage = new LocalStorage(root, secureAdapter());
+    await storage.init();
+    const store = new ExecutionTimelineStore(storage);
+    const recovered: ExecutionTimelineEvent[] = [{
+      sequence: 1,
+      chatId: 'chat-a',
+      runId: 'run-a',
+      at: 5000,
+      type: 'recovered',
+      state: 'interrupted',
+      startedAt: 1000,
+    }];
+
+    await store.save(recovered);
+    assert.deepEqual(await store.load(), recovered);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('timeline ignora eventos persistidos inválidos', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'auto-codez-timeline-security-'));
   try {
@@ -51,7 +74,11 @@ test('timeline ignora eventos persistidos inválidos', async () => {
     await storage.init();
     await storage.write('execution-timeline.json', {
       version: 1,
-      events: [...events(), { sequence: 0, chatId: '', runId: '', at: -1, type: 'unknown' }],
+      events: [
+        ...events(),
+        { sequence: 0, chatId: '', runId: '', at: -1, type: 'unknown' },
+        { sequence: 4, chatId: 'chat-a', runId: 'run-a', at: 5000, type: 'recovered', state: 'interrupted' },
+      ],
     });
     const store = new ExecutionTimelineStore(storage);
     assert.deepEqual(await store.load(), events());
