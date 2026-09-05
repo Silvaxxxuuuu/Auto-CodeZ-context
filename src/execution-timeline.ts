@@ -307,6 +307,7 @@ export class ExecutionTimeline {
         this.cursors.set(event.chatId, { snapshot, signature: snapshotSignature(snapshot) });
         continue;
       }
+      if (event.type === 'approval_decision') continue;
       if (event.type === 'started' || !current || current.snapshot.runId !== event.runId) {
         if (event.type !== 'started' || !event.state) continue;
         const snapshot: ExecutionSnapshot = {
