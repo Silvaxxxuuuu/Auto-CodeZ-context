@@ -1,8 +1,9 @@
 import type { ExecutionReport } from './execution-report';
 import type { ExecutionEvidenceType, ExecutionPlanStepStatus } from './execution-planner';
 import type { ExecutionState } from './execution-manager';
+import type { ExecutionApprovalDecision } from './execution-timeline';
 
-export type ExecutionGraphNodeKind = 'started' | 'recovered' | 'state' | 'tool' | 'evidence' | 'error';
+export type ExecutionGraphNodeKind = 'started' | 'recovered' | 'state' | 'tool' | 'approval' | 'evidence' | 'error';
 export type ExecutionGraphNodeSource = 'timeline' | 'plan';
 
 export type ExecutionGraphNode = {
@@ -15,6 +16,8 @@ export type ExecutionGraphNode = {
   label: string;
   state?: ExecutionState;
   tool?: string;
+  approvalId?: string;
+  approvalDecision?: ExecutionApprovalDecision;
   evidenceType?: ExecutionEvidenceType;
   reference?: string;
   stepId?: string;
@@ -99,6 +102,19 @@ function timelineNodes(report: ExecutionReport): OrderedNode[] {
         label: event.currentTool,
         state: event.state,
         tool: event.currentTool,
+      });
+      continue;
+    }
+
+    if (event.type === 'approval_decision' && event.approvalDecision && event.approvalId && event.toolName) {
+      nodes.push({
+        ...base,
+        id: `timeline:${event.sequence}:approval`,
+        kind: 'approval',
+        label: `${event.approvalDecision === 'approved' ? 'Aprovado' : 'Recusado'}: ${event.toolName}`,
+        tool: event.toolName,
+        approvalId: event.approvalId,
+        approvalDecision: event.approvalDecision,
       });
       continue;
     }
