@@ -13,6 +13,7 @@ export interface CommandOutputEvent {
 
 export interface CommandRunOptions {
   onOutput?: (event: CommandOutputEvent) => void;
+  signal?: AbortSignal;
 }
 
 export interface CommandResult {
@@ -66,6 +67,13 @@ function commandFailureMessage(result: CommandResult): string {
   return `O comando terminou com código ${result.exitCode}.${suffix}`;
 }
 
+function createAbortError(signal?: AbortSignal): Error {
+  if (signal?.reason instanceof Error) return signal.reason;
+  const error = new Error('Operação cancelada.');
+  error.name = 'AbortError';
+  return error;
+}
+
 export class CommandRuntime {
   constructor(private readonly projects: () => Promise<ProjectRecord[]>) {}
 
@@ -78,10 +86,12 @@ export class CommandRuntime {
   async run(projectId: string, command: string, options: CommandRunOptions = {}): Promise<CommandResult> {
     const normalizedCommand = command.trim();
     if (!normalizedCommand) throw new Error('O comando não pode estar vazio.');
+    options.signal?.throwIfAborted();
 
     const cwd = projectId === SYSTEM_PROJECT_ID
       ? await fs.realpath(getSystemWorkspaceRoot())
       : await fs.realpath(path.resolve((await this.project(projectId)).rootPath));
+    options.signal?.throwIfAborted();
     const { executable, args } = commandForPlatform(normalizedCommand);
     const startedAt = Date.now();
 
@@ -97,8 +107,15 @@ export class CommandRuntime {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let aborted = false;
       let settled = false;
       let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const cleanup = (): void => {
+        clearTimeout(timeout);
+        if (killTimer) clearTimeout(killTimer);
+        options.signal?.removeEventListener('abort', abort);
+      };
 
       const append = (target: 'stdout' | 'stderr', chunk: Buffer | string): void => {
         const value = chunk.toString();
@@ -111,20 +128,31 @@ export class CommandRuntime {
         }
       };
 
+      const beginTermination = (): void => {
+        terminateProcessTree(child);
+        if (!killTimer) {
+          killTimer = setTimeout(() => {
+            if (!settled) child.kill('SIGKILL');
+          }, TERMINATION_GRACE_MS);
+        }
+      };
+
+      const abort = (): void => {
+        if (settled || aborted) return;
+        aborted = true;
+        beginTermination();
+      };
+
       const timeout = setTimeout(() => {
         if (settled) return;
         timedOut = true;
-        terminateProcessTree(child);
-        killTimer = setTimeout(() => {
-          if (!settled) child.kill('SIGKILL');
-        }, TERMINATION_GRACE_MS);
+        beginTermination();
       }, TIMEOUT_MS);
 
       const finish = (partial: Omit<CommandResult, 'startedAt' | 'finishedAt' | 'durationMs'>): void => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
-        if (killTimer) clearTimeout(killTimer);
+        cleanup();
         const finishedAt = Date.now();
         resolve({ ...partial, startedAt, finishedAt, durationMs: Math.max(0, finishedAt - startedAt) });
       };
@@ -133,17 +161,29 @@ export class CommandRuntime {
       child.stderr?.on('data', (chunk: Buffer | string) => append('stderr', chunk));
       child.on('error', (error) => {
         if (settled) return;
-        clearTimeout(timeout);
-        if (killTimer) clearTimeout(killTimer);
+        settled = true;
+        cleanup();
         reject(error);
       });
-      child.on('close', (exitCode, signal) => finish({
-        command: normalizedCommand,
-        exitCode: exitCode ?? (signal ? 1 : 0),
-        stdout,
-        stderr: timedOut ? `${stderr}\nCommand timed out after ${TIMEOUT_MS / 60000} minutes.`.trim() : stderr,
-        timedOut,
-      }));
+      child.on('close', (exitCode, signal) => {
+        if (settled) return;
+        if (aborted) {
+          settled = true;
+          cleanup();
+          reject(createAbortError(options.signal));
+          return;
+        }
+        finish({
+          command: normalizedCommand,
+          exitCode: exitCode ?? (signal ? 1 : 0),
+          stdout,
+          stderr: timedOut ? `${stderr}\nCommand timed out after ${TIMEOUT_MS / 60000} minutes.`.trim() : stderr,
+          timedOut,
+        });
+      });
+
+      if (options.signal?.aborted) abort();
+      else options.signal?.addEventListener('abort', abort, { once: true });
     });
 
     if (result.exitCode !== 0 || result.timedOut) throw new Error(commandFailureMessage(result));
