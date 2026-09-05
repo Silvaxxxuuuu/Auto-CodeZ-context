@@ -185,14 +185,15 @@ export class AgentRuntime {
     return this.runStreamLoop(run, signal);
   }
 
-  async resumeRecovered(runId: string): Promise<AgentRunResult> {
+  async resumeRecovered(runId: string, signal?: AbortSignal): Promise<AgentRunResult> {
     const run = this.recoverableRuns.get(runId);
     if (!run) throw new Error('Execução recuperável não encontrada.');
     if (run.pendingApprovalIds.length) throw new Error('A execução ainda possui aprovações pendentes.');
-    return run.streamEmitter ? this.runStreamLoop(run) : this.runLoop(run);
+    return run.streamEmitter ? this.runStreamLoop(run, signal) : this.runLoop(run, signal);
   }
 
-  async resume(approvalId: string): Promise<AgentRunResult> {
+  async resume(approvalId: string, signal?: AbortSignal): Promise<AgentRunResult> {
+    signal?.throwIfAborted();
     const pending = this.getPending(approvalId);
     const call = pending.approvalCalls[approvalId];
     if (!call) throw new Error('Chamada de ferramenta associada à aprovação não encontrada.');
@@ -200,6 +201,7 @@ export class AgentRuntime {
     if (!approval) throw new Error('Aprovação não pertence à execução atual.');
 
     const result = await this.tools.approve(approvalId);
+    signal?.throwIfAborted();
     if (!result.ok && result.error && /mudou desde a aprovação|não corresponde mais ao estado aprovado/i.test(result.error)) {
       if (pending.streamEmitter) {
         pending.streamEmitter({
@@ -256,10 +258,11 @@ export class AgentRuntime {
       });
     }
 
-    return this.finishApproval(pending, approvalId);
+    return this.finishApproval(pending, approvalId, signal);
   }
 
-  async reject(approvalId: string): Promise<AgentRunResult> {
+  async reject(approvalId: string, signal?: AbortSignal): Promise<AgentRunResult> {
+    signal?.throwIfAborted();
     const pending = this.getPending(approvalId);
     const call = pending.approvalCalls[approvalId];
     if (!call) throw new Error('Chamada de ferramenta associada à aprovação não encontrada.');
@@ -284,7 +287,8 @@ export class AgentRuntime {
         },
       });
     }
-    return this.finishApproval(pending, approvalId);
+    signal?.throwIfAborted();
+    return this.finishApproval(pending, approvalId, signal);
   }
 
   async cancelChat(chatId: string): Promise<void> {
@@ -312,7 +316,7 @@ export class AgentRuntime {
     };
   }
 
-  private async finishApproval(pending: PendingRun, approvalId: string): Promise<AgentRunResult> {
+  private async finishApproval(pending: PendingRun, approvalId: string, signal?: AbortSignal): Promise<AgentRunResult> {
     pending.pendingApprovalIds = pending.pendingApprovalIds.filter((id) => id !== approvalId);
     delete pending.approvalCalls[approvalId];
     this.pendingRuns.delete(approvalId);
@@ -325,7 +329,8 @@ export class AgentRuntime {
     pending.lastError = undefined;
     this.recoverableRuns.set(pending.runId, pending);
     await this.persist();
-    return pending.streamEmitter ? this.runStreamLoop(pending) : this.runLoop(pending);
+    signal?.throwIfAborted();
+    return pending.streamEmitter ? this.runStreamLoop(pending, signal) : this.runLoop(pending, signal);
   }
 
   private async persist(): Promise<void> {
@@ -377,11 +382,12 @@ export class AgentRuntime {
     if (emit) emit({ type: 'activity', chatId, runId, activity: { id: `tool_${call.id}`, createdAt: Date.now(), ...activityInput } });
   }
 
-  private async runLoop(run: PendingRun): Promise<AgentRunResult> {
+  private async runLoop(run: PendingRun, signal?: AbortSignal): Promise<AgentRunResult> {
     while (run.toolRounds < MAX_TOOL_ROUNDS) {
+      signal?.throwIfAborted();
       let response: AIResponse;
       try {
-        response = await this.chatRuntime.send(run.config, run.workingChat, run.projectContext);
+        response = await this.chatRuntime.send(run.config, run.workingChat, run.projectContext, signal);
         run.lastError = undefined;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -391,6 +397,7 @@ export class AgentRuntime {
         throw error;
       }
 
+      signal?.throwIfAborted();
       if (!response.toolCalls?.length) {
         run.workingChat.messages.push({ role: 'assistant', content: response.content, createdAt: Date.now() });
         this.activity.emit({ runId: run.runId, chatId: run.chat.id, type: 'complete', message: 'Execução concluída.', status: 'success' });
@@ -408,7 +415,9 @@ export class AgentRuntime {
       const pendingApprovalIds: string[] = [];
       const approvalCalls: Record<string, AIToolCall> = {};
       for (const call of response.toolCalls) {
+        signal?.throwIfAborted();
         const result = await this.tools.execute(run.chat.id, executionProjectId, run.permission, call, run.runId);
+        signal?.throwIfAborted();
         this.appendToolResult(run.workingChat, call, result);
         this.emitToolActivity(run.runId, run.chat.id, call, result);
         if (result.pendingApproval && result.approvalId) {
@@ -454,7 +463,13 @@ export class AgentRuntime {
           runId: run.runId,
           activity: event.activity ? { ...event.activity, chatId: run.chat.id, runId: run.runId } : event.activity,
         };
-        if (event.type === 'complete' && event.response) response = event.response;
+        if (event.type === 'complete' && event.response) {
+          response = event.response;
+          if (event.response.toolCalls?.length) {
+            if (event.usage) emit({ type: 'usage', chatId: run.chat.id, runId: run.runId, usage: event.usage });
+            continue;
+          }
+        }
         if (event.type === 'error') streamError = event.error || 'Erro durante o streaming.';
         emit(contextualEvent);
       }
