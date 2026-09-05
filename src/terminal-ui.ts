@@ -38,10 +38,20 @@ const chatArea = document.querySelector<HTMLElement>('.chat-area');
 const rail = document.querySelector<HTMLElement>('.rail');
 if (!chatArea || !rail) throw new Error('Estrutura principal da interface não encontrada.');
 
+const MIN_PANEL_HEIGHT = 180;
+const DEFAULT_PANEL_HEIGHT = 360;
+const PANEL_HEIGHT_STORAGE_KEY = 'auto-codez-terminal-height';
+
+function readStoredPanelHeight(): number {
+  const value = Number(window.localStorage.getItem(PANEL_HEIGHT_STORAGE_KEY));
+  return Number.isFinite(value) && value >= MIN_PANEL_HEIGHT ? value : DEFAULT_PANEL_HEIGHT;
+}
+
 const style = document.createElement('style');
 style.textContent = `
 .terminal-rail-button:before{mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='m7 7 5 5-5 5 1.5 1.5 6.5-6.5-6.5-6.5L7 7Zm8 9h5v2h-5v-2Z'/%3E%3C/svg%3E")}
-.terminal-panel{display:none;position:relative;flex:none;height:360px;min-height:240px;border-top:1px solid #202631;background:#080a0e;color:#d9dee7;flex-direction:column;overflow:hidden}.terminal-panel.open{display:flex}
+.terminal-panel{display:none;position:relative;flex:none;height:360px;min-height:180px;border-top:1px solid #202631;background:#080a0e;color:#d9dee7;flex-direction:column;overflow:hidden}.terminal-panel.open{display:flex}
+.terminal-resize-handle{position:absolute;z-index:8;top:0;left:0;right:0;height:7px;transform:translateY(-3px);cursor:ns-resize;touch-action:none}.terminal-resize-handle:after{content:'';position:absolute;left:50%;top:2px;width:44px;height:2px;border-radius:2px;background:#4b5563;opacity:0;transform:translateX(-50%);transition:opacity .12s}.terminal-resize-handle:hover:after,.terminal-panel.resizing .terminal-resize-handle:after{opacity:.8}.terminal-panel.resizing,.terminal-panel.resizing *{user-select:none!important}
 .terminal-toolbar{height:38px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px;border-bottom:1px solid #202631;background:#0d1016}.terminal-title{font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:10px;font-weight:700;color:#dce2ea;margin-right:auto;letter-spacing:.08em}.terminal-shell-select,.terminal-toolbar-button{height:27px;border:1px solid #252c36;border-radius:6px;background:#11151c;color:#c4ccd6;outline:none;font:10px Inter,ui-sans-serif,system-ui,sans-serif}.terminal-shell-select{padding:0 8px}.terminal-toolbar-button{padding:0 9px;cursor:pointer}.terminal-toolbar-button:hover{background:#171c24;color:#eef2f7;border-color:#303845}.terminal-toolbar-button:disabled{opacity:.45;cursor:default}
 .terminal-tabs{height:31px;flex:none;display:flex;align-items:center;gap:2px;padding:0 10px;border-bottom:1px solid #181d25;background:#0b0e13;overflow:auto}.terminal-tab{height:25px;display:flex;align-items:center;gap:7px;padding:0 9px;border:1px solid transparent;border-radius:5px;background:transparent;color:#707a88;cursor:pointer;font:9px Inter,ui-sans-serif,system-ui,sans-serif;white-space:nowrap}.terminal-tab:hover{background:#141920;color:#aeb7c4}.terminal-tab.active{background:#161b23;border-color:#252c36;color:#e1e6ed}.terminal-tab-dot{width:6px;height:6px;border-radius:50%;background:#5e6876}.terminal-tab-dot.running{background:#c2cbd6;box-shadow:0 0 7px #c2cbd655}
 .terminal-body{position:relative;min-height:0;flex:1;background:#080a0e}.terminal-xterm-host{position:absolute;inset:0;padding:8px 10px 6px;overflow:hidden}.terminal-xterm-host .xterm{height:100%}.terminal-xterm-host .xterm-viewport{scrollbar-width:thin}.terminal-placeholder{position:absolute;inset:0;display:flex;align-items:flex-start;padding:13px;color:#596371;font:11px/1.55 ui-monospace,SFMono-Regular,Consolas,"Cascadia Mono",monospace;pointer-events:none}.terminal-placeholder.hidden{display:none}.terminal-footer{height:25px;flex:none;display:flex;align-items:center;padding:0 12px;border-top:1px solid #181d25;background:#0b0e13}.terminal-status{color:#626c79;font:9px Inter,ui-sans-serif,system-ui,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.terminal-panel .xterm-screen,.terminal-panel .xterm-rows{font-variant-ligatures:none}
@@ -60,9 +70,11 @@ rail.insertBefore(button, rail.querySelector('.rail-spacer'));
 const panel = document.createElement('section');
 panel.className = 'terminal-panel';
 panel.setAttribute('aria-label', 'Terminal');
-panel.innerHTML = `<div class="terminal-toolbar"><strong class="terminal-title">TERMINAL</strong><select class="terminal-shell-select" id="terminal-shell" aria-label="Shell"><option value="powershell">PowerShell</option><option value="cmd">Command Prompt (cmd)</option></select><button class="terminal-toolbar-button" id="terminal-new" type="button">Novo</button><button class="terminal-toolbar-button" id="terminal-kill" type="button" disabled>Parar</button><button class="terminal-toolbar-button" id="terminal-clear" type="button">Limpar</button><button class="terminal-toolbar-button" id="terminal-close" type="button" aria-label="Fechar terminal">×</button></div><div class="terminal-tabs" id="terminal-tabs"></div><div class="terminal-body"><div class="terminal-xterm-host" id="terminal-xterm-host"></div><div class="terminal-placeholder" id="terminal-placeholder">Abra uma sessão para usar o terminal.</div></div><div class="terminal-footer"><span class="terminal-status" id="terminal-status">Nenhuma sessão ativa</span></div>`;
+panel.style.height = `${readStoredPanelHeight()}px`;
+panel.innerHTML = `<div class="terminal-resize-handle" id="terminal-resize-handle" role="separator" aria-orientation="horizontal" aria-label="Redimensionar terminal"></div><div class="terminal-toolbar"><strong class="terminal-title">TERMINAL</strong><select class="terminal-shell-select" id="terminal-shell" aria-label="Shell"><option value="powershell">PowerShell</option><option value="cmd">Command Prompt (cmd)</option></select><button class="terminal-toolbar-button" id="terminal-new" type="button">Novo</button><button class="terminal-toolbar-button" id="terminal-kill" type="button" disabled>Parar</button><button class="terminal-toolbar-button" id="terminal-clear" type="button">Limpar</button><button class="terminal-toolbar-button" id="terminal-close" type="button" aria-label="Fechar terminal">×</button></div><div class="terminal-tabs" id="terminal-tabs"></div><div class="terminal-body"><div class="terminal-xterm-host" id="terminal-xterm-host"></div><div class="terminal-placeholder" id="terminal-placeholder">Abra uma sessão para usar o terminal.</div></div><div class="terminal-footer"><span class="terminal-status" id="terminal-status">Nenhuma sessão ativa</span></div>`;
 chatArea.appendChild(panel);
 
+const resizeHandle = panel.querySelector<HTMLDivElement>('#terminal-resize-handle')!;
 const shellSelect = panel.querySelector<HTMLSelectElement>('#terminal-shell')!;
 const newButton = panel.querySelector<HTMLButtonElement>('#terminal-new')!;
 const killButton = panel.querySelector<HTMLButtonElement>('#terminal-kill')!;
@@ -102,6 +114,9 @@ let fitFrame = 0;
 let renderToken = 0;
 let interruptPending = false;
 let openingDefaultSession = false;
+let resizePointerId: number | null = null;
+let resizeStartY = 0;
+let resizeStartHeight = 0;
 const outputBuffers = new Map<string, string>();
 
 function activeSession(): TerminalSession | undefined {
@@ -204,19 +219,6 @@ async function copySelection(): Promise<void> {
   }
 }
 
-async function pasteClipboard(): Promise<void> {
-  const session = activeSession();
-  if (!session || session.status !== 'running' || !session.interactive) return;
-  try {
-    const text = await navigator.clipboard.readText();
-    if (!text) return;
-    await terminalApi.writeInput({ sessionId: session.id, data: text });
-    xterm.focus();
-  } catch {
-    status.textContent = 'Não foi possível colar o conteúdo da área de transferência.';
-  }
-}
-
 async function clearActiveSession(): Promise<void> {
   const session = activeSession();
   if (!session) return;
@@ -265,6 +267,39 @@ function setOpen(value: boolean): void {
   });
 }
 
+function maxPanelHeight(): number {
+  return Math.max(MIN_PANEL_HEIGHT, Math.floor(chatArea.getBoundingClientRect().height - 72));
+}
+
+function finishPanelResize(): void {
+  if (resizePointerId === null) return;
+  try {
+    resizeHandle.releasePointerCapture(resizePointerId);
+  } catch {}
+  resizePointerId = null;
+  panel.classList.remove('resizing');
+  window.localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(Math.round(panel.getBoundingClientRect().height)));
+  scheduleFit();
+}
+
+resizeHandle.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  resizePointerId = event.pointerId;
+  resizeStartY = event.clientY;
+  resizeStartHeight = panel.getBoundingClientRect().height;
+  panel.classList.add('resizing');
+  resizeHandle.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+resizeHandle.addEventListener('pointermove', (event) => {
+  if (resizePointerId !== event.pointerId) return;
+  const nextHeight = Math.min(maxPanelHeight(), Math.max(MIN_PANEL_HEIGHT, resizeStartHeight + resizeStartY - event.clientY));
+  panel.style.height = `${Math.round(nextHeight)}px`;
+  scheduleFit();
+});
+resizeHandle.addEventListener('pointerup', finishPanelResize);
+resizeHandle.addEventListener('pointercancel', finishPanelResize);
+
 xterm.attachCustomKeyEventHandler((event) => {
   if (event.type !== 'keydown') return true;
   if (!(event.ctrlKey || event.metaKey) || event.altKey) return true;
@@ -278,10 +313,7 @@ xterm.attachCustomKeyEventHandler((event) => {
     else void interruptActiveSession();
     return false;
   }
-  if (key === 'v') {
-    void pasteClipboard();
-    return false;
-  }
+  if (key === 'v') return true;
   return true;
 });
 
