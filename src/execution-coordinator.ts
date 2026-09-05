@@ -7,6 +7,12 @@ export type ExecutionCompletion = {
   error?: string;
 };
 
+export type ExecutionCompletionPreflight = {
+  allowed: boolean;
+  plan?: ExecutionPlan;
+  error?: string;
+};
+
 const INCOMPLETE_PLAN_ERROR = 'A execução terminou antes de concluir o plano declarado.';
 
 export class ExecutionCoordinator {
@@ -32,22 +38,31 @@ export class ExecutionCoordinator {
     };
   }
 
-  complete(chatId: string, runId: string): ExecutionCompletion {
+  completionPreflight(chatId: string, runId: string): ExecutionCompletionPreflight {
     const plan = this.planner.get(chatId, runId);
-    if (!plan) return { execution: this.executions.update(chatId, { state: 'completed', runId }) };
-    if (plan.status === 'completed') {
-      return { execution: this.executions.update(chatId, { state: 'completed', runId }), plan };
+    if (!plan || plan.status === 'completed') return { allowed: true, ...(plan ? { plan } : {}) };
+    if (plan.status === 'failed') return { allowed: false, plan, error: 'O plano declarado terminou com falha.' };
+    return { allowed: false, plan, error: INCOMPLETE_PLAN_ERROR };
+  }
+
+  complete(chatId: string, runId: string): ExecutionCompletion {
+    const preflight = this.completionPreflight(chatId, runId);
+    if (preflight.allowed) {
+      return {
+        execution: this.executions.update(chatId, { state: 'completed', runId }),
+        ...(preflight.plan ? { plan: preflight.plan } : {}),
+      };
     }
-    if (plan.status === 'failed') {
-      const error = 'O plano declarado terminou com falha.';
-      return { execution: this.executions.update(chatId, { state: 'failed', error, runId }), plan, error };
+    if (preflight.plan?.status === 'failed') {
+      const error = preflight.error as string;
+      return { execution: this.executions.update(chatId, { state: 'failed', error, runId }), plan: preflight.plan, error };
     }
 
-    const failedPlan = this.failPlan(chatId, runId, INCOMPLETE_PLAN_ERROR) ?? plan;
+    const failedPlan = this.failPlan(chatId, runId, preflight.error as string) ?? preflight.plan;
     return {
-      execution: this.executions.update(chatId, { state: 'failed', error: INCOMPLETE_PLAN_ERROR, runId }),
-      plan: failedPlan,
-      error: INCOMPLETE_PLAN_ERROR,
+      execution: this.executions.update(chatId, { state: 'failed', error: preflight.error, runId }),
+      ...(failedPlan ? { plan: failedPlan } : {}),
+      error: preflight.error,
     };
   }
 
