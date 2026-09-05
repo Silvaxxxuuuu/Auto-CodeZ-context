@@ -15,6 +15,16 @@ test('read tools are always allowed', () => {
   }
 });
 
+test('internal planner tools are always allowed and never count as workspace writes', () => {
+  const runtime = new PermissionRuntime();
+  for (const level of ['read-only', 'safe', 'ask', 'unrestricted'] as const) {
+    assert.equal(runtime.decide(level, 'plan_execution'), 'allow');
+    assert.equal(runtime.decide(level, 'complete_plan_step'), 'allow');
+  }
+  assert.equal(runtime.isWriteTool('plan_execution'), false);
+  assert.equal(runtime.isWriteTool('complete_plan_step'), false);
+});
+
 test('read-only denies every write tool', () => {
   const runtime = new PermissionRuntime();
   for (const tool of allWrites) assert.equal(runtime.decide('read-only', tool), 'deny');
