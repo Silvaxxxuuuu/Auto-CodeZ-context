@@ -38,6 +38,7 @@ import { ExecutionCheckpointRuntime } from './execution-checkpoint';
 import { ExecutionCheckpointPersistence, ExecutionCheckpointStore } from './execution-checkpoint-store';
 import { ExecutionCheckpointController } from './execution-checkpoint-controller';
 import { ExecutionChangeBudgetRuntime } from './execution-change-budget';
+import { ExecutionChangeBudgetPersistence, ExecutionChangeBudgetStore } from './execution-change-budget-store';
 import { reconcileExecutionBootstrapState } from './execution-bootstrap-state';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
@@ -75,6 +76,8 @@ const executionTimelinePersistence = new ExecutionTimelinePersistence(executionT
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
 const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
+const executionChangeBudgetStore = new ExecutionChangeBudgetStore(storage);
+const executionChangeBudgetPersistence = new ExecutionChangeBudgetPersistence(executionChangeBudgetStore);
 toolRuntime.configureExecutionPlanner(executionPlanner);
 toolRuntime.configureExecutionChangeBudget(executionChangeBudgetRuntime);
 const executionPlanStore = new ExecutionPlanStore(storage);
@@ -99,6 +102,7 @@ let executionPlanHistoryPersistenceEnabled = false;
 let executionQualityGatePersistenceEnabled = false;
 let executionTaskCapsulePersistenceEnabled = false;
 let executionCheckpointPersistenceEnabled = false;
+let executionChangeBudgetPersistenceEnabled = false;
 const executionCheckpointController = new ExecutionCheckpointController(
   executionCheckpointRuntime,
   workspaceRuntime,
@@ -110,6 +114,9 @@ const executionCheckpointController = new ExecutionCheckpointController(
 toolRuntime.configureExecutionCheckpointRecorder((record) => {
   executionCheckpointRuntime.record(record);
   if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
+});
+executionChangeBudgetRuntime.subscribe((snapshots) => {
+  if (executionChangeBudgetPersistenceEnabled) executionChangeBudgetPersistence.schedule(snapshots);
 });
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 const approvalRunLocks = new Set<string>();
@@ -708,6 +715,7 @@ app.whenReady().then(async () => {
   executionQualityGateRuntime.restore(await executionQualityGateStore.load());
   executionTaskCapsuleRuntime.restore(await executionTaskCapsuleStore.load());
   executionCheckpointRuntime.hydrate(await executionCheckpointStore.load());
+  executionChangeBudgetRuntime.restore(await executionChangeBudgetStore.load());
   executionPlanner.restore(await executionPlanStore.load());
   await restoreExecutionBootstrapState();
   for (const run of agentRuntime.listPendingRuns()) executionCoordinator.resumePlan(run.chatId, run.runId);
@@ -719,6 +727,7 @@ app.whenReady().then(async () => {
   executionQualityGatePersistenceEnabled = true;
   executionTaskCapsulePersistenceEnabled = true;
   executionCheckpointPersistenceEnabled = true;
+  executionChangeBudgetPersistenceEnabled = true;
   executionStatePersistence.schedule(executionManager.list());
   executionTimelinePersistence.schedule(executionTimeline.list());
   executionPlanPersistence.schedule(executionPlanner.list());
@@ -726,6 +735,7 @@ app.whenReady().then(async () => {
   executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
   executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
   executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
+  executionChangeBudgetPersistence.schedule(executionChangeBudgetRuntime.list());
   activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
