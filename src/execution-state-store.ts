@@ -76,8 +76,8 @@ export class ExecutionStatePersistence {
   schedule(snapshots: ExecutionSnapshot[]): void {
     const copy = snapshots.map((snapshot) => ({ ...snapshot }));
     this.pending = this.pending
-      .catch(() => undefined)
-      .then(async () => {
+      .catch((): void => {})
+      .then(async (): Promise<void> => {
         try {
           await this.store.save(copy);
           this.lastError = undefined;
