@@ -149,6 +149,8 @@ async function addRollbackAction(panel: HTMLElement, chatId: string, signature: 
       try {
         await bridge.restoreExecutionCheckpoint!({ checkpointId: checkpoint.id, chatId: checkpoint.chatId, runId: checkpoint.runId });
         button.remove();
+        window.dispatchEvent(new CustomEvent('auto-codez-execution-refresh', { detail: { chatId: checkpoint.chatId, runId: checkpoint.runId } }));
+        window.dispatchEvent(new CustomEvent('auto-codez-chat-refresh', { detail: { chatId: checkpoint.chatId } }));
         createToast('Alterações desta execução foram desfeitas com segurança.', 'success');
       } catch (error) {
         button.disabled = false;
