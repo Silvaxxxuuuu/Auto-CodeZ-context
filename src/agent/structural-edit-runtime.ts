@@ -14,10 +14,16 @@ export interface StructuralSymbolMatch {
   endLine?: number;
 }
 
+export interface StructuralReplacementRange {
+  startOffset: number;
+  endOffset: number;
+}
+
 export interface StructuralSymbolLocator {
   readonly id: string;
   supports(filePath: string): boolean;
   locate(filePath: string, content: string, query: StructuralSymbolQuery): Promise<StructuralSymbolMatch[]> | StructuralSymbolMatch[];
+  validateReplacement(filePath: string, content: string, query: StructuralSymbolQuery, replacementRange: StructuralReplacementRange): Promise<void> | void;
 }
 
 export interface StructuralReplacementResult {
@@ -66,6 +72,11 @@ export class StructuralEditRuntime {
 
     const after = content.slice(0, match.startOffset) + replacement + content.slice(match.endOffset);
     if (after === content) throw new Error('A substituição estrutural não produziria nenhuma alteração.');
+
+    await locator.validateReplacement(filePath, after, normalizedQuery, {
+      startOffset: match.startOffset,
+      endOffset: match.startOffset + replacement.length,
+    });
 
     return { before: content, after, match: { ...match }, locatorId: locator.id };
   }
