@@ -21,7 +21,9 @@ export async function resumeRecoveredRun(
   executionManager: ExecutionManager,
   recoverable: RecoverableRun,
   now = Date.now(),
+  signal?: AbortSignal,
 ): Promise<RecoveryResult> {
+  signal?.throwIfAborted();
   const existing = executionManager.get(recoverable.chatId);
   if (existing && (existing.state === 'running' || existing.state === 'waiting_approval')) {
     throw new Error(`O chat ${recoverable.chatId} já possui uma execução ativa.`);
@@ -30,7 +32,8 @@ export async function resumeRecoveredRun(
   executionManager.start(recoverable.chatId, now, recoverable.runId);
 
   try {
-    const result = await agentRuntime.resumeRecovered(recoverable.runId);
+    const result = await agentRuntime.resumeRecovered(recoverable.runId, signal);
+    signal?.throwIfAborted();
     const state = result.pendingApprovalIds.length ? 'waiting_approval' : 'completed';
     const execution = executionManager.update(recoverable.chatId, {
       state,
@@ -38,6 +41,10 @@ export async function resumeRecoveredRun(
     });
     return { result, execution };
   } catch (error) {
+    if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      executionManager.remove(recoverable.chatId);
+      throw error;
+    }
     const message = error instanceof Error ? error.message : String(error);
     const execution = executionManager.update(recoverable.chatId, {
       state: 'failed',
