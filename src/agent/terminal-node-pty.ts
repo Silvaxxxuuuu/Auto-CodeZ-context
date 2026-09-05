@@ -48,6 +48,16 @@ function cleanEnvironment(source: NodeJS.ProcessEnv): Record<string, string> {
   return result;
 }
 
+function normalizeNodePtyModule(value: unknown): NodePtyModule | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const direct = value as Partial<NodePtyModule> & { default?: unknown };
+  if (typeof direct.spawn === 'function') return direct as NodePtyModule;
+  if (direct.default && typeof direct.default === 'object' && typeof (direct.default as Partial<NodePtyModule>).spawn === 'function') {
+    return direct.default as NodePtyModule;
+  }
+  return undefined;
+}
+
 class NodePtyInteractiveTerminalProcess implements InteractiveTerminalProcess {
   readonly supportsResize = true;
 
@@ -104,5 +114,16 @@ export class NodePtyInteractiveTerminalProcessFactory implements InteractiveTerm
       useConpty: process.platform === 'win32',
     });
     return new NodePtyInteractiveTerminalProcess(processHandle);
+  }
+}
+
+export async function loadNodePtyInteractiveTerminalProcessFactory(
+  importer: (specifier: string) => Promise<unknown> = async (specifier) => import(/* @vite-ignore */ specifier),
+): Promise<NodePtyInteractiveTerminalProcessFactory | undefined> {
+  try {
+    const loaded = normalizeNodePtyModule(await importer('node-pty'));
+    return loaded ? new NodePtyInteractiveTerminalProcessFactory(loaded) : undefined;
+  } catch {
+    return undefined;
   }
 }
