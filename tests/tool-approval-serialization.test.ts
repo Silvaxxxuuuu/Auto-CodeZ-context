@@ -66,6 +66,23 @@ test('safe mode requires approval before creating a file in the protected system
   assert.equal(await workspace.exists(SYSTEM_WORKSPACE_ID, relativePath), false);
 });
 
+test('safe mode requires approval before reading a file in the protected system workspace', async () => {
+  const workspace = new WorkspaceRuntime(async () => []);
+  const runtime = new ToolRuntime(workspace);
+
+  const result = await runtime.execute(
+    'chat-system-read',
+    SYSTEM_WORKSPACE_ID,
+    'safe',
+    { id: 'system-read', name: 'read_file', input: { path: 'Documents/private.txt' } },
+    'run-system-read',
+  );
+
+  assert.equal(result.pendingApproval, true);
+  assert.equal(result.diffPlan, undefined);
+  assert.equal(runtime.listApprovals({ chatId: 'chat-system-read', runId: 'run-system-read' }).length, 1);
+});
+
 test('unrestricted mode remains explicit for protected system workspace writes', async () => {
   const workspace = new WorkspaceRuntime(async () => []);
   const runtime = new ToolRuntime(workspace);
