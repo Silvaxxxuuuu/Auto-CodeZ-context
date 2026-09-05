@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ExecutionCoordinator } from '../src/execution-coordinator';
 import { ExecutionShadowLifecycle } from '../src/execution-shadow-lifecycle';
-import type { ExecutionShadowWorkspaceController } from '../src/execution-shadow-workspace-controller';
+import type { ExecutionShadowWorkspaceController, ShadowCommitResult } from '../src/execution-shadow-workspace-controller';
 
 function fixture(options: { preflightAllowed?: boolean; recoverable?: boolean; commitError?: Error } = {}) {
   const events: string[] = [];
@@ -39,16 +39,16 @@ function fixture(options: { preflightAllowed?: boolean; recoverable?: boolean; c
     },
   } as unknown as ExecutionCoordinator;
   const shadows = {
-    commitIfPresent: async () => {
+    commitIfPresent: async (): Promise<ShadowCommitResult> => {
       events.push('commit');
       if (options.commitError) throw options.commitError;
       return { committed: true, publicationChanges: [] };
     },
-    discardIfPresent: () => {
+    discardIfPresent: (): undefined => {
       events.push('discard');
       return undefined;
     },
-    removeChat: () => {
+    removeChat: (): number => {
       events.push('remove-chat');
       return 1;
     },
