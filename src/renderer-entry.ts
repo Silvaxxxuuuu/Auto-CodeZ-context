@@ -22,6 +22,7 @@ const criticalEnhancements: Enhancement[] = [
   { name: 'composer-resilience', load: () => import('./composer-resilience') },
   { name: 'live-activity-ui', load: () => import('./live-activity-ui') },
   { name: 'provider-error-ui', load: () => import('./provider-error-ui') },
+  { name: 'message-formatting-ui', load: () => import('./message-formatting-ui') },
 ];
 
 const secondaryEnhancements: Enhancement[] = [
