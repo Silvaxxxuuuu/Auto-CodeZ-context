@@ -4,6 +4,7 @@ import type { AIProviderConfig, AIRequest, AIResponse } from './types';
 export type ProviderRequestStatus = 'pending' | 'completed' | 'failed';
 export interface ProviderRequestJournalEntry { requestId: string; fingerprint: string; providerId: string; model: string; status: ProviderRequestStatus; createdAt: number; updatedAt: number; response?: AIResponse; error?: string; }
 export interface ProviderRequestJournalStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
+export interface ProviderRequestBeginOptions { allowInterruptedRetry?: boolean; }
 
 const STATE_FILE = 'provider-requests.json';
 const STATE_VERSION = 1;
@@ -37,12 +38,18 @@ export class ProviderRequestJournal {
     this.prune();
   }
 
-  async begin(request: AIRequest, providerScope = ''): Promise<{ requestId: string; cachedResponse?: AIResponse }> {
+  async begin(request: AIRequest, providerScope = '', options: ProviderRequestBeginOptions = {}): Promise<{ requestId: string; cachedResponse?: AIResponse }> {
     const fingerprint = fingerprintRequest(request, providerScope);
     const matching = [...this.entries.values()].filter((entry) => entry.fingerprint === fingerprint).sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt);
     const existing = matching[0];
     if (existing?.status === 'completed' && existing.response) return { requestId: existing.requestId, cachedResponse: cloneResponse(existing.response) };
-    if (existing?.status === 'pending') throw new Error('Existe uma solicitação ao provider interrompida para este contexto. Recupere ou descarte a solicitação antes de tentar novamente.');
+    if (existing?.status === 'pending') {
+      if (!options.allowInterruptedRetry) throw new Error('Existe uma solicitação ao provider interrompida para este contexto. Retome a execução correspondente antes de tentar novamente.');
+      existing.status = 'failed';
+      existing.error = 'Solicitação interrompida substituída por uma retomada explícita.';
+      existing.updatedAt = Math.max(Date.now(), this.lastCreatedAt + 1);
+      this.lastCreatedAt = existing.updatedAt;
+    }
     const now = Math.max(Date.now(), this.lastCreatedAt + 1);
     this.lastCreatedAt = now;
     const entry: ProviderRequestJournalEntry = { requestId: crypto.randomUUID(), fingerprint, providerId: request.providerId, model: request.model, status: 'pending', createdAt: now, updatedAt: now };
