@@ -247,6 +247,7 @@ export class ExecutionPlanner {
     const { plan, step } = this.requireStep(chatId, runId, stepId);
     if (plan.status === 'completed' || plan.status === 'failed') throw new Error('O plano já está em estado terminal.');
     if (step.status !== 'pending') throw new Error('Somente um passo pendente pode ser ignorado.');
+    if (plan.steps.some((item) => item.status === 'running')) throw new Error('Os passos do plano devem ser tratados em ordem; conclua o passo em execução antes de ignorar outro.');
     const firstPending = plan.steps.find((item) => item.status === 'pending');
     if (firstPending?.id !== step.id) throw new Error('Os passos do plano devem ser tratados em ordem.');
     this.appendEvidence(step, evidence);
