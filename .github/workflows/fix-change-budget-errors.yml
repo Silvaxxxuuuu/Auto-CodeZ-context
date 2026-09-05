@@ -1,12 +1,9 @@
-# trigger
 name: Normalize change budget errors
 
 on:
   push:
     branches:
       - feature/ui-hierarchy-polish
-    paths:
-      - .github/workflows/fix-change-budget-errors.yml
 
 permissions:
   contents: write
