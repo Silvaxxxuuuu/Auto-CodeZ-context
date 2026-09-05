@@ -10,6 +10,7 @@ test('read tools are always allowed', () => {
   const runtime = new PermissionRuntime();
   for (const level of ['read-only', 'safe', 'ask', 'unrestricted'] as const) {
     assert.equal(runtime.decide(level, 'read_file'), 'allow');
+    assert.equal(runtime.decide(level, 'read_symbol'), 'allow');
     assert.equal(runtime.decide(level, 'search_files'), 'allow');
   }
 });
@@ -44,6 +45,7 @@ test('unknown tools are denied and are not treated as writes', () => {
 test('isWriteTool matches the permission write policy', () => {
   const runtime = new PermissionRuntime();
   assert.equal(runtime.isWriteTool('read_file'), false);
+  assert.equal(runtime.isWriteTool('read_symbol'), false);
   assert.equal(runtime.isWriteTool('search_files'), false);
   for (const tool of allWrites) assert.equal(runtime.isWriteTool(tool), true);
 });
