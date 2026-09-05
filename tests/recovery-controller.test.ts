@@ -116,10 +116,10 @@ test('recovery-controller scopes provider retry permission only to the explicit 
       observedDuringRecovery = isExplicitProviderRecovery();
       return {
         chatId: 'chat-test',
-        pendingApprovalIds: [],
+        pendingApprovalIds: [] as string[],
         response: { content: '', model: 'test-model', providerId: 'test-provider' },
         toolRounds: 1,
-        messages: [],
+        messages: [] as never[],
       };
     },
   } as unknown as AgentRuntime;
