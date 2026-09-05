@@ -97,8 +97,20 @@ export class ProviderManager {
     return { ...config };
   }
 
+  getConfigForKey(keyId: string): AIProviderConfig {
+    const key = this.keys.find((item) => item.id === keyId);
+    if (!key?.apiKey) throw new Error('API key não encontrada ou indisponível.');
+    const adapter = this.registry.get(key.providerId);
+    return { id: key.providerId, displayName: adapter.displayName, apiKey: key.apiKey, ...(key.baseUrl ? { baseUrl: key.baseUrl } : {}), ...(key.selectedModel ? { selectedModel: key.selectedModel } : {}), enabled: true };
+  }
+
   async listModels(providerId: ProviderId): Promise<import('./types').AIModel[]> {
     const config = this.getConfig(providerId);
+    try { return await this.registry.listModels(config); } catch (error) { throw normalizeProviderError(config.displayName, 'model discovery', error); }
+  }
+
+  async listModelsForKey(keyId: string): Promise<import('./types').AIModel[]> {
+    const config = this.getConfigForKey(keyId);
     try { return await this.registry.listModels(config); } catch (error) { throw normalizeProviderError(config.displayName, 'model discovery', error); }
   }
 

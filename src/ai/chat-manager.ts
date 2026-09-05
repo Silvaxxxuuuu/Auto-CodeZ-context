@@ -22,7 +22,7 @@ export class ChatManager {
 
   async list(): Promise<ChatRecord[]> { return this.chats.map((chat) => ({ ...chat, messages: [...chat.messages] })); }
 
-  async create(input: { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }): Promise<ChatRecord> {
+  async create(input: { providerId?: string; model?: string; apiKeyId?: string; intelligence: string; permissionLevel: string; projectId?: string }): Promise<ChatRecord> {
     const now = Date.now();
     const chat: ChatRecord = {
       id: crypto.randomUUID(),
@@ -31,6 +31,7 @@ export class ChatManager {
       model: input.model || '',
       intelligence: input.intelligence as IntelligenceLevel,
       permissionLevel: input.permissionLevel as PermissionLevel,
+      ...(input.apiKeyId ? { apiKeyId: input.apiKeyId } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       messages: [],
       createdAt: now,
@@ -59,10 +60,13 @@ export class ChatManager {
     return { ...next, messages: [...next.messages] };
   }
 
-  async updateSettings(input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }): Promise<ChatRecord> {
+  async updateSettings(input: { chatId: string; providerId: string; model: string; apiKeyId?: string; intelligence: string; permissionLevel: string }): Promise<ChatRecord> {
     const chat = this.require(input.chatId);
+    const previousProviderId = chat.providerId;
     chat.providerId = input.providerId;
     chat.model = input.model;
+    if (input.apiKeyId) chat.apiKeyId = input.apiKeyId;
+    else if (chat.apiKeyId && previousProviderId !== input.providerId) delete chat.apiKeyId;
     chat.intelligence = input.intelligence as IntelligenceLevel;
     chat.permissionLevel = input.permissionLevel as PermissionLevel;
     chat.updatedAt = Date.now();

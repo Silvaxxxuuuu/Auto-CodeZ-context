@@ -5,9 +5,27 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return await ipcRenderer.invoke(channel, ...args) as T;
 }
 
+type ApprovalScope = { chatId?: string; runId?: string };
+
+function requireApprovalScope(input: ApprovalScope | undefined): ApprovalScope | undefined {
+  if (input === undefined) return undefined;
+  const value = requireObject(input, 'Contexto da aprovação');
+  return {
+    chatId: value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat'),
+    runId: value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução'),
+  };
+}
+
+function requireTerminalDimension(value: unknown, label: string): number {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) throw new Error(`${label} do terminal inválido.`);
+  return number;
+}
+
 contextBridge.exposeInMainWorld('autoCodez', {
   getState: () => invoke<{ providers: unknown[]; chats: unknown[]; projects: unknown[] }>('app:get-state'),
   listModels: (providerId: string) => invoke('providers:list-models', requireIdentifier(providerId, 'Provider')),
+  listModelsForApiKey: (keyId: string) => invoke('providers:list-models-for-key', requireIdentifier(keyId, 'API key')),
   listApiKeys: () => invoke('providers:list-keys'),
   saveApiKey: (input: { providerId: string; name: string; apiKey: string; model?: string; baseUrl?: string }) => {
     const value = requireObject(input, 'Dados da API key');
@@ -34,26 +52,28 @@ contextBridge.exposeInMainWorld('autoCodez', {
     return invoke('providers:save', { providerId, apiKey, model, baseUrl });
   },
   removeProvider: (providerId: string) => invoke('providers:remove', requireIdentifier(providerId, 'Provider')),
-  createChat: (input: { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }) => {
+  createChat: (input: { providerId?: string; model?: string; apiKeyId?: string; intelligence: string; permissionLevel: string; projectId?: string }) => {
     const value = requireObject(input, 'Dados do chat');
     const providerId = value.providerId === undefined ? undefined : requireIdentifier(value.providerId, 'Provider');
     const model = value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo');
+    const apiKeyId = value.apiKeyId === undefined ? undefined : requireIdentifier(value.apiKeyId, 'API key');
     const intelligence = requireIdentifier(value.intelligence, 'Inteligência');
     const permissionLevel = requireIdentifier(value.permissionLevel, 'Permissão');
     const projectId = value.projectId === undefined ? undefined : requireIdentifier(value.projectId, 'Projeto');
-    return invoke('chat:create', { providerId, model, intelligence, permissionLevel, projectId });
+    return invoke('chat:create', { providerId, model, apiKeyId, intelligence, permissionLevel, projectId });
   },
   deleteChat: (chatId: string) => invoke('chat:delete', requireIdentifier(chatId, 'Chat')),
   renameChat: (input: { chatId: string; title: string }) => {
     const value = requireObject(input, 'Dados do nome do chat');
     return invoke('chat:rename', { chatId: requireIdentifier(value.chatId, 'Chat'), title: requireNonEmptyString(value.title, 'Nome do chat') });
   },
-  updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => {
+  updateChatSettings: (input: { chatId: string; providerId: string; model: string; apiKeyId?: string; intelligence: string; permissionLevel: string }) => {
     const value = requireObject(input, 'Configurações do chat');
     return invoke('chat:update-settings', {
       chatId: requireIdentifier(value.chatId, 'Chat'),
       providerId: requireIdentifier(value.providerId, 'Provider'),
       model: requireIdentifier(value.model, 'Modelo'),
+      apiKeyId: value.apiKeyId === undefined ? undefined : requireIdentifier(value.apiKeyId, 'API key'),
       intelligence: requireIdentifier(value.intelligence, 'Inteligência'),
       permissionLevel: requireIdentifier(value.permissionLevel, 'Permissão'),
     });
@@ -62,20 +82,56 @@ contextBridge.exposeInMainWorld('autoCodez', {
     const value = requireObject(input, 'Mensagem');
     return invoke('chat:send', { chatId: requireIdentifier(value.chatId, 'Chat'), content: requireNonEmptyString(value.content, 'Mensagem') });
   },
-  streamChat: (input: { chatId: string; content: string }) => {
+  streamChat: async (input: { chatId: string; content: string }) => {
     const value = requireObject(input, 'Mensagem');
-    return invoke('chat:stream', { chatId: requireIdentifier(value.chatId, 'Chat'), content: requireNonEmptyString(value.content, 'Mensagem') });
+    const result = await invoke<{ pendingApprovalIds: string[]; chat: unknown; error?: string }>('chat:stream', { chatId: requireIdentifier(value.chatId, 'Chat'), content: requireNonEmptyString(value.content, 'Mensagem') });
+    if (result.error) throw new Error(result.error);
+    return result;
   },
+  stopChat: (chatId: string) => invoke('chat:stop', requireIdentifier(chatId, 'Chat')),
   onStreamEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('chat:stream-event', handler);
     return () => ipcRenderer.removeListener('chat:stream-event', handler);
   },
   listTools: () => invoke('agent:list-tools'),
-  listApprovals: () => invoke('agent:list-approvals'),
+  listApprovals: (filters?: ApprovalScope) => invoke('agent:list-approvals', requireApprovalScope(filters)),
+  listExecutions: (chatId?: string) => invoke('agent:list-executions', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  listExecutionTimeline: (filters?: ApprovalScope) => invoke('agent:list-execution-timeline', requireApprovalScope(filters)),
+  listExecutionPlans: (filters?: ApprovalScope) => invoke('agent:list-execution-plans', requireApprovalScope(filters)),
+  listExecutionPlanHistory: (filters?: ApprovalScope) => invoke('agent:list-execution-plan-history', requireApprovalScope(filters)),
+  getExecutionReport: (input: { chatId: string; runId: string }) => { const value = requireObject(input, 'Identificação do relatório de execução'); return invoke('agent:get-execution-report', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') }); },
+  listExecutionReports: (chatId?: string) => invoke('agent:list-execution-reports', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  configureExecutionQualityGate: (input: unknown) => invoke('agent:configure-execution-quality-gate', input),
+  getExecutionQualityGate: (input: { chatId: string; runId: string }) => { const value = requireObject(input, 'Identificação do quality gate'); return invoke('agent:get-execution-quality-gate', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') }); },
+  evaluateExecutionQualityGate: (input: { chatId: string; runId: string }) => { const value = requireObject(input, 'Identificação do quality gate'); return invoke('agent:evaluate-execution-quality-gate', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') }); },
+  listExecutionQualityGates: (chatId?: string) => invoke('agent:list-execution-quality-gates', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  getExecutionTaskCapsule: (input: { chatId: string; runId: string }) => { const value = requireObject(input, 'Identificação da Task Capsule'); return invoke('agent:get-execution-task-capsule', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') }); },
+  listExecutionTaskCapsules: (chatId?: string) => invoke('agent:list-execution-task-capsules', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  listExecutionCheckpoints: (filters?: ApprovalScope) => invoke('agent:list-execution-checkpoints', requireApprovalScope(filters)),
+  restoreExecutionCheckpoint: (input: { checkpointId: string; chatId: string; runId: string }) => {
+    const value = requireObject(input, 'Identificação do checkpoint');
+    return invoke('agent:restore-execution-checkpoint', {
+      checkpointId: requireIdentifier(value.checkpointId, 'Checkpoint'),
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      runId: requireIdentifier(value.runId, 'Execução'),
+    });
+  },
+  onExecutionPlanEvent: (listener: (event: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+    ipcRenderer.on('execution-plan:event', handler);
+    return () => ipcRenderer.removeListener('execution-plan:event', handler);
+  },
+  onExecutionEvent: (listener: (event: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+    ipcRenderer.on('execution:event', handler);
+    return () => ipcRenderer.removeListener('execution:event', handler);
+  },
+  listRecoverableRuns: () => invoke('agent:list-recoverable-runs'),
+  resumeRecoveredRun: (runId: string) => invoke('agent:resume-recovered', requireIdentifier(runId, 'Execução recuperável')),
   listInterruptedProviderRequests: () => invoke('agent:list-interrupted-provider-requests'),
-  approveTool: (approvalId: string) => invoke('agent:approve', requireIdentifier(approvalId, 'Aprovação')),
-  denyTool: (approvalId: string) => invoke('agent:deny', requireIdentifier(approvalId, 'Aprovação')),
+  approveTool: (approvalId: string, filters?: ApprovalScope) => invoke('agent:approve', { approvalId: requireIdentifier(approvalId, 'Aprovação'), ...requireApprovalScope(filters) }),
+  denyTool: (approvalId: string, filters?: ApprovalScope) => invoke('agent:deny', { approvalId: requireIdentifier(approvalId, 'Aprovação'), ...requireApprovalScope(filters) }),
   onActivity: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('agent:activity', handler);
@@ -85,6 +141,19 @@ contextBridge.exposeInMainWorld('autoCodez', {
     start: (input: { projectId: string; command: string }) => {
       const value = requireObject(input, 'Dados do terminal');
       return invoke('terminal:start', { projectId: requireIdentifier(value.projectId, 'Projeto'), command: requireNonEmptyString(value.command, 'Comando') });
+    },
+    writeInput: (input: { sessionId: string; data: string }) => {
+      const value = requireObject(input, 'Entrada do terminal');
+      if (typeof value.data !== 'string') throw new Error('Entrada do terminal inválida.');
+      return invoke('terminal:write-input', { sessionId: requireIdentifier(value.sessionId, 'Sessão do terminal'), data: value.data });
+    },
+    resize: (input: { sessionId: string; cols: number; rows: number }) => {
+      const value = requireObject(input, 'Tamanho do terminal');
+      return invoke('terminal:resize', {
+        sessionId: requireIdentifier(value.sessionId, 'Sessão do terminal'),
+        cols: requireTerminalDimension(value.cols, 'Número de colunas'),
+        rows: requireTerminalDimension(value.rows, 'Número de linhas'),
+      });
     },
     kill: (sessionId: string) => invoke('terminal:kill', requireIdentifier(sessionId, 'Sessão do terminal')),
     listSessions: () => invoke('terminal:list-sessions'),
@@ -114,7 +183,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
     },
     checkout: (input: { projectId: string; name: string }) => {
       const value = requireObject(input, 'Dados do checkout');
-      return invoke('git:checkout', { projectId: requireIdentifier(value.projectId, 'Projeto'), name: requireNonEmptyString(value.name, 'Branch') });
+      return invoke('git:checkout', { projectId: requireIdentifier(value.projectId, 'Projeto'), name: requireNonEmptyString(value.name, 'Nome da branch') });
     },
     stage: (input: { projectId: string; paths: string[] }) => {
       const value = requireObject(input, 'Dados do staging');

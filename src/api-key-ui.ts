@@ -10,198 +10,63 @@ type ApiKeyApi = {
 };
 
 const bridge = window.autoCodez as unknown as ApiKeyApi;
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char));
-}
-
-function queryRequired<T extends Element>(root: ParentNode, selector: string): T {
-  const element = root.querySelector<T>(selector);
-  if (!element) throw new Error(`Elemento de interface não encontrado: ${selector}`);
-  return element;
-}
-
-function closeApiKeyManager(): void {
-  document.querySelector<HTMLElement>('.api-key-manager-backdrop')?.remove();
-}
-
+function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] ?? char)); }
+function queryRequired<T extends Element>(root: ParentNode, selector: string): T { const element = root.querySelector<T>(selector); if (!element) throw new Error(`Elemento de interface não encontrado: ${selector}`); return element; }
+function closeApiKeyManager(): void { document.querySelector<HTMLElement>('.api-key-manager-backdrop')?.remove(); }
 function installStyles(): void {
   if (document.querySelector('#api-key-manager-style')) return;
-  const style = document.createElement('style');
-  style.id = 'api-key-manager-style';
-  style.textContent = `
+  const style = document.createElement('style'); style.id = 'api-key-manager-style'; style.textContent = `
     .api-key-manager-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:28px;background:#05070bcc;backdrop-filter:blur(12px)}
     .api-key-manager{width:min(760px,calc(100vw - 56px));max-height:min(760px,calc(100vh - 56px));display:flex;flex-direction:column;overflow:hidden;border:1px solid #29313c;border-radius:16px;background:#0d1016;box-shadow:0 28px 90px #00000088;color:#edf1f6}
-    .api-key-manager-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:22px 24px 17px;border-bottom:1px solid #202631}
-    .api-key-manager-head h2{margin:3px 0 5px;font-size:16px;font-weight:650}.api-key-manager-head p{margin:0;color:#778190;font-size:10px;line-height:1.5}
-    .api-key-manager-close,.api-key-manager-add,.api-key-edit,.api-key-delete{border:0;cursor:pointer;color:#8993a1;background:transparent}
-    .api-key-manager-close{width:30px;height:30px;border-radius:7px;font-size:20px}.api-key-manager-close:hover{background:#191e26;color:#eef2f7}
-    .api-key-manager-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 20px;border-bottom:1px solid #181d25}.api-key-manager-toolbar span{font-size:9px;color:#697382;text-transform:uppercase;letter-spacing:.12em;font-weight:700}
-    .api-key-manager-add{height:30px;padding:0 10px;border:1px solid #2b3440;border-radius:8px;background:#151a22;color:#dfe5ed;font-size:11px}.api-key-manager-add:hover{background:#1b212a;border-color:#3a4654}
-    .api-key-list{min-height:0;overflow:auto;padding:12px 20px 20px}.api-key-empty{padding:35px 10px;text-align:center;color:#626c7a;font-size:11px;line-height:1.7}
-    .api-key-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:14px 15px;margin:5px 0;border:1px solid #202631;border-radius:11px;background:#11151c}.api-key-card.active{border-color:#3b4655;background:#141922}
-    .api-key-card-main{min-width:0}.api-key-card-title{display:flex;align-items:center;gap:7px;min-width:0}.api-key-card-title strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.api-key-provider{font-size:9px;color:#788291}.api-key-active{padding:2px 6px;border-radius:5px;background:#242c37;color:#dfe6ef;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
-    .api-key-meta{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:7px;color:#687382;font:9px ui-monospace,SFMono-Regular,Consolas,monospace}.api-key-meta span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .api-key-actions{display:flex;align-items:center;gap:3px}.api-key-actions button{width:28px;height:28px;border-radius:7px}.api-key-actions button:hover{background:#202630;color:#eef2f7}.api-key-actions .api-key-delete:hover{background:#3a2023;color:#ef8b91}
+    .api-key-manager-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:22px 24px 17px;border-bottom:1px solid #202631}.api-key-manager-head h2{margin:3px 0 5px;font-size:16px;font-weight:650}.api-key-manager-head p{margin:0;color:#778190;font-size:10px;line-height:1.5}
+    .api-key-manager-close,.api-key-manager-add,.api-key-edit,.api-key-delete{border:0;cursor:pointer;color:#8993a1;background:transparent}.api-key-manager-close{width:30px;height:30px;border-radius:7px;font-size:20px}.api-key-manager-close:hover{background:#191e26;color:#eef2f7}
+    .api-key-manager-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 20px;border-bottom:1px solid #181d25}.api-key-manager-toolbar span{font-size:9px;color:#697382;text-transform:uppercase;letter-spacing:.12em;font-weight:700}.api-key-manager-add{height:30px;padding:0 10px;border:1px solid #2b3440;border-radius:8px;background:#151a22;color:#dfe5ed;font-size:11px}.api-key-manager-add:hover:not(:disabled){background:#1b212a;border-color:#3a4654}.api-key-manager-add:disabled{opacity:.45;cursor:wait}
+    .api-key-list{min-height:0;overflow:auto;padding:12px 20px 20px}.api-key-empty{padding:35px 10px;text-align:center;color:#626c7a;font-size:11px;line-height:1.7}.api-key-flow-error{margin:8px 0;padding:10px;border:1px solid #4a292d;border-radius:8px;background:#211316;color:#dca1a5;font-size:10px;line-height:1.5}
+    .api-key-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:14px 15px;margin:5px 0;border:1px solid #202631;border-radius:11px;background:#11151c}.api-key-card.active{border-color:#3b4655;background:#141922}.api-key-card-main{min-width:0}.api-key-card-title{display:flex;align-items:center;gap:7px;min-width:0}.api-key-card-title strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.api-key-provider{font-size:9px;color:#788291}.api-key-active{padding:2px 6px;border-radius:5px;background:#242c37;color:#dfe6ef;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}.api-key-meta{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:7px;color:#687382;font:9px ui-monospace,SFMono-Regular,Consolas,monospace}.api-key-meta span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.api-key-actions{display:flex;align-items:center;gap:3px}.api-key-actions button{width:28px;height:28px;border-radius:7px}.api-key-actions button:hover{background:#202630;color:#eef2f7}.api-key-actions .api-key-delete:hover{background:#3a2023;color:#ef8b91}
     .api-key-edit::before,.api-key-delete::before{content:"";display:block;width:15px;height:15px;margin:auto;background:currentColor;mask:center/contain no-repeat}.api-key-edit::before{mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M4 17.3V20h2.7l9.9-9.9-2.7-2.7L4 17.3Zm14.7-8.6a1 1 0 0 0 0-1.4l-1.3-1.3a1 1 0 0 0-1.4 0l-1.3 1.3 2.7 2.7 1.3-1.3Z'/%3E%3C/svg%3E")}.api-key-delete::before{mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M6 7h12l-.7 13H6.7L6 7Zm3-3h6l1 2H8l1-2Zm-5 2h16v2H4V6Zm5 4h2v7H9v-7Zm4 0h2v7h-2v-7Z'/%3E%3C/svg%3E")}
-    .api-key-manager-form{display:none;padding:18px 20px 20px;border-bottom:1px solid #202631;background:#10141a}.api-key-manager-form.open{display:block}.api-key-manager-form h3{margin:0 0 14px;font-size:12px}.api-key-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.api-key-field{display:flex;flex-direction:column;gap:5px}.api-key-field.full{grid-column:1/-1}.api-key-field label{font-size:9px;color:#7b8593}.api-key-field input,.api-key-field select{height:34px;padding:0 9px;border:1px solid #28313d;border-radius:7px;outline:none;background:#0b0f14;color:#e8edf4;font:10px Inter,ui-sans-serif,system-ui,sans-serif}.api-key-field input:focus,.api-key-field select:focus{border-color:#566476}.api-key-form-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:14px}.api-key-cancel,.api-key-save{height:31px;padding:0 12px;border-radius:7px;cursor:pointer;font:10px Inter,ui-sans-serif,system-ui,sans-serif}.api-key-cancel{border:1px solid #29313c;background:#11151c;color:#9da7b5}.api-key-save{border:1px solid #566476;background:#e0e6ed;color:#0c1015;font-weight:650}.api-key-save:disabled{opacity:.55;cursor:wait}
-    .api-key-inline-input{height:26px;width:min(280px,100%);padding:0 7px;border:1px solid #4a5667;border-radius:6px;outline:none;background:#0b0f14;color:#eef2f7;font:11px Inter,ui-sans-serif,system-ui,sans-serif}
-    @media(max-width:620px){.api-key-grid{grid-template-columns:1fr}.api-key-field.full{grid-column:auto}.api-key-card{grid-template-columns:1fr}.api-key-actions{justify-content:flex-end}}
-  `;
-  document.head.appendChild(style);
+    .api-key-manager-form{display:none;padding:18px 20px 20px;border-bottom:1px solid #202631;background:#10141a}.api-key-manager-form.open{display:block}.api-key-manager-form h3{margin:0 0 14px;font-size:12px}.api-key-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.api-key-field{display:flex;flex-direction:column;gap:5px}.api-key-field.full{grid-column:1/-1}.api-key-field label{font-size:9px;color:#7b8593}.api-key-field input,.api-key-field select{height:34px;padding:0 9px;border:1px solid #28313d;border-radius:7px;outline:none;background:#0b0f14;color:#e8edf4;font:10px Inter,ui-sans-serif,system-ui,sans-serif}.api-key-field input:focus,.api-key-field select:focus{border-color:#566476}.api-key-form-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:14px}.api-key-cancel,.api-key-save{height:31px;padding:0 12px;border-radius:7px;cursor:pointer;font:10px Inter,ui-sans-serif,system-ui,sans-serif}.api-key-cancel{border:1px solid #29313c;background:#11151c;color:#9da7b5}.api-key-save{border:1px solid #566476;background:#e0e6ed;color:#0c1015;font-weight:650}.api-key-save:disabled{opacity:.55;cursor:wait}.api-key-inline-input{height:26px;width:min(280px,100%);padding:0 7px;border:1px solid #4a5667;border-radius:6px;outline:none;background:#0b0f14;color:#eef2f7;font:11px Inter,ui-sans-serif,system-ui,sans-serif}@media(max-width:620px){.api-key-grid{grid-template-columns:1fr}.api-key-field.full{grid-column:auto}.api-key-card{grid-template-columns:1fr}.api-key-actions{justify-content:flex-end}}
+  `; document.head.appendChild(style);
 }
 
 async function renderApiKeys(list: HTMLElement): Promise<void> {
   const keys = await bridge.listApiKeys();
-  list.innerHTML = keys.length ? keys.map((key) => `
-    <article class="api-key-card ${key.active ? 'active' : ''}" data-key-card="${escapeHtml(key.id)}">
-      <div class="api-key-card-main">
-        <div class="api-key-card-title"><strong>${escapeHtml(key.name)}</strong><span class="api-key-provider">${escapeHtml(key.providerName)}</span>${key.active ? '<span class="api-key-active">Ativa</span>' : ''}</div>
-        <div class="api-key-meta"><span>${escapeHtml(key.maskedKey)}</span>${key.selectedModel ? `<span>${escapeHtml(key.selectedModel)}</span>` : '<span>modelo automático</span>'}</div>
-      </div>
-      <div class="api-key-actions">
-        <button class="api-key-edit" data-key-edit="${escapeHtml(key.id)}" title="Renomear" aria-label="Renomear"></button>
-        ${key.active ? '' : `<button data-key-activate="${escapeHtml(key.id)}" title="Usar esta chave" aria-label="Usar esta chave">✓</button>`}
-        <button class="api-key-delete" data-key-delete="${escapeHtml(key.id)}" title="Excluir" aria-label="Excluir"></button>
-      </div>
-    </article>
-  `).join('') : '<div class="api-key-empty">Nenhuma API key cadastrada.<br>Use + Nova API Key para adicionar a primeira.</div>';
+  list.innerHTML = keys.length ? keys.map((key) => `<article class="api-key-card ${key.active ? 'active' : ''}" data-key-card="${escapeHtml(key.id)}"><div class="api-key-card-main"><div class="api-key-card-title"><strong>${escapeHtml(key.name)}</strong><span class="api-key-provider">${escapeHtml(key.providerName)}</span>${key.active ? '<span class="api-key-active">Ativa</span>' : ''}</div><div class="api-key-meta"><span>${escapeHtml(key.maskedKey)}</span>${key.selectedModel ? `<span>${escapeHtml(key.selectedModel)}</span>` : '<span>modelo automático</span>'}</div></div><div class="api-key-actions"><button class="api-key-edit" data-key-edit="${escapeHtml(key.id)}" title="Renomear" aria-label="Renomear"></button>${key.active ? '' : `<button data-key-activate="${escapeHtml(key.id)}" title="Usar esta chave" aria-label="Usar esta chave">✓</button>`}<button class="api-key-delete" data-key-delete="${escapeHtml(key.id)}" title="Excluir" aria-label="Excluir"></button></div></article>`).join('') : '<div class="api-key-empty">Nenhuma API key cadastrada.<br>Use + Nova API Key para adicionar a primeira.</div>';
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: number | undefined;
+  try { return await Promise.race([promise, new Promise<T>((_, reject) => { timer = window.setTimeout(() => reject(new Error('A operação demorou demais. Verifique a conexão e tente novamente.')), timeoutMs); })]); }
+  finally { if (timer !== undefined) window.clearTimeout(timer); }
 }
 
 async function openApiKeyManager(): Promise<void> {
-  installStyles();
-  closeApiKeyManager();
-  const state = await bridge.getState();
-  const configuredProviders = state.providers;
-  const backdrop = document.createElement('div');
-  backdrop.className = 'api-key-manager-backdrop';
-  backdrop.innerHTML = `
-    <section class="api-key-manager" role="dialog" aria-modal="true" aria-labelledby="api-key-manager-title">
-      <header class="api-key-manager-head">
-        <div><div class="eyebrow">CREDENCIAIS</div><h2 id="api-key-manager-title">API Keys</h2><p>Gerencie suas chaves por provedor. O segredo completo nunca aparece nesta interface.</p></div>
-        <button class="api-key-manager-close" type="button" aria-label="Fechar">×</button>
-      </header>
-      <div class="api-key-manager-toolbar"><span>Suas chaves</span><button class="api-key-manager-add" type="button">+ Nova API Key</button></div>
-      <form class="api-key-manager-form" id="api-key-form">
-        <h3>Nova API Key</h3>
-        <div class="api-key-grid">
-          <div class="api-key-field"><label for="api-key-provider">Provedor</label><select id="api-key-provider">${configuredProviders.map((provider) => `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.displayName)}</option>`).join('')}</select></div>
-          <div class="api-key-field"><label for="api-key-name">Nome</label><input id="api-key-name" maxlength="80" placeholder="Minha chave pessoal" autocomplete="off"></div>
-          <div class="api-key-field full"><label for="api-key-value">API Key</label><input id="api-key-value" type="password" placeholder="Cole sua API key aqui" autocomplete="new-password" spellcheck="false"></div>
-          <div class="api-key-field"><label for="api-key-model">Modelo, opcional</label><input id="api-key-model" placeholder="Modelo específico" autocomplete="off"></div>
-          <div class="api-key-field"><label for="api-key-base-url">URL base, opcional</label><input id="api-key-base-url" placeholder="https://..." autocomplete="off"></div>
-        </div>
-        <div class="api-key-form-actions"><button class="api-key-cancel" type="button">Cancelar</button><button class="api-key-save" type="submit">Salvar API Key</button></div>
-      </form>
-      <div class="api-key-list" id="api-key-list"></div>
-    </section>`;
+  installStyles(); closeApiKeyManager();
+  const backdrop = document.createElement('div'); backdrop.className = 'api-key-manager-backdrop';
+  backdrop.innerHTML = `<section class="api-key-manager" role="dialog" aria-modal="true" aria-labelledby="api-key-manager-title"><header class="api-key-manager-head"><div><div class="eyebrow">CREDENCIAIS</div><h2 id="api-key-manager-title">API Keys</h2><p>Gerencie suas chaves por provedor. O segredo completo nunca aparece nesta interface.</p></div><button class="api-key-manager-close" type="button" aria-label="Fechar">×</button></header><div class="api-key-manager-toolbar"><span>Suas chaves</span><button class="api-key-manager-add" type="button" disabled>+ Nova API Key</button></div><form class="api-key-manager-form" id="api-key-form"><h3>Nova API Key</h3><div class="api-key-grid"><div class="api-key-field"><label for="api-key-provider">Provedor</label><select id="api-key-provider"></select></div><div class="api-key-field"><label for="api-key-name">Nome</label><input id="api-key-name" maxlength="80" placeholder="Minha chave pessoal" autocomplete="off"></div><div class="api-key-field full"><label for="api-key-value">API Key</label><input id="api-key-value" type="password" placeholder="Cole sua API key aqui" autocomplete="new-password" spellcheck="false"></div><div class="api-key-field"><label for="api-key-model">Modelo, opcional</label><input id="api-key-model" placeholder="Modelo específico" autocomplete="off"></div><div class="api-key-field"><label for="api-key-base-url">URL base, opcional</label><input id="api-key-base-url" placeholder="https://..." autocomplete="off"></div></div><div class="api-key-form-actions"><button class="api-key-cancel" type="button">Cancelar</button><button class="api-key-save" type="submit">Salvar API Key</button></div></form><div class="api-key-list" id="api-key-list"><div class="api-key-empty">Carregando credenciais...</div></div></section>`;
   document.body.appendChild(backdrop);
 
-  const list = queryRequired<HTMLElement>(backdrop, '#api-key-list');
-  const form = queryRequired<HTMLFormElement>(backdrop, '#api-key-form');
-  const addButton = queryRequired<HTMLButtonElement>(backdrop, '.api-key-manager-add');
-  const cancelButton = queryRequired<HTMLButtonElement>(backdrop, '.api-key-cancel');
-  const closeButton = queryRequired<HTMLButtonElement>(backdrop, '.api-key-manager-close');
-  const nameInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-name');
-  const keyInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-value');
-  const providerInput = queryRequired<HTMLSelectElement>(backdrop, '#api-key-provider');
-  const modelInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-model');
-  const baseUrlInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-base-url');
+  const list = queryRequired<HTMLElement>(backdrop, '#api-key-list'); const form = queryRequired<HTMLFormElement>(backdrop, '#api-key-form'); const addButton = queryRequired<HTMLButtonElement>(backdrop, '.api-key-manager-add'); const cancelButton = queryRequired<HTMLButtonElement>(backdrop, '.api-key-cancel'); const closeButton = queryRequired<HTMLButtonElement>(backdrop, '.api-key-manager-close'); const nameInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-name'); const keyInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-value'); const providerInput = queryRequired<HTMLSelectElement>(backdrop, '#api-key-provider'); const modelInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-model'); const baseUrlInput = queryRequired<HTMLInputElement>(backdrop, '#api-key-base-url');
+  const refresh = async (): Promise<void> => { try { await renderApiKeys(list); } catch (error) { list.innerHTML = `<div class="api-key-flow-error">${escapeHtml(error instanceof Error ? error.message : 'Não foi possível carregar as API keys.')}</div>`; } };
+  const toggleForm = (open: boolean): void => { form.classList.toggle('open', open); if (open) nameInput.focus(); if (!open) form.reset(); };
+  addButton.addEventListener('click', () => { if (!addButton.disabled) toggleForm(true); }); cancelButton.addEventListener('click', () => toggleForm(false)); closeButton.addEventListener('click', closeApiKeyManager); backdrop.addEventListener('click', (event) => { if (event.target === backdrop) closeApiKeyManager(); });
+  form.addEventListener('submit', async (event) => { event.preventDefault(); const saveButton = queryRequired<HTMLButtonElement>(form, '.api-key-save'); const providerId = providerInput.value; const name = nameInput.value.trim(); const apiKey = keyInput.value.trim(); const model = modelInput.value.trim() || undefined; const baseUrl = baseUrlInput.value.trim() || undefined; if (!providerId || !name || !apiKey) return; saveButton.disabled = true; saveButton.textContent = 'Validando...'; try { await bridge.saveApiKey({ providerId, name, apiKey, model, baseUrl }); toggleForm(false); await refresh(); } catch (error) { window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível salvar a API key.' })); } finally { saveButton.disabled = false; saveButton.textContent = 'Salvar API Key'; } });
+  list.addEventListener('click', async (event) => { const target = event.target as HTMLElement; const edit = target.closest<HTMLElement>('[data-key-edit]'); if (edit?.dataset.keyEdit) { const keyId = edit.dataset.keyEdit; const card = edit.closest<HTMLElement>('.api-key-card'); const title = card?.querySelector<HTMLElement>('.api-key-card-title strong'); if (!card || !title) return; const input = document.createElement('input'); input.className = 'api-key-inline-input'; input.value = title.textContent || ''; title.replaceWith(input); input.focus(); input.select(); const save = async (): Promise<void> => { const name = input.value.trim(); if (!name) { await refresh(); return; } try { await bridge.renameApiKey({ keyId, name }); await refresh(); } catch (error) { window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível renomear a API key.' })); await refresh(); } }; input.addEventListener('keydown', (keyEvent) => { if (keyEvent.key === 'Enter') { keyEvent.preventDefault(); void save(); } if (keyEvent.key === 'Escape') { keyEvent.preventDefault(); void refresh(); } }); input.addEventListener('blur', () => void save()); return; } const activate = target.closest<HTMLElement>('[data-key-activate]'); if (activate?.dataset.keyActivate) { try { await bridge.setActiveApiKey(activate.dataset.keyActivate); await refresh(); } catch (error) { window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível ativar a API key.' })); } return; } const remove = target.closest<HTMLElement>('[data-key-delete]'); if (remove?.dataset.keyDelete) { if (!window.confirm('Excluir esta API key permanentemente?')) return; try { await bridge.removeApiKey(remove.dataset.keyDelete); await refresh(); } catch (error) { window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível excluir a API key.' })); } } });
 
-  const refresh = async (): Promise<void> => { await renderApiKeys(list); };
-  await refresh();
-
-  const toggleForm = (open: boolean): void => {
-    form.classList.toggle('open', open);
-    if (open) nameInput.focus();
-    if (!open) form.reset();
-  };
-
-  addButton.addEventListener('click', () => toggleForm(true));
-  cancelButton.addEventListener('click', () => toggleForm(false));
-  closeButton.addEventListener('click', closeApiKeyManager);
-  backdrop.addEventListener('click', (event) => { if (event.target === backdrop) closeApiKeyManager(); });
-
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const saveButton = queryRequired<HTMLButtonElement>(form, '.api-key-save');
-    const providerId = providerInput.value;
-    const name = nameInput.value.trim();
-    const apiKey = keyInput.value.trim();
-    const model = modelInput.value.trim() || undefined;
-    const baseUrl = baseUrlInput.value.trim() || undefined;
-    if (!name || !apiKey) return;
-    saveButton.disabled = true;
-    saveButton.textContent = 'Validando...';
-    try {
-      await bridge.saveApiKey({ providerId, name, apiKey, model, baseUrl });
-      toggleForm(false);
-      await refresh();
-    } catch (error) {
-      saveButton.disabled = false;
-      saveButton.textContent = 'Salvar API Key';
-      window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível salvar a API key.' }));
-    }
-    saveButton.disabled = false;
-    saveButton.textContent = 'Salvar API Key';
-  });
-
-  list.addEventListener('click', async (event) => {
-    const target = event.target as HTMLElement;
-    const edit = target.closest<HTMLElement>('[data-key-edit]');
-    if (edit?.dataset.keyEdit) {
-      const keyId = edit.dataset.keyEdit;
-      const card = edit.closest<HTMLElement>('.api-key-card');
-      const title = card?.querySelector<HTMLElement>('.api-key-card-title strong');
-      if (!card || !title) return;
-      const input = document.createElement('input');
-      input.className = 'api-key-inline-input';
-      input.value = title.textContent || '';
-      title.replaceWith(input);
-      input.focus();
-      input.select();
-      const save = async (): Promise<void> => {
-        const name = input.value.trim();
-        if (!name) { await refresh(); return; }
-        try { await bridge.renameApiKey({ keyId, name }); await refresh(); }
-        catch (error) { window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível renomear a API key.' })); await refresh(); }
-      };
-      input.addEventListener('keydown', (keyEvent) => { if (keyEvent.key === 'Enter') { keyEvent.preventDefault(); void save(); } if (keyEvent.key === 'Escape') { keyEvent.preventDefault(); void refresh(); } });
-      input.addEventListener('blur', () => void save());
-      return;
-    }
-    const activate = target.closest<HTMLElement>('[data-key-activate]');
-    if (activate?.dataset.keyActivate) {
-      try { await bridge.setActiveApiKey(activate.dataset.keyActivate); await refresh(); }
-      catch (error) { window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível ativar a API key.' })); }
-      return;
-    }
-    const remove = target.closest<HTMLElement>('[data-key-delete]');
-    if (remove?.dataset.keyDelete) {
-      if (!window.confirm('Excluir esta API key permanentemente?')) return;
-      try { await bridge.removeApiKey(remove.dataset.keyDelete); await refresh(); }
-      catch (error) { window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível excluir a API key.' })); }
-    }
-  });
+  try {
+    const state = await withTimeout(bridge.getState(), 15_000);
+    if (!backdrop.isConnected) return;
+    const providers = state.providers;
+    providerInput.innerHTML = providers.map((provider) => `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.displayName)}</option>`).join('');
+    addButton.disabled = providers.length === 0;
+    if (!providers.length) list.innerHTML = '<div class="api-key-flow-error">Nenhum provider está disponível para cadastrar uma chave.</div>';
+    else await refresh();
+  } catch (error) {
+    if (!backdrop.isConnected) return;
+    list.innerHTML = `<div class="api-key-flow-error">${escapeHtml(error instanceof Error ? error.message : 'Não foi possível carregar os providers.')}<br>Tente novamente sem reiniciar o aplicativo.</div>`;
+    addButton.disabled = true;
+  }
 }
 
-function installApiKeyButton(): void {
-  const rail = document.querySelector<HTMLElement>('.rail');
-  const terminalButton = document.querySelector<HTMLElement>('.terminal-rail-button');
-  if (!rail || !terminalButton || rail.querySelector('.api-key-rail-button')) return;
-  const button = document.createElement('button');
-  button.className = 'rail-button api-key-rail-button';
-  button.type = 'button';
-  button.title = 'API Keys';
-  button.setAttribute('aria-label', 'API Keys');
-  button.innerHTML = '<span aria-hidden="true"></span>';
-  rail.insertBefore(button, terminalButton);
-  button.addEventListener('click', () => void openApiKeyManager());
-}
+function installApiKeyButton(): void { const rail = document.querySelector<HTMLElement>('.rail'); const terminalButton = document.querySelector<HTMLElement>('.terminal-rail-button'); if (!rail || !terminalButton || rail.querySelector('.api-key-rail-button')) return; const button = document.createElement('button'); button.className = 'rail-button api-key-rail-button'; button.type = 'button'; button.title = 'API Keys'; button.setAttribute('aria-label', 'API Keys'); button.innerHTML = '<span aria-hidden="true"></span>'; rail.insertBefore(button, terminalButton); button.addEventListener('click', () => void openApiKeyManager()); }
 
-installStyles();
-installApiKeyButton();
-if (!document.querySelector('.api-key-rail-button')) {
-  const observer = new MutationObserver(() => { installApiKeyButton(); if (document.querySelector('.api-key-rail-button')) observer.disconnect(); });
-  observer.observe(document.body, { childList: true, subtree: true });
-}
+installStyles(); installApiKeyButton(); if (!document.querySelector('.api-key-rail-button')) { const observer = new MutationObserver(() => { installApiKeyButton(); if (document.querySelector('.api-key-rail-button')) observer.disconnect(); }); observer.observe(document.body, { childList: true, subtree: true }); }
