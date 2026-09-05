@@ -4,6 +4,7 @@ import { CapabilityResolver } from './capability-resolver';
 import { IntelligenceRuntime } from './intelligence-runtime';
 import { ModelResolver } from './model-resolver';
 import { ProviderRegistry } from './provider-registry';
+import { isExplicitProviderRecovery } from './provider-recovery-context';
 import { fingerprintProviderScope, ProviderRequestJournal } from './provider-request-journal';
 import { formatProviderError, normalizeProviderError } from './provider-errors';
 import { SYSTEM_PROJECT_ID } from '../agent/command-runtime';
@@ -142,6 +143,10 @@ export class ChatRuntime {
     return { adapter, request: { providerId: config.id, model: model.id, messages, intelligence: resolution.effective, projectContext, toolsEnabled, tools: toolsEnabled ? tools.map((tool) => ({ ...tool })) : undefined }, resolution };
   }
 
+  private beginProviderRequest(config: AIProviderConfig, request: Parameters<ProviderRequestJournal['begin']>[0]) {
+    return this.requestJournal.begin(request, fingerprintProviderScope(config), { allowInterruptedRetry: isExplicitProviderRecovery() });
+  }
+
   async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal): Promise<AIResponse> {
     try {
       signal?.throwIfAborted();
@@ -149,7 +154,7 @@ export class ChatRuntime {
       this.activity.start('action', `Enviando mensagem para ${adapter.displayName}`);
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
-      const journal = await this.requestJournal.begin(request, fingerprintProviderScope(config));
+      const journal = await this.beginProviderRequest(config, request);
       if (journal.cachedResponse) {
         const cachedActivity = activityEventForResponse(journal.cachedResponse);
         if (cachedActivity?.activity) this.activity.emit(cachedActivity.activity);
@@ -163,7 +168,10 @@ export class ChatRuntime {
         this.activity.success('complete', 'Resposta recebida.');
         return responseForAgent(response);
       } catch (error) {
-        if (isAbortError(error)) throw error;
+        if (isAbortError(error)) {
+          await this.requestJournal.fail(journal.requestId, 'Solicitação cancelada pelo usuário.');
+          throw error;
+        }
         const normalized = normalizeProviderError(adapter.displayName, 'request', error);
         await this.requestJournal.fail(journal.requestId, normalized.message);
         throw normalized;
@@ -184,7 +192,7 @@ export class ChatRuntime {
       this.activity.start('action', `Transmitindo resposta de ${adapter.displayName}`);
       if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
-      const journal = await this.requestJournal.begin(request, fingerprintProviderScope(config));
+      const journal = await this.beginProviderRequest(config, request);
       if (journal.cachedResponse) {
         yield { type: 'start' };
         const cachedActivity = activityEventForResponse(journal.cachedResponse);
@@ -235,7 +243,10 @@ export class ChatRuntime {
         }
         this.activity.success('complete', 'Resposta recebida.');
       } catch (error) {
-        if (isAbortError(error)) throw error;
+        if (isAbortError(error)) {
+          if (!completed) await this.requestJournal.fail(journal.requestId, 'Solicitação cancelada pelo usuário.');
+          throw error;
+        }
         if (!completed) { const normalized = normalizeProviderError(adapter.displayName, 'stream', error); await this.requestJournal.fail(journal.requestId, normalized.message); throw normalized; }
         throw error;
       }
