@@ -15,6 +15,14 @@ export type ExecutionChangeUsage = {
   toolCalls: number;
 };
 
+export type ExecutionChangeBudgetSnapshot = {
+  chatId: string;
+  runId: string;
+  budget: ExecutionChangeBudget;
+  usage: ExecutionChangeUsage;
+  startedAt: number;
+};
+
 export type ExecutionChangeBudgetEvaluation = {
   chatId: string;
   runId: string;
@@ -27,6 +35,8 @@ export type ExecutionChangeBudgetEvaluation = {
 };
 
 type RunBudgetState = {
+  chatId: string;
+  runId: string;
   budget: ExecutionChangeBudget;
   files: Set<string>;
   changedLines: number;
@@ -34,6 +44,8 @@ type RunBudgetState = {
   toolCalls: number;
   startedAt: number;
 };
+
+type ExecutionChangeBudgetListener = (snapshots: ExecutionChangeBudgetSnapshot[]) => void;
 
 function keyOf(chatId: string, runId: string): string {
   return `${chatId}\u0000${runId}`;
@@ -73,6 +85,15 @@ function cloneBudget(budget: ExecutionChangeBudget): ExecutionChangeBudget {
   return { ...budget };
 }
 
+function normalizeUsage(usage: ExecutionChangeUsage): ExecutionChangeUsage {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) throw new Error('Uso do Change Budget inválido.');
+  if (!Array.isArray(usage.files) || usage.files.some((item) => typeof item !== 'string' || !item.trim())) throw new Error('Arquivos do Change Budget inválidos.');
+  const files = [...new Set(usage.files.map((item) => item.trim()))].sort();
+  const values = [usage.changedLines, usage.commands, usage.toolCalls];
+  if (values.some((value) => !Number.isInteger(value) || value < 0)) throw new Error('Contadores do Change Budget inválidos.');
+  return { files, changedLines: usage.changedLines, commands: usage.commands, toolCalls: usage.toolCalls };
+}
+
 function usageOf(state?: RunBudgetState): ExecutionChangeUsage {
   if (!state) return { files: [], changedLines: 0, commands: 0, toolCalls: 0 };
   return {
@@ -80,6 +101,36 @@ function usageOf(state?: RunBudgetState): ExecutionChangeUsage {
     changedLines: state.changedLines,
     commands: state.commands,
     toolCalls: state.toolCalls,
+  };
+}
+
+function snapshotOf(state: RunBudgetState): ExecutionChangeBudgetSnapshot {
+  return {
+    chatId: state.chatId,
+    runId: state.runId,
+    budget: cloneBudget(state.budget),
+    usage: usageOf(state),
+    startedAt: state.startedAt,
+  };
+}
+
+function stateFromSnapshot(snapshot: ExecutionChangeBudgetSnapshot): RunBudgetState {
+  const chatId = requireId(snapshot.chatId, 'Chat');
+  const runId = requireId(snapshot.runId, 'Execução');
+  const budget = normalizeBudget(snapshot.budget);
+  const usage = normalizeUsage(snapshot.usage);
+  if (typeof snapshot.startedAt !== 'number' || !Number.isFinite(snapshot.startedAt) || snapshot.startedAt < 0) throw new Error('Data inicial do Change Budget inválida.');
+  const staticViolations = violationsFor({ ...budget, maxDurationMs: undefined }, usage, 0);
+  if (staticViolations.length) throw new Error(`Snapshot do Change Budget excede o próprio limite: ${staticViolations.join(' · ')}.`);
+  return {
+    chatId,
+    runId,
+    budget,
+    files: new Set(usage.files),
+    changedLines: usage.changedLines,
+    commands: usage.commands,
+    toolCalls: usage.toolCalls,
+    startedAt: snapshot.startedAt,
   };
 }
 
@@ -127,8 +178,14 @@ function violationsFor(budget: ExecutionChangeBudget | undefined, usage: Executi
 
 export class ExecutionChangeBudgetRuntime {
   private readonly runs = new Map<string, RunBudgetState>();
+  private readonly listeners = new Set<ExecutionChangeBudgetListener>();
 
   constructor(private readonly now: () => number = () => Date.now()) {}
+
+  subscribe(listener: ExecutionChangeBudgetListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   configure(chatId: string, runId: string, budget: ExecutionChangeBudget): ExecutionChangeBudget {
     const normalizedChatId = requireId(chatId, 'Chat');
@@ -143,6 +200,8 @@ export class ExecutionChangeBudgetRuntime {
     const startedAt = this.now();
     if (!Number.isFinite(startedAt) || startedAt < 0) throw new Error('Relógio inválido para o Change Budget.');
     this.runs.set(key, {
+      chatId: normalizedChatId,
+      runId: normalizedRunId,
       budget: normalizedBudget,
       files: new Set(),
       changedLines: 0,
@@ -150,7 +209,28 @@ export class ExecutionChangeBudgetRuntime {
       toolCalls: 0,
       startedAt,
     });
+    this.emit();
     return cloneBudget(normalizedBudget);
+  }
+
+  restore(snapshots: ExecutionChangeBudgetSnapshot[]): void {
+    if (!Array.isArray(snapshots)) throw new Error('Change Budgets persistidos inválidos.');
+    const next = new Map<string, RunBudgetState>();
+    for (const snapshot of snapshots) {
+      const state = stateFromSnapshot(snapshot);
+      const key = keyOf(state.chatId, state.runId);
+      if (next.has(key)) throw new Error(`Change Budget duplicado para a execução ${state.runId}.`);
+      next.set(key, state);
+    }
+    this.runs.clear();
+    for (const [key, state] of next) this.runs.set(key, state);
+  }
+
+  list(chatId?: string): ExecutionChangeBudgetSnapshot[] {
+    return [...this.runs.values()]
+      .filter((state) => chatId === undefined || state.chatId === chatId)
+      .sort((left, right) => right.startedAt - left.startedAt || left.runId.localeCompare(right.runId))
+      .map(snapshotOf);
   }
 
   getBudget(chatId: string, runId: string): ExecutionChangeBudget | undefined {
@@ -210,16 +290,29 @@ export class ExecutionChangeBudgetRuntime {
     state.changedLines = projected.changedLines;
     state.commands = projected.commands;
     state.toolCalls = projected.toolCalls;
+    this.emit();
     return usageOf(state);
   }
 
   removeChat(chatId: string): number {
     let removed = 0;
-    for (const [key] of this.runs) {
-      if (!key.startsWith(`${chatId}\u0000`)) continue;
+    for (const [key, state] of this.runs) {
+      if (state.chatId !== chatId) continue;
       this.runs.delete(key);
       removed += 1;
     }
+    if (removed) this.emit();
     return removed;
+  }
+
+  private emit(): void {
+    if (!this.listeners.size) return;
+    const snapshots = this.list();
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(snapshots.map((snapshot) => ({ ...snapshot, budget: cloneBudget(snapshot.budget), usage: { ...snapshot.usage, files: [...snapshot.usage.files] } })));
+      } catch {
+      }
+    }
   }
 }
