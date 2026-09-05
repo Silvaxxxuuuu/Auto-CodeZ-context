@@ -24,11 +24,12 @@ style.textContent = `
 .activity-result-changes { border-top:1px solid rgba(255,255,255,.05); padding:7px 10px; }
 .activity-result-change { display:flex; align-items:center; gap:8px; padding:3px 0; font:10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 .activity-result-change-kind { width:14px; text-align:center; font-weight:700; }
-.activity-result-change-path { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.activity-result-change-details { margin-top:6px; }
-.activity-result-change-details summary { cursor:pointer; font-size:10px; opacity:.66; }
+.activity-result-change-path { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.activity-result-change-lines { flex:none; color:#7f8996; }
+.activity-result-change-rename { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#7f8996; }
 @media (max-width:720px) {
   .execution-run-details { padding:0 10px 8px; }
+  .activity-result-change-rename { display:none; }
 }
 `;
 document.head.appendChild(style);
@@ -80,20 +81,22 @@ function ensureRunDetails(runId: string): HTMLElement | null {
   return details;
 }
 
+function renderChangeRows(changes: FileDiff[]): string {
+  return changes.map((change) => {
+    const rename = change.renamedFrom ? `<span class="activity-result-change-rename" title="${escapeHtml(change.renamedFrom)}">${escapeHtml(change.renamedFrom)} →</span>` : '';
+    const lines = change.addedLines || change.removedLines ? `<span class="activity-result-change-lines">+${change.addedLines} -${change.removedLines}</span>` : '';
+    return `<div class="activity-result-change"><span class="activity-result-change-kind">${escapeHtml(changeKindLabel(change.type))}</span>${rename}<span class="activity-result-change-path" title="${escapeHtml(change.path)}">${escapeHtml(change.path)}</span>${lines}</div>`;
+  }).join('');
+}
+
 function renderChanges(changes: FileDiff[] | undefined): string {
   if (!changes?.length) return '';
-  const rows = changes.map((change) => `<div class="activity-result-change"><span class="activity-result-change-kind">${escapeHtml(changeKindLabel(change.type))}</span><span class="activity-result-change-path">${escapeHtml(change.path)}</span></div>`).join('');
-  return `<div class="activity-result-changes">${rows}</div>`;
+  return `<div class="activity-result-changes">${renderChangeRows(changes)}</div>`;
 }
 
 function renderDiffPlan(plan: DiffPlan | undefined): string {
   if (!plan?.changes?.length) return '';
-  const sections = plan.changes.map((change) => {
-    const before = change.before ?? '';
-    const after = change.after ?? '';
-    return `<details class="activity-result-change-details"><summary>${escapeHtml(change.path)}</summary><pre class="activity-result-output">${escapeHtml(`--- before ---\n${before}\n\n+++ after +++\n${after}`)}</pre></details>`;
-  }).join('');
-  return `<div class="activity-result-changes">${sections}</div>`;
+  return `<div class="activity-result-changes">${renderChangeRows(plan.changes)}</div>`;
 }
 
 function renderCommandActivity(event: ActivityEvent, container: HTMLElement): void {
@@ -103,7 +106,8 @@ function renderCommandActivity(event: ActivityEvent, container: HTMLElement): vo
   const card = document.createElement('article');
   card.className = 'activity-result-card';
   card.dataset.activityId = event.id;
-  card.innerHTML = `<div class="activity-result-head"><div class="activity-result-title"><span class="activity-result-dot ${escapeHtml(event.status)}"></span><strong>${escapeHtml(result.command)}</strong><span class="activity-result-status">${statusLabel(event.status)}</span></div><div class="activity-result-meta"><span>exit ${result.exitCode}</span><span>${formatDuration(result.durationMs)}</span></div></div>${output ? `<pre class="activity-result-output ${result.stderr ? 'activity-result-error' : ''}">${escapeHtml(output)}</pre>` : ''}${renderChanges(event.changes)}${renderDiffPlan(event.diffPlan)}${event.error ? `<div class="activity-result-output activity-result-error">${escapeHtml(event.error)}</div>` : ''}`;
+  const changeSummary = event.changes?.length ? renderChanges(event.changes) : renderDiffPlan(event.diffPlan);
+  card.innerHTML = `<div class="activity-result-head"><div class="activity-result-title"><span class="activity-result-dot ${escapeHtml(event.status)}"></span><strong>${escapeHtml(result.command)}</strong><span class="activity-result-status">${statusLabel(event.status)}</span></div><div class="activity-result-meta"><span>exit ${result.exitCode}</span><span>${formatDuration(result.durationMs)}</span></div></div>${output ? `<pre class="activity-result-output ${result.stderr ? 'activity-result-error' : ''}">${escapeHtml(output)}</pre>` : ''}${changeSummary}${event.error ? `<div class="activity-result-output activity-result-error">${escapeHtml(event.error)}</div>` : ''}`;
   container.prepend(card);
 }
 
@@ -113,7 +117,8 @@ function renderGitActivity(event: ActivityEvent, container: HTMLElement): void {
   const card = document.createElement('article');
   card.className = 'activity-result-card';
   card.dataset.activityId = event.id;
-  card.innerHTML = `<div class="activity-result-head"><div class="activity-result-title"><span class="activity-result-dot ${escapeHtml(event.status)}"></span><strong>${escapeHtml(gitOperationLabel(result.operation))}</strong><span class="activity-result-status">${statusLabel(event.status)}</span></div><div class="activity-result-meta"><span>${escapeHtml(result.branch)}</span></div></div><div class="activity-result-git"><div class="activity-result-git-row"><span class="activity-result-git-label">Operação</span><span>${escapeHtml(result.operation)}</span></div>${result.output ? `<pre class="activity-result-output">${escapeHtml(result.output)}</pre>` : ''}${event.error ? `<div class="activity-result-error">${escapeHtml(event.error)}</div>` : ''}</div>${renderChanges(event.changes)}${renderDiffPlan(event.diffPlan)}`;
+  const changeSummary = event.changes?.length ? renderChanges(event.changes) : renderDiffPlan(event.diffPlan);
+  card.innerHTML = `<div class="activity-result-head"><div class="activity-result-title"><span class="activity-result-dot ${escapeHtml(event.status)}"></span><strong>${escapeHtml(gitOperationLabel(result.operation))}</strong><span class="activity-result-status">${statusLabel(event.status)}</span></div><div class="activity-result-meta"><span>${escapeHtml(result.branch)}</span></div></div><div class="activity-result-git"><div class="activity-result-git-row"><span class="activity-result-git-label">Operação</span><span>${escapeHtml(result.operation)}</span></div>${result.output ? `<pre class="activity-result-output">${escapeHtml(result.output)}</pre>` : ''}${event.error ? `<div class="activity-result-error">${escapeHtml(event.error)}</div>` : ''}</div>${changeSummary}`;
   container.prepend(card);
 }
 
