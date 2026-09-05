@@ -71,6 +71,22 @@ class FakeWorkspace implements ExecutionCheckpointWorkspace {
   }
 }
 
+class FailAfterWriteWorkspace extends FakeWorkspace {
+  private failed = false;
+
+  constructor(private readonly failingPath: string, private readonly failingContent: string) {
+    super();
+  }
+
+  override async writeFile(projectId: string, path: string, content: string): Promise<void> {
+    await super.writeFile(projectId, path, content);
+    if (!this.failed && path === this.failingPath && content === this.failingContent) {
+      this.failed = true;
+      throw new Error('simulated write failure');
+    }
+  }
+}
+
 function record(runtime: ExecutionCheckpointRuntime, changes: FileDiff[]) {
   return runtime.record({ chatId: 'chat-a', runId: 'run-a', projectId: 'project-a', toolCallId: 'tool-a', changes });
 }
@@ -127,6 +143,24 @@ test('mudança externa bloqueia toda a restauração antes da primeira mutação
   assert.deepEqual(workspace.operations, []);
   assert.equal(await workspace.readFile('project-a', 'a.txt'), 'estado-da-ia');
   assert.equal(runtime.get(checkpoint.id)?.status, 'ready');
+});
+
+test('falha parcial durante rollback recompõe o estado anterior e mantém checkpoint pronto', async () => {
+  const runtime = new ExecutionCheckpointRuntime(() => 4500, () => 'checkpoint-compensated');
+  const workspace = new FailAfterWriteWorkspace('a.txt', 'a-original');
+  workspace.seed('project-a', 'a.txt', 'a-after');
+  workspace.seed('project-a', 'b.txt', 'b-after');
+  const checkpoint = record(runtime, [
+    change({ path: 'a.txt', type: 'modified', before: 'a-original', after: 'a-after', addedLines: 1, removedLines: 1 }),
+    change({ path: 'b.txt', type: 'modified', before: 'b-original', after: 'b-after', addedLines: 1, removedLines: 1 }),
+  ]);
+
+  await assert.rejects(() => runtime.restore(checkpoint.id, workspace), /workspace foi recomposto/i);
+
+  assert.equal(await workspace.readFile('project-a', 'a.txt'), 'a-after');
+  assert.equal(await workspace.readFile('project-a', 'b.txt'), 'b-after');
+  assert.equal(runtime.get(checkpoint.id)?.status, 'ready');
+  assert.equal(runtime.get(checkpoint.id)?.restoredAt, undefined);
 });
 
 test('rejeita caminhos duplicados ou sobrepostos incluindo origem de rename', () => {
