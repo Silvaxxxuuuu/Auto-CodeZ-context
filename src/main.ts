@@ -8,6 +8,7 @@ import { ProjectManager } from './project/project-manager';
 import { ToolRuntime } from './agent/tool-runtime';
 import { AgentRuntime } from './agent/agent-runtime';
 import { ChatRuntime } from './ai/chat-runtime';
+import { runWithAbortSignal } from './ai/request-cancellation';
 import { TerminalService, type TerminalEvent } from './agent/terminal-service';
 import { GitRuntime } from './agent/git-runtime';
 import { GitService } from './agent/git-service';
@@ -47,6 +48,7 @@ const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefin
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const executionManager = new ExecutionManager();
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
+const approvalRunLocks = new Set<string>();
 let mainWindow: BrowserWindow | null = null;
 
 function sendTerminalEvent(event: unknown): void {
@@ -55,6 +57,14 @@ function sendTerminalEvent(event: unknown): void {
 
 function sendActivity(event: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('agent:activity', event);
+}
+
+function sendStreamEvent(event: AIStreamEvent): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', event);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 function createWindow(): void {
@@ -97,6 +107,33 @@ async function clearChatExecution(chatId: string): Promise<void> {
   approvalRuntime.remove({ chatId });
   await agentRuntime.cancelChat(chatId);
   executionManager.remove(chatId);
+}
+
+async function withApprovalRunLock<T>(chatId: string, runId: string, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  if (approvalRunLocks.has(runId)) throw new Error('Esta execução já está processando outra decisão de aprovação.');
+  if (activeStreamControllers.has(chatId)) throw new Error('Esta execução já possui uma operação ativa.');
+  approvalRunLocks.add(runId);
+  const controller = new AbortController();
+  activeStreamControllers.set(chatId, { runId, controller });
+  try {
+    return await runWithAbortSignal(controller.signal, () => operation(controller.signal));
+  } finally {
+    const current = activeStreamControllers.get(chatId);
+    if (current?.controller === controller) activeStreamControllers.delete(chatId);
+    approvalRunLocks.delete(runId);
+  }
+}
+
+async function cancelledRunResult(chatId: string) {
+  const chat = (await chatManager.list()).find((item) => item.id === chatId);
+  if (!chat) throw new Error('Chat não encontrado após o cancelamento.');
+  return {
+    chatId,
+    response: { content: '', model: chat.model, providerId: chat.providerId },
+    toolRounds: 0,
+    pendingApprovalIds: [] as string[],
+    messages: [...chat.messages],
+  };
 }
 
 function restoreExecutionSnapshots(): void {
@@ -198,7 +235,7 @@ ipcMain.handle('chat:stop', async (_event, chatId: string) => {
   }
   if (agentRuntime.hasPendingForChat(id) || agentRuntime.hasRecoverableForChat(id)) {
     await clearChatExecution(id);
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', { type: 'cancelled', chatId: id });
+    sendStreamEvent({ type: 'cancelled', chatId: id });
     return { stopped: true };
   }
   reconcileExecutionSlot(id);
@@ -220,7 +257,7 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     execution = executionManager.start(chatId);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', { type: 'error', chatId, error: message });
+    sendStreamEvent({ type: 'error', chatId, error: message });
     return { pendingApprovalIds: [], chat: current, error: message };
   }
 
@@ -236,7 +273,7 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     } catch {
       // Execution bookkeeping must never interrupt the provider stream.
     }
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', { ...event, chatId, runId });
+    sendStreamEvent({ ...event, chatId, runId });
   };
 
   emit({ type: 'start', chatId, runId });
@@ -244,16 +281,16 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     if (!isRetryOfPersistedUserMessage) await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const workingChat = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
-    const result = await agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId);
+    const result = await runWithAbortSignal(controller.signal, () => agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId));
     await chatManager.update({ ...workingChat, messages: result.messages });
     if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId });
     else if (executionManager.get(chatId)?.state === 'running') executionManager.update(chatId, { state: 'completed', runId });
     return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
   } catch (error) {
-    if (controller.signal.aborted) {
+    if (controller.signal.aborted || isAbortError(error)) {
       approvalRuntime.remove({ chatId });
       await agentRuntime.cancelChat(chatId);
-      executionManager.update(chatId, { state: 'completed', runId });
+      executionManager.remove(chatId);
       emit({ type: 'cancelled', chatId, runId });
       return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
     }
@@ -262,7 +299,8 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     emit({ type: 'error', chatId, runId, error: message });
     return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: message };
   } finally {
-    if (activeStreamControllers.get(chatId)?.runId === runId) activeStreamControllers.delete(chatId);
+    const active = activeStreamControllers.get(chatId);
+    if (active?.runId === runId && active.controller === controller) activeStreamControllers.delete(chatId);
   }
 });
 
@@ -296,21 +334,29 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
   const chatId = approval.chatId;
   const runId = agentRuntime.getPendingRunId(id);
   if (runId !== approval.runId) throw new Error('A aprovação não corresponde mais à execução que a criou.');
-  ensureApprovalExecution(chatId, runId);
-  executionManager.update(chatId, { state: 'running', runId });
-  try {
-    const result = await agentRuntime.resume(id);
-    const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
-    if (chat) await chatManager.update({ ...chat, messages: result.messages });
-    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId });
-    else executionManager.update(chatId, { state: 'completed', runId });
-    return result;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
-    executionManager.update(chatId, { state: stillPending ? 'waiting_approval' : 'failed', error: stillPending ? undefined : message, runId });
-    throw error;
-  }
+
+  return withApprovalRunLock(chatId, runId, async (signal) => {
+    ensureApprovalExecution(chatId, runId);
+    executionManager.update(chatId, { state: 'running', runId });
+    try {
+      const result = await agentRuntime.resume(id, signal);
+      const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+      if (chat) await chatManager.update({ ...chat, messages: result.messages });
+      if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId });
+      else executionManager.update(chatId, { state: 'completed', runId });
+      return result;
+    } catch (error) {
+      if (signal.aborted || isAbortError(error)) {
+        await clearChatExecution(chatId);
+        sendStreamEvent({ type: 'cancelled', chatId, runId });
+        return cancelledRunResult(chatId);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
+      executionManager.update(chatId, { state: stillPending ? 'waiting_approval' : 'failed', error: stillPending ? undefined : message, runId });
+      throw error;
+    }
+  });
 });
 ipcMain.handle('agent:deny', async (_event, input: unknown) => {
   const value = requireObject(input, 'Dados da aprovação');
@@ -322,21 +368,29 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
   const chatId = approval.chatId;
   const runId = agentRuntime.getPendingRunId(id);
   if (runId !== approval.runId) throw new Error('A aprovação não corresponde mais à execução que a criou.');
-  ensureApprovalExecution(chatId, runId);
-  executionManager.update(chatId, { state: 'running', runId });
-  try {
-    const result = await agentRuntime.reject(id);
-    const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
-    if (chat) await chatManager.update({ ...chat, messages: result.messages });
-    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId });
-    else executionManager.update(chatId, { state: 'completed', runId });
-    return result;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
-    executionManager.update(chatId, { state: stillPending ? 'waiting_approval' : 'failed', error: stillPending ? undefined : message, runId });
-    throw error;
-  }
+
+  return withApprovalRunLock(chatId, runId, async (signal) => {
+    ensureApprovalExecution(chatId, runId);
+    executionManager.update(chatId, { state: 'running', runId });
+    try {
+      const result = await agentRuntime.reject(id, signal);
+      const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+      if (chat) await chatManager.update({ ...chat, messages: result.messages });
+      if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId });
+      else executionManager.update(chatId, { state: 'completed', runId });
+      return result;
+    } catch (error) {
+      if (signal.aborted || isAbortError(error)) {
+        await clearChatExecution(chatId);
+        sendStreamEvent({ type: 'cancelled', chatId, runId });
+        return cancelledRunResult(chatId);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
+      executionManager.update(chatId, { state: stillPending ? 'waiting_approval' : 'failed', error: stillPending ? undefined : message, runId });
+      throw error;
+    }
+  });
 });
 
 ipcMain.handle('terminal:start', async (_event, input: { projectId: string; command: string }) => { const value = requireObject(input, 'Dados do terminal'); return terminalService.start(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.command, 'Comando')); });
