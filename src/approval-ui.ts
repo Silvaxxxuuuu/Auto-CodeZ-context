@@ -139,12 +139,13 @@ function render(approvals: Approval[]): void {
     return;
   }
 
+  const anyProcessing = processing.size > 0;
   root.innerHTML = `${approvals.length > 1 ? `<div class="ac-approval-summary"><span>${approvals.length} operações aguardam sua decisão</span><span>Você pode revisar cada uma separadamente</span></div>` : ''}${approvals.map((approval, index) => {
     const isProcessing = processing.has(approval.id);
     const detail = primaryDetail(approval);
     const meta = diffMeta(approval);
     return `
-      <article class="ac-approval-card" data-ac-approval="${escapeHtml(approval.id)}" data-processing="${String(isProcessing)}">
+      <article class="ac-approval-card" data-ac-approval="${escapeHtml(approval.id)}" data-processing="${String(anyProcessing)}">
         <div class="ac-approval-head">
           <span class="ac-approval-icon">${approvalIcon()}</span>
           <div class="ac-approval-copy">
@@ -156,8 +157,8 @@ function render(approvals: Approval[]): void {
         ${meta ? `<div class="ac-approval-meta">${escapeHtml(meta)}</div>` : ''}
         <details class="ac-approval-details"><summary>Ver detalhes da operação</summary><pre class="ac-approval-input">${escapeHtml(safeInput(approval))}</pre></details>
         <div class="ac-approval-actions">
-          <button type="button" class="ac-approval-deny" data-deny="${escapeHtml(approval.id)}" ${isProcessing ? 'disabled' : ''}>${isProcessing ? 'Processando…' : 'Recusar'}</button>
-          <button type="button" class="ac-approval-approve" data-approve="${escapeHtml(approval.id)}" ${isProcessing ? 'disabled' : ''}>${isProcessing ? 'Processando…' : 'Aprovar'}</button>
+          <button type="button" class="ac-approval-deny" data-deny="${escapeHtml(approval.id)}" ${anyProcessing ? 'disabled' : ''}>${isProcessing ? 'Processando…' : 'Recusar'}</button>
+          <button type="button" class="ac-approval-approve" data-approve="${escapeHtml(approval.id)}" ${anyProcessing ? 'disabled' : ''}>${isProcessing ? 'Processando…' : 'Aprovar'}</button>
         </div>
       </article>`;
   }).join('')}`;
@@ -185,7 +186,10 @@ const nav = document.querySelector<HTMLElement>('#nav-panel');
 if (nav) {
   new MutationObserver(() => {
     const nextChatId = selectedChatId();
-    if (nextChatId !== activeChatId) void refresh();
+    if (nextChatId !== activeChatId) {
+      processing.clear();
+      void refresh();
+    }
   }).observe(nav, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
 }
 
@@ -203,18 +207,25 @@ document.addEventListener('click', (event) => {
   if (!action) return;
   const id = action.dataset.approve || action.dataset.deny;
   if (!id) return;
-  if (processing.has(id)) {
+  if (processing.size > 0) {
     event.preventDefault();
     event.stopImmediatePropagation();
     return;
   }
   processing.set(id, Date.now());
-  const card = action.closest<HTMLElement>('[data-ac-approval]');
-  card?.querySelectorAll<HTMLButtonElement>('button').forEach((button) => { button.disabled = true; button.textContent = 'Processando…'; });
+  root.querySelectorAll<HTMLElement>('[data-ac-approval]').forEach((card) => { card.dataset.processing = 'true'; });
+  root.querySelectorAll<HTMLButtonElement>('.ac-approval-actions button').forEach((button) => { button.disabled = true; });
+  action.textContent = 'Processando…';
   window.setTimeout(() => { void refresh(); }, 250);
   window.setTimeout(() => { void refresh(); }, 1200);
   window.setTimeout(() => { void refresh(); }, PROCESSING_TIMEOUT_MS + 50);
 }, true);
+
+window.addEventListener('auto-codez-approval-settled', (event) => {
+  const id = (event as CustomEvent<{ approvalId?: string }>).detail?.approvalId;
+  if (id) processing.delete(id);
+  void refresh();
+});
 
 window.addEventListener('focus', () => { void refresh(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void refresh(); });
