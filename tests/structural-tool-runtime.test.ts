@@ -18,6 +18,27 @@ function call(id: string, input: Record<string, unknown>): AIToolCall {
   return { id, name: 'replace_symbol', input };
 }
 
+test('read_symbol reads one exact AST declaration in read-only mode without approval', async () => {
+  const value = await fixture();
+  try {
+    const file = path.join(value.root, 'read.ts');
+    const source = '// header\nexport function greet(name: string) {\n  return `Hi ${name}`;\n}\n\nconst tail = true;\n';
+    await fs.writeFile(file, source);
+
+    const result = await value.runtime.execute('chat-a', 'project-test', 'read-only', {
+      id: 'structural-read',
+      name: 'read_symbol',
+      input: { path: 'read.ts', symbol: 'greet', kind: 'function' },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.output, 'export function greet(name: string) {\n  return `Hi ${name}`;\n}');
+    assert.equal(result.approvalId, undefined);
+    assert.equal(result.pendingApproval, undefined);
+    assert.equal(await fs.readFile(file, 'utf8'), source);
+  } finally { await value.cleanup(); }
+});
+
 test('replace_symbol definition exposes a strict AST-backed write schema', async () => {
   const value = await fixture();
   try {
