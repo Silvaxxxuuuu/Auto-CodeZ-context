@@ -29,6 +29,7 @@ import { ExecutionPlanner, type ExecutionPlanChange } from './execution-planner'
 import { ExecutionPlanPersistence, ExecutionPlanStore } from './execution-plan-store';
 import { ExecutionPlanHistory } from './execution-plan-history';
 import { ExecutionPlanHistoryPersistence, ExecutionPlanHistoryStore } from './execution-plan-history-store';
+import { ExecutionReportBuilder } from './execution-report';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
@@ -70,6 +71,7 @@ const executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore
 const executionPlanHistory = new ExecutionPlanHistory();
 const executionPlanHistoryStore = new ExecutionPlanHistoryStore(storage);
 const executionPlanHistoryPersistence = new ExecutionPlanHistoryPersistence(executionPlanHistoryStore);
+const executionReportBuilder = new ExecutionReportBuilder(executionManager, executionTimeline, executionPlanHistory);
 let executionPersistenceEnabled = false;
 let executionTimelinePersistenceEnabled = false;
 let executionPlanPersistenceEnabled = false;
@@ -429,6 +431,13 @@ ipcMain.handle('agent:list-execution-plan-history', async (_event, filters?: { c
   const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
   return executionPlanHistory.list({ chatId, runId });
 });
+ipcMain.handle('agent:get-execution-report', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação do relatório de execução');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const runId = requireIdentifier(value.runId, 'Execução');
+  return executionReportBuilder.build(chatId, runId) ?? null;
+});
+ipcMain.handle('agent:list-execution-reports', async (_event, chatId?: string) => executionReportBuilder.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));
 ipcMain.handle('agent:list-recoverable-runs', async () => listRecoverableRuns(agentRuntime));
 ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
   const id = requireIdentifier(runId, 'Execução recuperável');
