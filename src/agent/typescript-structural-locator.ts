@@ -1,8 +1,10 @@
 import path from 'node:path';
 import ts from 'typescript';
-import type { StructuralSymbolKind, StructuralSymbolLocator, StructuralSymbolMatch, StructuralSymbolQuery } from './structural-edit-runtime';
+import type { StructuralReplacementRange, StructuralSymbolKind, StructuralSymbolLocator, StructuralSymbolMatch, StructuralSymbolQuery } from './structural-edit-runtime';
 
 const SUPPORTED_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
+
+type ParsedSourceFile = ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] };
 
 function scriptKind(filePath: string): ts.ScriptKind {
   switch (path.extname(filePath).toLowerCase()) {
@@ -13,6 +15,10 @@ function scriptKind(filePath: string): ts.ScriptKind {
     case '.cjs': return ts.ScriptKind.JS;
     default: return ts.ScriptKind.TS;
   }
+}
+
+function parseSourceFile(filePath: string, content: string): ParsedSourceFile {
+  return ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true, scriptKind(filePath)) as ParsedSourceFile;
 }
 
 function identifierText(name: ts.PropertyName | ts.BindingName | undefined): string | undefined {
@@ -52,6 +58,27 @@ function toMatch(sourceFile: ts.SourceFile, node: ts.Node, name: string, kind: S
   };
 }
 
+function locateInSourceFile(sourceFile: ts.SourceFile, query: StructuralSymbolQuery): StructuralSymbolMatch[] {
+  const matches: StructuralSymbolMatch[] = [];
+
+  const visit = (node: ts.Node): void => {
+    const kind = symbolKind(node);
+    if (kind) {
+      const name = symbolName(node);
+      if (name === query.name && (!query.kind || query.kind === kind)) matches.push(toMatch(sourceFile, node, name, kind));
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return matches;
+}
+
+function firstParseError(sourceFile: ParsedSourceFile): string | undefined {
+  const diagnostic = sourceFile.parseDiagnostics?.find((item) => item.category === ts.DiagnosticCategory.Error);
+  return diagnostic ? ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ') : undefined;
+}
+
 export class TypeScriptStructuralLocator implements StructuralSymbolLocator {
   readonly id = 'typescript';
 
@@ -61,19 +88,25 @@ export class TypeScriptStructuralLocator implements StructuralSymbolLocator {
 
   locate(filePath: string, content: string, query: StructuralSymbolQuery): StructuralSymbolMatch[] {
     if (!this.supports(filePath)) return [];
-    const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true, scriptKind(filePath));
-    const matches: StructuralSymbolMatch[] = [];
+    return locateInSourceFile(parseSourceFile(filePath, content), query);
+  }
 
-    const visit = (node: ts.Node): void => {
-      const kind = symbolKind(node);
-      if (kind) {
-        const name = symbolName(node);
-        if (name === query.name && (!query.kind || query.kind === kind)) matches.push(toMatch(sourceFile, node, name, kind));
-      }
-      ts.forEachChild(node, visit);
-    };
+  validateReplacement(filePath: string, content: string, query: StructuralSymbolQuery, replacementRange: StructuralReplacementRange): void {
+    const sourceFile = parseSourceFile(filePath, content);
+    const parseError = firstParseError(sourceFile);
+    if (parseError) throw new Error(`A substituição deixaria o arquivo com sintaxe inválida: ${parseError}`);
 
-    visit(sourceFile);
-    return matches;
+    const matches = locateInSourceFile(sourceFile, query);
+    if (matches.length === 0) throw new Error(`A substituição precisa preservar o símbolo '${query.name}' com o mesmo tipo solicitado.`);
+    if (matches.length > 1) throw new Error(`A substituição criaria ambiguidade para o símbolo '${query.name}': ${matches.length} correspondências encontradas.`);
+
+    const match = matches[0];
+    if (match.startOffset < replacementRange.startOffset || match.endOffset > replacementRange.endOffset) {
+      throw new Error(`A substituição precisa conter integralmente a nova declaração de '${query.name}'.`);
+    }
+
+    const leading = content.slice(replacementRange.startOffset, match.startOffset);
+    const trailing = content.slice(match.endOffset, replacementRange.endOffset);
+    if (leading.trim() || trailing.trim()) throw new Error('O conteúdo de substituição deve conter apenas uma declaração estrutural e espaços em branco opcionais.');
   }
 }
