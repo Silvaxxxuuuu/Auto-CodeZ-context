@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ExecutionManager, type ExecutionChange } from '../src/execution-manager';
+import { ExecutionManager, type ExecutionChange, type ExecutionSnapshot } from '../src/execution-manager';
 
 test('mantém execuções independentes por chat', () => {
   const manager = new ExecutionManager();
@@ -132,4 +132,54 @@ test('falha de observer não interrompe transição e unsubscribe encerra notifi
 
   assert.equal(changes.length, 1);
   assert.equal(manager.get('chat-a')?.state, 'completed');
+});
+
+test('hidrata snapshots sem emitir eventos e substitui o estado anterior', () => {
+  const manager = new ExecutionManager();
+  const changes: ExecutionChange[] = [];
+  manager.start('old-chat', 500, 'old-run');
+  manager.subscribe((change) => changes.push(change));
+
+  const snapshots: ExecutionSnapshot[] = [
+    { chatId: 'chat-a', runId: 'run-a', state: 'interrupted', startedAt: 1000, updatedAt: 1200 },
+    { chatId: 'chat-b', runId: 'run-b', state: 'failed', startedAt: 2000, updatedAt: 2300, error: 'Falha persistida' },
+  ];
+
+  manager.hydrate(snapshots);
+
+  assert.deepEqual(changes, []);
+  assert.equal(manager.get('old-chat'), undefined);
+  assert.deepEqual(manager.list(), snapshots);
+});
+
+test('hidratação usa cópias defensivas', () => {
+  const manager = new ExecutionManager();
+  const snapshots: ExecutionSnapshot[] = [
+    { chatId: 'chat-a', runId: 'run-a', state: 'running', startedAt: 1000, updatedAt: 1100, currentTool: 'read_file' },
+  ];
+
+  manager.hydrate(snapshots);
+  snapshots[0].currentTool = 'outside';
+  assert.equal(manager.get('chat-a')?.currentTool, 'read_file');
+
+  const listed = manager.list();
+  listed[0].currentTool = 'inside';
+  assert.equal(manager.get('chat-a')?.currentTool, 'read_file');
+});
+
+test('hidratação é atômica diante de snapshot inválido ou chat duplicado', () => {
+  const manager = new ExecutionManager();
+  manager.hydrate([{ chatId: 'existing', runId: 'run-existing', state: 'completed', startedAt: 1000, updatedAt: 1500 }]);
+
+  assert.throws(() => manager.hydrate([
+    { chatId: 'next', runId: 'run-next', state: 'running', startedAt: 2000, updatedAt: 2100 },
+    { chatId: 'broken', runId: 'run-broken', state: 'completed', startedAt: 3000, updatedAt: 2900 },
+  ]), /anterior ao início/i);
+  assert.equal(manager.get('existing')?.runId, 'run-existing');
+
+  assert.throws(() => manager.hydrate([
+    { chatId: 'duplicate', runId: 'run-a', state: 'completed', startedAt: 1000, updatedAt: 1200 },
+    { chatId: 'duplicate', runId: 'run-b', state: 'failed', startedAt: 1300, updatedAt: 1400, error: 'x' },
+  ]), /mais de um snapshot/i);
+  assert.equal(manager.get('existing')?.runId, 'run-existing');
 });
