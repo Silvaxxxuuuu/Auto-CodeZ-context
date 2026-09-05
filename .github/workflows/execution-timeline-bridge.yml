@@ -1,0 +1,44 @@
+name: Integrate execution timeline bridge
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/execution-timeline-bridge.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Patch read-only execution timeline bridge
+        shell: pwsh
+        run: |
+          $encoded = 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgptYWluX3BhdGggPSBQYXRoKCdzcmMvbWFpbi50cycpCm1haW4gPSBtYWluX3BhdGgucmVhZF90ZXh0KGVuY29kaW5nPSd1dGYtOCcpCgpvbGRfbWFpbiA9ICIiImlwY01haW4uaGFuZGxlKCdhZ2VudDpsaXN0LWV4ZWN1dGlvbnMnLCBhc3luYyAoX2V2ZW50LCBjaGF0SWQ/OiBzdHJpbmcpID0+IGNoYXRJZCA9PT0gdW5kZWZpbmVkID8gZXhlY3V0aW9uTWFuYWdlci5saXN0KCkgOiBleGVjdXRpb25NYW5hZ2VyLmdldChyZXF1aXJlSWRlbnRpZmllcihjaGF0SWQsICdDaGF0JykpID8/IG51bGwpOwppcGNNYWluLmhhbmRsZSgnYWdlbnQ6bGlzdC1yZWNvdmVyYWJsZS1ydW5zJywgYXN5bmMgKCkgPT4gbGlzdFJlY292ZXJhYmxlUnVucyhhZ2VudFJ1bnRpbWUpKTsKIiIiCm5ld19tYWluID0gIiIiaXBjTWFpbi5oYW5kbGUoJ2FnZW50Omxpc3QtZXhlY3V0aW9ucycsIGFzeW5jIChfZXZlbnQsIGNoYXRJZD86IHN0cmluZykgPT4gY2hhdElkID09PSB1bmRlZmluZWQgPyBleGVjdXRpb25NYW5hZ2VyLmxpc3QoKSA6IGV4ZWN1dGlvbk1hbmFnZXIuZ2V0KHJlcXVpcmVJZGVudGlmaWVyKGNoYXRJZCwgJ0NoYXQnKSkgPz8gbnVsbCk7CmlwY01haW4uaGFuZGxlKCdhZ2VudDpsaXN0LWV4ZWN1dGlvbi10aW1lbGluZScsIGFzeW5jIChfZXZlbnQsIGZpbHRlcnM/OiB7IGNoYXRJZD86IHN0cmluZzsgcnVuSWQ/OiBzdHJpbmcgfSkgPT4gewogIGlmIChmaWx0ZXJzID09PSB1bmRlZmluZWQpIHJldHVybiBleGVjdXRpb25UaW1lbGluZS5saXN0KCk7CiAgY29uc3QgdmFsdWUgPSByZXF1aXJlT2JqZWN0KGZpbHRlcnMsICdGaWx0cm8gZGEgdGltZWxpbmUgZGUgZXhlY3XDp8OjbycpOwogIGNvbnN0IGNoYXRJZCA9IHZhbHVlLmNoYXRJZCA9PT0gdW5kZWZpbmVkID8gdW5kZWZpbmVkIDogcmVxdWlyZUlkZW50aWZpZXIodmFsdWUuY2hhdElkLCAnQ2hhdCcpOwogIGNvbnN0IHJ1bklkID0gdmFsdWUucnVuSWQgPT09IHVuZGVmaW5lZCA/IHVuZGVmaW5lZCA6IHJlcXVpcmVJZGVudGlmaWVyKHZhbHVlLnJ1bklkLCAnRXhlY3XDp8OjbycpOwogIHJldHVybiBleGVjdXRpb25UaW1lbGluZS5saXN0KGNoYXRJZCwgcnVuSWQpOwp9KTsKaXBjTWFpbi5oYW5kbGUoJ2FnZW50Omxpc3QtcmVjb3ZlcmFibGUtcnVucycsIGFzeW5jICgpID0+IGxpc3RSZWNvdmVyYWJsZVJ1bnMoYWdlbnRSdW50aW1lKSk7CiIiIgoKaWYgbWFpbi5jb3VudChvbGRfbWFpbikgIT0gMToKICAgIHJhaXNlIFN5c3RlbUV4aXQoZidtYWluLnRzIGV4ZWN1dGlvbiBJUEMgYW5jaG9yIGNvdW50PXttYWluLmNvdW50KG9sZF9tYWluKX0nKQptYWluID0gbWFpbi5yZXBsYWNlKG9sZF9tYWluLCBuZXdfbWFpbiwgMSkKbWFpbl9wYXRoLndyaXRlX3RleHQobWFpbiwgZW5jb2Rpbmc9J3V0Zi04JywgbmV3bGluZT0nJykKCnByZWxvYWRfcGF0aCA9IFBhdGgoJ3NyYy9wcmVsb2FkLnRzJykKcHJlbG9hZCA9IHByZWxvYWRfcGF0aC5yZWFkX3RleHQoZW5jb2Rpbmc9J3V0Zi04JykKb2xkX3ByZWxvYWQgPSAiIiIgIGxpc3RFeGVjdXRpb25zOiAoY2hhdElkPzogc3RyaW5nKSA9PiBpbnZva2UoJ2FnZW50Omxpc3QtZXhlY3V0aW9ucycsIGNoYXRJZCA9PT0gdW5kZWZpbmVkID8gdW5kZWZpbmVkIDogcmVxdWlyZUlkZW50aWZpZXIoY2hhdElkLCAnQ2hhdCcpKSwKICBvbkV4ZWN1dGlvbkV2ZW50OiAobGlzdGVuZXI6IChldmVudDogdW5rbm93bikgPT4gdm9pZCkgPT4gewoiIiIKbmV3X3ByZWxvYWQgPSAiIiIgIGxpc3RFeGVjdXRpb25zOiAoY2hhdElkPzogc3RyaW5nKSA9PiBpbnZva2UoJ2FnZW50Omxpc3QtZXhlY3V0aW9ucycsIGNoYXRJZCA9PT0gdW5kZWZpbmVkID8gdW5kZWZpbmVkIDogcmVxdWlyZUlkZW50aWZpZXIoY2hhdElkLCAnQ2hhdCcpKSwKICBsaXN0RXhlY3V0aW9uVGltZWxpbmU6IChmaWx0ZXJzPzogQXBwcm92YWxTY29wZSkgPT4gaW52b2tlKCdhZ2VudDpsaXN0LWV4ZWN1dGlvbi10aW1lbGluZScsIHJlcXVpcmVBcHByb3ZhbFNjb3BlKGZpbHRlcnMpKSwKICBvbkV4ZWN1dGlvbkV2ZW50OiAobGlzdGVuZXI6IChldmVudDogdW5rbm93bikgPT4gdm9pZCkgPT4gewoiIiIKCmlmIHByZWxvYWQuY291bnQob2xkX3ByZWxvYWQpICE9IDE6CiAgICByYWlzZSBTeXN0ZW1FeGl0KGYncHJlbG9hZC50cyBleGVjdXRpb24gYnJpZGdlIGFuY2hvciBjb3VudD17cHJlbG9hZC5jb3VudChvbGRfcHJlbG9hZCl9JykKcHJlbG9hZCA9IHByZWxvYWQucmVwbGFjZShvbGRfcHJlbG9hZCwgbmV3X3ByZWxvYWQsIDEpCnByZWxvYWRfcGF0aC53cml0ZV90ZXh0KHByZWxvYWQsIGVuY29kaW5nPSd1dGYtOCcsIG5ld2xpbmU9JycpCg=='
+          [IO.File]::WriteAllBytes('.patch_execution_timeline_bridge.py', [Convert]::FromBase64String($encoded))
+          python .patch_execution_timeline_bridge.py
+          Remove-Item .patch_execution_timeline_bridge.py
+          git diff --check
+          npm run typecheck
+          npm test
+      - name: Commit bridge and remove workflow
+        shell: pwsh
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git add src/main.ts src/preload.ts
+          git rm .github/workflows/execution-timeline-bridge.yml
+          git commit -m "feat(execution): expose read-only execution timeline"
+          git push origin HEAD:feature/ui-hierarchy-polish
