@@ -1,8 +1,8 @@
-.chat-execution .execution-run.execution-status-success,
-.chat-execution .execution-run.execution-status-failed {
+.chat-execution .execution-run.execution-status-success:not(:has(.execution-graph)),
+.chat-execution .execution-run.execution-status-failed:not(:has(.execution-graph)) {
   display: none !important;
 }
-.chat-execution:not(:has(.execution-run.execution-status-running)):not(:has(.execution-run.execution-status-pending)) {
+.chat-execution:not(:has(.execution-run.execution-status-running)):not(:has(.execution-run.execution-status-pending)):not(:has(.execution-graph)) {
   display: none !important;
 }
 
