@@ -1,9 +1,14 @@
 import { renderMarkdown } from './core/markdown';
 import { normalizeUnicodeText } from './core/unicode-normalization';
 
+type ExternalLinkBridge = {
+  openExternal: (url: string) => Promise<unknown>;
+};
+
 const messages = document.querySelector<HTMLElement>('#messages');
 if (!messages) throw new Error('Área de mensagens indisponível.');
 
+const bridge = window.autoCodez as unknown as ExternalLinkBridge;
 const renderedMarkup = new WeakMap<HTMLElement, string>();
 let scheduled = false;
 
@@ -98,7 +103,7 @@ messages.addEventListener('click', (event) => {
   const href = safeExternalUrl(anchor.href);
   event.preventDefault();
   event.stopPropagation();
-  if (href) void window.autoCodez.openExternal(href).catch((): undefined => undefined);
+  if (href) void bridge.openExternal(href).catch((): undefined => undefined);
 });
 window.addEventListener('auto-codez-chat-refresh', schedule);
 window.addEventListener('focus', schedule);
