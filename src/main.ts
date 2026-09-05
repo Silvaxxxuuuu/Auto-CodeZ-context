@@ -233,12 +233,15 @@ async function cancelledRunResult(chatId: string) {
 }
 
 async function restoreExecutionBootstrapState(): Promise<void> {
+  const recoveredAt = Date.now();
   const snapshots = reconcileExecutionBootstrapState({
     persisted: await executionStateStore.load(),
     pendingRuns: agentRuntime.listPendingRuns(),
     recoverableRuns: listRecoverableRuns(agentRuntime),
+    now: recoveredAt,
   });
   executionManager.hydrate(snapshots);
+  for (const snapshot of snapshots) executionTimeline.recordRecovery(snapshot, recoveredAt);
 }
 
 async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnType<ChatManager['list']>>[number]; config: AIProviderConfig; projectContext?: string }> {
