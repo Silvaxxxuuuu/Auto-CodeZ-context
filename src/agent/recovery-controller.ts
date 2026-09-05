@@ -30,8 +30,12 @@ export async function resumeRecoveredRun(
   if (existing && (existing.state === 'running' || existing.state === 'waiting_approval')) {
     throw new Error(`O chat ${recoverable.chatId} já possui uma execução ativa.`);
   }
+  if (existing && existing.runId !== recoverable.runId) {
+    throw new Error(`A execução recuperável ${recoverable.runId} não corresponde ao snapshot atual do chat ${recoverable.chatId}.`);
+  }
 
-  executionManager.start(recoverable.chatId, now, recoverable.runId);
+  if (existing) executionManager.resumeInterrupted(recoverable.chatId, recoverable.runId, now);
+  else executionManager.start(recoverable.chatId, now, recoverable.runId);
 
   try {
     const result = await runWithExplicitProviderRecovery(() => agentRuntime.resumeRecovered(recoverable.runId, signal));
