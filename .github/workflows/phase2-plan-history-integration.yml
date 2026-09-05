@@ -1,0 +1,93 @@
+name: Integrate execution plan history
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/phase2-plan-history-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - name: Integrate bounded plan history
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          main = Path('src/main.ts')
+          text = main.read_text(encoding='utf-8')
+
+          def replace_once(old: str, new: str):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected one occurrence, found {count}: {old[:120]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "import { ExecutionPlanPersistence, ExecutionPlanStore } from './execution-plan-store';\n",
+              "import { ExecutionPlanPersistence, ExecutionPlanStore } from './execution-plan-store';\nimport { ExecutionPlanHistory } from './execution-plan-history';\nimport { ExecutionPlanHistoryPersistence, ExecutionPlanHistoryStore } from './execution-plan-history-store';\n",
+          )
+          replace_once(
+              "const executionPlanStore = new ExecutionPlanStore(storage);\nconst executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore);\n",
+              "const executionPlanStore = new ExecutionPlanStore(storage);\nconst executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore);\nconst executionPlanHistory = new ExecutionPlanHistory();\nconst executionPlanHistoryStore = new ExecutionPlanHistoryStore(storage);\nconst executionPlanHistoryPersistence = new ExecutionPlanHistoryPersistence(executionPlanHistoryStore);\n",
+          )
+          replace_once(
+              "let executionPlanPersistenceEnabled = false;\n",
+              "let executionPlanPersistenceEnabled = false;\nlet executionPlanHistoryPersistenceEnabled = false;\n",
+          )
+          replace_once(
+              "executionPlanner.subscribe((change) => {\n  sendExecutionPlanChange(change);\n  if (executionPlanPersistenceEnabled) executionPlanPersistence.schedule(executionPlanner.list());\n});\n",
+              "executionPlanner.subscribe((change) => {\n  sendExecutionPlanChange(change);\n  const historyChanged = executionPlanHistory.record(change);\n  if (executionPlanPersistenceEnabled) executionPlanPersistence.schedule(executionPlanner.list());\n  if (executionPlanHistoryPersistenceEnabled && historyChanged) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());\n});\n",
+          )
+          replace_once(
+              "ipcMain.handle('chat:delete', async (_event, chatId: string) => {\n  const id = requireIdentifier(chatId, 'Chat');\n  await clearChatExecution(id);\n  return chatManager.remove(id);\n});\n",
+              "ipcMain.handle('chat:delete', async (_event, chatId: string) => {\n  const id = requireIdentifier(chatId, 'Chat');\n  await clearChatExecution(id);\n  if (executionPlanHistory.purgeChat(id) && executionPlanHistoryPersistenceEnabled) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());\n  return chatManager.remove(id);\n});\n",
+          )
+          anchor = """ipcMain.handle('agent:list-execution-plans', async (_event, filters?: { chatId?: string; runId?: string }) => {\n  if (filters === undefined) return executionPlanner.list();\n  const value = requireObject(filters, 'Filtro dos planos de execução');\n  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');\n  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');\n  if (chatId !== undefined) {\n    const plan = executionPlanner.get(chatId, runId);\n    return plan ? [plan] : [];\n  }\n  return executionPlanner.list().filter((plan) => runId === undefined || plan.runId === runId);\n});\n"""
+          addition = anchor + """ipcMain.handle('agent:list-execution-plan-history', async (_event, filters?: { chatId?: string; runId?: string }) => {\n  if (filters === undefined) return executionPlanHistory.list();\n  const value = requireObject(filters, 'Filtro do histórico de planos');\n  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');\n  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');\n  return executionPlanHistory.list({ chatId, runId });\n});\n"""
+          replace_once(anchor, addition)
+          replace_once(
+              "  executionTimeline.restore(await executionTimelineStore.load());\n  await restorePersistedExecutionSnapshots();\n  executionPlanner.restore(await executionPlanStore.load());\n",
+              "  executionTimeline.restore(await executionTimelineStore.load());\n  executionPlanHistory.restore(await executionPlanHistoryStore.load());\n  await restorePersistedExecutionSnapshots();\n  executionPlanner.restore(await executionPlanStore.load());\n",
+          )
+          replace_once(
+              "  executionPlanPersistenceEnabled = true;\n  executionStatePersistence.schedule(executionManager.list());\n",
+              "  executionPlanPersistenceEnabled = true;\n  executionPlanHistoryPersistenceEnabled = true;\n  executionStatePersistence.schedule(executionManager.list());\n",
+          )
+          replace_once(
+              "  executionPlanPersistence.schedule(executionPlanner.list());\n",
+              "  executionPlanPersistence.schedule(executionPlanner.list());\n  executionPlanHistoryPersistence.schedule(executionPlanHistory.list());\n",
+          )
+          main.write_text(text, encoding='utf-8')
+
+          preload = Path('src/preload.ts')
+          ptext = preload.read_text(encoding='utf-8')
+          old = "  listExecutionPlans: (filters?: ApprovalScope) => invoke('agent:list-execution-plans', requireApprovalScope(filters)),\n"
+          new = old + "  listExecutionPlanHistory: (filters?: ApprovalScope) => invoke('agent:list-execution-plan-history', requireApprovalScope(filters)),\n"
+          if ptext.count(old) != 1:
+              raise SystemExit('Preload execution plan anchor mismatch')
+          preload.write_text(ptext.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          git diff --check
+          git diff -- src/main.ts src/preload.ts
+      - name: Commit integration and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git rm .github/workflows/phase2-plan-history-integration.yml
+          git add src/main.ts src/preload.ts
+          git commit -m "feat(execution): integrate persistent plan history"
+          git push origin HEAD:feature/ui-hierarchy-polish
