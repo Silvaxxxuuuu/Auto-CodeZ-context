@@ -53,6 +53,14 @@ export class ExecutionCoordinator {
 
   fail(chatId: string, runId: string, error: string): ExecutionCompletion {
     const message = typeof error === 'string' && error.trim() ? error.trim() : 'A execução falhou.';
+    const current = this.executions.get(chatId);
+    if (current?.runId === runId && current.state === 'interrupted') {
+      return {
+        execution: current,
+        plan: this.planner.get(chatId, runId),
+        error: message,
+      };
+    }
     const plan = this.failPlan(chatId, runId, message);
     return {
       execution: this.executions.update(chatId, { state: 'failed', error: message, runId }),
