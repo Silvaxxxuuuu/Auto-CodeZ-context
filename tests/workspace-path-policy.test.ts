@@ -11,7 +11,7 @@ test('arquivos comuns permanecem permitidos pela política de path', () => {
   assert.deepEqual(result.reasons, []);
 });
 
-test('segredos conhecidos exigem aprovação inclusive para leitura', () => {
+test('segredos conhecidos exigem aprovação para leitura', () => {
   for (const path of [
     '.env',
     '.env.local',
@@ -32,6 +32,14 @@ test('segredos conhecidos exigem aprovação inclusive para leitura', () => {
   }
 });
 
+test('mutações de segredos são bloqueadas inclusive em file tools e staging seletivo', () => {
+  for (const tool of ['write_file', 'create_file', 'replace_text', 'delete_file', 'rename_file', 'git_stage'] as const) {
+    const result = policy.evaluate(tool, ['.env']);
+    assert.equal(result.decision, 'deny', tool);
+    assert.equal(result.classification, 'sensitive', tool);
+  }
+});
+
 test('modelos de env explicitamente destinados a exemplo não são tratados como segredo', () => {
   for (const path of ['.env.example', '.env.sample', '.env.template', '.env.production.example', '.env.local.template']) {
     const result = policy.evaluate('write_file', [path]);
@@ -40,12 +48,12 @@ test('modelos de env explicitamente destinados a exemplo não são tratados como
   }
 });
 
-test('metadados Git podem ser lidos somente com aprovação e nunca modificados por file tools', () => {
+test('metadados Git podem ser lidos somente com aprovação e não podem ser modificados', () => {
   const read = policy.evaluate('read_file', ['.git/config']);
   assert.equal(read.decision, 'ask');
   assert.equal(read.classification, 'protected');
 
-  for (const tool of ['write_file', 'create_file', 'replace_text', 'delete_file', 'rename_file'] as const) {
+  for (const tool of ['write_file', 'create_file', 'replace_text', 'delete_file', 'rename_file', 'git_stage'] as const) {
     const result = policy.evaluate(tool, ['.git/config']);
     assert.equal(result.decision, 'deny', tool);
     assert.equal(result.classification, 'protected', tool);
@@ -54,7 +62,7 @@ test('metadados Git podem ser lidos somente com aprovação e nunca modificados 
 
 test('rename considera origem e destino e aplica a decisão mais forte', () => {
   const sensitiveDestination = policy.evaluate('rename_file', ['src/config.ts', '.env']);
-  assert.equal(sensitiveDestination.decision, 'ask');
+  assert.equal(sensitiveDestination.decision, 'deny');
   assert.equal(sensitiveDestination.classification, 'sensitive');
 
   const protectedDestination = policy.evaluate('rename_file', ['src/config.ts', '.git/config']);
