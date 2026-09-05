@@ -51,6 +51,8 @@ const runChatIds = new Map<string, string>();
 let pendingApprovals: Approval[] = [];
 let recoverableRuns: RecoverableRun[] = [];
 let activeChatId = '';
+let approvalRequestToken = 0;
+let recoveryRequestToken = 0;
 const MAX_RUNS = 6;
 const MAX_STEPS = 8;
 
@@ -92,12 +94,6 @@ function runTitle(run: RunState): string {
   return 'Execução do agente';
 }
 
-function approvalMarkup(approvals: Approval[]): string {
-  if (!approvals.length) return '';
-  const cards = approvals.map((approval) => `<div class="execution-approval-item" data-execution-approval="${escapeHtml(approval.id)}"><div class="execution-approval-tool"><span class="execution-approval-icon" aria-hidden="true"></span><div><div class="execution-approval-label">Aprovação necessária</div><strong>${escapeHtml(approval.toolCall.name)}</strong></div></div><pre class="execution-approval-input">${escapeHtml(JSON.stringify(approval.toolCall.input, null, 2))}</pre><div class="execution-approval-actions"><button data-approve="${escapeHtml(approval.id)}" class="primary-button">Aprovar</button><button data-deny="${escapeHtml(approval.id)}" class="danger-button">Recusar</button></div></div>`).join('');
-  return `<div class="execution-approval"><div class="execution-approval-head"><span class="execution-approval-status-dot"></span><span>Operação aguardando sua decisão</span></div>${cards}</div>`;
-}
-
 function recoveryMarkup(): string {
   const current = recoverableRuns.filter((run) => run.chatId === activeChatId);
   if (!current.length) return '';
@@ -115,11 +111,10 @@ function currentRunId(): string | undefined {
 function render(): void {
   const ordered = [...runs.values()].filter((run) => run.chatId === activeChatId).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_RUNS);
   const recovery = recoveryMarkup();
-  container.hidden = ordered.length === 0 && pendingApprovals.length === 0 && !recovery;
+  container.hidden = ordered.length === 0 && !recovery;
   container.innerHTML = recovery + ordered.map((run) => {
     const existingRun = container.querySelector<HTMLElement>(`[data-run-id="${CSS.escape(run.runId)}"]`);
     const detailsMarkup = existingRun?.querySelector<HTMLElement>('.execution-run-details')?.outerHTML || '<div class="execution-run-details"></div>';
-    const approvalMarkupForRun = pendingApprovals.length && run.runId === currentRunId() ? approvalMarkup(pendingApprovals.filter((approval) => !approval.runId || approval.runId === run.runId)) : '';
     const steps = run.steps.slice(-MAX_STEPS).map((step) => {
       const status = normalizeStatus(step.status);
       const detail = step.commandResult
@@ -129,7 +124,7 @@ function render(): void {
           : '';
       return `<div class="execution-step"><span class="execution-step-status ${statusClass(status)}"></span><span class="execution-step-label">${escapeHtml(stepLabel(step))}</span><span class="execution-step-detail">${escapeHtml(detail || statusLabel(status))}</span></div>`;
     }).join('');
-    return `<article class="execution-run ${statusClass(run.status)}" data-run-id="${escapeHtml(run.runId)}"><div class="execution-run-header"><div><div class="execution-run-kicker">Execução do agente</div><div class="execution-run-title">${escapeHtml(runTitle(run))}</div></div><span class="execution-run-status">${statusLabel(run.status)}</span></div><div class="execution-run-message">${escapeHtml(run.message)}</div><div class="execution-steps">${steps}</div>${detailsMarkup}${approvalMarkupForRun}</article>`;
+    return `<article class="execution-run ${statusClass(run.status)}" data-run-id="${escapeHtml(run.runId)}"><div class="execution-run-header"><div><div class="execution-run-kicker">Execução do agente</div><div class="execution-run-title">${escapeHtml(runTitle(run))}</div></div><span class="execution-run-status">${statusLabel(run.status)}</span></div><div class="execution-run-message">${escapeHtml(run.message)}</div><div class="execution-steps">${steps}</div>${detailsMarkup}</article>`;
   }).join('');
   ordered.forEach((run) => window.dispatchEvent(new CustomEvent('auto-codez-execution-run-rendered', { detail: { runId: run.runId } })));
 }
@@ -170,10 +165,19 @@ function handleActivity(value: unknown): void {
 }
 
 async function refreshApprovals(): Promise<void> {
+  const chatId = activeChatId;
+  const runId = currentRunId();
+  const token = ++approvalRequestToken;
+  if (!chatId) {
+    pendingApprovals = [];
+    return;
+  }
   try {
-    const runId = currentRunId();
-    pendingApprovals = (await bridge.listApprovals({ chatId: activeChatId, ...(runId ? { runId } : {}) })).filter((approval) => approval.chatId === activeChatId && (!runId || !approval.runId || approval.runId === runId));
+    const approvals = await bridge.listApprovals({ chatId, ...(runId ? { runId } : {}) });
+    if (token !== approvalRequestToken || activeChatId !== chatId) return;
+    pendingApprovals = approvals.filter((approval) => approval.chatId === chatId && (!runId || !approval.runId || approval.runId === runId));
   } catch {
+    if (token !== approvalRequestToken || activeChatId !== chatId) return;
     pendingApprovals = [];
   }
   const current = latestRun();
@@ -186,10 +190,19 @@ async function refreshApprovals(): Promise<void> {
 }
 
 async function refreshRecoverableRuns(): Promise<void> {
+  const chatId = activeChatId;
+  const token = ++recoveryRequestToken;
+  if (!chatId) {
+    recoverableRuns = [];
+    return;
+  }
   try {
-    recoverableRuns = (await bridge.listRecoverableRuns()).filter((run) => run.chatId === activeChatId);
+    const recovered = await bridge.listRecoverableRuns();
+    if (token !== recoveryRequestToken || activeChatId !== chatId) return;
+    recoverableRuns = recovered.filter((run) => run.chatId === chatId);
     for (const run of recoverableRuns) runChatIds.set(run.runId, run.chatId);
   } catch {
+    if (token !== recoveryRequestToken || activeChatId !== chatId) return;
     recoverableRuns = [];
   }
   render();
@@ -200,6 +213,8 @@ function syncChatContext(): void {
   const nextChatId = selected?.dataset.chat || '';
   if (nextChatId === activeChatId) return;
   activeChatId = nextChatId;
+  approvalRequestToken += 1;
+  recoveryRequestToken += 1;
   runs.clear();
   pendingApprovals = [];
   recoverableRuns = [];
@@ -211,8 +226,11 @@ function syncChatContext(): void {
   }
 }
 
-const chatContextObserver = new MutationObserver(syncChatContext);
-chatContextObserver.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
+const nav = document.querySelector<HTMLElement>('#nav-panel');
+if (nav) {
+  const chatContextObserver = new MutationObserver(syncChatContext);
+  chatContextObserver.observe(nav, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
+}
 
 bridge.onActivity(handleActivity);
 bridge.onStreamEvent((value: unknown) => {
@@ -241,6 +259,14 @@ bridge.onStreamEvent((value: unknown) => {
     render();
     return;
   }
+  if (event.type === 'cancelled') {
+    if (event.runId) runs.delete(event.runId);
+    else if (current) runs.delete(current.runId);
+    pendingApprovals = [];
+    recoverableRuns = recoverableRuns.filter((run) => run.runId !== event.runId);
+    render();
+    return;
+  }
   if (event.type === 'error') {
     if (current) {
       current.status = 'failed';
@@ -257,10 +283,12 @@ document.addEventListener('click', (event) => {
   const recoveryButton = target.closest<HTMLButtonElement>('[data-recover-run]');
   if (recoveryButton) {
     const runId = recoveryButton.dataset.recoverRun;
-    if (!runId) return;
+    const chatId = activeChatId;
+    if (!runId || !chatId) return;
     recoveryButton.disabled = true;
     recoveryButton.textContent = 'Retomando…';
     void bridge.resumeRecoveredRun(runId).then((result) => {
+      if (activeChatId !== chatId || result.chatId !== chatId) return;
       recoverableRuns = recoverableRuns.filter((run) => run.runId !== runId);
       runChatIds.set(runId, result.chatId);
       const now = Date.now();
@@ -278,6 +306,7 @@ document.addEventListener('click', (event) => {
       void refreshApprovals();
       void refreshRecoverableRuns();
     }).catch((error: unknown) => {
+      if (activeChatId !== chatId) return;
       recoveryButton.disabled = false;
       recoveryButton.textContent = 'Retomar execução';
       const message = error instanceof Error ? error.message : String(error);
@@ -297,9 +326,7 @@ document.addEventListener('click', (event) => {
     });
     return;
   }
-  if (target.closest('[data-approve], [data-deny]')) {
-    window.setTimeout((): void => { void refreshApprovals(); }, 80);
-  }
+  if (target.closest('[data-approve], [data-deny]')) window.setTimeout((): void => { void refreshApprovals(); }, 80);
 });
 
 syncChatContext();
