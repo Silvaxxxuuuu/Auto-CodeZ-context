@@ -12,17 +12,39 @@ const sendButton = document.querySelector<HTMLButtonElement>('#send-button');
 if (!prompt || !sendButton) throw new Error('Composer não encontrado.');
 
 let syncToken = 0;
-let periodicTimer: number | null = null;
+let syncTimer: number | null = null;
+let reconciliationTimer: number | null = null;
+let locked = false;
 
 function activeChatId(): string | undefined {
   return document.querySelector<HTMLElement>('.chat-item.selected[data-chat]')?.dataset.chat;
 }
 
-function applyLocked(locked: boolean): void {
-  prompt.disabled = locked;
-  prompt.dataset.executionLocked = String(locked);
-  sendButton.dataset.executionLocked = String(locked);
+function syncLocalAvailability(): void {
   sendButton.disabled = locked || !activeChatId() || !prompt.value.trim();
+}
+
+function stopReconciliation(): void {
+  if (reconciliationTimer === null) return;
+  window.clearInterval(reconciliationTimer);
+  reconciliationTimer = null;
+}
+
+function startReconciliation(): void {
+  if (reconciliationTimer !== null) return;
+  reconciliationTimer = window.setInterval(() => {
+    void sync();
+  }, 1500);
+}
+
+function applyLocked(nextLocked: boolean): void {
+  locked = nextLocked;
+  prompt.disabled = nextLocked;
+  prompt.dataset.executionLocked = String(nextLocked);
+  sendButton.dataset.executionLocked = String(nextLocked);
+  syncLocalAvailability();
+  if (nextLocked) startReconciliation();
+  else stopReconciliation();
 }
 
 async function sync(): Promise<void> {
@@ -40,44 +62,45 @@ async function sync(): Promise<void> {
     ]);
     if (token !== syncToken || activeChatId() !== chatId) return;
 
-    const ownedApprovals = approvals.filter((approval) => approval.chatId === chatId);
-    const hasApprovals = ownedApprovals.length > 0;
+    const hasApprovals = approvals.some((approval) => approval.chatId === chatId);
     const running = execution?.state === 'running';
     const waiting = execution?.state === 'waiting_approval';
-    const locked = running || hasApprovals || (waiting && hasApprovals);
-    applyLocked(locked);
+    applyLocked(Boolean(running || waiting || hasApprovals));
   } catch {
-    // Preserve the current UI state on transient IPC failures.
+    syncLocalAvailability();
   }
 }
 
-function ensurePeriodicSync(): void {
-  if (periodicTimer !== null) return;
-  periodicTimer = window.setInterval(() => {
+function scheduleSync(delay = 0): void {
+  if (syncTimer !== null) window.clearTimeout(syncTimer);
+  syncTimer = window.setTimeout(() => {
+    syncTimer = null;
     void sync();
-  }, 1500);
+  }, delay);
 }
 
 bridge.onStreamEvent((event): void => {
   if (event.chatId && event.chatId !== activeChatId()) return;
-  void sync();
-  if (event.type === 'start' || event.type === 'approval_required') ensurePeriodicSync();
+  scheduleSync();
 });
 
-prompt.addEventListener('input', () => { void sync(); });
-window.addEventListener('focus', () => { void sync(); });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) void sync(); });
-window.addEventListener('auto-codez-chat-refresh', () => { void sync(); });
-window.addEventListener('auto-codez-execution-refresh', () => { void sync(); });
+prompt.addEventListener('input', syncLocalAvailability);
+window.addEventListener('focus', () => scheduleSync());
+document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleSync(); });
+window.addEventListener('auto-codez-chat-refresh', () => scheduleSync());
+window.addEventListener('auto-codez-execution-refresh', () => scheduleSync());
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
   if (target.closest('[data-chat], [data-approve], [data-deny]')) {
-    window.setTimeout(() => { void sync(); }, 0);
-    window.setTimeout(() => { void sync(); }, 300);
-    window.setTimeout(() => { void sync(); }, 1200);
+    scheduleSync();
+    window.setTimeout(() => scheduleSync(), 300);
   }
 }, true);
 
-ensurePeriodicSync();
+window.addEventListener('beforeunload', () => {
+  stopReconciliation();
+  if (syncTimer !== null) window.clearTimeout(syncTimer);
+}, { once: true });
+
 void sync();
