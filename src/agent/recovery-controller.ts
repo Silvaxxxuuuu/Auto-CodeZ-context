@@ -1,5 +1,6 @@
 import type { AgentRunResult, AgentRuntime } from './agent-runtime';
 import type { ExecutionManager, ExecutionSnapshot } from '../execution-manager';
+import { runWithExplicitProviderRecovery } from '../ai/provider-recovery-context';
 
 export type RecoverableRun = {
   runId: string;
@@ -32,7 +33,7 @@ export async function resumeRecoveredRun(
   executionManager.start(recoverable.chatId, now, recoverable.runId);
 
   try {
-    const result = await agentRuntime.resumeRecovered(recoverable.runId, signal);
+    const result = await runWithExplicitProviderRecovery(() => agentRuntime.resumeRecovered(recoverable.runId, signal));
     signal?.throwIfAborted();
     const state = result.pendingApprovalIds.length ? 'waiting_approval' : 'completed';
     const execution = executionManager.update(recoverable.chatId, {
