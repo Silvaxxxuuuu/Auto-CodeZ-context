@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   listTools: () => invoke('agent:list-tools'),
   listApprovals: (filters?: ApprovalScope) => invoke('agent:list-approvals', requireApprovalScope(filters)),
   listExecutions: (chatId?: string) => invoke('agent:list-executions', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  listExecutionTimeline: (filters?: ApprovalScope) => invoke('agent:list-execution-timeline', requireApprovalScope(filters)),
   onExecutionEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('execution:event', handler);

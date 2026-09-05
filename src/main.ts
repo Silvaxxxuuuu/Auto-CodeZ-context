@@ -347,6 +347,13 @@ ipcMain.handle('agent:list-approvals', async (_event, filters?: { chatId?: strin
   return toolRuntime.listApprovals({ chatId, runId });
 });
 ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatId === undefined ? executionManager.list() : executionManager.get(requireIdentifier(chatId, 'Chat')) ?? null);
+ipcMain.handle('agent:list-execution-timeline', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return executionTimeline.list();
+  const value = requireObject(filters, 'Filtro da timeline de execução');
+  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  return executionTimeline.list(chatId, runId);
+});
 ipcMain.handle('agent:list-recoverable-runs', async () => listRecoverableRuns(agentRuntime));
 ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
   const id = requireIdentifier(runId, 'Execução recuperável');
