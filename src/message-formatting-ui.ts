@@ -32,6 +32,15 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 }
 
+function safeExternalUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    return ['http:', 'https:', 'mailto:'].includes(parsed.protocol) ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function rawText(element: HTMLElement): string {
   let value = '';
   const visit = (node: Node): void => {
@@ -83,6 +92,14 @@ function schedule(): void {
 }
 
 new MutationObserver(schedule).observe(messages, { childList: true, subtree: true, characterData: true });
+messages.addEventListener('click', (event) => {
+  const anchor = (event.target as HTMLElement).closest<HTMLAnchorElement>('.message.assistant .message-content a[href]');
+  if (!anchor) return;
+  const href = safeExternalUrl(anchor.href);
+  event.preventDefault();
+  event.stopPropagation();
+  if (href) void window.autoCodez.openExternal(href).catch((): undefined => undefined);
+});
 window.addEventListener('auto-codez-chat-refresh', schedule);
 window.addEventListener('focus', schedule);
 
