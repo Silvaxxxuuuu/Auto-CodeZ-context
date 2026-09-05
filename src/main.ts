@@ -21,6 +21,8 @@ import { CommandRuntime } from './agent/command-runtime';
 import { DiffRuntime } from './agent/diff-runtime';
 import { ComputerContextRuntime } from './agent/computer-context';
 import { ExecutionManager, type ExecutionChange } from './execution-manager';
+import { ExecutionStatePersistence, ExecutionStateStore } from './execution-state-store';
+import { ExecutionTimeline } from './execution-timeline';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
@@ -49,6 +51,10 @@ const providerRequestJournal = new ProviderRequestJournal(storage);
 const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefined, activityRuntime, undefined, toolRuntime.listDefinitions(), providerRequestJournal);
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const executionManager = new ExecutionManager();
+const executionStateStore = new ExecutionStateStore(storage);
+const executionStatePersistence = new ExecutionStatePersistence(executionStateStore);
+const executionTimeline = new ExecutionTimeline();
+let executionPersistenceEnabled = false;
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 const approvalRunLocks = new Set<string>();
 let mainWindow: BrowserWindow | null = null;
@@ -69,7 +75,11 @@ function sendExecutionChange(change: ExecutionChange): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution:event', change);
 }
 
-executionManager.subscribe(sendExecutionChange);
+executionManager.subscribe((change) => {
+  sendExecutionChange(change);
+  executionTimeline.record(change);
+  if (executionPersistenceEnabled) executionStatePersistence.schedule(executionManager.list());
+});
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
@@ -144,6 +154,20 @@ async function cancelledRunResult(chatId: string) {
   };
 }
 
+async function restorePersistedExecutionSnapshots(): Promise<void> {
+  const snapshots = await executionStateStore.load();
+  for (const snapshot of snapshots) {
+    executionManager.remove(snapshot.chatId);
+    executionManager.start(snapshot.chatId, snapshot.startedAt, snapshot.runId);
+    executionManager.update(snapshot.chatId, {
+      state: snapshot.state,
+      currentTool: snapshot.currentTool,
+      error: snapshot.error,
+      runId: snapshot.runId,
+    }, snapshot.updatedAt);
+  }
+}
+
 function restoreExecutionSnapshots(): void {
   for (const run of agentRuntime.listPendingRuns()) {
     executionManager.remove(run.chatId);
@@ -151,7 +175,9 @@ function restoreExecutionSnapshots(): void {
     executionManager.update(run.chatId, { state: 'waiting_approval', runId: run.runId });
   }
   for (const run of listRecoverableRuns(agentRuntime)) {
-    if (executionManager.get(run.chatId)) continue;
+    const current = executionManager.get(run.chatId);
+    if (current?.runId === run.runId && current.state === 'interrupted') continue;
+    executionManager.remove(run.chatId);
     executionManager.start(run.chatId, Date.now(), run.runId);
     executionManager.update(run.chatId, { state: 'interrupted', runId: run.runId });
   }
@@ -462,7 +488,10 @@ app.whenReady().then(async () => {
   await chatRuntime.init();
   await toolRuntime.init();
   await agentRuntime.init();
+  await restorePersistedExecutionSnapshots();
   restoreExecutionSnapshots();
+  executionPersistenceEnabled = true;
+  executionStatePersistence.schedule(executionManager.list());
   activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
