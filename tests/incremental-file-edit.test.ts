@@ -7,6 +7,16 @@ test('replace_range replaces an inclusive 1-based line range', () => {
   assert.equal(result, 'one\nTWO\nTHREE\nfour\n');
 });
 
+test('replace_text replaces one exact unique anchor', () => {
+  const result = applyIncrementalEdit('replace_text', { oldText: 'const enabled = false;', newText: 'const enabled = true;' }, 'const name = "Auto CodeZ";\nconst enabled = false;\n');
+  assert.equal(result, 'const name = "Auto CodeZ";\nconst enabled = true;\n');
+});
+
+test('replace_text rejects missing and ambiguous anchors', () => {
+  assert.throws(() => applyIncrementalEdit('replace_text', { oldText: 'missing', newText: 'x' }, 'alpha\nbeta\n'), /não foi encontrado/);
+  assert.throws(() => applyIncrementalEdit('replace_text', { oldText: 'same', newText: 'x' }, 'same\nother\nsame\n'), /ambíguo: 2 ocorrências/);
+});
+
 test('insert_before inserts content before the requested line', () => {
   const result = applyIncrementalEdit('insert_before', { line: 2, content: 'inserted' }, 'one\ntwo\nthree');
   assert.equal(result, 'one\ninserted\ntwo\nthree');
