@@ -126,6 +126,34 @@ export class ExecutionManager {
     return { ...snapshot };
   }
 
+  resumeInterrupted(chatId: string, runId: string, now = Date.now()): ExecutionSnapshot {
+    const normalizedChatId = requireId(chatId, 'Chat');
+    const normalizedRunId = requireId(runId, 'Execução');
+    const timestamp = requireTime(now, 'Data da retomada');
+    const current = this.executions.get(normalizedChatId);
+    if (!current) throw new Error(`Nenhuma execução interrompida encontrada para o chat ${normalizedChatId}.`);
+    if (current.runId !== normalizedRunId) {
+      throw new Error(`A execução ${normalizedRunId} não corresponde à execução interrompida do chat ${normalizedChatId}.`);
+    }
+    if (current.state !== 'interrupted') {
+      throw new Error(`A execução ${normalizedRunId} não está interrompida (${current.state}).`);
+    }
+    if (timestamp < current.updatedAt) {
+      throw new Error(`Retomada obsoleta rejeitada para a execução ${normalizedRunId}.`);
+    }
+
+    const next: ExecutionSnapshot = {
+      ...current,
+      state: 'running',
+      updatedAt: timestamp,
+      currentTool: undefined,
+      error: undefined,
+    };
+    this.executions.set(normalizedChatId, next);
+    this.emit({ type: 'upsert', snapshot: { ...next } });
+    return { ...next };
+  }
+
   update(chatId: string, update: ExecutionUpdate, now = Date.now()): ExecutionSnapshot {
     const normalizedChatId = requireId(chatId, 'Chat');
     const timestamp = requireTime(now, 'Data da atualização');
