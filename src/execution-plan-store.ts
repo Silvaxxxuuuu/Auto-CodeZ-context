@@ -31,7 +31,7 @@ export class ExecutionPlanStore {
     if (value.version !== 1 || !Array.isArray(value.plans)) return [];
     return value.plans
       .filter((plan): plan is ExecutionPlan => Boolean(plan && typeof plan === 'object'))
-      .map(clonePlan);
+      .map((plan) => structuredClone(plan));
   }
 
   async save(plans: ExecutionPlan[]): Promise<void> {
