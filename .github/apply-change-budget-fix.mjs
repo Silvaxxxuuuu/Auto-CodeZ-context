@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 const toolPath = 'src/agent/tool-runtime.ts';
-let text = fs.readFileSync(toolPath, 'utf8');
+let text = fs.readFileSync(toolPath, 'utf8').replace(/\r\n/g, '\n');
 
 const approvalOld = `      this.assertChangeBudget(chatId, runId, normalizedCall, diffPlan);
       const approval = this.approvals.request({ projectId, chatId, runId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });
