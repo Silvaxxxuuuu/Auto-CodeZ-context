@@ -11,6 +11,20 @@ function locator(matches: StructuralSymbolMatch[], supported = true, validateRep
   };
 }
 
+test('structural edit reads exactly one parser-provided symbol range', async () => {
+  const content = 'before\nfunction greet() { return 1; }\nafter\n';
+  const startOffset = content.indexOf('function greet');
+  const endOffset = content.indexOf('\nafter');
+  const match = { name: 'greet', kind: 'function' as const, startOffset, endOffset, startLine: 2, endLine: 2 };
+  const runtime = new StructuralEditRuntime([locator([match])]);
+
+  const result = await runtime.readSymbol('src/example.ts', content, { name: 'greet', kind: 'function' });
+
+  assert.equal(result.locatorId, 'test-locator');
+  assert.equal(result.content, 'function greet() { return 1; }');
+  assert.deepEqual(result.match, match);
+});
+
 test('structural edit replaces exactly one parser-provided symbol range', async () => {
   const content = 'before\nfunction greet() { return 1; }\nafter\n';
   const startOffset = content.indexOf('function greet');
