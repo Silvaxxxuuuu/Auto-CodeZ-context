@@ -5,7 +5,8 @@ import { LocalStorage } from './core/storage';
 import { ProviderManager } from './ai/provider-manager';
 import { ChatManager } from './ai/chat-manager';
 import { ProjectManager } from './project/project-manager';
-import { ToolRuntime } from './agent/tool-runtime';
+import { ShadowAwareToolRuntime } from './agent/shadow-aware-tool-runtime';
+import { ShadowAwareWorkspaceRuntime } from './agent/shadow-aware-workspace-runtime';
 import { AgentRuntime } from './agent/agent-runtime';
 import { ChatRuntime } from './ai/chat-runtime';
 import { ProviderRequestJournal } from './ai/provider-request-journal';
@@ -39,6 +40,11 @@ import { ExecutionCheckpointPersistence, ExecutionCheckpointStore } from './exec
 import { ExecutionCheckpointController } from './execution-checkpoint-controller';
 import { ExecutionChangeBudgetRuntime } from './execution-change-budget';
 import { ExecutionChangeBudgetPersistence, ExecutionChangeBudgetStore } from './execution-change-budget-store';
+import { ExecutionShadowWorkspaceRuntime } from './execution-shadow-workspace';
+import { ExecutionShadowWorkspacePersistence, ExecutionShadowWorkspaceStore } from './execution-shadow-workspace-store';
+import { ExecutionShadowWorkspaceController } from './execution-shadow-workspace-controller';
+import { reconcileShadowWorkspaceBootstrap } from './execution-shadow-workspace-bootstrap';
+import { ExecutionShadowLifecycle } from './execution-shadow-lifecycle';
 import { reconcileExecutionBootstrapState } from './execution-bootstrap-state';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
@@ -53,6 +59,8 @@ const providerManager = new ProviderManager(storage);
 const chatManager = new ChatManager(storage);
 const projectManager = new ProjectManager(storage);
 const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
+const executionShadowWorkspaceRuntime = new ExecutionShadowWorkspaceRuntime(workspaceRuntime);
+const shadowAwareWorkspaceRuntime = new ShadowAwareWorkspaceRuntime(workspaceRuntime, executionShadowWorkspaceRuntime);
 const permissionRuntime = new PermissionRuntime();
 const activityRuntime = new ActivityRuntime();
 const approvalRuntime = new ApprovalRuntime();
@@ -62,7 +70,8 @@ const gitRuntime = new GitRuntime(() => projectManager.list());
 const gitService = new GitService(gitRuntime);
 const terminalService = new TerminalService(storage, () => projectManager.list());
 const computerContextRuntime = new ComputerContextRuntime();
-const toolRuntime = new ToolRuntime(workspaceRuntime, permissionRuntime, activityRuntime, approvalRuntime, commandRuntime, diffRuntime, storage);
+const toolRuntime = new ShadowAwareToolRuntime(shadowAwareWorkspaceRuntime, permissionRuntime, activityRuntime, approvalRuntime, commandRuntime, diffRuntime, storage);
+toolRuntime.configureShadowWorkspace(executionShadowWorkspaceRuntime);
 toolRuntime.configureGitRuntime(gitRuntime);
 const providerRequestJournal = new ProviderRequestJournal(storage);
 const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefined, activityRuntime, undefined, toolRuntime.listDefinitions(), providerRequestJournal);
@@ -95,6 +104,8 @@ const executionTaskCapsulePersistence = new ExecutionTaskCapsulePersistence(exec
 const executionCheckpointRuntime = new ExecutionCheckpointRuntime();
 const executionCheckpointStore = new ExecutionCheckpointStore(storage);
 const executionCheckpointPersistence = new ExecutionCheckpointPersistence(executionCheckpointStore);
+const executionShadowWorkspaceStore = new ExecutionShadowWorkspaceStore(storage);
+const executionShadowWorkspacePersistence = new ExecutionShadowWorkspacePersistence(executionShadowWorkspaceStore);
 let executionPersistenceEnabled = false;
 let executionTimelinePersistenceEnabled = false;
 let executionPlanPersistenceEnabled = false;
@@ -103,6 +114,7 @@ let executionQualityGatePersistenceEnabled = false;
 let executionTaskCapsulePersistenceEnabled = false;
 let executionCheckpointPersistenceEnabled = false;
 let executionChangeBudgetPersistenceEnabled = false;
+let executionShadowWorkspacePersistenceEnabled = false;
 const executionCheckpointController = new ExecutionCheckpointController(
   executionCheckpointRuntime,
   workspaceRuntime,
@@ -111,16 +123,32 @@ const executionCheckpointController = new ExecutionCheckpointController(
     if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(checkpoints);
   },
 );
-toolRuntime.configureExecutionCheckpointRecorder((record) => {
-  executionCheckpointRuntime.record(record);
-  if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
-});
+const executionShadowWorkspaceController = new ExecutionShadowWorkspaceController(
+  executionShadowWorkspaceRuntime,
+  (record) => {
+    executionCheckpointRuntime.record(record);
+    if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
+  },
+);
+const executionShadowLifecycle = new ExecutionShadowLifecycle(
+  executionCoordinator,
+  executionShadowWorkspaceController,
+  isRecoverableExecution,
+);
 executionChangeBudgetRuntime.subscribe((snapshots) => {
   if (executionChangeBudgetPersistenceEnabled) executionChangeBudgetPersistence.schedule(snapshots);
+});
+executionShadowWorkspaceRuntime.subscribe((snapshots) => {
+  if (executionShadowWorkspacePersistenceEnabled) executionShadowWorkspacePersistence.schedule(snapshots);
 });
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 const approvalRunLocks = new Set<string>();
 let mainWindow: BrowserWindow | null = null;
+
+function isRecoverableExecution(chatId: string, runId: string): boolean {
+  return agentRuntime.listPendingRuns().some((run) => run.chatId === chatId && run.runId === runId)
+    || listRecoverableRuns(agentRuntime).some((run) => run.chatId === chatId && run.runId === runId);
+}
 
 function sendTerminalEvent(event: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('terminal:event', event);
@@ -202,7 +230,7 @@ function reconcileExecutionSlot(chatId: string): void {
   const hasController = activeStreamControllers.has(chatId);
   const hasPending = agentRuntime.hasPendingForChat(chatId);
   if (!hasController && !hasPending) {
-    executionCoordinator.interrupt(chatId, current.runId);
+    executionShadowLifecycle.interrupt(chatId, current.runId);
     executionManager.remove(chatId);
   }
 }
@@ -225,6 +253,7 @@ async function clearChatExecution(chatId: string): Promise<void> {
   activeStreamControllers.delete(chatId);
   approvalRuntime.remove({ chatId });
   await agentRuntime.cancelChat(chatId);
+  executionShadowLifecycle.clearChat(chatId);
   if (execution) executionCoordinator.interrupt(chatId, execution.runId);
   else executionPlanner.remove(chatId);
   executionManager.remove(chatId);
@@ -267,6 +296,15 @@ async function restoreExecutionBootstrapState(): Promise<void> {
   });
   executionManager.hydrate(snapshots);
   for (const snapshot of snapshots) executionTimeline.recordRecovery(snapshot, recoveredAt);
+}
+
+async function restoreShadowWorkspaceBootstrapState(): Promise<void> {
+  const snapshots = reconcileShadowWorkspaceBootstrap(
+    await executionShadowWorkspaceStore.load(),
+    agentRuntime.listPendingRuns(),
+    listRecoverableRuns(agentRuntime),
+  );
+  executionShadowWorkspaceRuntime.restore(snapshots);
 }
 
 async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnType<ChatManager['list']>>[number]; config: AIProviderConfig; projectContext?: string }> {
@@ -371,13 +409,13 @@ async function executeChat(chatId: string, content: string): Promise<{ pendingAp
     await chatManager.update({ ...current, messages: result.messages });
     if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
     else {
-      const completion = executionCoordinator.complete(chatId, runId);
+      const { completion } = await executionShadowLifecycle.complete(chatId, runId);
       if (completion.error) throw new Error(completion.error);
     }
     return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    executionCoordinator.fail(chatId, runId, message);
+    executionShadowLifecycle.fail(chatId, runId, message);
     throw error;
   }
 }
@@ -443,7 +481,7 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     await chatManager.update({ ...workingChat, messages: result.messages });
     if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
     else if (executionManager.get(chatId)?.state === 'running') {
-      const completion = executionCoordinator.complete(chatId, runId);
+      const { completion } = await executionShadowLifecycle.complete(chatId, runId);
       if (completion.error) sendStreamEvent({ type: 'error', chatId, runId, error: completion.error });
     }
     return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
@@ -454,7 +492,7 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
       return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
     }
     const message = error instanceof Error ? error.message : String(error);
-    executionCoordinator.fail(chatId, runId, message);
+    executionShadowLifecycle.fail(chatId, runId, message);
     emit({ type: 'error', chatId, runId, error: message });
     return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: message };
   } finally {
@@ -559,7 +597,7 @@ ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
       const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
       if (chat) await chatManager.update({ ...chat, messages: result.messages });
       if (!result.pendingApprovalIds.length) {
-        const completion = executionCoordinator.complete(recoverable.chatId, id);
+        const { completion } = await executionShadowLifecycle.complete(recoverable.chatId, id);
         if (completion.error) sendStreamEvent({ type: 'error', chatId: recoverable.chatId, runId: id, error: completion.error });
       }
       return result;
@@ -570,7 +608,7 @@ ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
         return cancelledRunResult(recoverable.chatId);
       }
       const message = error instanceof Error ? error.message : String(error);
-      executionCoordinator.fail(recoverable.chatId, id, message);
+      executionShadowLifecycle.fail(recoverable.chatId, id, message);
       throw error;
     }
   });
@@ -599,7 +637,7 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
       if (chat) await chatManager.update({ ...chat, messages: result.messages });
       if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
       else {
-        const completion = executionCoordinator.complete(chatId, runId);
+        const { completion } = await executionShadowLifecycle.complete(chatId, runId);
         if (completion.error) sendStreamEvent({ type: 'error', chatId, runId, error: completion.error });
       }
       return result;
@@ -613,7 +651,7 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
       }
       const message = error instanceof Error ? error.message : String(error);
       if (stillPending) executionCoordinator.waitingApproval(chatId, runId);
-      else executionCoordinator.fail(chatId, runId, message);
+      else executionShadowLifecycle.fail(chatId, runId, message);
       throw error;
     }
   });
@@ -641,7 +679,7 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
       if (chat) await chatManager.update({ ...chat, messages: result.messages });
       if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
       else {
-        const completion = executionCoordinator.complete(chatId, runId);
+        const { completion } = await executionShadowLifecycle.complete(chatId, runId);
         if (completion.error) sendStreamEvent({ type: 'error', chatId, runId, error: completion.error });
       }
       return result;
@@ -655,7 +693,7 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
       }
       const message = error instanceof Error ? error.message : String(error);
       if (stillPending) executionCoordinator.waitingApproval(chatId, runId);
-      else executionCoordinator.fail(chatId, runId, message);
+      else executionShadowLifecycle.fail(chatId, runId, message);
       throw error;
     }
   });
@@ -710,6 +748,7 @@ app.whenReady().then(async () => {
   await chatRuntime.init();
   await toolRuntime.init();
   await agentRuntime.init();
+  await restoreShadowWorkspaceBootstrapState();
   executionTimeline.restore(await executionTimelineStore.load());
   executionPlanHistory.restore(await executionPlanHistoryStore.load());
   executionQualityGateRuntime.restore(await executionQualityGateStore.load());
@@ -728,6 +767,7 @@ app.whenReady().then(async () => {
   executionTaskCapsulePersistenceEnabled = true;
   executionCheckpointPersistenceEnabled = true;
   executionChangeBudgetPersistenceEnabled = true;
+  executionShadowWorkspacePersistenceEnabled = true;
   executionStatePersistence.schedule(executionManager.list());
   executionTimelinePersistence.schedule(executionTimeline.list());
   executionPlanPersistence.schedule(executionPlanner.list());
@@ -736,6 +776,7 @@ app.whenReady().then(async () => {
   executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
   executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
   executionChangeBudgetPersistence.schedule(executionChangeBudgetRuntime.list());
+  executionShadowWorkspacePersistence.schedule(executionShadowWorkspaceRuntime.list());
   activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
