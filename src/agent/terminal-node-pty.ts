@@ -84,7 +84,8 @@ class NodePtyInteractiveTerminalProcess implements InteractiveTerminalProcess {
     return () => disposable.dispose();
   }
 
-  onError(_listener: (error: Error) => void): () => void {
+  onError(listener: (error: Error) => void): () => void {
+    void listener;
     return () => undefined;
   }
 }
