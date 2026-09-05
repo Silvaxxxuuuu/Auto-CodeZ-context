@@ -40,10 +40,18 @@ function activeChatId(): string | undefined {
   return document.querySelector<HTMLElement>('.chat-item.selected')?.dataset.chat;
 }
 
+function clearVisibleError(): void {
+  visibleError = null;
+  document.querySelector('[data-auto-codez-provider-error="true"]')?.remove();
+}
+
 function ensureVisibleError(): void {
   renderScheduled = false;
   if (!visibleError) return;
-  if (visibleError.chatId && activeChatId() !== visibleError.chatId) return;
+  if (visibleError.chatId && activeChatId() !== visibleError.chatId) {
+    clearVisibleError();
+    return;
+  }
 
   const messages = document.querySelector<HTMLElement>('#messages');
   if (!messages || messages.querySelector('[data-auto-codez-provider-error="true"]')) return;
@@ -72,9 +80,10 @@ function scheduleRender(): void {
 }
 
 window.autoCodez.onStreamEvent((event) => {
+  if (event.chatId && event.chatId !== activeChatId()) return;
+
   if (event.type === 'start') {
-    visibleError = null;
-    document.querySelector('[data-auto-codez-provider-error="true"]')?.remove();
+    clearVisibleError();
     return;
   }
 
@@ -86,8 +95,9 @@ window.autoCodez.onStreamEvent((event) => {
   scheduleRender();
 });
 
-const observer = new MutationObserver(() => {
-  if (visibleError) scheduleRender();
-});
-
-observer.observe(document.body, { childList: true, subtree: true });
+const messages = document.querySelector<HTMLElement>('#messages');
+if (messages) {
+  new MutationObserver(() => {
+    if (visibleError) scheduleRender();
+  }).observe(messages, { childList: true });
+}
