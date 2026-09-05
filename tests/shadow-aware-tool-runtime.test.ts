@@ -23,6 +23,7 @@ async function fixture() {
   const shadows = new ExecutionShadowWorkspaceRuntime(base, () => time++);
   const workspace = new ShadowAwareWorkspaceRuntime(base, shadows);
   const tools = new ShadowAwareToolRuntime(workspace);
+  tools.configureShadowWorkspace(shadows);
   return {
     base,
     shadows,
@@ -146,6 +147,43 @@ test('create delete rename e search usam o mesmo overlay da execução', async (
     assert.deepEqual(JSON.parse(search.output ?? '[]'), ['renamed-item.txt']);
     assert.equal(await fx.base.exists('project-a', 'new-item.txt'), false);
     assert.equal(await fx.base.exists('project-a', 'renamed-item.txt'), false);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test('comandos e Git falham fechado depois que a run possui alterações isoladas', async () => {
+  const fx = await fixture();
+  try {
+    const write = await fx.tools.execute(
+      'chat-a',
+      'project-a',
+      'unrestricted',
+      toolCall('write-shadow', 'write_file', { path: 'a.txt', content: 'shadow' }),
+      'run-a',
+    );
+    assert.equal(write.ok, true);
+
+    const command = await fx.tools.execute(
+      'chat-a',
+      'project-a',
+      'unrestricted',
+      toolCall('command-after-shadow', 'run_command', { command: 'npm test' }),
+      'run-a',
+    );
+    const git = await fx.tools.execute(
+      'chat-a',
+      'project-a',
+      'unrestricted',
+      toolCall('git-after-shadow', 'git_status', {}),
+      'run-a',
+    );
+
+    assert.equal(command.ok, false);
+    assert.equal(git.ok, false);
+    assert.match(command.error ?? '', /Shadow Workspace/i);
+    assert.match(git.error ?? '', /Shadow Workspace/i);
+    assert.equal(await fx.base.readFile('project-a', 'a.txt'), 'base');
   } finally {
     await fx.cleanup();
   }
