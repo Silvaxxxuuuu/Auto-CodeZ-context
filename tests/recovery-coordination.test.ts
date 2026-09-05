@@ -11,7 +11,7 @@ function runtime(pendingApprovalIds: string[] = []): AgentRuntime {
       pendingApprovalIds,
       response: { content: '', model: 'model', providerId: 'provider' },
       toolRounds: 1,
-      messages: [],
+      messages: [] as never[],
     }),
   } as unknown as AgentRuntime;
 }
