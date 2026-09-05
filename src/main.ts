@@ -23,6 +23,8 @@ import { ComputerContextRuntime } from './agent/computer-context';
 import { ExecutionManager, type ExecutionChange } from './execution-manager';
 import { ExecutionStatePersistence, ExecutionStateStore } from './execution-state-store';
 import { ExecutionTimeline } from './execution-timeline';
+import { ExecutionPlanner, type ExecutionPlanChange } from './execution-planner';
+import { ExecutionPlanPersistence, ExecutionPlanStore } from './execution-plan-store';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
@@ -54,7 +56,11 @@ const executionManager = new ExecutionManager();
 const executionStateStore = new ExecutionStateStore(storage);
 const executionStatePersistence = new ExecutionStatePersistence(executionStateStore);
 const executionTimeline = new ExecutionTimeline();
+const executionPlanner = new ExecutionPlanner();
+const executionPlanStore = new ExecutionPlanStore(storage);
+const executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore);
 let executionPersistenceEnabled = false;
+let executionPlanPersistenceEnabled = false;
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 const approvalRunLocks = new Set<string>();
 let mainWindow: BrowserWindow | null = null;
@@ -74,6 +80,15 @@ function sendStreamEvent(event: AIStreamEvent): void {
 function sendExecutionChange(change: ExecutionChange): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution:event', change);
 }
+
+function sendExecutionPlanChange(change: ExecutionPlanChange): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution-plan:event', change);
+}
+
+executionPlanner.subscribe((change) => {
+  sendExecutionPlanChange(change);
+  if (executionPlanPersistenceEnabled) executionPlanPersistence.schedule(executionPlanner.list());
+});
 
 executionManager.subscribe((change) => {
   sendExecutionChange(change);
@@ -354,6 +369,17 @@ ipcMain.handle('agent:list-execution-timeline', async (_event, filters?: { chatI
   const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
   return executionTimeline.list(chatId, runId);
 });
+ipcMain.handle('agent:list-execution-plans', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return executionPlanner.list();
+  const value = requireObject(filters, 'Filtro dos planos de execução');
+  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  if (chatId !== undefined) {
+    const plan = executionPlanner.get(chatId, runId);
+    return plan ? [plan] : [];
+  }
+  return executionPlanner.list().filter((plan) => runId === undefined || plan.runId === runId);
+});
 ipcMain.handle('agent:list-recoverable-runs', async () => listRecoverableRuns(agentRuntime));
 ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
   const id = requireIdentifier(runId, 'Execução recuperável');
@@ -497,8 +523,11 @@ app.whenReady().then(async () => {
   await agentRuntime.init();
   await restorePersistedExecutionSnapshots();
   restoreExecutionSnapshots();
+  executionPlanner.restore(await executionPlanStore.load());
   executionPersistenceEnabled = true;
+  executionPlanPersistenceEnabled = true;
   executionStatePersistence.schedule(executionManager.list());
+  executionPlanPersistence.schedule(executionPlanner.list());
   activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
