@@ -10,7 +10,10 @@ if (!messages) throw new Error('Área de mensagens indisponível.');
 
 const bridge = window.autoCodez as unknown as ExternalLinkBridge;
 const renderedMarkup = new WeakMap<HTMLElement, string>();
-let scheduled = false;
+const pendingElements = new Set<HTMLElement>();
+const MAX_ELEMENTS_PER_FRAME = 8;
+const MAX_MARKDOWN_CHARS = 200_000;
+let frameId: number | null = null;
 
 const style = document.createElement('style');
 style.id = 'auto-codez-message-formatting';
@@ -48,33 +51,41 @@ function safeExternalUrl(value: string): string | null {
 
 function rawText(element: HTMLElement): string {
   let value = '';
-  const visit = (node: Node): void => {
+  const stack: Node[] = Array.from(element.childNodes).reverse();
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node) continue;
     if (node.nodeType === Node.TEXT_NODE) {
       value += node.textContent ?? '';
-      return;
+      continue;
     }
-    if (!(node instanceof HTMLElement)) return;
+    if (!(node instanceof HTMLElement)) continue;
     if (node.tagName === 'BR') {
       value += '\n';
-      return;
+      continue;
     }
-    for (const child of Array.from(node.childNodes)) visit(child);
-  };
-  for (const child of Array.from(element.childNodes)) visit(child);
+    for (let index = node.childNodes.length - 1; index >= 0; index -= 1) stack.push(node.childNodes[index]);
+  }
   return value;
 }
 
 function applyMarkup(element: HTMLElement, html: string): void {
-  const previous = renderedMarkup.get(element);
-  if (previous !== undefined && previous === element.innerHTML) return;
+  if (!element.isConnected || !messages.contains(element)) return;
   if (element.innerHTML !== html) element.innerHTML = html;
   renderedMarkup.set(element, html);
 }
 
 function formatAssistant(element: HTMLElement): void {
+  if (element.closest('.message.streaming')) return;
   const previous = renderedMarkup.get(element);
   if (previous !== undefined && previous === element.innerHTML) return;
-  applyMarkup(element, renderMarkdown(rawText(element)));
+  const source = rawText(element);
+  if (source.length > MAX_MARKDOWN_CHARS) {
+    const normalized = normalizeUnicodeText(source);
+    applyMarkup(element, escapeHtml(normalized).replace(/\n/g, '<br>'));
+    return;
+  }
+  applyMarkup(element, renderMarkdown(source));
 }
 
 function formatTool(element: HTMLElement): void {
@@ -84,19 +95,28 @@ function formatTool(element: HTMLElement): void {
   applyMarkup(element, escapeHtml(normalized).replace(/\n/g, '<br>'));
 }
 
-function flush(): void {
-  scheduled = false;
-  messages.querySelectorAll<HTMLElement>('.message.assistant .message-content').forEach(formatAssistant);
-  messages.querySelectorAll<HTMLElement>('.message.tool .message-content').forEach(formatTool);
+function processFrame(): void {
+  frameId = null;
+  let processed = 0;
+  for (const element of pendingElements) {
+    pendingElements.delete(element);
+    if (!element.isConnected || !messages.contains(element)) continue;
+    if (element.closest('.message.assistant')) formatAssistant(element);
+    else if (element.closest('.message.tool')) formatTool(element);
+    processed += 1;
+    if (processed >= MAX_ELEMENTS_PER_FRAME) break;
+  }
+  if (pendingElements.size) frameId = window.requestAnimationFrame(processFrame);
 }
 
-function schedule(): void {
-  if (scheduled) return;
-  scheduled = true;
-  queueMicrotask(flush);
+function enqueueCurrentMessages(): void {
+  messages.querySelectorAll<HTMLElement>('.message.assistant:not(.streaming) .message-content, .message.tool .message-content').forEach((element) => pendingElements.add(element));
+  if (pendingElements.size && frameId === null) frameId = window.requestAnimationFrame(processFrame);
 }
 
-new MutationObserver(schedule).observe(messages, { childList: true, subtree: true, characterData: true });
+const observer = new MutationObserver(() => enqueueCurrentMessages());
+observer.observe(messages, { childList: true });
+
 messages.addEventListener('click', (event) => {
   const anchor = (event.target as HTMLElement).closest<HTMLAnchorElement>('.message.assistant .message-content a[href]');
   if (!anchor) return;
@@ -105,7 +125,14 @@ messages.addEventListener('click', (event) => {
   event.stopPropagation();
   if (href) void bridge.openExternal(href).catch((): undefined => undefined);
 });
-window.addEventListener('auto-codez-chat-refresh', schedule);
-window.addEventListener('focus', schedule);
 
-schedule();
+window.addEventListener('auto-codez-chat-refresh', enqueueCurrentMessages);
+window.addEventListener('focus', enqueueCurrentMessages);
+window.addEventListener('beforeunload', () => {
+  observer.disconnect();
+  if (frameId !== null) window.cancelAnimationFrame(frameId);
+  frameId = null;
+  pendingElements.clear();
+}, { once: true });
+
+enqueueCurrentMessages();
