@@ -6,6 +6,7 @@ import test from 'node:test';
 import { ToolRuntime } from '../src/agent/tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 import { CommandRuntime } from '../src/agent/command-runtime';
+import { SYSTEM_WORKSPACE_ID } from '../src/agent/system-workspace';
 import type { ProjectRecord } from '../src/ai/types';
 
 test('only the first approval-dependent tool call is materialized in a cycle', async () => {
@@ -44,5 +45,44 @@ test('a different chat is not blocked by another chats approval', async () => {
     assert.equal(runtime.listApprovals().length, 2);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('safe mode requires approval before creating a file in the protected system workspace', async () => {
+  const workspace = new WorkspaceRuntime(async () => []);
+  const runtime = new ToolRuntime(workspace);
+  const relativePath = `.auto-codez-safe-test-${process.pid}-${Date.now()}.txt`;
+
+  const result = await runtime.execute(
+    'chat-system-safe',
+    SYSTEM_WORKSPACE_ID,
+    'safe',
+    { id: 'system-create', name: 'create_file', input: { path: relativePath, content: 'private data' } },
+    'run-system-safe',
+  );
+
+  assert.equal(result.pendingApproval, true);
+  assert.ok(result.diffPlan?.changes.length);
+  assert.equal(await workspace.exists(SYSTEM_WORKSPACE_ID, relativePath), false);
+});
+
+test('unrestricted mode remains explicit for protected system workspace writes', async () => {
+  const workspace = new WorkspaceRuntime(async () => []);
+  const runtime = new ToolRuntime(workspace);
+  const relativePath = `.auto-codez-unrestricted-test-${process.pid}-${Date.now()}.txt`;
+  try {
+    const result = await runtime.execute(
+      'chat-system-unrestricted',
+      SYSTEM_WORKSPACE_ID,
+      'unrestricted',
+      { id: 'system-create-unrestricted', name: 'create_file', input: { path: relativePath, content: 'allowed' } },
+      'run-system-unrestricted',
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.pendingApproval, undefined);
+    assert.equal(await workspace.readFile(SYSTEM_WORKSPACE_ID, relativePath), 'allowed');
+  } finally {
+    if (await workspace.exists(SYSTEM_WORKSPACE_ID, relativePath)) await workspace.deleteFile(SYSTEM_WORKSPACE_ID, relativePath);
   }
 });
