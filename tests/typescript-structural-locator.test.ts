@@ -76,3 +76,38 @@ test('structural runtime replaces a real TypeScript AST symbol without touching 
   assert.equal(result.locatorId, 'typescript');
   assert.equal(result.after, '// header\nexport function greet(name: string) {\n  return `Hello ${name}`;\n}\n\nconst untouched = true;\n');
 });
+
+test('structural runtime rejects a replacement that renames the requested symbol', async () => {
+  const content = 'export function greet() { return 1; }\n';
+  const runtime = new StructuralEditRuntime([new TypeScriptStructuralLocator()]);
+
+  await assert.rejects(
+    () => runtime.replaceSymbol('src/greet.ts', content, { name: 'greet', kind: 'function' }, 'export function renamed() { return 2; }'),
+    /preservar o símbolo 'greet'/,
+  );
+});
+
+test('structural runtime rejects a replacement that leaves TypeScript syntax invalid', async () => {
+  const content = 'export function greet() { return 1; }\n';
+  const runtime = new StructuralEditRuntime([new TypeScriptStructuralLocator()]);
+
+  await assert.rejects(
+    () => runtime.replaceSymbol('src/greet.ts', content, { name: 'greet', kind: 'function' }, 'export function greet( { return 2; }'),
+    /sintaxe inválida/,
+  );
+});
+
+test('structural runtime rejects replacement content containing extra declarations', async () => {
+  const content = 'export function greet() { return 1; }\n';
+  const runtime = new StructuralEditRuntime([new TypeScriptStructuralLocator()]);
+
+  await assert.rejects(
+    () => runtime.replaceSymbol(
+      'src/greet.ts',
+      content,
+      { name: 'greet', kind: 'function' },
+      'export function greet() { return 2; }\nexport function extra() { return 3; }',
+    ),
+    /apenas uma declaração estrutural/,
+  );
+});
