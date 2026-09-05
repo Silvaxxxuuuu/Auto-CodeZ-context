@@ -21,7 +21,7 @@ function call(id: string, name: AIToolCall['name'], input: Record<string, unknow
 test('incremental tool definitions are exposed with strict schemas', async () => {
   const value = await fixture();
   try {
-    for (const name of ['replace_range', 'insert_before', 'insert_after'] as const) {
+    for (const name of ['replace_range', 'replace_text', 'insert_before', 'insert_after'] as const) {
       const definition = value.runtime.listDefinitions().find((item) => item.name === name);
       assert.ok(definition, name);
       assert.equal(definition.requiresWriteAccess, true);
@@ -52,6 +52,47 @@ test('replace_range previews an exact diff and applies it only after approval', 
     assert.equal(result.ok, true);
     assert.equal(result.changes?.[0]?.after, 'const a = 1;\nconst b = 20;\nconst c = 3;\n');
     assert.equal(await fs.readFile(file, 'utf8'), 'const a = 1;\nconst b = 20;\nconst c = 3;\n');
+  } finally { await value.cleanup(); }
+});
+
+test('replace_text previews and applies one exact unique fragment through approval', async () => {
+  const value = await fixture();
+  try {
+    const file = path.join(value.root, 'sample.ts');
+    await fs.writeFile(file, 'const enabled = false;\nconst mode = "safe";\n');
+    const pending = await value.runtime.execute('chat-a', 'project-test', 'ask', call('replace-text-1', 'replace_text', {
+      path: 'sample.ts', oldText: 'const enabled = false;', newText: 'const enabled = true;',
+    }));
+
+    assert.equal(pending.pendingApproval, true);
+    assert.ok(pending.approvalId);
+    assert.equal(pending.diffPlan?.changes[0]?.after, 'const enabled = true;\nconst mode = "safe";\n');
+    assert.equal(await fs.readFile(file, 'utf8'), 'const enabled = false;\nconst mode = "safe";\n');
+
+    const result = await value.runtime.approve(pending.approvalId!);
+    assert.equal(result.ok, true);
+    assert.equal(await fs.readFile(file, 'utf8'), 'const enabled = true;\nconst mode = "safe";\n');
+  } finally { await value.cleanup(); }
+});
+
+test('replace_text fails closed for missing or ambiguous fragments without mutating the file', async () => {
+  const value = await fixture();
+  try {
+    const file = path.join(value.root, 'sample.txt');
+    await fs.writeFile(file, 'same\nother\nsame\n');
+
+    const ambiguous = await value.runtime.execute('chat-a', 'project-test', 'unrestricted', call('replace-text-ambiguous', 'replace_text', {
+      path: 'sample.txt', oldText: 'same', newText: 'changed',
+    }));
+    assert.equal(ambiguous.ok, false);
+    assert.match(ambiguous.error ?? '', /ambíguo: 2 ocorrências/);
+
+    const missing = await value.runtime.execute('chat-a', 'project-test', 'unrestricted', call('replace-text-missing', 'replace_text', {
+      path: 'sample.txt', oldText: 'missing', newText: 'changed',
+    }));
+    assert.equal(missing.ok, false);
+    assert.match(missing.error ?? '', /não foi encontrado/);
+    assert.equal(await fs.readFile(file, 'utf8'), 'same\nother\nsame\n');
   } finally { await value.cleanup(); }
 });
 
