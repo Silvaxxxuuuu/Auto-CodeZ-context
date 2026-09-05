@@ -99,6 +99,51 @@ async function matchesExpectedState(workspace: ExecutionCheckpointWorkspace, pro
   }
 }
 
+async function undoChange(workspace: ExecutionCheckpointWorkspace, projectId: string, change: FileDiff): Promise<void> {
+  if (change.type === 'created') {
+    await workspace.deleteFile(projectId, change.path);
+    return;
+  }
+  if (change.type === 'modified') {
+    await workspace.writeFile(projectId, change.path, change.before);
+    return;
+  }
+  if (change.type === 'deleted') {
+    await workspace.createFile(projectId, change.path, change.before);
+    return;
+  }
+  await workspace.renameFile(projectId, change.path, change.renamedFrom!);
+  if (change.before !== change.after) await workspace.writeFile(projectId, change.renamedFrom!, change.before);
+}
+
+async function ensureAppliedState(workspace: ExecutionCheckpointWorkspace, projectId: string, change: FileDiff): Promise<void> {
+  if (change.type === 'deleted') {
+    if (await workspace.exists(projectId, change.path)) await workspace.deleteFile(projectId, change.path);
+    return;
+  }
+
+  if (change.type === 'renamed') {
+    const from = change.renamedFrom!;
+    const sourceExists = await workspace.exists(projectId, from);
+    const destinationExists = await workspace.exists(projectId, change.path);
+    if (sourceExists && destinationExists) throw new Error(`Não foi possível recompor a renomeação de '${from}' para '${change.path}'.`);
+    if (sourceExists) await workspace.renameFile(projectId, from, change.path);
+    if (!(await workspace.exists(projectId, change.path))) throw new Error(`Destino ausente ao recompor '${change.path}'.`);
+    if ((await workspace.readFile(projectId, change.path)) !== change.after) await workspace.writeFile(projectId, change.path, change.after);
+    return;
+  }
+
+  if (await workspace.exists(projectId, change.path)) {
+    if ((await workspace.readFile(projectId, change.path)) !== change.after) await workspace.writeFile(projectId, change.path, change.after);
+  } else {
+    await workspace.createFile(projectId, change.path, change.after);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export class ExecutionCheckpointRuntime {
   private readonly checkpoints = new Map<string, ExecutionCheckpoint>();
 
@@ -164,16 +209,24 @@ export class ExecutionCheckpointRuntime {
       }
     }
 
+    const reverted: FileDiff[] = [];
     for (const change of [...checkpoint.changes].reverse()) {
-      if (change.type === 'created') {
-        await workspace.deleteFile(checkpoint.projectId, change.path);
-      } else if (change.type === 'modified') {
-        await workspace.writeFile(checkpoint.projectId, change.path, change.before);
-      } else if (change.type === 'deleted') {
-        await workspace.createFile(checkpoint.projectId, change.path, change.before);
-      } else {
-        await workspace.renameFile(checkpoint.projectId, change.path, change.renamedFrom!);
-        if (change.before !== change.after) await workspace.writeFile(checkpoint.projectId, change.renamedFrom!, change.before);
+      try {
+        await undoChange(workspace, checkpoint.projectId, change);
+        reverted.push(change);
+      } catch (error) {
+        const compensationErrors: string[] = [];
+        for (const candidate of [change, ...[...reverted].reverse()]) {
+          try {
+            await ensureAppliedState(workspace, checkpoint.projectId, candidate);
+          } catch (compensationError) {
+            compensationErrors.push(`${candidate.path}: ${errorMessage(compensationError)}`);
+          }
+        }
+        if (compensationErrors.length) {
+          throw new Error(`A restauração falhou em '${change.path}' (${errorMessage(error)}) e a recomposição do workspace também falhou: ${compensationErrors.join('; ')}`);
+        }
+        throw new Error(`A restauração foi cancelada em '${change.path}' (${errorMessage(error)}). O workspace foi recomposto para o estado anterior ao rollback.`);
       }
     }
 
