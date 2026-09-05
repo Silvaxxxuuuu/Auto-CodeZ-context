@@ -57,23 +57,27 @@ function clonePlan(plan: ExecutionPlan | undefined): ExecutionPlan | undefined {
 function reconstructSnapshot(events: ExecutionTimelineEvent[]): ExecutionSnapshot | undefined {
   if (!events.length) return undefined;
   const ordered = [...events].sort((left, right) => left.sequence - right.sequence);
-  const started = ordered.find((event) => event.type === 'started' && event.state);
-  if (!started?.state) return undefined;
+  const baseline = ordered.find((event) => (event.type === 'started' || event.type === 'recovered') && event.state);
+  if (!baseline?.state) return undefined;
 
   const snapshot: ExecutionSnapshot = {
-    chatId: started.chatId,
-    runId: started.runId,
-    state: started.state,
-    startedAt: started.at,
-    updatedAt: started.at,
-    currentTool: started.currentTool,
-    error: started.error,
+    chatId: baseline.chatId,
+    runId: baseline.runId,
+    state: baseline.state,
+    startedAt: baseline.type === 'recovered' ? baseline.startedAt ?? baseline.at : baseline.at,
+    updatedAt: baseline.at,
+    currentTool: baseline.currentTool,
+    error: baseline.error,
   };
 
   for (const event of ordered) {
     if (event.chatId !== snapshot.chatId || event.runId !== snapshot.runId) continue;
     snapshot.updatedAt = Math.max(snapshot.updatedAt, event.at);
-    if (event.type === 'state_changed' && event.state) {
+    if (event.type === 'recovered' && event.state) {
+      snapshot.state = event.state;
+      snapshot.currentTool = event.currentTool;
+      snapshot.error = event.error;
+    } else if (event.type === 'state_changed' && event.state) {
       snapshot.state = event.state;
       if (event.state !== 'running' && event.state !== 'waiting_approval') snapshot.currentTool = undefined;
       if (event.state !== 'failed') snapshot.error = undefined;
