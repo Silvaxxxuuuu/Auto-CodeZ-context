@@ -8,17 +8,25 @@ const EMPTY_STATE_HTML = `
 
 function syncEmptyState(): void {
   const messages = document.querySelector<HTMLElement>('#messages');
+  const composer = document.querySelector<HTMLElement>('.composer-wrap');
   if (!messages) return;
-  const welcome = messages.querySelector<HTMLElement>('.welcome');
+
+  const welcome = messages.querySelector<HTMLElement>(':scope > .welcome');
   if (welcome) welcome.outerHTML = EMPTY_STATE_HTML;
+
+  const empty = Boolean(messages.querySelector(':scope > .ac-empty-chat'));
+  composer?.toggleAttribute('hidden', empty);
 }
 
 function initialize(): void {
   syncEmptyState();
   const messages = document.querySelector<HTMLElement>('#messages');
   if (!messages) return;
+
   const observer = new MutationObserver(syncEmptyState);
-  observer.observe(messages, { childList: true, subtree: true });
+  observer.observe(messages, { childList: true });
+
+  window.addEventListener('beforeunload', () => observer.disconnect(), { once: true });
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
