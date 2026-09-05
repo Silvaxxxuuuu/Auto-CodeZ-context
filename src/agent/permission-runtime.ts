@@ -3,7 +3,7 @@ import type { PermissionLevel, ToolName } from '../ai/types';
 export type PermissionDecision = 'allow' | 'ask' | 'deny';
 
 const readTools = new Set<ToolName>(['read_file', 'search_files', 'git_status', 'git_diff', 'git_log', 'git_branches']);
-const safeWriteTools = new Set<ToolName>(['write_file', 'create_file']);
+const safeWriteTools = new Set<ToolName>(['write_file', 'create_file', 'replace_range', 'insert_before', 'insert_after']);
 const sensitiveWriteTools = new Set<ToolName>([
   'delete_file',
   'rename_file',
