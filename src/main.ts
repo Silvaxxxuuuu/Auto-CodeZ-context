@@ -408,6 +408,20 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
 });
 
 ipcMain.handle('terminal:start', async (_event, input: { projectId: string; command: string }) => { const value = requireObject(input, 'Dados do terminal'); return terminalService.start(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.command, 'Comando')); });
+ipcMain.handle('terminal:write-input', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Entrada do terminal');
+  const sessionId = requireIdentifier(value.sessionId, 'Sessão do terminal');
+  if (typeof value.data !== 'string') throw new Error('Entrada do terminal inválida.');
+  return terminalService.writeInput(sessionId, value.data);
+});
+ipcMain.handle('terminal:resize', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Tamanho do terminal');
+  const sessionId = requireIdentifier(value.sessionId, 'Sessão do terminal');
+  const cols = Number(value.cols);
+  const rows = Number(value.rows);
+  if (!Number.isInteger(cols) || !Number.isInteger(rows)) throw new Error('Tamanho do terminal inválido.');
+  return terminalService.resize(sessionId, cols, rows);
+});
 ipcMain.handle('terminal:kill', async (_event, sessionId: string) => terminalService.kill(requireIdentifier(sessionId, 'Sessão do terminal')));
 ipcMain.handle('terminal:list-sessions', async () => terminalService.listSessions());
 ipcMain.handle('terminal:get-output', async (_event, sessionId: string) => terminalService.getOutput(requireIdentifier(sessionId, 'Sessão do terminal')));
