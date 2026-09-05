@@ -78,3 +78,31 @@ test('recovery-controller keeps the authoritative run identity when recovery fai
   assert.equal(execution?.startedAt, 300);
   assert.equal(execution?.error, 'Provider indisponível.');
 });
+
+test('recovery-controller removes the active snapshot when recovery is cancelled', async () => {
+  const controller = new AbortController();
+  const agentRuntime = {
+    resumeRecovered: async (_runId: string, signal?: AbortSignal) => new Promise<never>((_resolve, reject) => {
+      const abort = (): void => {
+        const error = new Error('Operação cancelada.');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      if (signal?.aborted) abort();
+      else signal?.addEventListener('abort', abort, { once: true });
+    }),
+  } as unknown as AgentRuntime;
+  const executionManager = new ExecutionManager();
+
+  const recovery = resumeRecoveredRun(
+    agentRuntime,
+    executionManager,
+    { runId: 'persisted-run', chatId: 'chat-test', toolRounds: 3 },
+    400,
+    controller.signal,
+  );
+  controller.abort();
+
+  await assert.rejects(recovery, (error: unknown) => error instanceof Error && error.name === 'AbortError');
+  assert.equal(executionManager.get('chat-test'), undefined);
+});
