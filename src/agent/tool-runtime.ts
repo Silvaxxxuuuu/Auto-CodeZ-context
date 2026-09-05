@@ -174,14 +174,26 @@ export class ToolRuntime {
           } catch {}
         }
       }
-      this.assertChangeBudget(chatId, runId, normalizedCall, diffPlan);
+      try {
+        this.assertChangeBudget(chatId, runId, normalizedCall, diffPlan);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.activity.emit({ type: 'action', message: `Bloqueado pelo Change Budget: ${normalizedCall.name}`, status: 'failed', toolCallId: normalizedCall.id, toolName: normalizedCall.name, chatId, runId, error: message, ...(diffPlan ? { diffPlan } : {}) });
+        return { toolCallId: normalizedCall.id, ok: false, error: message, ...(diffPlan ? { diffPlan } : {}) };
+      }
       const approval = this.approvals.request({ projectId, chatId, runId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });
       this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${normalizedCall.name}.`, status: 'pending', toolCallId: normalizedCall.id, toolName: normalizedCall.name, chatId, runId, ...(diffPlan ? { diffPlan } : {}) });
       return { toolCallId: normalizedCall.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
     }
     let directDiffPlan: DiffPlan | undefined;
-    if (this.hasChangeBudget(chatId, runId) && this.isMutation(normalizedCall.name)) directDiffPlan = await this.preview(projectId, normalizedCall);
-    this.assertChangeBudget(chatId, runId, normalizedCall, directDiffPlan);
+    try {
+      if (this.hasChangeBudget(chatId, runId) && this.isMutation(normalizedCall.name)) directDiffPlan = await this.preview(projectId, normalizedCall);
+      this.assertChangeBudget(chatId, runId, normalizedCall, directDiffPlan);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.activity.emit({ type: 'action', message: `Bloqueado pelo Change Budget: ${normalizedCall.name}`, status: 'failed', toolCallId: normalizedCall.id, toolName: normalizedCall.name, chatId, runId, error: message, ...(directDiffPlan ? { diffPlan: directDiffPlan } : {}) });
+      return { toolCallId: normalizedCall.id, ok: false, error: message, ...(directDiffPlan ? { diffPlan: directDiffPlan } : {}) };
+    }
     return this.executeNow(projectId, normalizedCall, undefined, directDiffPlan, { chatId, runId });
   }
 
