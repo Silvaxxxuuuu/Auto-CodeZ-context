@@ -32,6 +32,8 @@ import { ExecutionPlanHistoryPersistence, ExecutionPlanHistoryStore } from './ex
 import { ExecutionReportBuilder } from './execution-report';
 import { ExecutionQualityGateRuntime, type ExecutionQualityGateRequirement } from './execution-quality-gate';
 import { ExecutionQualityGatePersistence, ExecutionQualityGateStore } from './execution-quality-gate-store';
+import { ExecutionTaskCapsuleRuntime } from './execution-task-capsule';
+import { ExecutionTaskCapsulePersistence, ExecutionTaskCapsuleStore } from './execution-task-capsule-store';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
@@ -77,11 +79,15 @@ const executionReportBuilder = new ExecutionReportBuilder(executionManager, exec
 const executionQualityGateRuntime = new ExecutionQualityGateRuntime();
 const executionQualityGateStore = new ExecutionQualityGateStore(storage);
 const executionQualityGatePersistence = new ExecutionQualityGatePersistence(executionQualityGateStore);
+const executionTaskCapsuleRuntime = new ExecutionTaskCapsuleRuntime();
+const executionTaskCapsuleStore = new ExecutionTaskCapsuleStore(storage);
+const executionTaskCapsulePersistence = new ExecutionTaskCapsulePersistence(executionTaskCapsuleStore);
 let executionPersistenceEnabled = false;
 let executionTimelinePersistenceEnabled = false;
 let executionPlanPersistenceEnabled = false;
 let executionPlanHistoryPersistenceEnabled = false;
 let executionQualityGatePersistenceEnabled = false;
+let executionTaskCapsulePersistenceEnabled = false;
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 const approvalRunLocks = new Set<string>();
 let mainWindow: BrowserWindow | null = null;
@@ -262,6 +268,23 @@ async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnTyp
   return { chat, config, projectContext };
 }
 
+function captureExecutionTaskCapsule(
+  chat: Awaited<ReturnType<ChatManager['list']>>[number],
+  runId: string,
+  objective: string,
+): void {
+  executionTaskCapsuleRuntime.create({
+    chatId: chat.id,
+    runId,
+    objective,
+    projectId: chat.projectId,
+    providerId: chat.providerId,
+    model: chat.model,
+    permissionLevel: chat.permissionLevel,
+  });
+  if (executionTaskCapsulePersistenceEnabled) executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
+}
+
 ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.list(), chats: await chatManager.list(), projects: await projectManager.list() }));
 ipcMain.handle('providers:list-models', async (_event, identifier: string) => {
   const value = requireIdentifier(identifier, 'Provider');
@@ -282,6 +305,7 @@ ipcMain.handle('chat:delete', async (_event, chatId: string) => {
   await clearChatExecution(id);
   if (executionPlanHistory.purgeChat(id) && executionPlanHistoryPersistenceEnabled) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
   if (executionQualityGateRuntime.removeChat(id) && executionQualityGatePersistenceEnabled) executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
+  if (executionTaskCapsuleRuntime.removeChat(id) && executionTaskCapsulePersistenceEnabled) executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
   return chatManager.remove(id);
 });
 ipcMain.handle('chat:rename', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome do chat'); return chatManager.rename(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.title, 'Nome do chat')); });
@@ -305,6 +329,7 @@ async function executeChat(chatId: string, content: string): Promise<{ pendingAp
   reconcileExecutionSlot(chatId);
   const execution = executionManager.start(chatId);
   const runId = execution.runId;
+  captureExecutionTaskCapsule(chat, runId, content);
   try {
     await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const current = (await chatManager.list()).find((item) => item.id === chat.id);
@@ -363,6 +388,7 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
   const controller = new AbortController();
   activeStreamControllers.set(chatId, { runId: execution.runId, controller });
   const runId = execution.runId;
+  captureExecutionTaskCapsule(chat, runId, content);
 
   const emit = (event: AIStreamEvent): void => {
     try {
@@ -467,6 +493,11 @@ ipcMain.handle('agent:evaluate-execution-quality-gate', async (_event, input: un
   return executionQualityGateRuntime.evaluate(executionReportBuilder.build(chatId, runId)) ?? null;
 });
 ipcMain.handle('agent:list-execution-quality-gates', async (_event, chatId?: string) => executionQualityGateRuntime.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));
+ipcMain.handle('agent:get-execution-task-capsule', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação da Task Capsule');
+  return executionTaskCapsuleRuntime.get(requireIdentifier(value.chatId, 'Chat'), requireIdentifier(value.runId, 'Execução')) ?? null;
+});
+ipcMain.handle('agent:list-execution-task-capsules', async (_event, chatId?: string) => executionTaskCapsuleRuntime.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));
 ipcMain.handle('agent:list-recoverable-runs', async () => listRecoverableRuns(agentRuntime));
 ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
   const id = requireIdentifier(runId, 'Execução recuperável');
@@ -626,6 +657,7 @@ app.whenReady().then(async () => {
   executionTimeline.restore(await executionTimelineStore.load());
   executionPlanHistory.restore(await executionPlanHistoryStore.load());
   executionQualityGateRuntime.restore(await executionQualityGateStore.load());
+  executionTaskCapsuleRuntime.restore(await executionTaskCapsuleStore.load());
   await restorePersistedExecutionSnapshots();
   executionPlanner.restore(await executionPlanStore.load());
   restoreExecutionSnapshots();
@@ -636,11 +668,13 @@ app.whenReady().then(async () => {
   executionPlanPersistenceEnabled = true;
   executionPlanHistoryPersistenceEnabled = true;
   executionQualityGatePersistenceEnabled = true;
+  executionTaskCapsulePersistenceEnabled = true;
   executionStatePersistence.schedule(executionManager.list());
   executionTimelinePersistence.schedule(executionTimeline.list());
   executionPlanPersistence.schedule(executionPlanner.list());
   executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
   executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
+  executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
   activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);

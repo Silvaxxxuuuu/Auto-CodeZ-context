@@ -16,6 +16,7 @@ const SENSITIVE_JSON_FILES = new Set([
   'execution-plans.json',
   'execution-plan-history.json',
   'execution-quality-gates.json',
+  'execution-task-capsules.json',
   'execution-timeline.json',
 ]);
 
