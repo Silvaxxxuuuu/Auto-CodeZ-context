@@ -23,6 +23,7 @@ export async function resumeRecoveredRun(
   recoverable: RecoverableRun,
   now = Date.now(),
   signal?: AbortSignal,
+  deferCompletion = false,
 ): Promise<RecoveryResult> {
   signal?.throwIfAborted();
   const existing = executionManager.get(recoverable.chatId);
@@ -35,7 +36,7 @@ export async function resumeRecoveredRun(
   try {
     const result = await runWithExplicitProviderRecovery(() => agentRuntime.resumeRecovered(recoverable.runId, signal));
     signal?.throwIfAborted();
-    const state = result.pendingApprovalIds.length ? 'waiting_approval' : 'completed';
+    const state = result.pendingApprovalIds.length ? 'waiting_approval' : deferCompletion ? 'running' : 'completed';
     const execution = executionManager.update(recoverable.chatId, {
       state,
       runId: recoverable.runId,
