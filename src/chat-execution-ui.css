@@ -4,6 +4,21 @@
 }
 
 .chat-execution > .execution-run:not([data-recovery-run]) {
+  display: block !important;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.chat-execution > .execution-run:not([data-recovery-run]) > .execution-run-header,
+.chat-execution > .execution-run:not([data-recovery-run]) > .execution-run-message,
+.chat-execution > .execution-run:not([data-recovery-run]) > .execution-steps {
+  display: none !important;
+}
+
+.chat-execution > .execution-run:not([data-recovery-run]) > .execution-run-details:empty {
   display: none !important;
 }
 
