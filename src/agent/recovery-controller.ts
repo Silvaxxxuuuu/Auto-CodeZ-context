@@ -18,6 +18,7 @@ export function listRecoverableRuns(agentRuntime: AgentRuntime): RecoverableRun[
 }
 
 function recoveryJournalRetained(agentRuntime: AgentRuntime, recoverable: RecoverableRun): boolean {
+  if (typeof agentRuntime.listRecoverableRuns !== 'function') return false;
   return agentRuntime.listRecoverableRuns().some((run) => run.runId === recoverable.runId && run.chatId === recoverable.chatId);
 }
 
