@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AgentRuntime } from '../src/agent/agent-runtime';
-import { resumeRecoveredRun } from '../src/agent/recovery-controller';
+import { resumeRecoveredRun, type RecoverableRun } from '../src/agent/recovery-controller';
 import { ExecutionCoordinator } from '../src/execution-coordinator';
 import { ExecutionManager } from '../src/execution-manager';
 import { ExecutionPlanner } from '../src/execution-planner';
@@ -75,7 +75,7 @@ test('mesma execução pode ser retomada novamente depois de falha transitória'
 
 test('journal consumido mantém semântica terminal de falha', async () => {
   const runtime = {
-    listRecoverableRuns: () => [],
+    listRecoverableRuns: (): RecoverableRun[] => [],
     resumeRecovered: async () => {
       throw new Error('Execução não é mais recuperável.');
     },
