@@ -18,6 +18,7 @@ const SENSITIVE_JSON_FILES = new Set([
   'execution-quality-gates.json',
   'execution-task-capsules.json',
   'execution-timeline.json',
+  'execution-change-budget.json',
 ]);
 
 function isMissingFile(error: unknown): boolean {
