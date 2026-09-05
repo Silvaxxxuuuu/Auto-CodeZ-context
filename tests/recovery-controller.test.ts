@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ExecutionManager } from '../src/execution-manager';
 import { resumeRecoveredRun } from '../src/agent/recovery-controller';
+import { isExplicitProviderRecovery } from '../src/ai/provider-recovery-context';
 import type { AgentRuntime } from '../src/agent/agent-runtime';
 
 function createRuntime(result: { chatId: string; pendingApprovalIds: string[] }) {
@@ -105,4 +106,33 @@ test('recovery-controller removes the active snapshot when recovery is cancelled
 
   await assert.rejects(recovery, (error: unknown) => error instanceof Error && error.name === 'AbortError');
   assert.equal(executionManager.get('chat-test'), undefined);
+});
+
+test('recovery-controller scopes provider retry permission only to the explicit recovery operation', async () => {
+  let observedDuringRecovery = false;
+  const agentRuntime = {
+    resumeRecovered: async () => {
+      await Promise.resolve();
+      observedDuringRecovery = isExplicitProviderRecovery();
+      return {
+        chatId: 'chat-test',
+        pendingApprovalIds: [],
+        response: { content: '', model: 'test-model', providerId: 'test-provider' },
+        toolRounds: 1,
+        messages: [],
+      };
+    },
+  } as unknown as AgentRuntime;
+  const executionManager = new ExecutionManager();
+
+  assert.equal(isExplicitProviderRecovery(), false);
+  await resumeRecoveredRun(
+    agentRuntime,
+    executionManager,
+    { runId: 'persisted-run', chatId: 'chat-test', toolRounds: 1 },
+    500,
+  );
+
+  assert.equal(observedDuringRecovery, true);
+  assert.equal(isExplicitProviderRecovery(), false);
 });
