@@ -1,0 +1,69 @@
+name: Integrate verified completion reports
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/phase2-report-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - name: Integrate execution reports
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          main = Path('src/main.ts')
+          text = main.read_text(encoding='utf-8')
+
+          def replace_once(old: str, new: str):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected one occurrence, found {count}: {old[:120]!r}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "import { ExecutionPlanHistoryPersistence, ExecutionPlanHistoryStore } from './execution-plan-history-store';\n",
+              "import { ExecutionPlanHistoryPersistence, ExecutionPlanHistoryStore } from './execution-plan-history-store';\nimport { ExecutionReportBuilder } from './execution-report';\n",
+          )
+          replace_once(
+              "const executionPlanHistoryPersistence = new ExecutionPlanHistoryPersistence(executionPlanHistoryStore);\n",
+              "const executionPlanHistoryPersistence = new ExecutionPlanHistoryPersistence(executionPlanHistoryStore);\nconst executionReportBuilder = new ExecutionReportBuilder(executionManager, executionTimeline, executionPlanHistory);\n",
+          )
+          history_handler = """ipcMain.handle('agent:list-execution-plan-history', async (_event, filters?: { chatId?: string; runId?: string }) => {\n  if (filters === undefined) return executionPlanHistory.list();\n  const value = requireObject(filters, 'Filtro do histórico de planos');\n  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');\n  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');\n  return executionPlanHistory.list({ chatId, runId });\n});\n"""
+          report_handlers = history_handler + """ipcMain.handle('agent:get-execution-report', async (_event, input: unknown) => {\n  const value = requireObject(input, 'Identificação do relatório de execução');\n  const chatId = requireIdentifier(value.chatId, 'Chat');\n  const runId = requireIdentifier(value.runId, 'Execução');\n  return executionReportBuilder.build(chatId, runId) ?? null;\n});\nipcMain.handle('agent:list-execution-reports', async (_event, chatId?: string) => executionReportBuilder.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));\n"""
+          replace_once(history_handler, report_handlers)
+          main.write_text(text, encoding='utf-8')
+
+          preload = Path('src/preload.ts')
+          ptext = preload.read_text(encoding='utf-8')
+          old = "  listExecutionPlanHistory: (filters?: ApprovalScope) => invoke('agent:list-execution-plan-history', requireApprovalScope(filters)),\n"
+          new = old + "  getExecutionReport: (input: { chatId: string; runId: string }) => { const value = requireObject(input, 'Identificação do relatório de execução'); return invoke('agent:get-execution-report', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') }); },\n  listExecutionReports: (chatId?: string) => invoke('agent:list-execution-reports', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),\n"
+          if ptext.count(old) != 1:
+              raise SystemExit('Preload history anchor mismatch')
+          preload.write_text(ptext.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          git diff --check
+          git diff -- src/main.ts src/preload.ts
+      - name: Commit integration and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git rm .github/workflows/phase2-report-integration.yml
+          git add src/main.ts src/preload.ts
+          git commit -m "feat(execution): expose verified completion reports"
+          git push origin HEAD:feature/ui-hierarchy-polish
