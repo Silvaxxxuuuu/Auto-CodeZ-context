@@ -8,7 +8,7 @@ type Chat = { id: string; title: string; projectId?: string; providerId: string;
 type Project = { id: string; name: string; rootPath: string; createdAt: number; updatedAt: number };
 type IntelligenceLevel = Chat['intelligence'];
 type PermissionLevel = Chat['permissionLevel'];
-type StreamEvent = { type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'error'; chatId?: string; runId?: string; text?: string; activity?: { message: string; status: string }; toolCall?: { id: string; name: string; input: Record<string, unknown> }; pendingApprovalIds?: string[]; error?: string };
+type StreamEvent = { type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'cancelled' | 'error'; chatId?: string; runId?: string; text?: string; activity?: { message: string; status: string }; toolCall?: { id: string; name: string; input: Record<string, unknown> }; pendingApprovalIds?: string[]; error?: string };
 type Approval = { id: string; projectId: string; chatId?: string; runId?: string; permissionLevel: string; toolCall: { id: string; name: string; input: Record<string, unknown> }; createdAt: number };
 type ExecutionState = 'idle' | 'running' | 'waiting_approval' | 'failed';
 
@@ -27,7 +27,7 @@ declare global {
       listApprovals: (filters?: { chatId?: string; runId?: string }) => Promise<Approval[]>;
       approveTool: (approvalId: string, filters?: { chatId?: string; runId?: string }) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
       denyTool: (approvalId: string, filters?: { chatId?: string; runId?: string }) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
-      onActivity: (listener: (event: { message?: string; status?: string }) => void) => () => void;
+      onActivity: (listener: (event: { message?: string; status?: string; chatId?: string; runId?: string }) => void) => () => void;
       terminal: {
         start: (input: { projectId: string; command: string }) => Promise<unknown>;
         kill: (sessionId: string) => Promise<unknown>;
@@ -68,6 +68,7 @@ let activeProjectId: string | undefined;
 let composerIntelligence: IntelligenceLevel = 'normal';
 let intelligenceMenuOpen = false;
 let executionState: ExecutionState = 'idle';
+let activeRunId: string | undefined;
 let streamingText = '';
 let streamingActivity: string[] = [];
 let pendingApprovals: Approval[] = [];
@@ -77,6 +78,8 @@ let lastSubmittedContent = '';
 let streamRenderTimer: number | null = null;
 let streamingMessageElement: HTMLElement | null = null;
 let activityElement: HTMLElement | null = null;
+let stateRefreshToken = 0;
+let approvalRefreshToken = 0;
 
 app.innerHTML = `
 <div class="app-shell">
@@ -177,8 +180,7 @@ function renderStreamingActivityDom(): void {
   const activityLines = [...streamingActivity];
   if (executionState === 'waiting_approval') activityLines.push('Aguardando sua aprovação.');
   if (lastError) activityLines.push(lastError);
-  const shouldRender = activityLines.length || pendingApprovals.length;
-  if (!shouldRender) {
+  if (!activityLines.length) {
     activityElement?.remove();
     activityElement = null;
     return;
@@ -188,7 +190,7 @@ function renderStreamingActivityDom(): void {
     activityElement.className = 'activity-card';
     messages.appendChild(activityElement);
   }
-  activityElement.innerHTML = `<div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line ${executionState === 'failed' ? 'error' : 'running'}">${escapeHtml(line)}</div>`).join('')}${renderApprovals()}`;
+  activityElement.innerHTML = `<div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line ${executionState === 'failed' ? 'error' : 'running'}">${escapeHtml(line)}</div>`).join('')}`;
 }
 
 function renderStreamingDom(): void {
@@ -250,11 +252,6 @@ function renderHeader(): void {
   chatHeader.innerHTML = `<div><div class="chat-title-row"><h1>${escapeHtml(activeChat.title)}</h1></div><div class="chat-subtitle">${escapeHtml(providerName(activeChat.providerId))}${unconfigured ? '' : ` · ${escapeHtml(activeChat.model)} · Inteligência ${intelligenceLabel(activeChat.intelligence)}`}</div></div><div class="header-actions"><button class="provider-chip" data-chat-settings="${activeChat.id}">${escapeHtml(providerName(activeChat.providerId))}<span class="provider-chevron" aria-hidden="true"></span></button></div>`;
 }
 
-function renderApprovals(): string {
-  if (!pendingApprovals.length) return '';
-  return pendingApprovals.map((approval) => `<div class="approval-card" data-approval="${approval.id}"><div class="approval-heading">Aprovação necessária</div><div class="approval-tool">${escapeHtml(approval.toolCall.name)}</div><div class="approval-input">${escapeHtml(JSON.stringify(approval.toolCall.input, null, 2))}</div><div class="approval-actions"><button data-approve="${approval.id}" class="primary-button">Aprovar</button><button data-deny="${approval.id}" class="danger-button">Recusar</button></div></div>`).join('');
-}
-
 function renderMessages(): void {
   streamingMessageElement = null;
   activityElement = null;
@@ -267,7 +264,7 @@ function renderMessages(): void {
   const activityLines = [...streamingActivity];
   if (executionState === 'waiting_approval') activityLines.push('Aguardando sua aprovação.');
   if (lastError) activityLines.push(lastError);
-  const activity = activityLines.length || pendingApprovals.length ? `<div class="activity-card"><div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line ${executionState === 'failed' ? 'error' : 'running'}">${escapeHtml(line)}</div>`).join('')}${renderApprovals()}</div>` : '';
+  const activity = activityLines.length ? `<div class="activity-card"><div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line ${executionState === 'failed' ? 'error' : 'running'}">${escapeHtml(line)}</div>`).join('')}</div>` : '';
   const wasNearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100;
   messages.innerHTML = rendered + live + activity;
   if (wasNearBottom || executionState === 'running') messages.scrollTop = messages.scrollHeight;
@@ -278,14 +275,18 @@ function renderMessages(): void {
 function renderComposer(): void {
   const busy = executionState === 'running' || executionState === 'waiting_approval';
   intelligenceButton.querySelector<HTMLElement>('.intelligence-current')!.textContent = intelligenceLabel(composerIntelligence);
+  prompt.dataset.executionLocked = String(busy);
+  sendButton.dataset.executionLocked = String(busy);
   sendButton.disabled = !activeChat || !prompt.value.trim() || busy || pendingApprovals.length > 0;
   prompt.disabled = busy;
   renderIntelligenceMenu();
 }
 
 async function refresh(): Promise<void> {
+  const token = ++stateRefreshToken;
   try {
     const state = await window.autoCodez.getState();
+    if (token !== stateRefreshToken) return;
     providers = state.providers;
     chats = state.chats;
     projects = state.projects;
@@ -300,6 +301,7 @@ async function refresh(): Promise<void> {
     renderMessages();
     renderComposer();
   } catch (error) {
+    if (token !== stateRefreshToken) return;
     setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível carregar o estado do aplicativo.');
   }
 }
@@ -325,6 +327,7 @@ async function openChatSettings(chat: Chat): Promise<void> {
   if (provider?.configured) {
     try { models = await window.autoCodez.listModels(chat.providerId); } catch { models = []; }
   }
+  if (activeChat?.id !== chat.id) return;
   openModal(`<div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Configurações do chat</h2><p>Essas configurações pertencem a esta conversa.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><label>Inteligência artificial<select id="chat-provider">${providers.map((item) => `<option value="${item.id}" ${item.id === chat.providerId ? 'selected' : ''} ${item.configured ? '' : 'disabled'}>${escapeHtml(item.displayName)}${item.configured ? '' : ' · não configurada'}</option>`).join('')}</select></label><label>Modelo<select id="chat-model">${models.map((model) => `<option value="${model.id}" ${model.id === chat.model ? 'selected' : ''}>${escapeHtml(model.name)}</option>`).join('') || (chat.model === 'unconfigured' ? '<option value="">Configure uma IA primeiro</option>' : `<option value="${escapeHtml(chat.model)}">${escapeHtml(chat.model)}</option>`)}</select></label><label>Nível de acesso<select id="chat-permission"><option value="read-only" ${chat.permissionLevel === 'read-only' ? 'selected' : ''}>Somente leitura</option><option value="safe" ${chat.permissionLevel === 'safe' ? 'selected' : ''}>Acesso seguro</option><option value="ask" ${chat.permissionLevel === 'ask' ? 'selected' : ''}>Acesso solicitado</option><option value="unrestricted" ${chat.permissionLevel === 'unrestricted' ? 'selected' : ''}>Acesso irrestrito</option></select></label><button class="primary-button" id="save-chat-settings">Salvar configurações</button></div>`);
 }
 
@@ -337,6 +340,7 @@ async function newChat(projectId?: string): Promise<void> {
     lastError = '';
     retryContent = '';
     lastSubmittedContent = '';
+    activeRunId = undefined;
     executionState = 'idle';
     activePanel = projectId ? 'projects' : 'chats';
     activeProjectId = projectId;
@@ -361,16 +365,24 @@ async function newProject(): Promise<void> {
 }
 
 async function refreshApprovals(): Promise<void> {
+  const chatId = activeChat?.id;
+  const token = ++approvalRefreshToken;
+  if (!chatId) {
+    pendingApprovals = [];
+    return;
+  }
   try {
-    const chatId = activeChat?.id;
-    if (!chatId) { pendingApprovals = []; return; }
-    pendingApprovals = (await window.autoCodez.listApprovals({ chatId })).filter((approval) => approval.chatId === chatId);
+    const approvals = (await window.autoCodez.listApprovals({ chatId })).filter((approval) => approval.chatId === chatId);
+    if (token !== approvalRefreshToken || activeChat?.id !== chatId) return;
+    pendingApprovals = approvals;
+    if (approvals[0]?.runId) activeRunId = approvals[0].runId;
     if (pendingApprovals.length) executionState = 'waiting_approval';
     renderMessages();
     renderComposer();
   } catch (error) {
+    if (token !== approvalRefreshToken || activeChat?.id !== chatId) return;
     pendingApprovals = [];
-    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível carregar as aprovações.');
+    window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível carregar as aprovações.' }));
   }
 }
 
@@ -386,6 +398,7 @@ async function sendMessage(contentOverride?: string, isRetry = false): Promise<v
   streamingActivity = [`Enviando para ${providerName(activeChat.providerId)}`];
   lastError = '';
   lastSubmittedContent = content;
+  activeRunId = undefined;
   if (!isRetry) {
     retryContent = '';
     activeChat.messages = [...activeChat.messages, { role: 'user', content, createdAt: Date.now() }];
@@ -395,7 +408,14 @@ async function sendMessage(contentOverride?: string, isRetry = false): Promise<v
     const result = await window.autoCodez.streamChat({ chatId, content });
     if (!activeChat || activeChat.id !== chatId) return;
     activeChat = result.chat;
-    pendingApprovals = result.pendingApprovalIds.length ? (await window.autoCodez.listApprovals({ chatId })).filter((approval) => approval.chatId === chatId) : [];
+    if (result.pendingApprovalIds.length) {
+      const approvals = (await window.autoCodez.listApprovals({ chatId })).filter((approval) => approval.chatId === chatId);
+      if (!activeChat || activeChat.id !== chatId) return;
+      pendingApprovals = approvals;
+      if (approvals[0]?.runId) activeRunId = approvals[0].runId;
+    } else {
+      pendingApprovals = [];
+    }
     if (pendingApprovals.length) {
       executionState = 'waiting_approval';
       streamingText = '';
@@ -403,14 +423,15 @@ async function sendMessage(contentOverride?: string, isRetry = false): Promise<v
       renderComposer();
     } else {
       executionState = 'idle';
+      activeRunId = undefined;
       streamingText = '';
       streamingActivity = [];
-      pendingApprovals = [];
       retryContent = '';
       lastSubmittedContent = '';
       await refresh();
     }
   } catch (error) {
+    if (!activeChat || activeChat.id !== chatId) return;
     retryContent = content;
     setExecutionState('failed', error instanceof Error ? error.message : 'Falha ao enviar mensagem.');
   }
@@ -426,6 +447,8 @@ async function resumeApproval(id: string, approve: boolean): Promise<void> {
   if (executionState !== 'waiting_approval' || !activeChat) return;
   const approval = pendingApprovals.find((item) => item.id === id);
   if (!approval || approval.chatId !== activeChat.id) return;
+  const chatId = activeChat.id;
+  const runId = approval.runId;
   executionState = 'running';
   pendingApprovals = pendingApprovals.filter((item) => item.id !== id);
   streamingText = '';
@@ -434,21 +457,26 @@ async function resumeApproval(id: string, approve: boolean): Promise<void> {
   renderMessages();
   renderComposer();
   try {
-    const scope = { chatId: approval.chatId, ...(approval.runId ? { runId: approval.runId } : {}) };
+    const scope = { chatId, ...(runId ? { runId } : {}) };
     const result = approve ? await window.autoCodez.approveTool(id, scope) : await window.autoCodez.denyTool(id, scope);
     if (result.chatId) {
       const chat = chats.find((item) => item.id === result.chatId);
       if (chat && result.messages) chat.messages = result.messages;
-      if (activeChat?.id === result.chatId && result.messages) activeChat.messages = result.messages;
     }
-    pendingApprovals = (await window.autoCodez.listApprovals({ chatId: activeChat.id })).filter((item) => item.chatId === activeChat?.id);
+    if (activeChat?.id !== chatId) return;
+    if (result.chatId === chatId && result.messages) activeChat.messages = result.messages;
+    const approvals = (await window.autoCodez.listApprovals({ chatId })).filter((item) => item.chatId === chatId && (!runId || !item.runId || item.runId === runId));
+    if (activeChat?.id !== chatId) return;
+    pendingApprovals = approvals;
     if (pendingApprovals.length) {
       executionState = 'waiting_approval';
+      activeRunId = pendingApprovals[0]?.runId || runId;
       streamingActivity = ['Outras operações ainda aguardam aprovação.'];
       renderMessages();
       renderComposer();
     } else {
       executionState = 'idle';
+      activeRunId = undefined;
       streamingText = '';
       streamingActivity = [];
       retryContent = '';
@@ -456,28 +484,45 @@ async function resumeApproval(id: string, approve: boolean): Promise<void> {
       await refresh();
     }
   } catch (error) {
-    pendingApprovals = await window.autoCodez.listApprovals({ chatId: activeChat.id }).catch((): Approval[] => []);
-    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível processar a aprovação.');
+    const message = error instanceof Error ? error.message : 'Não foi possível processar a aprovação.';
+    const approvals = await window.autoCodez.listApprovals({ chatId }).catch((): Approval[] => []);
+    if (activeChat?.id !== chatId) return;
+    pendingApprovals = approvals.filter((item) => item.chatId === chatId && (!runId || !item.runId || item.runId === runId));
+    if (pendingApprovals.length) {
+      executionState = 'waiting_approval';
+      activeRunId = pendingApprovals[0]?.runId || runId;
+      streamingActivity = [message];
+      lastError = '';
+      renderMessages();
+      renderComposer();
+    } else {
+      setExecutionState('failed', message);
+    }
+  } finally {
+    window.dispatchEvent(new CustomEvent('auto-codez-approval-settled', { detail: { approvalId: id, chatId, runId } }));
   }
 }
 
 async function setComposerIntelligence(level: IntelligenceLevel): Promise<void> {
   if (!activeChat || (executionState !== 'idle' && executionState !== 'failed')) return;
+  const chatId = activeChat.id;
   const previous = composerIntelligence;
-  const previousState = executionState;
   composerIntelligence = level;
   setIntelligenceMenu(false);
   if (activeChat.intelligence === level) { renderComposer(); return; }
   try {
-    activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId: activeChat.providerId, model: activeChat.model, intelligence: level, permissionLevel: activeChat.permissionLevel });
+    const updated = await window.autoCodez.updateChatSettings({ chatId, providerId: activeChat.providerId, model: activeChat.model, intelligence: level, permissionLevel: activeChat.permissionLevel });
+    if (activeChat?.id !== chatId) return;
+    activeChat = updated;
     executionState = 'idle';
     lastError = '';
     retryContent = '';
     lastSubmittedContent = '';
     await refresh();
   } catch (error) {
+    if (activeChat?.id !== chatId) return;
     composerIntelligence = previous;
-    setExecutionState(previousState === 'failed' ? 'failed' : 'failed', error instanceof Error ? error.message : 'Não foi possível atualizar o perfil de raciocínio.');
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível atualizar o perfil de raciocínio.');
   }
 }
 
@@ -487,6 +532,7 @@ async function deleteChat(chatId: string): Promise<void> {
     await window.autoCodez.deleteChat(chatId);
     if (activeChat?.id === chatId) {
       activeChat = null;
+      activeRunId = undefined;
       pendingApprovals = [];
       streamingText = '';
       streamingActivity = [];
@@ -497,7 +543,8 @@ async function deleteChat(chatId: string): Promise<void> {
     }
     await refresh();
   } catch (error) {
-    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível excluir o chat.');
+    if (activeChat?.id === chatId) setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível excluir o chat.');
+    else window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível excluir o chat.' }));
   }
 }
 
@@ -563,7 +610,10 @@ app.addEventListener('click', async (event) => {
   if (chatButton) {
     const nextChat = chats.find((chat) => chat.id === chatButton.dataset.chat) || null;
     if (!nextChat) return;
+    approvalRefreshToken += 1;
+    stateRefreshToken += 1;
     activeChat = nextChat;
+    activeRunId = undefined;
     pendingApprovals = [];
     streamingText = '';
     streamingActivity = [];
@@ -629,23 +679,41 @@ modalRoot.addEventListener('click', async (event) => {
   }
   if (target.id === 'save-chat-settings') {
     if (!activeChat) return;
+    const chatId = activeChat.id;
     const providerId = document.querySelector<HTMLSelectElement>('#chat-provider')?.value || activeChat.providerId;
     const model = document.querySelector<HTMLSelectElement>('#chat-model')?.value || activeChat.model;
     const permissionLevel = document.querySelector<HTMLSelectElement>('#chat-permission')?.value || activeChat.permissionLevel;
     if (providerId === 'unconfigured' || !model) { closeModal(); await openProviderSettings(); return; }
-    try { activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId, model, intelligence: activeChat.intelligence, permissionLevel }); composerIntelligence = activeChat.intelligence; closeModal(); executionState = 'idle'; lastError = ''; retryContent = ''; lastSubmittedContent = ''; await refresh(); } catch (error) { setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.'); }
+    try {
+      const updated = await window.autoCodez.updateChatSettings({ chatId, providerId, model, intelligence: activeChat.intelligence, permissionLevel });
+      if (activeChat?.id !== chatId) return;
+      activeChat = updated;
+      composerIntelligence = activeChat.intelligence;
+      closeModal();
+      executionState = 'idle';
+      lastError = '';
+      retryContent = '';
+      lastSubmittedContent = '';
+      await refresh();
+    } catch (error) {
+      if (activeChat?.id === chatId) setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.');
+    }
   }
 });
 
 window.autoCodez.onStreamEvent((event) => {
   const eventChatId = event.chatId;
-  if (eventChatId && activeChat && eventChatId !== activeChat.id) return;
+  if (eventChatId && eventChatId !== activeChat?.id) return;
+  if (!eventChatId && !activeChat) return;
   if (event.type === 'start') {
+    activeRunId = event.runId;
     executionState = 'running';
     lastError = '';
     renderComposer();
     return;
   }
+  if (event.runId && activeRunId && event.runId !== activeRunId) return;
+  if (event.runId && !activeRunId) activeRunId = event.runId;
   if (event.type === 'delta' && event.text) {
     streamingText += event.text;
     scheduleStreamRender();
@@ -667,16 +735,28 @@ window.autoCodez.onStreamEvent((event) => {
     return;
   }
   if (event.type === 'complete') {
-    if (activeChat && event.chatId === activeChat.id) {
-      executionState = 'idle';
-      streamingText = '';
-      streamingActivity = [];
-      pendingApprovals = [];
-      retryContent = '';
-      lastSubmittedContent = '';
-      renderMessages();
-      renderComposer();
-    }
+    executionState = 'idle';
+    activeRunId = undefined;
+    streamingText = '';
+    streamingActivity = [];
+    pendingApprovals = [];
+    retryContent = '';
+    lastSubmittedContent = '';
+    renderMessages();
+    renderComposer();
+    return;
+  }
+  if (event.type === 'cancelled') {
+    executionState = 'idle';
+    activeRunId = undefined;
+    streamingText = '';
+    streamingActivity = [];
+    pendingApprovals = [];
+    lastError = '';
+    retryContent = '';
+    lastSubmittedContent = '';
+    renderMessages();
+    renderComposer();
     return;
   }
   if (event.type === 'error' && event.error) {
@@ -686,6 +766,8 @@ window.autoCodez.onStreamEvent((event) => {
 });
 
 window.autoCodez.onActivity((event) => {
+  if (event.chatId && event.chatId !== activeChat?.id) return;
+  if (event.runId && activeRunId && event.runId !== activeRunId) return;
   if (event.message && executionState === 'running') {
     streamingActivity.push(event.message);
     scheduleStreamRender();
@@ -693,14 +775,14 @@ window.autoCodez.onActivity((event) => {
 });
 
 window.addEventListener('error', (event) => {
-  if (executionState === 'running' || executionState === 'waiting_approval') {
-    retryContent = lastSubmittedContent;
-    setExecutionState('failed', event.error instanceof Error ? event.error.message : event.message || 'Erro inesperado no renderer.');
-  }
+  const message = event.error instanceof Error ? event.error.message : event.message || 'Erro inesperado no renderer.';
+  console.error('[Auto CodeZ renderer]', event.error || event.message);
+  window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: message }));
 });
 window.addEventListener('unhandledrejection', (event) => {
-  retryContent = lastSubmittedContent;
-  setExecutionState('failed', event.reason instanceof Error ? event.reason.message : String(event.reason || 'Operação rejeitada.'));
+  const message = event.reason instanceof Error ? event.reason.message : String(event.reason || 'Operação rejeitada.');
+  console.error('[Auto CodeZ renderer promise]', event.reason);
+  window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: message }));
 });
 
 void refresh();
