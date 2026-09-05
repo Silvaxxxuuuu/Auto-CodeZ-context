@@ -23,6 +23,8 @@ import { ComputerContextRuntime } from './agent/computer-context';
 import { ExecutionManager, type ExecutionChange } from './execution-manager';
 import { ExecutionStatePersistence, ExecutionStateStore } from './execution-state-store';
 import { ExecutionTimeline } from './execution-timeline';
+import { ExecutionTimelinePersistence, ExecutionTimelineStore } from './execution-timeline-store';
+import { ExecutionCoordinator } from './execution-coordinator';
 import { ExecutionPlanner, type ExecutionPlanChange } from './execution-planner';
 import { ExecutionPlanPersistence, ExecutionPlanStore } from './execution-plan-store';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
@@ -56,11 +58,15 @@ const executionManager = new ExecutionManager();
 const executionStateStore = new ExecutionStateStore(storage);
 const executionStatePersistence = new ExecutionStatePersistence(executionStateStore);
 const executionTimeline = new ExecutionTimeline();
+const executionTimelineStore = new ExecutionTimelineStore(storage);
+const executionTimelinePersistence = new ExecutionTimelinePersistence(executionTimelineStore);
 const executionPlanner = new ExecutionPlanner();
+const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
 toolRuntime.configureExecutionPlanner(executionPlanner);
 const executionPlanStore = new ExecutionPlanStore(storage);
 const executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore);
 let executionPersistenceEnabled = false;
+let executionTimelinePersistenceEnabled = false;
 let executionPlanPersistenceEnabled = false;
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 const approvalRunLocks = new Set<string>();
@@ -93,8 +99,9 @@ executionPlanner.subscribe((change) => {
 
 executionManager.subscribe((change) => {
   sendExecutionChange(change);
-  executionTimeline.record(change);
+  const timelineEvents = executionTimeline.record(change);
   if (executionPersistenceEnabled) executionStatePersistence.schedule(executionManager.list());
+  if (executionTimelinePersistenceEnabled && timelineEvents.length) executionTimelinePersistence.schedule(executionTimeline.list());
 });
 
 function isAbortError(error: unknown): boolean {
@@ -124,22 +131,32 @@ function reconcileExecutionSlot(chatId: string): void {
   if (!current || (current.state !== 'running' && current.state !== 'waiting_approval')) return;
   const hasController = activeStreamControllers.has(chatId);
   const hasPending = agentRuntime.hasPendingForChat(chatId);
-  if (!hasController && !hasPending) executionManager.remove(chatId);
+  if (!hasController && !hasPending) {
+    executionCoordinator.interrupt(chatId, current.runId);
+    executionManager.remove(chatId);
+  }
 }
 
 function ensureApprovalExecution(chatId: string, runId: string): void {
   const current = executionManager.get(chatId);
-  if (current?.runId === runId) return;
+  if (current?.runId === runId && (current.state === 'running' || current.state === 'waiting_approval')) {
+    executionCoordinator.resumePlan(chatId, runId);
+    return;
+  }
   if (current) executionManager.remove(chatId);
   executionManager.start(chatId, Date.now(), runId);
+  executionCoordinator.resumePlan(chatId, runId);
 }
 
 async function clearChatExecution(chatId: string): Promise<void> {
+  const execution = executionManager.get(chatId);
   const active = activeStreamControllers.get(chatId);
   active?.controller.abort();
   activeStreamControllers.delete(chatId);
   approvalRuntime.remove({ chatId });
   await agentRuntime.cancelChat(chatId);
+  if (execution) executionCoordinator.interrupt(chatId, execution.runId);
+  else executionPlanner.remove(chatId);
   executionManager.remove(chatId);
 }
 
@@ -267,12 +284,23 @@ ipcMain.handle('chat:update-settings', async (_event, input: unknown) => {
 
 async function executeChat(chatId: string, content: string): Promise<{ pendingApprovalIds: string[]; chat: Awaited<ReturnType<ChatManager['list']>>[number] | undefined }> {
   const { chat, config, projectContext } = await getChatContext(chatId);
-  await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
-  const current = (await chatManager.list()).find((item) => item.id === chat.id);
-  if (!current) throw new Error('Chat desapareceu durante a execução.');
-  const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
-  await chatManager.update({ ...current, messages: result.messages });
-  return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  reconcileExecutionSlot(chatId);
+  const execution = executionManager.start(chatId);
+  const runId = execution.runId;
+  try {
+    await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
+    const current = (await chatManager.list()).find((item) => item.id === chat.id);
+    if (!current) throw new Error('Chat desapareceu durante a execução.');
+    const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel, runId);
+    await chatManager.update({ ...current, messages: result.messages });
+    if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
+    else executionCoordinator.complete(chatId, runId);
+    return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    executionCoordinator.fail(chatId, runId, message);
+    throw error;
+  }
 }
 
 ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => { const value = requireObject(input, 'Mensagem'); return executeChat(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.content, 'Mensagem')); });
@@ -333,8 +361,11 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
     const result = await runWithAbortSignal(controller.signal, () => agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId));
     await chatManager.update({ ...workingChat, messages: result.messages });
-    if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId });
-    else if (executionManager.get(chatId)?.state === 'running') executionManager.update(chatId, { state: 'completed', runId });
+    if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
+    else if (executionManager.get(chatId)?.state === 'running') {
+      const completion = executionCoordinator.complete(chatId, runId);
+      if (completion.error) sendStreamEvent({ type: 'error', chatId, runId, error: completion.error });
+    }
     return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
   } catch (error) {
     if (controller.signal.aborted || isAbortError(error)) {
@@ -345,7 +376,7 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
       return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
     }
     const message = error instanceof Error ? error.message : String(error);
-    executionManager.update(chatId, { state: 'failed', error: message, runId });
+    executionCoordinator.fail(chatId, runId, message);
     emit({ type: 'error', chatId, runId, error: message });
     return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: message };
   } finally {
@@ -389,9 +420,14 @@ ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
   return withApprovalRunLock(recoverable.chatId, id, async (signal) => {
     sendStreamEvent({ type: 'start', chatId: recoverable.chatId, runId: id });
     try {
-      const { result } = await resumeRecoveredRun(agentRuntime, executionManager, recoverable, Date.now(), signal);
+      executionCoordinator.resumePlan(recoverable.chatId, id);
+      const { result } = await resumeRecoveredRun(agentRuntime, executionManager, recoverable, Date.now(), signal, true);
       const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
       if (chat) await chatManager.update({ ...chat, messages: result.messages });
+      if (!result.pendingApprovalIds.length) {
+        const completion = executionCoordinator.complete(recoverable.chatId, id);
+        if (completion.error) sendStreamEvent({ type: 'error', chatId: recoverable.chatId, runId: id, error: completion.error });
+      }
       return result;
     } catch (error) {
       if (signal.aborted || isAbortError(error)) {
@@ -399,6 +435,8 @@ ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
         sendStreamEvent({ type: 'cancelled', chatId: recoverable.chatId, runId: id });
         return cancelledRunResult(recoverable.chatId);
       }
+      const message = error instanceof Error ? error.message : String(error);
+      executionCoordinator.fail(recoverable.chatId, id, message);
       throw error;
     }
   });
@@ -422,8 +460,11 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
       const result = await agentRuntime.resume(id, signal);
       const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
       if (chat) await chatManager.update({ ...chat, messages: result.messages });
-      if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId });
-      else executionManager.update(chatId, { state: 'completed', runId });
+      if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
+      else {
+        const completion = executionCoordinator.complete(chatId, runId);
+        if (completion.error) sendStreamEvent({ type: 'error', chatId, runId, error: completion.error });
+      }
       return result;
     } catch (error) {
       if (signal.aborted || isAbortError(error)) {
@@ -433,7 +474,8 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
       }
       const message = error instanceof Error ? error.message : String(error);
       const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
-      executionManager.update(chatId, { state: stillPending ? 'waiting_approval' : 'failed', error: stillPending ? undefined : message, runId });
+      if (stillPending) executionCoordinator.waitingApproval(chatId, runId);
+      else executionCoordinator.fail(chatId, runId, message);
       throw error;
     }
   });
@@ -456,8 +498,11 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
       const result = await agentRuntime.reject(id, signal);
       const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
       if (chat) await chatManager.update({ ...chat, messages: result.messages });
-      if (result.pendingApprovalIds.length) executionManager.update(chatId, { state: 'waiting_approval', runId });
-      else executionManager.update(chatId, { state: 'completed', runId });
+      if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
+      else {
+        const completion = executionCoordinator.complete(chatId, runId);
+        if (completion.error) sendStreamEvent({ type: 'error', chatId, runId, error: completion.error });
+      }
       return result;
     } catch (error) {
       if (signal.aborted || isAbortError(error)) {
@@ -467,7 +512,8 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
       }
       const message = error instanceof Error ? error.message : String(error);
       const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
-      executionManager.update(chatId, { state: stillPending ? 'waiting_approval' : 'failed', error: stillPending ? undefined : message, runId });
+      if (stillPending) executionCoordinator.waitingApproval(chatId, runId);
+      else executionCoordinator.fail(chatId, runId, message);
       throw error;
     }
   });
@@ -522,12 +568,17 @@ app.whenReady().then(async () => {
   await chatRuntime.init();
   await toolRuntime.init();
   await agentRuntime.init();
+  executionTimeline.restore(await executionTimelineStore.load());
   await restorePersistedExecutionSnapshots();
-  restoreExecutionSnapshots();
   executionPlanner.restore(await executionPlanStore.load());
+  restoreExecutionSnapshots();
+  for (const run of agentRuntime.listPendingRuns()) executionCoordinator.resumePlan(run.chatId, run.runId);
+  for (const run of listRecoverableRuns(agentRuntime)) executionCoordinator.resumePlan(run.chatId, run.runId);
   executionPersistenceEnabled = true;
+  executionTimelinePersistenceEnabled = true;
   executionPlanPersistenceEnabled = true;
   executionStatePersistence.schedule(executionManager.list());
+  executionTimelinePersistence.schedule(executionTimeline.list());
   executionPlanPersistence.schedule(executionPlanner.list());
   activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
