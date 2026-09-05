@@ -13,7 +13,6 @@ if (!prompt || !sendButton) throw new Error('Composer não encontrado.');
 
 let syncToken = 0;
 let syncTimer: number | null = null;
-let reconciliationTimer: number | null = null;
 let locked = false;
 
 function activeChatId(): string | undefined {
@@ -24,27 +23,12 @@ function syncLocalAvailability(): void {
   sendButton.disabled = locked || !activeChatId() || !prompt.value.trim();
 }
 
-function stopReconciliation(): void {
-  if (reconciliationTimer === null) return;
-  window.clearInterval(reconciliationTimer);
-  reconciliationTimer = null;
-}
-
-function startReconciliation(): void {
-  if (reconciliationTimer !== null) return;
-  reconciliationTimer = window.setInterval(() => {
-    void sync();
-  }, 1500);
-}
-
 function applyLocked(nextLocked: boolean): void {
   locked = nextLocked;
   prompt.disabled = nextLocked;
   prompt.dataset.executionLocked = String(nextLocked);
   sendButton.dataset.executionLocked = String(nextLocked);
   syncLocalAvailability();
-  if (nextLocked) startReconciliation();
-  else stopReconciliation();
 }
 
 async function sync(): Promise<void> {
@@ -89,6 +73,7 @@ window.addEventListener('focus', () => scheduleSync());
 document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleSync(); });
 window.addEventListener('auto-codez-chat-refresh', () => scheduleSync());
 window.addEventListener('auto-codez-execution-refresh', () => scheduleSync());
+window.addEventListener('auto-codez-approval-settled', () => scheduleSync());
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
@@ -99,7 +84,6 @@ document.addEventListener('click', (event) => {
 }, true);
 
 window.addEventListener('beforeunload', () => {
-  stopReconciliation();
   if (syncTimer !== null) window.clearTimeout(syncTimer);
 }, { once: true });
 
