@@ -3,6 +3,7 @@ import { ActivityRuntime } from './activity-runtime';
 import { ApprovalRuntime } from './approval-runtime';
 import { PermissionRuntime } from './permission-runtime';
 import { WorkspacePathPolicy } from './workspace-path-policy';
+import { CommandSafetyPolicy } from './command-safety-policy';
 import { WorkspaceRuntime } from './workspace-runtime';
 import { CommandRuntime } from './command-runtime';
 import { DiffRuntime } from './diff-runtime';
@@ -29,7 +30,7 @@ const definitions: AIToolDefinition[] = [
   { name: 'delete_file', description: 'Delete a file inside the active workspace. Prefer this tool over shell commands for workspace file deletion so Auto CodeZ can preview and review the exact change.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'rename_file', description: 'Rename or move a file inside the active workspace. Prefer this tool over shell commands for workspace file renames so Auto CodeZ can preview and review the exact change.', parameters: { type: 'object', properties: { from: { type: 'string', description: 'Current workspace-relative path.' }, to: { type: 'string', description: 'Destination workspace-relative path.' } }, required: ['from', 'to'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'search_files', description: 'Search workspace file names for a text query.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'Text to search for in workspace file names.' } }, required: ['query'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
-  { name: 'run_command', description: 'Execute a local shell command from the active workspace. Use it for tests, builds, package managers, scripts, CLIs and operations that genuinely require a shell. Do not use it to create, edit, delete or rename workspace files when create_file, write_file, delete_file or rename_file can represent the operation, because those file tools provide diff review and stale-file protection. In read-only mode it is blocked. In safe and ask modes it requires explicit user approval. In unrestricted mode it executes directly.', parameters: { type: 'object', properties: { command: { type: 'string', description: 'Exact local shell command to execute.' } }, required: ['command'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'run_command', description: 'Execute a local shell command from the active workspace. Use it for tests, builds, package managers, scripts, CLIs and operations that genuinely require a shell. Do not use it to create, edit, delete or rename workspace files when create_file, write_file, delete_file or rename_file can represent the operation, because those file tools provide diff review and stale-file protection. In read-only mode it is blocked. In safe and ask modes it requires explicit user approval. In unrestricted mode it executes directly unless the command safety policy requires approval or blocks it.', parameters: { type: 'object', properties: { command: { type: 'string', description: 'Exact local shell command to execute.' } }, required: ['command'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'git_status', description: 'Read the current Git branch and working tree status.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_diff', description: 'Read the current unstaged Git diff.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_log', description: 'Read recent Git commits from the active workspace.', parameters: { type: 'object', properties: { limit: { type: 'number', description: 'Number of commits to return.' } }, required: ['limit'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -110,6 +111,11 @@ function policyPaths(call: AIToolCall): string[] {
   return [];
 }
 
+function strongerDecision(left: 'allow' | 'ask' | 'deny', right: 'allow' | 'ask' | 'deny'): 'allow' | 'ask' | 'deny' {
+  const severity = (value: 'allow' | 'ask' | 'deny'): number => value === 'deny' ? 2 : value === 'ask' ? 1 : 0;
+  return severity(left) >= severity(right) ? left : right;
+}
+
 const unavailableCommandRuntime = new CommandRuntime(async () => { throw new Error('O runtime de comandos não foi configurado para esta instância.'); });
 
 function executionActivityMessage(call: AIToolCall): string {
@@ -150,7 +156,7 @@ export class ToolRuntime {
   private executionChangeBudget?: ExecutionChangeBudgetRuntime;
   private executionCheckpointRecorder?: ExecutionCheckpointRecorder;
 
-  constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()]), private readonly workspacePathPolicy = new WorkspacePathPolicy()) {}
+  constructor(private readonly workspace: WorkspaceRuntime, private readonly permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()]), private readonly workspacePathPolicy = new WorkspacePathPolicy(), private readonly commandSafetyPolicy = new CommandSafetyPolicy()) {}
 
   configureGitRuntime(runtime: GitRuntime): void { this.gitRuntime = runtime; }
   configureExecutionPlanner(runtime: ExecutionPlanner): void { this.executionPlanner = runtime; }
@@ -185,13 +191,18 @@ export class ToolRuntime {
     try { validateToolInput(definition, normalizedCall.input); } catch (error) { return { toolCallId: normalizedCall.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
     const permissionDecision = this.permissions.decide(permission, normalizedCall.name);
     const pathPolicy = this.workspacePathPolicy.evaluate(normalizedCall.name, policyPaths(normalizedCall));
-    let decision = permissionDecision;
-    if (pathPolicy.decision === 'deny' || (pathPolicy.decision === 'ask' && decision === 'allow')) decision = pathPolicy.decision;
+    const commandPolicy = normalizedCall.name === 'run_command'
+      ? this.commandSafetyPolicy.evaluate(typeof normalizedCall.input.command === 'string' ? normalizedCall.input.command : '')
+      : { decision: 'allow' as const, reasons: [] as string[], matchedPaths: [] as string[] };
+    let decision = strongerDecision(permissionDecision, pathPolicy.decision);
+    decision = strongerDecision(decision, commandPolicy.decision);
     const systemFileTool = normalizedCall.name === 'read_file' || normalizedCall.name === 'write_file' || normalizedCall.name === 'create_file' || normalizedCall.name === 'replace_range' || normalizedCall.name === 'replace_text' || normalizedCall.name === 'replace_symbol' || normalizedCall.name === 'insert_before' || normalizedCall.name === 'insert_after' || normalizedCall.name === 'delete_file' || normalizedCall.name === 'rename_file' || normalizedCall.name === 'search_files';
     if (projectId === SYSTEM_WORKSPACE_ID && permission !== 'unrestricted' && decision !== 'deny' && systemFileTool) decision = 'ask';
+    const securityReasons = [...new Set([...pathPolicy.reasons, ...commandPolicy.reasons])];
     if (decision === 'deny') {
-      const error = pathPolicy.decision === 'deny'
-        ? `Operação bloqueada pela política de segurança do workspace${pathPolicy.reasons.length ? `: ${pathPolicy.reasons.join(' · ')}` : ''}.`
+      const securityDenied = pathPolicy.decision === 'deny' || commandPolicy.decision === 'deny';
+      const error = securityDenied
+        ? `Operação bloqueada pela política de segurança do workspace${securityReasons.length ? `: ${securityReasons.join(' · ')}` : ''}.`
         : 'Operação bloqueada pelas permissões do chat.';
       return { toolCallId: normalizedCall.id, ok: false, error };
     }
@@ -221,7 +232,7 @@ export class ToolRuntime {
         return { toolCallId: normalizedCall.id, ok: false, error: message, ...(diffPlan ? { diffPlan } : {}) };
       }
       const approval = this.approvals.request({ projectId, chatId, runId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });
-      const securityReason = pathPolicy.decision === 'ask' && pathPolicy.reasons.length ? ` Segurança: ${pathPolicy.reasons.join(' · ')}.` : '';
+      const securityReason = (pathPolicy.decision === 'ask' || commandPolicy.decision === 'ask') && securityReasons.length ? ` Segurança: ${securityReasons.join(' · ')}.` : '';
       this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${normalizedCall.name}.${securityReason}`, status: 'pending', toolCallId: normalizedCall.id, toolName: normalizedCall.name, chatId, runId, ...(diffPlan ? { diffPlan } : {}) });
       return { toolCallId: normalizedCall.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
     }
