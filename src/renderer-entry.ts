@@ -33,7 +33,6 @@ const secondaryEnhancements: Enhancement[] = [
   { name: 'error-recovery-ui', load: () => import('./error-recovery-ui') },
   { name: 'execution-visibility', load: () => import('./execution-visibility') },
   { name: 'stop-control', load: () => import('./stop-control') },
-  { name: 'stream-performance', load: () => import('./stream-performance') },
 ];
 
 const failures = new Map<string, unknown>();
