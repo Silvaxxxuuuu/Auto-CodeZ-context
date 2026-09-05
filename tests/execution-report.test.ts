@@ -68,6 +68,28 @@ test('reconstrói execução histórica depois que snapshot ativo foi removido',
   assert.ok(report?.timeline.some((event) => event.type === 'removed'));
 });
 
+test('reconstrói execução histórica apenas a partir de recovery baseline', () => {
+  const executions = new ExecutionManager();
+  const timeline = new ExecutionTimeline();
+  const history = new ExecutionPlanHistory();
+  timeline.restore([{
+    sequence: 1,
+    chatId: 'chat-a',
+    runId: 'run-recovered',
+    at: 5000,
+    type: 'recovered',
+    state: 'interrupted',
+    startedAt: 1000,
+  }]);
+  const reports = new ExecutionReportBuilder(executions, timeline, history);
+
+  const report = reports.build('chat-a', 'run-recovered');
+  assert.equal(report?.state, 'interrupted');
+  assert.equal(report?.startedAt, 1000);
+  assert.equal(report?.updatedAt, 5000);
+  assert.equal(report?.completionProof, 'interrupted');
+});
+
 test('lista runs históricas em ordem de atualização e isola chats', () => {
   const { executions, reports, tick } = setup();
   executions.start('chat-a', tick(), 'run-a');
