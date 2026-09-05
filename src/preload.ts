@@ -108,6 +108,15 @@ contextBridge.exposeInMainWorld('autoCodez', {
   listExecutionQualityGates: (chatId?: string) => invoke('agent:list-execution-quality-gates', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
   getExecutionTaskCapsule: (input: { chatId: string; runId: string }) => { const value = requireObject(input, 'Identificação da Task Capsule'); return invoke('agent:get-execution-task-capsule', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') }); },
   listExecutionTaskCapsules: (chatId?: string) => invoke('agent:list-execution-task-capsules', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  listExecutionCheckpoints: (filters?: ApprovalScope) => invoke('agent:list-execution-checkpoints', requireApprovalScope(filters)),
+  restoreExecutionCheckpoint: (input: { checkpointId: string; chatId: string; runId: string }) => {
+    const value = requireObject(input, 'Identificação do checkpoint');
+    return invoke('agent:restore-execution-checkpoint', {
+      checkpointId: requireIdentifier(value.checkpointId, 'Checkpoint'),
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      runId: requireIdentifier(value.runId, 'Execução'),
+    });
+  },
   onExecutionPlanEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('execution-plan:event', handler);
