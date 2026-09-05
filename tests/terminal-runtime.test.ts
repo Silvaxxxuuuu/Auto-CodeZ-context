@@ -20,7 +20,7 @@ async function createProject(factory?: InteractiveTerminalProcessFactory): Promi
     root,
     events,
     runtime: new TerminalRuntime(async () => [project], (event) => events.push(event), factory),
-    cleanup: () => fs.rm(root, { recursive: true, force: true }),
+    cleanup: () => fs.rm(root, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 10 : 0, retryDelay: 50 }),
   };
 }
 
