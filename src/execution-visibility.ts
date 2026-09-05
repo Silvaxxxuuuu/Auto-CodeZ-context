@@ -17,6 +17,7 @@ type StreamBridge = {
 const bridge = (window as unknown as { autoCodez?: StreamBridge }).autoCodez;
 const manager = new ExecutionManager();
 const STYLE_ID = 'auto-codez-execution-visibility';
+let hydrateToken = 0;
 
 function installStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
@@ -93,7 +94,7 @@ function syncComposer(): void {
   const input = document.querySelector<HTMLTextAreaElement>('#prompt');
   if (send) {
     send.dataset.executionLocked = busy ? 'true' : 'false';
-    send.disabled = busy;
+    send.disabled = busy || !chatId || !input?.value.trim();
     send.title = snapshot?.state === 'waiting_approval' ? 'Aguardando aprovação' : busy ? 'Execução em andamento' : 'Enviar';
   }
   if (input) input.dataset.executionLocked = busy ? 'true' : 'false';
@@ -113,9 +114,10 @@ function applySnapshot(snapshot: ExecutionSnapshot): void {
 
 async function hydrateExecutions(): Promise<void> {
   if (!bridge?.listExecutions) return;
+  const token = ++hydrateToken;
   try {
     const value = await bridge.listExecutions();
-    if (!Array.isArray(value)) return;
+    if (token !== hydrateToken || !Array.isArray(value)) return;
     const snapshots = value.filter((item): item is ExecutionSnapshot => {
       if (!item || typeof item !== 'object') return false;
       const snapshot = item as Partial<ExecutionSnapshot>;
@@ -127,9 +129,7 @@ async function hydrateExecutions(): Promise<void> {
     }
     for (const snapshot of snapshots) {
       const current = manager.get(snapshot.chatId);
-      if (!current || current.runId !== snapshot.runId || snapshot.updatedAt >= current.updatedAt) {
-        applySnapshot(snapshot);
-      }
+      if (!current || current.runId !== snapshot.runId || snapshot.updatedAt >= current.updatedAt) applySnapshot(snapshot);
     }
     syncUi();
   } catch {
@@ -148,7 +148,9 @@ function handleEvent(event: StreamExecutionEvent): void {
   if (!event.chatId) return;
   try {
     if (event.type === 'start') {
-      manager.start(event.chatId, Date.now(), event.runId);
+      const existing = manager.get(event.chatId);
+      if (existing && (!event.runId || existing.runId !== event.runId)) manager.remove(event.chatId);
+      if (!manager.get(event.chatId)) manager.start(event.chatId, Date.now(), event.runId);
     } else {
       const current = currentEventExecution(event);
       if (!current) return;
@@ -160,6 +162,8 @@ function handleEvent(event: StreamExecutionEvent): void {
         manager.update(event.chatId, { state: 'completed' });
       } else if (event.type === 'error') {
         manager.update(event.chatId, { state: 'failed', error: event.error });
+      } else if (event.type === 'cancelled') {
+        manager.remove(event.chatId);
       }
     }
   } catch {
