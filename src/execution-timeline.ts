@@ -1,15 +1,21 @@
 import type { ExecutionChange, ExecutionSnapshot, ExecutionState } from './execution-manager';
 
+export type ExecutionApprovalDecision = 'approved' | 'denied';
+
 export type ExecutionTimelineEvent = {
   sequence: number;
   chatId: string;
   runId: string;
   at: number;
-  type: 'started' | 'recovered' | 'state_changed' | 'tool_changed' | 'error' | 'removed';
+  type: 'started' | 'recovered' | 'state_changed' | 'tool_changed' | 'approval_decision' | 'error' | 'removed';
   state?: ExecutionSnapshot['state'];
   startedAt?: number;
   currentTool?: string;
   error?: string;
+  approvalId?: string;
+  toolCallId?: string;
+  toolName?: string;
+  approvalDecision?: ExecutionApprovalDecision;
 };
 
 type TimelineCursor = {
@@ -17,8 +23,9 @@ type TimelineCursor = {
   signature: string;
 };
 
-const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'recovered', 'state_changed', 'tool_changed', 'error', 'removed']);
+const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'recovered', 'state_changed', 'tool_changed', 'approval_decision', 'error', 'removed']);
 const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
+const APPROVAL_DECISIONS = new Set<ExecutionApprovalDecision>(['approved', 'denied']);
 
 function snapshotSignature(snapshot: ExecutionSnapshot): string {
   return JSON.stringify([
@@ -36,6 +43,11 @@ function sameObservableState(left: ExecutionSnapshot, right: ExecutionSnapshot):
     && left.startedAt === right.startedAt
     && left.currentTool === right.currentTool
     && left.error === right.error;
+}
+
+function requireNonEmpty(value: string, label: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} inválido.`);
+  return value.trim();
 }
 
 function cloneEvent(event: ExecutionTimelineEvent): ExecutionTimelineEvent {
@@ -59,10 +71,33 @@ function isValidEvent(value: unknown): value is ExecutionTimelineEvent {
     && (event.state === undefined || EXECUTION_STATES.has(event.state))
     && (event.startedAt === undefined || (typeof event.startedAt === 'number' && Number.isFinite(event.startedAt) && event.startedAt >= 0))
     && (event.currentTool === undefined || typeof event.currentTool === 'string')
-    && (event.error === undefined || typeof event.error === 'string');
+    && (event.error === undefined || typeof event.error === 'string')
+    && (event.approvalId === undefined || (typeof event.approvalId === 'string' && event.approvalId.length > 0))
+    && (event.toolCallId === undefined || (typeof event.toolCallId === 'string' && event.toolCallId.length > 0))
+    && (event.toolName === undefined || (typeof event.toolName === 'string' && event.toolName.length > 0))
+    && (event.approvalDecision === undefined || APPROVAL_DECISIONS.has(event.approvalDecision));
   if (!validBase) return false;
-  if (event.type === 'recovered') return event.state !== undefined && event.startedAt !== undefined && event.startedAt <= event.at;
-  return event.startedAt === undefined;
+  if (event.type === 'recovered') {
+    return event.state !== undefined
+      && event.startedAt !== undefined
+      && event.startedAt <= event.at
+      && event.approvalId === undefined
+      && event.toolCallId === undefined
+      && event.toolName === undefined
+      && event.approvalDecision === undefined;
+  }
+  if (event.type === 'approval_decision') {
+    return event.startedAt === undefined
+      && event.approvalId !== undefined
+      && event.toolCallId !== undefined
+      && event.toolName !== undefined
+      && event.approvalDecision !== undefined;
+  }
+  return event.startedAt === undefined
+    && event.approvalId === undefined
+    && event.toolCallId === undefined
+    && event.toolName === undefined
+    && event.approvalDecision === undefined;
 }
 
 export class ExecutionTimeline {
@@ -116,6 +151,42 @@ export class ExecutionTimeline {
     });
     this.cursors.set(snapshot.chatId, { snapshot: recoveredSnapshot, signature: snapshotSignature(recoveredSnapshot) });
     return [event];
+  }
+
+  recordApprovalDecision(input: {
+    chatId: string;
+    runId: string;
+    approvalId: string;
+    toolCallId: string;
+    toolName: string;
+    decision: ExecutionApprovalDecision;
+    at?: number;
+  }): ExecutionTimelineEvent[] {
+    const chatId = requireNonEmpty(input.chatId, 'Chat');
+    const runId = requireNonEmpty(input.runId, 'Execução');
+    const approvalId = requireNonEmpty(input.approvalId, 'Aprovação');
+    const toolCallId = requireNonEmpty(input.toolCallId, 'Tool call');
+    const toolName = requireNonEmpty(input.toolName, 'Ferramenta');
+    if (!APPROVAL_DECISIONS.has(input.decision)) throw new Error('Decisão de aprovação inválida.');
+    const at = input.at ?? this.now();
+    if (typeof at !== 'number' || !Number.isFinite(at) || at < 0) throw new Error('Data da decisão de aprovação inválida.');
+
+    const duplicate = this.events.some((event) => event.type === 'approval_decision'
+      && event.chatId === chatId
+      && event.runId === runId
+      && event.approvalId === approvalId);
+    if (duplicate) return [];
+
+    return [this.append({
+      chatId,
+      runId,
+      at,
+      type: 'approval_decision',
+      approvalId,
+      toolCallId,
+      toolName,
+      approvalDecision: input.decision,
+    })];
   }
 
   list(chatId?: string, runId?: string): ExecutionTimelineEvent[] {
