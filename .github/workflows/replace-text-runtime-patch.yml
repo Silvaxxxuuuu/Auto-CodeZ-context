@@ -1,0 +1,87 @@
+name: Apply replace text runtime patch
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - .github/workflows/replace-text-runtime-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-hierarchy-polish
+          fetch-depth: 0
+      - name: Patch runtimes
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          def replace_once(text, old, new, path):
+              if old not in text:
+                  raise SystemExit(f'Expected snippet not found in {path}: {old[:140]}')
+              return text.replace(old, new, 1)
+
+          tool_path = Path('src/agent/tool-runtime.ts')
+          tool = tool_path.read_text(encoding='utf-8')
+          tool = replace_once(tool,
+              "  { name: 'replace_range', description: 'Replace an inclusive 1-based line range in an existing UTF-8 text file. Prefer this for localized edits instead of rewriting the whole file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, startLine: { type: 'number', description: 'First 1-based line to replace.' }, endLine: { type: 'number', description: 'Last 1-based line to replace, inclusive.' }, content: { type: 'string', description: 'Replacement line content.' } }, required: ['path', 'startLine', 'endLine', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },",
+              "  { name: 'replace_range', description: 'Replace an inclusive 1-based line range in an existing UTF-8 text file. Prefer this for localized edits instead of rewriting the whole file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, startLine: { type: 'number', description: 'First 1-based line to replace.' }, endLine: { type: 'number', description: 'Last 1-based line to replace, inclusive.' }, content: { type: 'string', description: 'Replacement line content.' } }, required: ['path', 'startLine', 'endLine', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },\n  { name: 'replace_text', description: 'Replace one exact unique text fragment in an existing UTF-8 file. The oldText fragment must occur exactly once; otherwise the operation fails instead of guessing. Prefer this when you have just read the exact code to change.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, oldText: { type: 'string', description: 'Exact current text fragment. It must be unique in the file.' }, newText: { type: 'string', description: 'Replacement text, which may be empty to remove the fragment.' } }, required: ['path', 'oldText', 'newText'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },",
+              str(tool_path))
+          tool = replace_once(tool,
+              "    case 'replace_range': return value('path') ? `Editando trecho de ${value('path')}` : 'Editando trecho do arquivo.';",
+              "    case 'replace_range': return value('path') ? `Editando trecho de ${value('path')}` : 'Editando trecho do arquivo.';\n    case 'replace_text': return value('path') ? `Substituindo trecho exato de ${value('path')}` : 'Substituindo trecho exato do arquivo.';",
+              str(tool_path))
+          tool = replace_once(tool,
+              "normalizedCall.name === 'replace_range' || normalizedCall.name === 'insert_before' || normalizedCall.name === 'insert_after'",
+              "normalizedCall.name === 'replace_range' || normalizedCall.name === 'replace_text' || normalizedCall.name === 'insert_before' || normalizedCall.name === 'insert_after'",
+              str(tool_path))
+          tool = replace_once(tool,
+              "return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'insert_before' || name === 'insert_after' || name === 'delete_file' || name === 'rename_file';",
+              "return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'replace_text' || name === 'insert_before' || name === 'insert_after' || name === 'delete_file' || name === 'rename_file';",
+              str(tool_path))
+          tool = replace_once(tool,
+              "      case 'replace_range':\n      case 'insert_before':\n      case 'insert_after': {",
+              "      case 'replace_range':\n      case 'replace_text':\n      case 'insert_before':\n      case 'insert_after': {",
+              str(tool_path))
+          tool_path.write_text(tool, encoding='utf-8', newline='')
+
+          chat_path = Path('src/ai/chat-runtime.ts')
+          chat = chat_path.read_text(encoding='utf-8')
+          chat = replace_once(chat,
+              "File tools such as read_file, write_file, create_file, replace_range, insert_before, insert_after, delete_file, rename_file, and search_files",
+              "File tools such as read_file, write_file, create_file, replace_range, replace_text, insert_before, insert_after, delete_file, rename_file, and search_files",
+              str(chat_path))
+          chat = replace_once(chat,
+              "For localized edits, prefer replace_range, insert_before or insert_after instead of rewriting the whole file with write_file.",
+              "For localized edits, prefer replace_text when you have an exact unique fragment from a recent read; otherwise use replace_range, insert_before or insert_after instead of rewriting the whole file with write_file.",
+              str(chat_path))
+          chat = replace_once(chat,
+              "prefer create_file/write_file/replace_range/insert_before/insert_after/delete_file/rename_file over run_command",
+              "prefer create_file/write_file/replace_range/replace_text/insert_before/insert_after/delete_file/rename_file over run_command",
+              str(chat_path))
+          chat = replace_once(chat,
+              "const SYSTEM_CHAT_TOOL_NAMES = new Set(['read_file', 'write_file', 'create_file', 'replace_range', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']);",
+              "const SYSTEM_CHAT_TOOL_NAMES = new Set(['read_file', 'write_file', 'create_file', 'replace_range', 'replace_text', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command']);",
+              str(chat_path))
+          chat_path.write_text(chat, encoding='utf-8', newline='')
+          '@ | Set-Content -Encoding utf8 .patch_replace_text.py
+          python .patch_replace_text.py
+          Remove-Item .patch_replace_text.py
+          git diff --check
+          git diff -- src/agent/tool-runtime.ts src/ai/chat-runtime.ts
+      - name: Commit runtime patch
+        shell: pwsh
+        run: |
+          git config user.name "ggmacro"
+          git config user.email "sebastiao54e@gmail.com"
+          git add src/agent/tool-runtime.ts src/ai/chat-runtime.ts
+          git commit -m "feat(agent): wire exact text replacement runtime"
+          git push origin HEAD:feature/ui-hierarchy-polish
