@@ -56,7 +56,7 @@ function handleEvent(event: StreamEvent): void {
   if (event.type === 'approval_required') { state.accumulatedMs = elapsed(state); state.waitingApproval = true; state.pausedAt = Date.now(); if (chatId === activeChatId) renderLiveStatus(); return; }
   if (event.type === 'tool_call' && state.waitingApproval) { state.waitingApproval = false; state.startedAt = Date.now(); state.pausedAt = 0; if (chatId === activeChatId) renderLiveStatus(); return; }
   if (event.type === 'activity' && event.activity?.type === 'complete' && event.activity.status === 'success') { finish(chatId); return; }
-  if (event.type === 'complete' || event.type === 'error') finish(chatId);
+  if (event.type === 'complete' || event.type === 'error' || event.type === 'cancelled') finish(chatId);
 }
 function hydrate(): void {
   if (!bridge?.listExecutions) return;
