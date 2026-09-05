@@ -48,6 +48,8 @@ const MAX_EVIDENCE_SUMMARY_LENGTH = 4000;
 const MAX_REFERENCE_LENGTH = 4000;
 const MAX_STEPS = 100;
 const MAX_EVIDENCE_PER_STEP = 50;
+const STEP_STATUSES = new Set<ExecutionPlanStepStatus>(['pending', 'running', 'completed', 'failed', 'skipped']);
+const EVIDENCE_TYPES = new Set<ExecutionEvidenceType>(['tool', 'test', 'build', 'file', 'result']);
 
 function requireText(value: string, label: string, maxLength: number): string {
   if (typeof value !== 'string') throw new Error(`${label} inválido.`);
@@ -55,6 +57,11 @@ function requireText(value: string, label: string, maxLength: number): string {
   if (!normalized) throw new Error(`${label} não pode ficar vazio.`);
   if (normalized.length > maxLength) throw new Error(`${label} excede o limite permitido.`);
   return normalized;
+}
+
+function requireTimestamp(value: number, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error(`${label} inválido.`);
+  return value;
 }
 
 function cloneEvidence(evidence: ExecutionStepEvidence): ExecutionStepEvidence {
@@ -74,6 +81,63 @@ function derivePlanStatus(steps: ExecutionPlanStep[]): ExecutionPlanStatus {
   if (steps.every((step) => step.status === 'completed' || step.status === 'skipped')) return 'completed';
   if (steps.some((step) => step.status !== 'pending')) return 'running';
   return 'pending';
+}
+
+function normalizeRestoredPlan(candidate: ExecutionPlan): ExecutionPlan {
+  if (!candidate || typeof candidate !== 'object') throw new Error('Plano persistido inválido.');
+  const id = requireText(candidate.id, 'ID do plano', 500);
+  const chatId = requireText(candidate.chatId, 'Chat', 500);
+  const runId = requireText(candidate.runId, 'Execução', 500);
+  const objective = requireText(candidate.objective, 'Objetivo', MAX_OBJECTIVE_LENGTH);
+  const createdAt = requireTimestamp(candidate.createdAt, 'Data de criação do plano');
+  const updatedAt = requireTimestamp(candidate.updatedAt, 'Data de atualização do plano');
+  if (updatedAt < createdAt) throw new Error('Datas do plano persistido são inválidas.');
+  if (!Array.isArray(candidate.steps) || candidate.steps.length < 1 || candidate.steps.length > MAX_STEPS) throw new Error('Passos do plano persistido são inválidos.');
+
+  const ids = new Set<string>();
+  let runningCount = 0;
+  const steps = candidate.steps.map((candidateStep) => {
+    if (!candidateStep || typeof candidateStep !== 'object') throw new Error('Passo persistido inválido.');
+    const stepId = requireText(candidateStep.id, 'ID do passo', 500);
+    if (ids.has(stepId)) throw new Error('O plano persistido possui IDs de passo duplicados.');
+    ids.add(stepId);
+    const title = requireText(candidateStep.title, 'Passo', MAX_STEP_TITLE_LENGTH);
+    if (!STEP_STATUSES.has(candidateStep.status)) throw new Error('Estado de passo persistido inválido.');
+    if (candidateStep.status === 'running') runningCount += 1;
+    const stepCreatedAt = requireTimestamp(candidateStep.createdAt, 'Data de criação do passo');
+    const stepUpdatedAt = requireTimestamp(candidateStep.updatedAt, 'Data de atualização do passo');
+    if (stepUpdatedAt < stepCreatedAt) throw new Error('Datas do passo persistido são inválidas.');
+    if (!Array.isArray(candidateStep.evidence) || candidateStep.evidence.length > MAX_EVIDENCE_PER_STEP) throw new Error('Evidências persistidas inválidas.');
+    const evidence = candidateStep.evidence.map((item) => {
+      if (!item || typeof item !== 'object' || !EVIDENCE_TYPES.has(item.type)) throw new Error('Evidência persistida inválida.');
+      return {
+        type: item.type,
+        summary: requireText(item.summary, 'Resumo da evidência', MAX_EVIDENCE_SUMMARY_LENGTH),
+        reference: item.reference === undefined ? undefined : requireText(item.reference, 'Referência da evidência', MAX_REFERENCE_LENGTH),
+        createdAt: requireTimestamp(item.createdAt, 'Data da evidência'),
+      };
+    });
+    return {
+      id: stepId,
+      title,
+      status: candidateStep.status === 'running' ? 'pending' as const : candidateStep.status,
+      createdAt: stepCreatedAt,
+      updatedAt: stepUpdatedAt,
+      evidence,
+    };
+  });
+
+  if (runningCount > 1) throw new Error('O plano persistido possui mais de um passo em execução.');
+  return {
+    id,
+    chatId,
+    runId,
+    objective,
+    status: derivePlanStatus(steps),
+    createdAt,
+    updatedAt,
+    steps,
+  };
 }
 
 export class ExecutionPlanner {
@@ -126,6 +190,20 @@ export class ExecutionPlanner {
     this.plansByChat.set(normalizedChatId, plan);
     this.publish({ type: 'upsert', plan });
     return clonePlan(plan);
+  }
+
+  restore(plans: ExecutionPlan[]): void {
+    if (!Array.isArray(plans)) throw new Error('Planos persistidos inválidos.');
+    const byChat = new Map<string, ExecutionPlan>();
+    for (const candidate of plans) {
+      try {
+        const normalized = normalizeRestoredPlan(candidate);
+        const current = byChat.get(normalized.chatId);
+        if (!current || normalized.updatedAt > current.updatedAt) byChat.set(normalized.chatId, normalized);
+      } catch {}
+    }
+    this.plansByChat.clear();
+    for (const plan of byChat.values()) this.plansByChat.set(plan.chatId, plan);
   }
 
   get(chatId: string, runId?: string): ExecutionPlan | undefined {
@@ -197,7 +275,7 @@ export class ExecutionPlanner {
     if (step.evidence.length + evidence.length > MAX_EVIDENCE_PER_STEP) throw new Error('O passo excede o limite de evidências.');
     for (const item of evidence) {
       if (!item || typeof item !== 'object') throw new Error('Evidência do passo inválida.');
-      if (!['tool', 'test', 'build', 'file', 'result'].includes(item.type)) throw new Error('Tipo de evidência inválido.');
+      if (!EVIDENCE_TYPES.has(item.type)) throw new Error('Tipo de evidência inválido.');
       const summary = requireText(item.summary, 'Resumo da evidência', MAX_EVIDENCE_SUMMARY_LENGTH);
       const reference = item.reference === undefined ? undefined : requireText(item.reference, 'Referência da evidência', MAX_REFERENCE_LENGTH);
       step.evidence.push({ type: item.type, summary, reference, createdAt: this.now() });
