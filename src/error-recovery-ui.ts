@@ -114,7 +114,7 @@ function selectedChatId(): string | undefined {
 function rollbackConfirmation(checkpoint: RollbackCheckpointTarget): string {
   const count = checkpoint.changes.length;
   const files = count === 1 ? '1 alteração de arquivo' : `${count} alterações de arquivo`;
-  return `Desfazer ${files} feitas pela IA nesta execução?\n\nO rollback só continuará se os arquivos ainda estiverem exatamente no estado deixado por essa execução.`;
+  return `Desfazer a última alteração da IA nesta execução?\n\nEste checkpoint contém ${files}. O rollback só continuará se os arquivos ainda estiverem exatamente no estado deixado por essa alteração.`;
 }
 
 async function addRollbackAction(panel: HTMLElement, chatId: string, signature: string): Promise<void> {
@@ -136,8 +136,8 @@ async function addRollbackAction(panel: HTMLElement, chatId: string, signature: 
     button.type = 'button';
     button.className = 'ac-recovery-action';
     button.dataset.recoveryRollback = 'true';
-    button.textContent = 'Desfazer alterações';
-    button.title = `Desfazer ${checkpoint.changes.length} alteração(ões) desta execução`;
+    button.textContent = 'Desfazer última alteração';
+    button.title = `Desfazer o checkpoint mais recente desta execução (${checkpoint.changes.length} alteração(ões) de arquivo)`;
     actions.prepend(button);
 
     button.addEventListener('click', async () => {
@@ -151,7 +151,10 @@ async function addRollbackAction(panel: HTMLElement, chatId: string, signature: 
         button.remove();
         window.dispatchEvent(new CustomEvent('auto-codez-execution-refresh', { detail: { chatId: checkpoint.chatId, runId: checkpoint.runId } }));
         window.dispatchEvent(new CustomEvent('auto-codez-chat-refresh', { detail: { chatId: checkpoint.chatId } }));
-        createToast('Alterações desta execução foram desfeitas com segurança.', 'success');
+        createToast('A última alteração da IA foi desfeita com segurança.', 'success');
+        lastRecoverySignature = '';
+        rollbackLookupToken += 1;
+        scheduleRecoverySync();
       } catch (error) {
         button.disabled = false;
         button.textContent = originalText;
