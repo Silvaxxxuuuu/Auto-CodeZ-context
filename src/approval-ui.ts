@@ -23,7 +23,6 @@ const composer = document.querySelector<HTMLElement>('.composer-wrap');
 if (!bridge?.listApprovals || !bridge.onStreamEvent || !chatArea || !composer) throw new Error('Infraestrutura de aprovações indisponível.');
 
 const processing = new Map<string, number>();
-const PROCESSING_TIMEOUT_MS = 15_000;
 let activeChatId = '';
 let requestToken = 0;
 
@@ -123,13 +122,7 @@ function safeInput(approval: Approval): string {
   return JSON.stringify(input, null, 2);
 }
 
-function clearExpiredProcessing(): void {
-  const now = Date.now();
-  for (const [id, startedAt] of processing) if (now - startedAt > PROCESSING_TIMEOUT_MS) processing.delete(id);
-}
-
 function render(approvals: Approval[]): void {
-  clearExpiredProcessing();
   const validIds = new Set(approvals.map((approval) => approval.id));
   for (const id of processing.keys()) if (!validIds.has(id)) processing.delete(id);
 
@@ -218,7 +211,6 @@ document.addEventListener('click', (event) => {
   action.textContent = 'Processando…';
   window.setTimeout(() => { void refresh(); }, 250);
   window.setTimeout(() => { void refresh(); }, 1200);
-  window.setTimeout(() => { void refresh(); }, PROCESSING_TIMEOUT_MS + 50);
 }, true);
 
 window.addEventListener('auto-codez-approval-settled', (event) => {
