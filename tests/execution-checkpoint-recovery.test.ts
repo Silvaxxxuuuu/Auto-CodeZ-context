@@ -28,6 +28,18 @@ test('seleciona o checkpoint ready mais recente da mesma execução com falha', 
   assert.equal(selected?.id, 'newer');
 });
 
+test('após restaurar o checkpoint mais recente, seleciona o anterior ainda pronto', () => {
+  const selected = selectRollbackCheckpoint(
+    { chatId: 'chat-a', runId: 'run-a', state: 'failed' },
+    [
+      checkpoint({ id: 'older-ready', createdAt: 1000 }),
+      checkpoint({ id: 'newer-restored', createdAt: 2000, status: 'restored' }),
+    ],
+  );
+
+  assert.equal(selected?.id, 'older-ready');
+});
+
 test('aceita execução interrompida e rejeita estados ativos ou concluídos', () => {
   const values = [checkpoint()];
   assert.equal(selectRollbackCheckpoint({ chatId: 'chat-a', runId: 'run-a', state: 'interrupted' }, values)?.id, 'checkpoint-a');
