@@ -294,7 +294,10 @@ async function executeChat(chatId: string, content: string): Promise<{ pendingAp
     const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel, runId);
     await chatManager.update({ ...current, messages: result.messages });
     if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
-    else executionCoordinator.complete(chatId, runId);
+    else {
+      const completion = executionCoordinator.complete(chatId, runId);
+      if (completion.error) throw new Error(completion.error);
+    }
     return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -369,9 +372,7 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
     return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
   } catch (error) {
     if (controller.signal.aborted || isAbortError(error)) {
-      approvalRuntime.remove({ chatId });
-      await agentRuntime.cancelChat(chatId);
-      executionManager.remove(chatId);
+      await clearChatExecution(chatId);
       emit({ type: 'cancelled', chatId, runId });
       return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
     }

@@ -169,7 +169,7 @@ export class ExecutionPlanner {
     }
 
     const createdAt = this.now();
-    const steps: ExecutionPlanStep[] = stepTitles.map((title) => ({
+    const steps = stepTitles.map<ExecutionPlanStep>((title) => ({
       id: this.createId(),
       title: requireText(title, 'Passo', MAX_STEP_TITLE_LENGTH),
       status: 'pending',
