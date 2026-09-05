@@ -18,6 +18,12 @@ jobs:
         with:
           ref: feature/ui-hierarchy-polish
           fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
       - name: Patch canonical execution persistence
         shell: pwsh
         run: |
