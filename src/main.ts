@@ -36,6 +36,7 @@ import { ExecutionTaskCapsuleRuntime } from './execution-task-capsule';
 import { ExecutionTaskCapsulePersistence, ExecutionTaskCapsuleStore } from './execution-task-capsule-store';
 import { ExecutionCheckpointRuntime } from './execution-checkpoint';
 import { ExecutionCheckpointPersistence, ExecutionCheckpointStore } from './execution-checkpoint-store';
+import { ExecutionCheckpointController } from './execution-checkpoint-controller';
 import { ExecutionChangeBudgetRuntime } from './execution-change-budget';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
@@ -97,6 +98,14 @@ let executionPlanHistoryPersistenceEnabled = false;
 let executionQualityGatePersistenceEnabled = false;
 let executionTaskCapsulePersistenceEnabled = false;
 let executionCheckpointPersistenceEnabled = false;
+const executionCheckpointController = new ExecutionCheckpointController(
+  executionCheckpointRuntime,
+  workspaceRuntime,
+  executionManager,
+  (checkpoints) => {
+    if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(checkpoints);
+  },
+);
 toolRuntime.configureExecutionCheckpointRecorder((record) => {
   executionCheckpointRuntime.record(record);
   if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
@@ -513,6 +522,21 @@ ipcMain.handle('agent:get-execution-task-capsule', async (_event, input: unknown
   return executionTaskCapsuleRuntime.get(requireIdentifier(value.chatId, 'Chat'), requireIdentifier(value.runId, 'Execução')) ?? null;
 });
 ipcMain.handle('agent:list-execution-task-capsules', async (_event, chatId?: string) => executionTaskCapsuleRuntime.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));
+ipcMain.handle('agent:list-execution-checkpoints', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return executionCheckpointController.list();
+  const value = requireObject(filters, 'Filtro dos checkpoints de execução');
+  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  return executionCheckpointController.list(chatId, runId);
+});
+ipcMain.handle('agent:restore-execution-checkpoint', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação do checkpoint');
+  return executionCheckpointController.restore({
+    checkpointId: requireIdentifier(value.checkpointId, 'Checkpoint'),
+    chatId: requireIdentifier(value.chatId, 'Chat'),
+    runId: requireIdentifier(value.runId, 'Execução'),
+  });
+});
 ipcMain.handle('agent:list-recoverable-runs', async () => listRecoverableRuns(agentRuntime));
 ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
   const id = requireIdentifier(runId, 'Execução recuperável');
