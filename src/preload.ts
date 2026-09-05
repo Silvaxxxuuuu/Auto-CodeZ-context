@@ -102,6 +102,10 @@ contextBridge.exposeInMainWorld('autoCodez', {
   listExecutionPlanHistory: (filters?: ApprovalScope) => invoke('agent:list-execution-plan-history', requireApprovalScope(filters)),
   getExecutionReport: (input: { chatId: string; runId: string }) => { const value = requireObject(input, 'Identificação do relatório de execução'); return invoke('agent:get-execution-report', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') }); },
   listExecutionReports: (chatId?: string) => invoke('agent:list-execution-reports', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  configureExecutionQualityGate: (input: unknown) => invoke('agent:configure-execution-quality-gate', input),
+  getExecutionQualityGate: (input: { chatId: string; runId: string }) => { const value = requireObject(input, 'Identificação do quality gate'); return invoke('agent:get-execution-quality-gate', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') }); },
+  evaluateExecutionQualityGate: (input: { chatId: string; runId: string }) => { const value = requireObject(input, 'Identificação do quality gate'); return invoke('agent:evaluate-execution-quality-gate', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') }); },
+  listExecutionQualityGates: (chatId?: string) => invoke('agent:list-execution-quality-gates', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
   onExecutionPlanEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('execution-plan:event', handler);

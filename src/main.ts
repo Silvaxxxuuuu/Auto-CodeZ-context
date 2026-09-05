@@ -30,6 +30,8 @@ import { ExecutionPlanPersistence, ExecutionPlanStore } from './execution-plan-s
 import { ExecutionPlanHistory } from './execution-plan-history';
 import { ExecutionPlanHistoryPersistence, ExecutionPlanHistoryStore } from './execution-plan-history-store';
 import { ExecutionReportBuilder } from './execution-report';
+import { ExecutionQualityGateRuntime, type ExecutionQualityGateRequirement } from './execution-quality-gate';
+import { ExecutionQualityGatePersistence, ExecutionQualityGateStore } from './execution-quality-gate-store';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
@@ -72,10 +74,14 @@ const executionPlanHistory = new ExecutionPlanHistory();
 const executionPlanHistoryStore = new ExecutionPlanHistoryStore(storage);
 const executionPlanHistoryPersistence = new ExecutionPlanHistoryPersistence(executionPlanHistoryStore);
 const executionReportBuilder = new ExecutionReportBuilder(executionManager, executionTimeline, executionPlanHistory);
+const executionQualityGateRuntime = new ExecutionQualityGateRuntime();
+const executionQualityGateStore = new ExecutionQualityGateStore(storage);
+const executionQualityGatePersistence = new ExecutionQualityGatePersistence(executionQualityGateStore);
 let executionPersistenceEnabled = false;
 let executionTimelinePersistenceEnabled = false;
 let executionPlanPersistenceEnabled = false;
 let executionPlanHistoryPersistenceEnabled = false;
+let executionQualityGatePersistenceEnabled = false;
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 const approvalRunLocks = new Set<string>();
 let mainWindow: BrowserWindow | null = null;
@@ -275,6 +281,7 @@ ipcMain.handle('chat:delete', async (_event, chatId: string) => {
   const id = requireIdentifier(chatId, 'Chat');
   await clearChatExecution(id);
   if (executionPlanHistory.purgeChat(id) && executionPlanHistoryPersistenceEnabled) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
+  if (executionQualityGateRuntime.removeChat(id) && executionQualityGatePersistenceEnabled) executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
   return chatManager.remove(id);
 });
 ipcMain.handle('chat:rename', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome do chat'); return chatManager.rename(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.title, 'Nome do chat')); });
@@ -438,6 +445,28 @@ ipcMain.handle('agent:get-execution-report', async (_event, input: unknown) => {
   return executionReportBuilder.build(chatId, runId) ?? null;
 });
 ipcMain.handle('agent:list-execution-reports', async (_event, chatId?: string) => executionReportBuilder.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));
+ipcMain.handle('agent:configure-execution-quality-gate', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Configuração do quality gate');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const runId = requireIdentifier(value.runId, 'Execução');
+  if (value.requireVerifiedCompletion !== undefined && typeof value.requireVerifiedCompletion !== 'boolean') throw new Error('requireVerifiedCompletion inválido.');
+  if (value.requirements !== undefined && !Array.isArray(value.requirements)) throw new Error('Requisitos do quality gate inválidos.');
+  const requirements = (value.requirements ?? []) as ExecutionQualityGateRequirement[];
+  const gate = executionQualityGateRuntime.configure({ chatId, runId, requireVerifiedCompletion: value.requireVerifiedCompletion as boolean | undefined, requirements });
+  if (executionQualityGatePersistenceEnabled) executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
+  return gate;
+});
+ipcMain.handle('agent:get-execution-quality-gate', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação do quality gate');
+  return executionQualityGateRuntime.get(requireIdentifier(value.chatId, 'Chat'), requireIdentifier(value.runId, 'Execução')) ?? null;
+});
+ipcMain.handle('agent:evaluate-execution-quality-gate', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação do quality gate');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const runId = requireIdentifier(value.runId, 'Execução');
+  return executionQualityGateRuntime.evaluate(executionReportBuilder.build(chatId, runId)) ?? null;
+});
+ipcMain.handle('agent:list-execution-quality-gates', async (_event, chatId?: string) => executionQualityGateRuntime.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));
 ipcMain.handle('agent:list-recoverable-runs', async () => listRecoverableRuns(agentRuntime));
 ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
   const id = requireIdentifier(runId, 'Execução recuperável');
@@ -596,6 +625,7 @@ app.whenReady().then(async () => {
   await agentRuntime.init();
   executionTimeline.restore(await executionTimelineStore.load());
   executionPlanHistory.restore(await executionPlanHistoryStore.load());
+  executionQualityGateRuntime.restore(await executionQualityGateStore.load());
   await restorePersistedExecutionSnapshots();
   executionPlanner.restore(await executionPlanStore.load());
   restoreExecutionSnapshots();
@@ -605,10 +635,12 @@ app.whenReady().then(async () => {
   executionTimelinePersistenceEnabled = true;
   executionPlanPersistenceEnabled = true;
   executionPlanHistoryPersistenceEnabled = true;
+  executionQualityGatePersistenceEnabled = true;
   executionStatePersistence.schedule(executionManager.list());
   executionTimelinePersistence.schedule(executionTimeline.list());
   executionPlanPersistence.schedule(executionPlanner.list());
   executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
+  executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
   activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
