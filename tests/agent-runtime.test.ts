@@ -102,11 +102,22 @@ test('multiple approvals resume independently and continue only after the last a
   finally { await fixtureData.cleanup(); }
 });
 
-test('streaming preserves approval state and resumes with the same tool round', async () => {
+test('streaming preserves approval state and emits complete only after the full run finishes', async () => {
   const events: AIStreamEvent[] = [];
   const fixtureData = await fixture([{ content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('stream-call')] }, { content: 'Stream finished.', model: 'test-model', providerId: config.id }], [[{ type: 'start' }, { type: 'delta', text: 'Preparing...' }, { type: 'complete', response: { content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('stream-call')] } }], [{ type: 'start' }, { type: 'delta', text: 'Stream finished.' }, { type: 'complete', response: { content: 'Stream finished.', model: 'test-model', providerId: config.id } }]]);
-  try { const pending = await fixtureData.agent.runStreaming(config, chat(), undefined, 'ask', (event) => events.push(event)); assert.equal(pending.toolRounds, 1); assert.equal(pending.pendingApprovalIds.length, 1); assert.equal(events.some((event) => event.type === 'approval_required'), true); const resumed = await fixtureData.agent.resume(pending.pendingApprovalIds[0]); assert.equal(resumed.toolRounds, 1); assert.equal(resumed.response.content, 'Stream finished.'); assert.equal(resumed.pendingApprovalIds.length, 0); assert.equal(events.some((event) => event.type === 'delta' && event.text === 'Stream finished.'), true); }
-  finally { await fixtureData.cleanup(); }
+  try {
+    const pending = await fixtureData.agent.runStreaming(config, chat(), undefined, 'ask', (event) => events.push(event));
+    assert.equal(pending.toolRounds, 1);
+    assert.equal(pending.pendingApprovalIds.length, 1);
+    assert.equal(events.some((event) => event.type === 'approval_required'), true);
+    assert.equal(events.filter((event) => event.type === 'complete').length, 0);
+    const resumed = await fixtureData.agent.resume(pending.pendingApprovalIds[0]);
+    assert.equal(resumed.toolRounds, 1);
+    assert.equal(resumed.response.content, 'Stream finished.');
+    assert.equal(resumed.pendingApprovalIds.length, 0);
+    assert.equal(events.some((event) => event.type === 'delta' && event.text === 'Stream finished.'), true);
+    assert.equal(events.filter((event) => event.type === 'complete').length, 1);
+  } finally { await fixtureData.cleanup(); }
 });
 
 test('agent stops after the global twelve-round tool limit', async () => {
