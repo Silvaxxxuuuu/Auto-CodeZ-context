@@ -1,7 +1,18 @@
+import { selectRollbackCheckpoint, type RollbackCheckpointTarget } from './execution-checkpoint-recovery';
+
 const STYLE_ID = 'auto-codez-error-recovery-ui';
 const PANEL_ID = 'auto-codez-error-recovery';
+
+type RecoveryBridge = {
+  listExecutions?: (chatId?: string) => Promise<unknown>;
+  listExecutionCheckpoints?: (filters?: { chatId?: string; runId?: string }) => Promise<unknown>;
+  restoreExecutionCheckpoint?: (input: { checkpointId: string; chatId: string; runId: string }) => Promise<unknown>;
+};
+
+const bridge = (window as unknown as { autoCodez?: RecoveryBridge }).autoCodez;
 let lastRecoverySignature = '';
 let recoveryFrame = 0;
+let rollbackLookupToken = 0;
 
 function installStyles(): void {
   if (document.getElementById(STYLE_ID)) return;
@@ -28,6 +39,7 @@ function installStyles(): void {
     .ac-recovery-action:hover{background:#202630;border-color:#465262;color:#f0f3f7;transform:translateY(-1px)}
     .ac-recovery-action.primary{border-color:#586576;background:#e0e6ed;color:#0b0f14}
     .ac-recovery-action.primary:hover{background:#f0f3f7;border-color:#718095;color:#080b0f}
+    .ac-recovery-action:disabled{cursor:default;opacity:.58;transform:none}
     .ac-recovery-action:focus-visible{outline:2px solid #586577;outline-offset:2px}
     .ac-ui-toast{position:fixed;right:18px;bottom:18px;z-index:1200;max-width:min(420px,calc(100vw - 36px));padding:11px 13px;border:1px solid #39434f;border-radius:10px;background:#12171e;color:#dce2ea;font:10px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;box-shadow:0 16px 42px #0007;animation:ac-toast-in .18s ease-out}
     .ac-ui-toast.error{border-color:#54353c;color:#e1b9be}
@@ -56,10 +68,10 @@ function openChatAiSettings(): void {
   openApiKeys();
 }
 
-function createToast(message: string): void {
+function createToast(message: string, variant: 'error' | 'success' = 'error'): void {
   document.querySelector('.ac-ui-toast')?.remove();
   const toast = document.createElement('div');
-  toast.className = 'ac-ui-toast error';
+  toast.className = `ac-ui-toast ${variant}`;
   toast.setAttribute('role', 'status');
   toast.textContent = message;
   document.body.appendChild(toast);
@@ -93,6 +105,62 @@ function retryLastMessage(): void {
   window.dispatchEvent(new CustomEvent('auto-codez-retry-message'));
 }
 
+function selectedChatId(): string | undefined {
+  const item = document.querySelector<HTMLElement>('#nav-panel .chat-item.selected[data-chat]');
+  const chatId = item?.dataset.chat?.trim();
+  return chatId || undefined;
+}
+
+function rollbackConfirmation(checkpoint: RollbackCheckpointTarget): string {
+  const count = checkpoint.changes.length;
+  const files = count === 1 ? '1 alteração de arquivo' : `${count} alterações de arquivo`;
+  return `Desfazer ${files} feitas pela IA nesta execução?\n\nO rollback só continuará se os arquivos ainda estiverem exatamente no estado deixado por essa execução.`;
+}
+
+async function addRollbackAction(panel: HTMLElement, chatId: string, signature: string): Promise<void> {
+  if (!bridge?.listExecutions || !bridge.listExecutionCheckpoints || !bridge.restoreExecutionCheckpoint) return;
+  const token = ++rollbackLookupToken;
+  try {
+    const execution = await bridge.listExecutions(chatId);
+    const checkpoints = await bridge.listExecutionCheckpoints({ chatId });
+    const checkpoint = selectRollbackCheckpoint(execution, checkpoints);
+    if (!checkpoint) return;
+    if (token !== rollbackLookupToken) return;
+    if (selectedChatId() !== chatId) return;
+    if (lastRecoverySignature !== signature) return;
+    if (document.getElementById(PANEL_ID) !== panel) return;
+
+    const actions = panel.querySelector<HTMLElement>('.ac-recovery-actions');
+    if (!actions || actions.querySelector('[data-recovery-rollback]')) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ac-recovery-action';
+    button.dataset.recoveryRollback = 'true';
+    button.textContent = 'Desfazer alterações';
+    button.title = `Desfazer ${checkpoint.changes.length} alteração(ões) desta execução`;
+    actions.prepend(button);
+
+    button.addEventListener('click', async () => {
+      if (button.disabled || selectedChatId() !== checkpoint.chatId) return;
+      if (!window.confirm(rollbackConfirmation(checkpoint))) return;
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Desfazendo...';
+      try {
+        await bridge.restoreExecutionCheckpoint!({ checkpointId: checkpoint.id, chatId: checkpoint.chatId, runId: checkpoint.runId });
+        button.remove();
+        createToast('Alterações desta execução foram desfeitas com segurança.', 'success');
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = originalText;
+        createToast(error instanceof Error ? error.message : String(error));
+      }
+    });
+  } catch {
+    return;
+  }
+}
+
 function syncWelcome(): void {
   const welcome = document.querySelector<HTMLElement>('#messages .welcome');
   if (!welcome) return;
@@ -115,14 +183,17 @@ function syncRecovery(): void {
   const error = activity?.querySelector<HTMLElement>('.activity-line.error');
   const errorText = error?.textContent?.trim() || '';
   if (!errorText) {
+    rollbackLookupToken += 1;
     lastRecoverySignature = '';
     document.querySelector(`#${PANEL_ID}`)?.remove();
     return;
   }
 
   const kind = classify(errorText);
-  const signature = `${kind}:${errorText}`;
+  const chatId = selectedChatId();
+  const signature = `${chatId || 'no-chat'}:${kind}:${errorText}`;
   if (signature === lastRecoverySignature && document.getElementById(PANEL_ID)) return;
+  rollbackLookupToken += 1;
   lastRecoverySignature = signature;
 
   document.querySelector(`#${PANEL_ID}`)?.remove();
@@ -139,6 +210,7 @@ function syncRecovery(): void {
     if (kind === 'rate_limit' || kind === 'network' || kind === 'server') { retryLastMessage(); return; }
     openChatAiSettings();
   });
+  if (chatId) void addRollbackAction(panel, chatId, signature);
 }
 
 function scheduleRecoverySync(): void {
