@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ExecutionChangeBudgetRuntime } from '../src/execution-change-budget';
+import { ExecutionChangeBudgetRuntime, type ExecutionChangeBudgetSnapshot } from '../src/execution-change-budget';
 import type { DiffPlan, FileDiff } from '../src/ai/types';
 
 function change(path: string, addedLines: number, removedLines: number, renamedFrom?: string): FileDiff {
@@ -29,6 +29,16 @@ function plan(changes: FileDiff[]): DiffPlan {
       addedLines: changes.reduce((total, item) => total + item.addedLines, 0),
       removedLines: changes.reduce((total, item) => total + item.removedLines, 0),
     },
+  };
+}
+
+function snapshot(input: Partial<ExecutionChangeBudgetSnapshot> = {}): ExecutionChangeBudgetSnapshot {
+  return {
+    chatId: input.chatId ?? 'chat-a',
+    runId: input.runId ?? 'run-a',
+    budget: input.budget ?? { maxFiles: 3, maxChangedLines: 20, maxCommands: 2, maxToolCalls: 5, maxDurationMs: 10_000 },
+    usage: input.usage ?? { files: ['src/a.ts'], changedLines: 3, commands: 0, toolCalls: 1 },
+    startedAt: input.startedAt ?? 1_000,
   };
 }
 
@@ -134,6 +144,58 @@ test('limite temporal usa o mesmo relógio determinístico da execução', () =>
   assert.equal(expired.elapsedMs, 5_001);
   assert.match(expired.violations.join(' '), /Duração: 5001ms\/5000ms/);
   assert.throws(() => runtime.record('chat-a', 'run-a', { toolName: 'read_file' }), /Change Budget excedido/i);
+});
+
+test('restore preserva orçamento, uso e startedAt sem reiniciar a duração', () => {
+  let now = 4_000;
+  const runtime = new ExecutionChangeBudgetRuntime(() => now);
+  runtime.restore([snapshot({ startedAt: 1_000, budget: { maxDurationMs: 5_000, maxToolCalls: 3 } })]);
+
+  assert.deepEqual(runtime.getUsage('chat-a', 'run-a'), { files: ['src/a.ts'], changedLines: 3, commands: 0, toolCalls: 1 });
+  assert.equal(runtime.evaluate('chat-a', 'run-a', { toolName: 'read_file' }).elapsedMs, 3_000);
+
+  now = 6_001;
+  assert.equal(runtime.evaluate('chat-a', 'run-a', { toolName: 'read_file' }).allowed, false);
+});
+
+test('restore é atômico e rejeita duplicidade ou snapshot impossível', () => {
+  const runtime = new ExecutionChangeBudgetRuntime(() => 2_000);
+  runtime.restore([snapshot({ runId: 'existing' })]);
+
+  assert.throws(() => runtime.restore([
+    snapshot({ runId: 'next' }),
+    snapshot({ runId: 'broken', budget: { maxFiles: 0 }, usage: { files: ['src/a.ts'], changedLines: 0, commands: 0, toolCalls: 0 } }),
+  ]), /excede o próprio limite/i);
+  assert.equal(runtime.list()[0]?.runId, 'existing');
+
+  assert.throws(() => runtime.restore([
+    snapshot({ runId: 'duplicate' }),
+    snapshot({ runId: 'duplicate' }),
+  ]), /duplicado/i);
+  assert.equal(runtime.list()[0]?.runId, 'existing');
+});
+
+test('list e observers usam cópias defensivas e restore permanece silencioso', () => {
+  const runtime = new ExecutionChangeBudgetRuntime(() => 2_000);
+  const events: ExecutionChangeBudgetSnapshot[][] = [];
+  runtime.subscribe((snapshots) => {
+    events.push(snapshots);
+    if (snapshots[0]) snapshots[0].usage.files.push('mutated.ts');
+  });
+  runtime.subscribe(() => { throw new Error('observer failure'); });
+
+  runtime.restore([snapshot()]);
+  assert.equal(events.length, 0);
+
+  runtime.record('chat-a', 'run-a', { toolName: 'read_file' });
+  assert.equal(events.length, 1);
+  assert.deepEqual(runtime.list()[0]?.usage.files, ['src/a.ts']);
+
+  const listed = runtime.list();
+  listed[0].usage.files.push('outside.ts');
+  listed[0].budget.maxFiles = 99;
+  assert.deepEqual(runtime.list()[0]?.usage.files, ['src/a.ts']);
+  assert.equal(runtime.list()[0]?.budget.maxFiles, 3);
 });
 
 test('relógio inválido é rejeitado ao configurar o budget', () => {
