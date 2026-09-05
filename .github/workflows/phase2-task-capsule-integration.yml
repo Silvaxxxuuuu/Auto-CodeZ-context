@@ -59,8 +59,8 @@ jobs:
               "  const runId = execution.runId;\n  try {\n    await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });\n",
               "  const runId = execution.runId;\n  captureExecutionTaskCapsule(chat, runId, content);\n  try {\n    await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });\n",
           )
-          stream_anchor = """  const runId = execution.runId;\n  const controller = new AbortController();\n"""
-          stream_replacement = """  const runId = execution.runId;\n  captureExecutionTaskCapsule(chat, runId, content);\n  const controller = new AbortController();\n"""
+          stream_anchor = """  const controller = new AbortController();\n  activeStreamControllers.set(chatId, { runId: execution.runId, controller });\n  const runId = execution.runId;\n"""
+          stream_replacement = """  const controller = new AbortController();\n  activeStreamControllers.set(chatId, { runId: execution.runId, controller });\n  const runId = execution.runId;\n  captureExecutionTaskCapsule(chat, runId, content);\n"""
           replace_once(stream_anchor, stream_replacement)
 
           quality_handlers = """ipcMain.handle('agent:list-execution-quality-gates', async (_event, chatId?: string) => executionQualityGateRuntime.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));\n"""
