@@ -49,7 +49,7 @@ export async function resumeRecoveredRun(
     const execution = executionManager.update(recoverable.chatId, {
       state,
       runId: recoverable.runId,
-    });
+    }, now);
     return { result, execution };
   } catch (error) {
     if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
@@ -60,7 +60,7 @@ export async function resumeRecoveredRun(
     const retained = recoveryJournalRetained(agentRuntime, recoverable);
     const execution = executionManager.update(recoverable.chatId, retained
       ? { state: 'interrupted', runId: recoverable.runId }
-      : { state: 'failed', error: message, runId: recoverable.runId });
+      : { state: 'failed', error: message, runId: recoverable.runId }, now);
     throw Object.assign(error instanceof Error ? error : new Error(message), { execution, recoverable: retained });
   }
 }
