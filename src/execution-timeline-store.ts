@@ -2,7 +2,7 @@ import type { LocalStorage } from './core/storage';
 import type { ExecutionTimelineEvent } from './execution-timeline';
 
 const DEFAULT_FILE = 'execution-timeline.json';
-const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'state_changed', 'tool_changed', 'error', 'removed']);
+const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'recovered', 'state_changed', 'tool_changed', 'error', 'removed']);
 const STATES = new Set(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
 
 type StoredExecutionTimeline = {
@@ -13,7 +13,7 @@ type StoredExecutionTimeline = {
 function isEvent(value: unknown): value is ExecutionTimelineEvent {
   if (!value || typeof value !== 'object') return false;
   const event = value as Partial<ExecutionTimelineEvent>;
-  return Number.isInteger(event.sequence)
+  const validBase = Number.isInteger(event.sequence)
     && Number(event.sequence) > 0
     && typeof event.chatId === 'string'
     && event.chatId.length > 0
@@ -25,8 +25,12 @@ function isEvent(value: unknown): value is ExecutionTimelineEvent {
     && typeof event.type === 'string'
     && EVENT_TYPES.has(event.type as ExecutionTimelineEvent['type'])
     && (event.state === undefined || STATES.has(event.state))
+    && (event.startedAt === undefined || (typeof event.startedAt === 'number' && Number.isFinite(event.startedAt) && event.startedAt >= 0))
     && (event.currentTool === undefined || typeof event.currentTool === 'string')
     && (event.error === undefined || typeof event.error === 'string');
+  if (!validBase) return false;
+  if (event.type === 'recovered') return event.state !== undefined && event.startedAt !== undefined && event.startedAt <= event.at;
+  return event.startedAt === undefined;
 }
 
 function cloneEvent(event: ExecutionTimelineEvent): ExecutionTimelineEvent {
