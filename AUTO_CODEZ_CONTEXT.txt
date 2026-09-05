@@ -1,5 +1,5 @@
 AUTO CODEZ — DOCUMENTO DE CONTEXTO PERMANENTE
-Última atualização: 03/09/2026
+Última atualização: 04/09/2026
 
 ============================================================
 1. PRODUTO
@@ -46,9 +46,23 @@ Branch atual de trabalho: feature/ui-hierarchy-polish
 PR #9: feature/ui-hierarchy-polish -> feature/provider-error-resilience
 Não fazer merge do PR sem solicitação explícita.
 
-HEAD atual:
+HEAD histórico registrado anteriormente:
 463563a47b13fb87a8cfd6485201c0b6c899163e
 test: use node:test for computer context coverage
+
+Estado validado mais recente antes desta atualização de contexto:
+787795ddabd63f4b926d14a71861b2ed0e77898b
+fix(diff): use Monaco 0.56 bundled styles
+
+CI correspondente:
+- workflow: Validate Auto CodeZ;
+- run: 33894085579;
+- conclusão: success;
+- TypeScript validation: passou;
+- core tests: 217/217 passaram;
+- ESLint validation: passou;
+- Electron Forge package build: passou;
+- startup smoke test: passou.
 
 Commits recentes de hardening de execução/aprovação:
 
@@ -71,7 +85,7 @@ Pass approval scope through legacy approval controls
 fix(ui): clear execution state after completion
 
 29be0a6e68f00ba0b3d3b081cae47f23ecca035d
- test: allow regular chat tool approval recovery
+test: allow regular chat tool approval recovery
 
 ce3eb14e36dbd7a5a536f363af900dafe102f450
 fix(ui): load execution/approval modules in renderer
@@ -115,11 +129,10 @@ CI do hardening anterior:
 - Electron Forge package build: passou;
 - startup smoke test: passou.
 
-CI mais recente do estado atual:
+CI do estado 463563a:
 - workflow: Validate Auto CodeZ;
 - run: 33820608674;
 - run number: 1287;
-- job: verificar no workflow atual;
 - conclusão: success;
 - TypeScript validation: passou;
 - core tests: passaram;
@@ -732,6 +745,8 @@ Sync:
 20. ROADMAP
 ============================================================
 
+NOTA DE 04/09/2026: a ordem abaixo é histórica e será reorganizada em uma etapa separada. As ideias registradas na seção 23 mudam significativamente as prioridades e não devem ser encaixadas às pressas nesta ordem antiga.
+
 FASE 1 — ESTABILIZAÇÃO
 - billing/quota provider handling;
 - API Key Manager;
@@ -894,8 +909,10 @@ Antes de major feature perguntar:
 - Quando uma alteração estiver pronta para consumo local, quer receber explicitamente o comando para atualizar o clone e uma lista objetiva do que testar.
 
 ============================================================
-22. PRÓXIMAS ETAPAS IMEDIATAS
+22. PRÓXIMAS ETAPAS IMEDIATAS — REGISTRO HISTÓRICO
 ============================================================
+
+A lista abaixo é histórica e será substituída por um roadmap reorganizado após a seção 23 ser discutida e priorizada.
 
 1. Manter o commit atual e a CI verde como baseline de estabilidade.
 2. Atualizar este contexto após cada estado validado, preservando o histórico existente.
@@ -911,3 +928,765 @@ Antes de major feature perguntar:
 12. Projetar memória/context management antes de aumentar significativamente a autonomia de agentes.
 13. Só então expandir progressivamente providers, modalidades multimídia, ferramentas, plugins e automações.
 14. Não fazer merge do PR #9 sem autorização explícita.
+
+============================================================
+23. NOVAS IDEIAS E DIREÇÕES APROVADAS — 04/09/2026
+============================================================
+
+Esta seção registra as novas funcionalidades e decisões discutidas após a estabilização do sistema de execução/aprovação. A ordem de implementação ainda NÃO está definida. O próximo passo será reorganizar todas as fases do produto considerando dependências, risco, impacto e arquitetura.
+
+------------------------------------------------------------
+23.1. MONACO DIFF REVIEW E EDIÇÃO CONTROLADA
+------------------------------------------------------------
+
+Monaco Editor já faz parte das dependências do Auto CodeZ e foi integrado como base para revisão visual de alterações.
+
+Estado técnico validado antes desta atualização:
+- commit 787795ddabd63f4b926d14a71861b2ed0e77898b;
+- CI 33894085579 completamente verde;
+- Monaco Diff Review empacota no Electron Forge e passa startup smoke test.
+
+Arquitetura desejada:
+approval.diffPlan -> Revisar alterações -> Monaco Diff Editor -> Aprovar/Recusar -> ApprovalRuntime/AgentRuntime -> ToolRuntime aplica a mudança.
+
+Monaco é visualizador/revisor, não executor paralelo. Não criar segundo runId, segundo approval flow ou aplicação direta independente do ToolRuntime.
+
+Problema descoberto no teste manual:
+- a IA ainda escolhe run_command/PowerShell para escrever código em alguns casos;
+- quando isso acontece não existe DiffPlan de arquivo e o botão Revisar alterações não aparece;
+- isso contorna a revisão de arquivo apesar de a operação ainda pedir aprovação de comando.
+
+Decisão:
+- para criar/editar/excluir/renomear arquivos, a IA deve preferir create_file/write_file/delete_file/rename_file;
+- run_command deve ser priorizado para npm, testes, builds, scripts, CLIs, ferramentas externas e comandos realmente apropriados ao shell;
+- não usar shell como editor de arquivos quando as file tools puderem representar a operação;
+- mudanças de arquivo devem passar pelo DiffRuntime e, quando aplicável, Monaco Diff Review.
+
+Futuro desejado:
+- revisão multi-arquivo;
+- Aprovar tudo / Recusar tudo;
+- revisão individual por arquivo;
+- before/after;
+- contagem de linhas;
+- linguagem/syntax highlighting;
+- precondition contra arquivo alterado desde o preview;
+- aplicação somente depois de aprovação.
+
+------------------------------------------------------------
+23.2. TERMINAL REAL — NODE-PTY + XTERM.JS
+------------------------------------------------------------
+
+Ideia aprovada:
+- substituir progressivamente o terminal visual simples por terminal PTY real;
+- node-pty no backend;
+- xterm.js no renderer;
+- conexão via IPC controlado.
+
+Arquitetura desejada:
+xterm.js -> IPC -> TerminalService -> TerminalRuntime -> node-pty -> shell.
+
+Benefícios:
+- ANSI completo;
+- cores reais;
+- caracteres especiais;
+- Ctrl+C;
+- processos long-running;
+- prompts interativos;
+- shells reais;
+- melhor suporte a npm start, Vite, Python e outras CLIs.
+
+O impacto de native modules no Electron Forge/Windows deve ser auditado antes de implementação.
+
+------------------------------------------------------------
+23.3. TREE-SITTER / WORKSPACE INTELLIGENCE
+------------------------------------------------------------
+
+Adicionar indexação estrutural local do workspace usando Tree-sitter ou tecnologia equivalente adequada ao packaging.
+
+Objetivos:
+- símbolos;
+- classes;
+- funções;
+- imports;
+- referências;
+- dependências entre arquivos;
+- estrutura do projeto;
+- seleção contextual inteligente.
+
+Contexto deve combinar primeiro:
+- busca textual;
+- estrutura/símbolos;
+- arquivos recentemente alterados;
+- contexto da tarefa.
+
+Embeddings/vector DB entram depois, não antes de existir índice estrutural confiável.
+
+------------------------------------------------------------
+23.4. MCP / EXTENSIBILIDADE DE FERRAMENTAS
+------------------------------------------------------------
+
+MCP é considerado uma camada futura de conectores/ferramentas externas.
+
+Princípio:
+- MCP não substitui ferramentas internas fundamentais;
+- read/write/edit/terminal/git/diff continuam sob controle do Auto CodeZ;
+- ferramentas MCP também passam por PermissionRuntime, ApprovalRuntime, sandbox e observabilidade;
+- MCP é uma nova fonte de tools, não um bypass de segurança.
+
+------------------------------------------------------------
+23.5. PATCH ENGINE / JSDIFF / EDIÇÃO INCREMENTAL
+------------------------------------------------------------
+
+Avaliar jsdiff ou tecnologia equivalente para produzir/representar diffs e patches.
+
+A IA não deve depender apenas de reescrever arquivos inteiros.
+
+Operações estruturadas desejadas:
+- replace_range;
+- replace_symbol;
+- insert_before;
+- insert_after;
+- create;
+- delete;
+- rename.
+
+Diff textual pode ser derivado para revisão, mas aplicação deve preservar preconditions e consistência.
+
+------------------------------------------------------------
+23.6. CONTEXTO SEMÂNTICO / LANCEDB
+------------------------------------------------------------
+
+Após Tree-sitter e Context Engine estrutural, avaliar embeddings e armazenamento vetorial local.
+
+LanceDB foi considerado preferível a uma dependência de servidor separado para um app desktop embedded, sujeito a spike técnico.
+
+Usos:
+- recuperação semântica de histórico;
+- localização de trechos relevantes;
+- memória de projeto;
+- conhecimento acumulado do workspace.
+
+Antes de implementar definir:
+- index lifecycle;
+- invalidação;
+- chunking;
+- privacidade;
+- quotas de armazenamento;
+- embeddings locais vs remotos;
+- comportamento offline.
+
+------------------------------------------------------------
+23.7. AI ECONOMY / CONTEXT BUDGET
+------------------------------------------------------------
+
+Adicionar configurações para fazer APIs e cotas durarem muito mais.
+
+Área sugerida:
+Configurações -> Inteligência -> Economia/Contexto.
+
+Modos possíveis:
+- Econômico;
+- Equilibrado;
+- Máxima qualidade.
+
+Controles possíveis:
+- limite máximo de contexto por requisição;
+- resumo incremental de conversas longas;
+- cache local de contexto;
+- não reenviar arquivos inalterados integralmente;
+- priorizar contexto realmente relevante;
+- respostas mais curtas quando apropriado;
+- preferência por modelos baratos/gratuitos;
+- permitir fallback para modelo mais barato;
+- limite diário/mensal de gasto;
+- aviso de consumo;
+- orçamento por tarefa;
+- limite de tool calls;
+- limite de duração.
+
+Context Engine desejado:
+mensagem -> contexto local relevante -> router -> modelo adequado.
+
+O histórico/contexto pertence ao Auto CodeZ, não ao provider. Isso é essencial para economia, Auto Change, multi-agent e recovery.
+
+Não implementar criação automática de várias contas/projetos/keys para contornar quotas de providers.
+
+------------------------------------------------------------
+23.8. USAGE ANALYTICS — “SEUS GASTOS”
+------------------------------------------------------------
+
+Adicionar no Perfil uma aba global chamada “Seus gastos”.
+
+Objetivo: análise completa de uso sem deixar consumo/token counters escandalosos na tela principal do chat.
+
+Painel desejado:
+- gráfico das 5 ou 10 IAs/modelos com maior consumo;
+- filtros de 7 dias, 30 dias, 3 meses, tudo ou intervalo customizado;
+- alternar entre Tokens, Custo e Requisições;
+- lista completa de todas as IAs/modelos já utilizados;
+- filtros por provider, modelo, credencial, chat, projeto e período;
+- entrada vs saída;
+- uso por agente/ferramentas vs conversa normal.
+
+Métricas devem ser separadas quando disponíveis:
+- inputTokens;
+- outputTokens;
+- cachedInputTokens;
+- reasoningTokens;
+- totalTokens;
+- requests;
+- estimatedCost;
+- providerReportedCost.
+
+Custo calculado localmente deve ser marcado como estimado quando o provider não informar custo real.
+
+Também mostrar economia produzida pelo Auto CodeZ:
+- tokens evitados por cache;
+- contexto evitado por resumo/indexação;
+- percentual estimado de economia;
+- custo estimado evitado.
+
+Histórico deve ser local-first. Sincronização futura deve ser opcional e respeitar privacidade.
+
+------------------------------------------------------------
+23.9. MODEL ROUTER E FALLBACK INTELIGENTE
+------------------------------------------------------------
+
+Criar roteamento de modelos baseado em:
+- custo;
+- qualidade;
+- velocidade;
+- capability;
+- disponibilidade;
+- contexto necessário;
+- tipo de tarefa.
+
+Exemplos:
+- tarefa simples -> modelo barato/rápido;
+- resumo/indexação -> modelo econômico;
+- código complexo -> modelo principal;
+- provider indisponível -> fallback compatível.
+
+Provider/modelo nunca deve ser trocado silenciosamente quando essa troca violar a escolha explícita do usuário. Auto Change/fallback automático deve ser opt-in/configurável e observável.
+
+------------------------------------------------------------
+23.10. NOVOS PROVIDERS / OPÇÕES ECONÔMICAS
+------------------------------------------------------------
+
+Avaliar progressivamente providers/gateways adicionais, mantendo BYOK quando possível.
+
+Ideias citadas:
+- Groq;
+- Cloudflare Workers AI;
+- OpenRouter;
+- modelos locais via Ollama/llama.cpp;
+- outros providers compatíveis no futuro.
+
+OpenRouter pode servir como fonte adicional de modelos/fallback quando configurado pelo usuário, mas não deve virar dependência obrigatória do Auto CodeZ.
+
+Puter.js foi analisado como gateway User-Pays com muitos modelos e sem API key individual do provider para o desenvolvedor. Conclusão atual: interessante como opção complementar, mas menos prioritário depois de esclarecer que o usuário ainda pode ter franquia/custos via conta Puter. Não chamar de “IA ilimitada grátis” sem qualificação.
+
+------------------------------------------------------------
+23.11. LOCAL MODELS / OLLAMA
+------------------------------------------------------------
+
+Adicionar futuramente suporte nativo a modelos locais.
+
+Possíveis backends:
+- Ollama;
+- llama.cpp;
+- outros runtimes locais compatíveis.
+
+Benefícios:
+- uso sem custo por token;
+- privacidade;
+- funcionamento offline;
+- alternativa quando providers externos estão indisponíveis.
+
+Limitações devem ser avaliadas conforme hardware do usuário, contexto, velocidade e capacidade real do modelo.
+
+Local model deve entrar no mesmo Provider/Model abstraction, sem criar chat paralelo separado.
+
+------------------------------------------------------------
+23.12. HISTÓRICO DE AÇÕES DO AGENTE / EXECUTION TIMELINE
+------------------------------------------------------------
+
+Esta funcionalidade corresponde ao que o usuário originalmente queria ao falar de “atividades”.
+
+Separar duas coisas:
+
+1. Atividade ao vivo efêmera:
+- discreta;
+- aparece no fluxo do chat enquanto a IA trabalha;
+- sem caixa exagerada;
+- some ao terminar;
+- texto pode ser contextual/dinâmico;
+- nunca expõe raciocínio privado.
+
+2. Histórico permanente da execução:
+- timeline de tudo que realmente aconteceu;
+- ligado a chatId + runId;
+- pode ser aberto depois da conclusão;
+- não precisa ficar permanentemente exposto no chat.
+
+Eventos possíveis:
+- analisou projeto;
+- leu arquivo;
+- pesquisou;
+- propôs alteração;
+- solicitou aprovação;
+- aprovação concedida/recusada;
+- criou/alterou/excluiu/renomeou arquivo;
+- executou comando;
+- executou teste/build;
+- teste passou/falhou;
+- retry;
+- troca de modelo;
+- recovery;
+- conclusão.
+
+Não registrar chain-of-thought/raciocínio privado. Registrar apenas fatos operacionais observáveis.
+
+UI desejada:
+- botão discreto “Histórico” ou “Atividade” associado à execução/resposta final;
+- timeline com timestamps, ícones e resultados;
+- possibilidade futura de exportar relatório;
+- session replay conceitual sem reproduzir raciocínio interno.
+
+------------------------------------------------------------
+23.13. MODOS DE EXECUÇÃO
+------------------------------------------------------------
+
+Criar modo claro de execução para o usuário:
+
+Chat:
+- conversa normal;
+- sem automação pesada por padrão.
+
+Agente:
+- uma IA usa ferramentas e executa tarefas.
+
+Orquestrador:
+- múltiplas IAs/agentes cooperam numa tarefa completa.
+
+Outra classificação de permissividade pode coexistir:
+
+Revisão:
+- IA sugere, usuário revisa antes de aplicar.
+
+Assistido:
+- operações seguras podem ocorrer; sensíveis pedem aprovação.
+
+Autônomo:
+- IA trabalha sozinha dentro de permissões, sandbox, orçamento e limites definidos.
+
+Autônomo nunca significa acesso irrestrito ou bypass de segurança.
+
+Possível botão de alto nível na top bar, próximo ao branding/configurações, com ícone Lucide como workflow. Não adicionar definitivamente antes de reorganizar a top bar.
+
+------------------------------------------------------------
+23.14. ORCHESTRATOR / MULTI-AGENT
+------------------------------------------------------------
+
+Funcionalidade central futura aprovada: duas ou mais IAs podem colaborar para concluir um projeto inteiro a partir de um único prompt.
+
+Primeira versão deve priorizar duas funções:
+
+Supervisor:
+- interpreta objetivo;
+- planeja;
+- define arquitetura;
+- pesquisa limitações quando permitido;
+- cria critérios de aceitação;
+- revisa implementação;
+- detecta problemas;
+- sugere abordagem melhor;
+- controla qualidade;
+- decide quando a tarefa realmente terminou.
+
+Executor:
+- lê workspace;
+- implementa;
+- usa file tools;
+- executa comandos;
+- cria testes;
+- builda;
+- corrige falhas;
+- devolve resultados estruturados.
+
+Fluxo desejado:
+prompt -> Supervisor -> TaskPlan estruturado -> Auto CodeZ -> Executor -> ExecutionReport -> Supervisor -> revisão -> novas tarefas/correções -> Executor -> validação final -> entrega.
+
+Não permitir que duas IAs simplesmente conversem indefinidamente em texto livre, pois isso desperdiça tokens e perde controle.
+
+Usar estruturas do domínio do Auto CodeZ, por exemplo:
+TaskPlan:
+- objetivo;
+- etapas;
+- critérios de aceitação;
+- arquivos relevantes;
+- testes necessários.
+
+ExecutionReport:
+- etapas concluídas;
+- arquivos alterados;
+- testes;
+- erros;
+- observações;
+- próximos bloqueios.
+
+O Supervisor e o Executor podem usar providers/modelos diferentes ou o mesmo provider/modelo.
+
+Exemplos:
+- Supervisor Claude / Executor Gemini;
+- Supervisor GPT / Executor DeepSeek;
+- mesma IA nos dois papéis, se necessário.
+
+A arquitetura deve nascer extensível para papéis adicionais sem exigir que todos sejam ativados:
+- Reviewer;
+- Researcher;
+- Tester;
+- Security Agent;
+- Documentation Agent;
+- Frontend Agent;
+- Backend Agent.
+
+O Supervisor pode convocar agentes especializados somente quando necessário.
+
+------------------------------------------------------------
+23.15. CICLOS DE REVISÃO E OTIMIZAÇÃO
+------------------------------------------------------------
+
+Depois da primeira implementação, o Supervisor pode executar ciclos controlados de revisão:
+- arquitetura;
+- performance;
+- segurança;
+- UX;
+- manutenção;
+- duplicação;
+- dependências;
+- testes;
+- abordagem alternativa.
+
+Depois gera melhorias, Executor aplica, testes rodam e Supervisor revisa novamente.
+
+Evitar loop infinito usando limites configuráveis.
+
+Perfis sugeridos:
+- Rápido: 1 revisão;
+- Normal: 2 revisões;
+- Profundo: 3 revisões;
+- Exaustivo: continuar até critérios de qualidade/limites definidos, nunca sem orçamento/limite.
+
+------------------------------------------------------------
+23.16. AUTO CHANGE / CONTINUIDADE ENTRE MODELOS
+------------------------------------------------------------
+
+Funcionalidade aprovada: quando o modelo atual ficar sem créditos/cota ou indisponível, o Auto CodeZ pode, se o usuário ativar, trocar para outro modelo compatível e continuar exatamente do ponto onde parou.
+
+O contexto pertence ao Auto CodeZ, não ao provider.
+
+Estado persistente necessário para continuidade:
+- prompt original;
+- objetivo;
+- plano;
+- tarefas concluídas;
+- tarefas pendentes;
+- arquivos relevantes;
+- diffs;
+- tool results;
+- testes;
+- approvals;
+- resumo do histórico;
+- estado atual do projeto;
+- checkpoint da execução;
+- última falha;
+- próxima ação.
+
+Ao trocar de modelo, o novo modelo recebe uma continuação estruturada, não precisa reler toda a conversa do zero.
+
+Auto Change deve ser opt-in e configurável.
+
+Possíveis gatilhos:
+- billing/sem créditos;
+- quota atingida;
+- rate limit prolongado;
+- provider indisponível;
+- modelo removido/indisponível.
+
+Não trocar automaticamente em erro lógico comum sem política explícita.
+
+Configuração possível:
+- ordem manual de fallback;
+- priorizar grátis;
+- priorizar menor custo;
+- priorizar qualidade;
+- priorizar velocidade;
+- permitir OpenRouter;
+- permitir modelos locais.
+
+Supervisor e Executor podem possuir cadeias de Auto Change independentes.
+
+Exemplo:
+Supervisor: Claude -> GPT -> Gemini.
+Executor: Gemini -> DeepSeek -> Groq -> modelo local.
+
+Toda troca deve ser registrada no histórico da execução.
+
+------------------------------------------------------------
+23.17. CHECKPOINTS, SNAPSHOTS E UNDO
+------------------------------------------------------------
+
+Ideias aprovadas:
+- workspace snapshots antes de alterações grandes;
+- checkpoint por execução;
+- desfazer alteração individual;
+- desfazer execução inteira quando tecnicamente seguro;
+- voltar ao estado anterior à tarefa;
+- dry-run sem tocar no projeto;
+- review-only mode.
+
+Isso deve se integrar a DiffRuntime, Git quando disponível e sistema de recovery. Não duplicar mecanismos de versão sem necessidade.
+
+------------------------------------------------------------
+23.18. TASK PLANNER E LIMITES POR EXECUÇÃO
+------------------------------------------------------------
+
+Antes de tarefas grandes, o agente pode produzir plano observável sem expor chain-of-thought.
+
+Mostrar:
+- objetivo;
+- etapas;
+- arquivos previstos;
+- testes esperados;
+- dependências;
+- riscos;
+- orçamento estimado quando possível.
+
+Limites configuráveis:
+- tokens;
+- custo;
+- tempo;
+- número de tool calls;
+- número de ciclos de revisão;
+- número de retries.
+
+------------------------------------------------------------
+23.19. CONTEXT INSPECTOR / PRIVACIDADE
+------------------------------------------------------------
+
+Adicionar uma forma de o usuário entender qual contexto está sendo enviado ao provider.
+
+Possíveis recursos:
+- Context Inspector;
+- lista de arquivos/trechos selecionados;
+- motivo resumido de seleção;
+- tamanho estimado;
+- opção de excluir arquivos/pastas.
+
+Privacy Mode:
+- bloquear envio de arquivos/pastas específicos;
+- detectar arquivos sensíveis;
+- secrets scanner para .env, tokens, chaves e credenciais;
+- impedir envio acidental para providers externos;
+- políticas por projeto.
+
+------------------------------------------------------------
+23.20. PERFIS DE COMPORTAMENTO / AGENTES ESPECIALIZADOS
+------------------------------------------------------------
+
+Perfis possíveis:
+- Conciso;
+- Professor;
+- Engenheiro;
+- Criativo;
+- Debugger;
+- Revisor de código;
+- Arquiteto;
+- Frontend;
+- Backend;
+- Testes;
+- Segurança;
+- Documentação.
+
+Perfis são instruções/comportamento, não devem fingir capabilities inexistentes no modelo.
+
+------------------------------------------------------------
+23.21. CONTEÚDO SENSÍVEL / MODO ADULTO OPCIONAL
+------------------------------------------------------------
+
+Ideia do usuário: opção nas configurações para reduzir filtros locais opcionais de linguagem/conteúdo e permitir conteúdo maduro quando o provider/modelo suportar.
+
+Nome final ainda não definido. Possibilidades: “Conteúdo sensível”, “Modo adulto”. Não prometer “sem censura total”.
+
+Esse modo pode afetar somente apresentação/estilo/conteúdo permitido pelo provider e pelas políticas aplicáveis.
+
+Não deve reduzir nem alterar:
+- sandbox;
+- permissões de filesystem;
+- approvals;
+- proteção contra operações perigosas;
+- políticas de segurança do runtime;
+- proteções de secrets;
+- limites reais do provider/modelo.
+
+Menos filtragem de conteúdo não significa menos segurança operacional.
+
+------------------------------------------------------------
+23.22. PROVIDER HEALTH / BENCHMARK PESSOAL
+------------------------------------------------------------
+
+Funcionalidades aprovadas para futuro:
+- status/latência de providers;
+- indisponibilidade recente;
+- rate limits observados;
+- benchmark pessoal de modelos em tarefas reais;
+- comparação de qualidade, custo e velocidade;
+- favoritos;
+- modelos recentes;
+- tags como barato, rápido, reasoning, código, visão, gratuito.
+
+------------------------------------------------------------
+23.23. COMPARADOR DE MODELOS
+------------------------------------------------------------
+
+Permitir enviar o mesmo prompt para 2 ou 3 modelos e comparar resultados.
+
+Pode integrar com Usage Analytics para mostrar:
+- tokens;
+- tempo;
+- custo;
+- resultado;
+- avaliação manual do usuário.
+
+Não usar automaticamente em toda tarefa por causa de custo.
+
+------------------------------------------------------------
+23.24. PROMPT PRESETS E PROJECT RULES
+------------------------------------------------------------
+
+Adicionar:
+- presets de prompts/instruções reutilizáveis;
+- regras globais do usuário;
+- regras específicas de projeto;
+- arquivo de projeto conceitual como AUTO_CODEZ.md ou nome equivalente a definir.
+
+Regras de projeto devem ser incluídas no Context Engine de forma controlada e observável.
+
+------------------------------------------------------------
+23.25. BACKGROUND TASKS E NOTIFICAÇÕES
+------------------------------------------------------------
+
+Futuro:
+- tarefas longas persistentes;
+- progresso;
+- pausa/cancelamento;
+- recovery;
+- notificação quando build/teste/tarefa terminar;
+- retomada depois de reinício quando tecnicamente seguro.
+
+Não prometer background real sem infraestrutura de execução persistente adequada.
+
+------------------------------------------------------------
+23.26. RELATÓRIOS E RESULTADO FINAL DE TAREFA
+------------------------------------------------------------
+
+Ao terminar tarefa grande, o Auto CodeZ deve entregar resultado verificável, não apenas “Pronto”.
+
+Resumo possível:
+- arquivos criados/modificados/excluídos;
+- testes executados;
+- build;
+- revisões do Supervisor;
+- otimizações aplicadas;
+- instruções para executar/testar;
+- modelos utilizados;
+- trocas Auto Change;
+- tokens;
+- duração;
+- custo estimado;
+- link/botão para histórico completo.
+
+Exportação futura de relatório pode ser adicionada.
+
+------------------------------------------------------------
+23.27. PLUGIN MARKETPLACE / INTEGRAÇÕES / AUTOMAÇÕES
+------------------------------------------------------------
+
+Ideias aprovadas permanecem:
+- plugin marketplace;
+- MCP connectors;
+- GitHub;
+- bancos de dados;
+- browsers;
+- cloud;
+- APIs externas;
+- automações recorrentes;
+- comandos customizados;
+- providers customizados;
+- themes;
+- tools.
+
+Toda integração externa deve respeitar permissões e autorização explícita.
+
+------------------------------------------------------------
+23.28. PROJECT ANALYTICS / QUALITY / SECURITY
+------------------------------------------------------------
+
+Funcionalidades futuras citadas:
+- code quality dashboard;
+- security audit automático;
+- dependency health;
+- project analytics;
+- uso/token/custo por projeto;
+- testes/build health;
+- histórico de mudanças da IA.
+
+------------------------------------------------------------
+23.29. PRINCÍPIOS ARQUITETURAIS NOVOS
+------------------------------------------------------------
+
+1. O contexto da execução pertence ao Auto CodeZ, não ao provider.
+2. Uma execução deve poder sobreviver a troca de modelo, provider failure e reinício quando tecnicamente seguro.
+3. Multi-agent, Auto Change, AI Economy e Context Engine devem usar a mesma infraestrutura de estado, não sistemas paralelos.
+4. Ferramentas internas fundamentais continuam sob controle do Auto CodeZ.
+5. Modelo externo nunca aplica filesystem/processo diretamente fora do ToolRuntime.
+6. Operações de arquivo devem preferir file tools e DiffRuntime em vez de shell.
+7. Activity ao vivo e Execution Timeline são produtos distintos.
+8. Histórico de execução registra fatos operacionais, nunca chain-of-thought.
+9. Automação pesada deve permanecer observável, interrompível, limitada e recuperável.
+10. Custo/consumo deve ser mensurável e controlável.
+11. Fallback automático só acontece quando o usuário permitir e deve ser visível.
+12. Provider/model capabilities são reais; o Auto CodeZ não inventa suporte.
+13. Local models devem entrar pela mesma abstração de providers.
+14. Conteúdo sensível não pode enfraquecer segurança operacional.
+15. Sandbox, approvals, preconditions e secret protection permanecem invariantes mesmo em modo autônomo.
+
+------------------------------------------------------------
+23.30. PONTO DE PARTIDA PARA A PRÓXIMA REORGANIZAÇÃO
+------------------------------------------------------------
+
+Na próxima etapa, reorganizar TODO o roadmap considerando estas áreas:
+- Stability / Execution Reliability;
+- Monaco Diff e file-edit workflow;
+- Terminal PTY;
+- Context Engine / Tree-sitter;
+- AI Economy;
+- Usage Analytics;
+- Provider expansion;
+- Auto Change;
+- Orchestrator / Multi-Agent;
+- Execution Timeline;
+- Sandbox;
+- Account;
+- Sync;
+- MCP/Plugins;
+- semantic memory/vector DB;
+- incremental patch engine;
+- local models;
+- multimodal;
+- product/distribution.
+
+A reorganização deve considerar dependências. Não colocar uma feature visual antes da infraestrutura da qual ela depende. Não implementar Orchestrator antes de o estado de execução/contexto permitir continuidade confiável. Não implementar Auto Change como simples troca de dropdown; ele exige checkpoint/context handoff. Não implementar Usage Analytics sem uma camada normalizada de usage/cost telemetry.
+
+Não fazer merge do PR #9 sem autorização explícita do usuário.
