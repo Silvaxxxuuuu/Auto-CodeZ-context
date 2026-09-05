@@ -1,4 +1,5 @@
 import { renderMarkdown } from './core/markdown';
+import { normalizeUnicodeText } from './core/unicode-normalization';
 
 const messages = document.querySelector<HTMLElement>('#messages');
 if (!messages) throw new Error('Área de mensagens indisponível.');
@@ -23,8 +24,13 @@ style.textContent = `
 .message.assistant .message-content pre code{display:block;padding:0;border:0;border-radius:0;background:transparent;color:#d7dee8;font-size:11.5px;line-height:1.6;white-space:pre;word-break:normal}
 .message.assistant .message-content a{color:#8db9f3;text-decoration:none}.message.assistant .message-content a:hover{text-decoration:underline}
 .message.assistant .message-content hr{height:1px;margin:14px 0;border:0;background:#252d38}
+.message.tool .message-content{white-space:normal;word-break:break-word}
 `;
 if (!document.getElementById(style.id)) document.head.appendChild(style);
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+}
 
 function rawText(element: HTMLElement): string {
   let value = '';
@@ -44,18 +50,30 @@ function rawText(element: HTMLElement): string {
   return value;
 }
 
-function format(element: HTMLElement): void {
+function applyMarkup(element: HTMLElement, html: string): void {
   const previous = renderedMarkup.get(element);
   if (previous !== undefined && previous === element.innerHTML) return;
-  const source = rawText(element);
-  const html = renderMarkdown(source);
   if (element.innerHTML !== html) element.innerHTML = html;
   renderedMarkup.set(element, html);
 }
 
+function formatAssistant(element: HTMLElement): void {
+  const previous = renderedMarkup.get(element);
+  if (previous !== undefined && previous === element.innerHTML) return;
+  applyMarkup(element, renderMarkdown(rawText(element)));
+}
+
+function formatTool(element: HTMLElement): void {
+  const previous = renderedMarkup.get(element);
+  if (previous !== undefined && previous === element.innerHTML) return;
+  const normalized = normalizeUnicodeText(rawText(element));
+  applyMarkup(element, escapeHtml(normalized).replace(/\n/g, '<br>'));
+}
+
 function flush(): void {
   scheduled = false;
-  messages.querySelectorAll<HTMLElement>('.message.assistant .message-content').forEach(format);
+  messages.querySelectorAll<HTMLElement>('.message.assistant .message-content').forEach(formatAssistant);
+  messages.querySelectorAll<HTMLElement>('.message.tool .message-content').forEach(formatTool);
 }
 
 function schedule(): void {
