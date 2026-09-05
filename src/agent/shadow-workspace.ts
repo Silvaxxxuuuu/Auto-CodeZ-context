@@ -36,6 +36,14 @@ type OverlayState = {
   content?: string;
 };
 
+type RestoredState = {
+  createdAt: number;
+  updatedAt: number;
+  changes: FileDiff[];
+  baselines: Map<string, BaselineState>;
+  overlay: Map<string, OverlayState>;
+};
+
 function requireId(value: string, label: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} inválido.`);
   return value.trim();
@@ -61,6 +69,74 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function assertTimestamp(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${label} inválido para Shadow Workspace.`);
+  return value;
+}
+
+function validatedDiff(change: FileDiff, diffs: DiffRuntime): FileDiff {
+  if (!change || typeof change !== 'object') throw new Error('Alteração inválida no Shadow Workspace.');
+  if (!['created', 'modified', 'deleted', 'renamed'].includes(change.type)) throw new Error('Tipo de alteração inválido no Shadow Workspace.');
+  const normalizedPath = normalizePath(change.path);
+  if (typeof change.before !== 'string' || typeof change.after !== 'string') throw new Error('Conteúdo inválido no Shadow Workspace.');
+  const renamedFrom = change.type === 'renamed' ? normalizePath(change.renamedFrom as string) : undefined;
+  if (change.type === 'renamed' && (!change.renamedFrom || pathKey(renamedFrom as string) === pathKey(normalizedPath))) throw new Error('Renomeação inválida no Shadow Workspace.');
+  if (change.type !== 'renamed' && change.renamedFrom !== undefined) throw new Error('Somente renomeações podem informar origem no Shadow Workspace.');
+  const rebuilt = diffs.create(normalizedPath, change.type, change.before, change.after, renamedFrom);
+  if (rebuilt.addedLines !== change.addedLines || rebuilt.removedLines !== change.removedLines) throw new Error('Contagem de linhas inválida no Shadow Workspace.');
+  return rebuilt;
+}
+
+function restoreState(snapshot: ShadowWorkspaceSnapshot, diffs: DiffRuntime): RestoredState {
+  const createdAt = assertTimestamp(snapshot.createdAt, 'Data de criação');
+  const updatedAt = assertTimestamp(snapshot.updatedAt, 'Data de atualização');
+  if (updatedAt < createdAt) throw new Error('Data de atualização anterior à criação do Shadow Workspace.');
+  if (snapshot.status !== 'active') throw new Error('Somente Shadow Workspaces ativos podem ser restaurados.');
+  if (!Array.isArray(snapshot.changes)) throw new Error('Lista de alterações inválida no Shadow Workspace.');
+
+  const baselines = new Map<string, BaselineState>();
+  const overlay = new Map<string, OverlayState>();
+  const changes: FileDiff[] = [];
+
+  const seed = (requestedPath: string, exists: boolean, content?: string): OverlayState => {
+    const normalized = normalizePath(requestedPath);
+    const key = pathKey(normalized);
+    const current = overlay.get(key);
+    if (current) {
+      if (current.exists !== exists || (exists && current.content !== content)) throw new Error(`Sequência inconsistente no Shadow Workspace para '${normalized}'.`);
+      return current;
+    }
+    const baseline: BaselineState = exists ? { path: normalized, exists: true, content } : { path: normalized, exists: false };
+    const state: OverlayState = exists ? { path: normalized, exists: true, content } : { path: normalized, exists: false };
+    baselines.set(key, baseline);
+    overlay.set(key, state);
+    return state;
+  };
+
+  for (const rawChange of snapshot.changes) {
+    const change = validatedDiff(rawChange, diffs);
+    if (change.type === 'created') {
+      seed(change.path, false);
+      overlay.set(pathKey(change.path), { path: change.path, exists: true, content: change.after });
+    } else if (change.type === 'modified') {
+      seed(change.path, true, change.before);
+      overlay.set(pathKey(change.path), { path: change.path, exists: true, content: change.after });
+    } else if (change.type === 'deleted') {
+      seed(change.path, true, change.before);
+      overlay.set(pathKey(change.path), { path: change.path, exists: false });
+    } else {
+      const source = change.renamedFrom as string;
+      seed(source, true, change.before);
+      seed(change.path, false);
+      overlay.set(pathKey(source), { path: source, exists: false });
+      overlay.set(pathKey(change.path), { path: change.path, exists: true, content: change.after });
+    }
+    changes.push(change);
+  }
+
+  return { createdAt, updatedAt, changes, baselines, overlay };
+}
+
 export class ShadowWorkspaceTransaction implements ShadowWorkspaceBase {
   private readonly baselines = new Map<string, BaselineState>();
   private readonly overlay = new Map<string, OverlayState>();
@@ -78,13 +154,38 @@ export class ShadowWorkspaceTransaction implements ShadowWorkspaceBase {
     input: { chatId: string; runId: string; projectId: string },
     private readonly diffs = new DiffRuntime(),
     private readonly now: () => number = () => Date.now(),
+    restored?: RestoredState,
   ) {
     this.chatId = requireId(input.chatId, 'Chat');
     this.runId = requireId(input.runId, 'Execução');
     this.projectId = requireId(input.projectId, 'Projeto');
-    this.createdAt = this.now();
-    if (!Number.isFinite(this.createdAt) || this.createdAt < 0) throw new Error('Relógio inválido para Shadow Workspace.');
+    if (restored) {
+      this.createdAt = restored.createdAt;
+      this.updatedAt = restored.updatedAt;
+      for (const [key, value] of restored.baselines) this.baselines.set(key, { ...value });
+      for (const [key, value] of restored.overlay) this.overlay.set(key, { ...value });
+      this.changes.push(...cloneChanges(restored.changes));
+      return;
+    }
+    this.createdAt = assertTimestamp(this.now(), 'Relógio');
     this.updatedAt = this.createdAt;
+  }
+
+  static restore(
+    base: ShadowWorkspaceBase,
+    snapshot: ShadowWorkspaceSnapshot,
+    diffs = new DiffRuntime(),
+    now: () => number = () => Date.now(),
+  ): ShadowWorkspaceTransaction {
+    const identity = {
+      chatId: requireId(snapshot.chatId, 'Chat'),
+      runId: requireId(snapshot.runId, 'Execução'),
+      projectId: requireId(snapshot.projectId, 'Projeto'),
+    };
+    const restored = restoreState(snapshot, diffs);
+    const current = assertTimestamp(now(), 'Relógio');
+    if (current < restored.updatedAt) throw new Error('Relógio anterior ao snapshot do Shadow Workspace.');
+    return new ShadowWorkspaceTransaction(base, identity, diffs, now, restored);
   }
 
   snapshot(): ShadowWorkspaceSnapshot {
@@ -236,8 +337,8 @@ export class ShadowWorkspaceTransaction implements ShadowWorkspaceBase {
   }
 
   private touch(): void {
-    const value = this.now();
-    if (!Number.isFinite(value) || value < this.updatedAt) throw new Error('Relógio inválido para Shadow Workspace.');
+    const value = assertTimestamp(this.now(), 'Relógio');
+    if (value < this.updatedAt) throw new Error('Relógio inválido para Shadow Workspace.');
     this.updatedAt = value;
   }
 
