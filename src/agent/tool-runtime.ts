@@ -120,7 +120,8 @@ export class ToolRuntime {
     if (!definition) return { toolCallId: normalizedCall.id, ok: false, error: `Ferramenta desconhecida: ${normalizedCall.name}` };
     try { validateToolInput(definition, normalizedCall.input); } catch (error) { return { toolCallId: normalizedCall.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
     let decision = this.permissions.decide(permission, normalizedCall.name);
-    if (projectId === SYSTEM_WORKSPACE_ID && permission === 'safe' && (normalizedCall.name === 'create_file' || normalizedCall.name === 'write_file')) decision = 'ask';
+    const systemFileTool = normalizedCall.name === 'read_file' || normalizedCall.name === 'write_file' || normalizedCall.name === 'create_file' || normalizedCall.name === 'delete_file' || normalizedCall.name === 'rename_file' || normalizedCall.name === 'search_files';
+    if (projectId === SYSTEM_WORKSPACE_ID && permission !== 'unrestricted' && decision !== 'deny' && systemFileTool) decision = 'ask';
     if (decision === 'deny') return { toolCallId: normalizedCall.id, ok: false, error: 'Operação bloqueada pelas permissões do chat.' };
     const pending = this.approvals.list({ chatId, runId });
     if (pending.length) {
