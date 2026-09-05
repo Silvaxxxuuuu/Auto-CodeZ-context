@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { ProjectRecord } from '../ai/types';
+import { currentAbortSignal } from '../ai/request-cancellation';
 import { SYSTEM_WORKSPACE_ID, getSystemWorkspaceRoot } from './system-workspace';
 
 export const SYSTEM_PROJECT_ID = SYSTEM_WORKSPACE_ID;
@@ -86,12 +87,13 @@ export class CommandRuntime {
   async run(projectId: string, command: string, options: CommandRunOptions = {}): Promise<CommandResult> {
     const normalizedCommand = command.trim();
     if (!normalizedCommand) throw new Error('O comando não pode estar vazio.');
-    options.signal?.throwIfAborted();
+    const executionSignal = options.signal ?? currentAbortSignal();
+    executionSignal?.throwIfAborted();
 
     const cwd = projectId === SYSTEM_PROJECT_ID
       ? await fs.realpath(getSystemWorkspaceRoot())
       : await fs.realpath(path.resolve((await this.project(projectId)).rootPath));
-    options.signal?.throwIfAborted();
+    executionSignal?.throwIfAborted();
     const { executable, args } = commandForPlatform(normalizedCommand);
     const startedAt = Date.now();
 
@@ -114,7 +116,7 @@ export class CommandRuntime {
       const cleanup = (): void => {
         clearTimeout(timeout);
         if (killTimer) clearTimeout(killTimer);
-        options.signal?.removeEventListener('abort', abort);
+        executionSignal?.removeEventListener('abort', abort);
       };
 
       const append = (target: 'stdout' | 'stderr', chunk: Buffer | string): void => {
@@ -170,7 +172,7 @@ export class CommandRuntime {
         if (aborted) {
           settled = true;
           cleanup();
-          reject(createAbortError(options.signal));
+          reject(createAbortError(executionSignal));
           return;
         }
         finish({
@@ -182,8 +184,8 @@ export class CommandRuntime {
         });
       });
 
-      if (options.signal?.aborted) abort();
-      else options.signal?.addEventListener('abort', abort, { once: true });
+      if (executionSignal?.aborted) abort();
+      else executionSignal?.addEventListener('abort', abort, { once: true });
     });
 
     if (result.exitCode !== 0 || result.timedOut) throw new Error(commandFailureMessage(result));
