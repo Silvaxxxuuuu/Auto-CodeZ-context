@@ -1,6 +1,7 @@
 import type { ProjectRecord } from '../ai/types';
 import type { LocalStorage } from '../core/storage';
 import { TerminalHistory, type TerminalHistoryRecord } from './terminal-history';
+import type { InteractiveTerminalProcessFactory } from './terminal-process';
 import { TerminalRuntime, type TerminalExitEvent, type TerminalOutputEvent, type TerminalSession } from './terminal-runtime';
 
 export type TerminalEvent =
@@ -15,7 +16,11 @@ export class TerminalService {
   private readonly runtime: TerminalRuntime;
   private readonly listeners = new Set<(event: TerminalEvent) => void>();
 
-  constructor(private readonly storage: LocalStorage, projects: () => Promise<ProjectRecord[]>) {
+  constructor(
+    private readonly storage: LocalStorage,
+    projects: () => Promise<ProjectRecord[]>,
+    interactiveFactory?: InteractiveTerminalProcessFactory,
+  ) {
     this.history = new TerminalHistory(storage);
     this.runtime = new TerminalRuntime(projects, (event) => {
       if ('text' in event) {
@@ -23,7 +28,7 @@ export class TerminalService {
         return;
       }
       void this.finish(event);
-    });
+    }, interactiveFactory);
   }
 
   async init(): Promise<void> {
