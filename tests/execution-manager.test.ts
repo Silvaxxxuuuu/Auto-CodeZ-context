@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ExecutionManager } from '../src/execution-manager';
+import { ExecutionManager, type ExecutionChange } from '../src/execution-manager';
 
 test('mantém execuções independentes por chat', () => {
   const manager = new ExecutionManager();
@@ -101,4 +101,35 @@ test('remove o estado de um chat excluído', () => {
 
   assert.equal(manager.get('chat-a'), undefined);
   assert.deepEqual(manager.list(), []);
+});
+
+test('publica snapshots autoritativos para início, atualização e remoção', () => {
+  const manager = new ExecutionManager();
+  const changes: ExecutionChange[] = [];
+  manager.subscribe((change) => changes.push(change));
+
+  manager.start('chat-a', 1000, 'run-a');
+  manager.update('chat-a', { state: 'waiting_approval', currentTool: 'write_file', runId: 'run-a' }, 1200);
+  manager.remove('chat-a');
+
+  assert.deepEqual(changes, [
+    { type: 'upsert', snapshot: { chatId: 'chat-a', runId: 'run-a', state: 'running', startedAt: 1000, updatedAt: 1000 } },
+    { type: 'upsert', snapshot: { chatId: 'chat-a', runId: 'run-a', state: 'waiting_approval', startedAt: 1000, updatedAt: 1200, currentTool: 'write_file', error: undefined } },
+    { type: 'remove', chatId: 'chat-a', runId: 'run-a' },
+  ]);
+});
+
+test('falha de observer não interrompe transição e unsubscribe encerra notificações', () => {
+  const manager = new ExecutionManager();
+  const changes: ExecutionChange[] = [];
+  manager.subscribe(() => { throw new Error('observer failure'); });
+  const unsubscribe = manager.subscribe((change) => changes.push(change));
+
+  const started = manager.start('chat-a', 1000, 'run-a');
+  assert.equal(started.state, 'running');
+  unsubscribe();
+  manager.update('chat-a', { state: 'completed', runId: 'run-a' }, 1200);
+
+  assert.equal(changes.length, 1);
+  assert.equal(manager.get('chat-a')?.state, 'completed');
 });
