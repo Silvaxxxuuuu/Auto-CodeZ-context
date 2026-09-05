@@ -72,7 +72,7 @@ test('materialização aplica o estado final do shadow sem copiar Git ou outputs
 test('command sandbox executa contra o overlay e descarta mutações feitas pelo comando', async () => {
   const fx = await fixture();
   try {
-    const shadow = fx.shadows.open('chat-a', 'run-a', 'project-a');
+    const shadow = fx.shadows.begin('chat-a', 'run-a', 'project-a');
     await shadow.writeFile('project-a', 'a.txt', 'shadow-value');
     const runtime = new CommandSandboxRuntime(fx.projects, fx.shadows);
 
@@ -94,7 +94,7 @@ test('command sandbox executa contra o overlay e descarta mutações feitas pelo
 test('command sandbox consegue resolver dependência copiada sem usar o node_modules real', async () => {
   const fx = await fixture();
   try {
-    const shadow = fx.shadows.open('chat-a', 'run-a', 'project-a');
+    const shadow = fx.shadows.begin('chat-a', 'run-a', 'project-a');
     await shadow.writeFile('project-a', 'a.txt', 'shadow');
     const runtime = new CommandSandboxRuntime(fx.projects, fx.shadows);
 
@@ -120,7 +120,7 @@ test('command sandbox rejeita run ausente, projeto divergente e workspace de sis
       /Shadow Workspace ativo não encontrado/i,
     );
 
-    fx.shadows.open('chat-a', 'run-a', 'project-a');
+    fx.shadows.begin('chat-a', 'run-a', 'project-a');
     await assert.rejects(
       () => runtime.run('chat-a', 'run-a', 'project-b', 'node -v'),
       /outro projeto/i,
