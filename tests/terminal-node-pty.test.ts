@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { NodePtyInteractiveTerminalProcessFactory, type NodePtyModule } from '../src/agent/terminal-node-pty';
+import {
+  NodePtyInteractiveTerminalProcessFactory,
+  loadNodePtyInteractiveTerminalProcessFactory,
+  type NodePtyModule,
+} from '../src/agent/terminal-node-pty';
 
 type Listener<T> = (value: T) => void;
 
@@ -15,14 +19,13 @@ class DisposableSet<T> {
   }
 }
 
-test('node-pty adapter maps shell, environment, raw input, resize and exit events', () => {
+function createModule() {
   const data = new DisposableSet<string>();
   const exits = new DisposableSet<{ exitCode: number; signal?: number }>();
   const writes: string[] = [];
   const sizes: Array<{ cols: number; rows: number }> = [];
   let killed = false;
   let captured: { file: string; args: string[]; options: Record<string, unknown> } | undefined;
-
   const module: NodePtyModule = {
     spawn(file, args, options) {
       captured = { file, args, options };
@@ -36,8 +39,12 @@ test('node-pty adapter maps shell, environment, raw input, resize and exit event
       };
     },
   };
+  return { module, data, exits, writes, sizes, killed: () => killed, captured: () => captured };
+}
 
-  const factory = new NodePtyInteractiveTerminalProcessFactory(module);
+test('node-pty adapter maps shell, environment, raw input, resize and exit events', () => {
+  const fixture = createModule();
+  const factory = new NodePtyInteractiveTerminalProcessFactory(fixture.module);
   const processHandle = factory.create({
     shell: 'powershell',
     cwd: 'C:\\Workspace',
@@ -46,6 +53,7 @@ test('node-pty adapter maps shell, environment, raw input, resize and exit event
     env: { PATH: 'C:\\bin', UNUSED: undefined },
   });
 
+  const captured = fixture.captured();
   assert.ok(captured);
   assert.match(captured.file.toLowerCase(), /powershell\.exe$/);
   assert.deepEqual(captured.args, ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass']);
@@ -66,22 +74,42 @@ test('node-pty adapter maps shell, environment, raw input, resize and exit event
   processHandle.write('npm start\r');
   processHandle.resize(160, 50);
   processHandle.kill();
-  assert.deepEqual(writes, ['npm start\r']);
-  assert.deepEqual(sizes, [{ cols: 160, rows: 50 }]);
-  assert.equal(killed, true);
+  assert.deepEqual(fixture.writes, ['npm start\r']);
+  assert.deepEqual(fixture.sizes, [{ cols: 160, rows: 50 }]);
+  assert.equal(fixture.killed(), true);
 
   const output: string[] = [];
   const exitEvents: Array<{ exitCode: number; signal?: string }> = [];
   const unsubscribeData = processHandle.onData((value) => output.push(value));
   const unsubscribeExit = processHandle.onExit((event) => exitEvents.push(event));
-  data.emit('\u001b[32mok\u001b[0m');
-  exits.emit({ exitCode: 0, signal: 2 });
+  fixture.data.emit('\u001b[32mok\u001b[0m');
+  fixture.exits.emit({ exitCode: 0, signal: 2 });
   assert.deepEqual(output, ['\u001b[32mok\u001b[0m']);
   assert.deepEqual(exitEvents, [{ exitCode: 0, signal: '2' }]);
   unsubscribeData();
   unsubscribeExit();
-  data.emit('ignored');
-  exits.emit({ exitCode: 1 });
+  fixture.data.emit('ignored');
+  fixture.exits.emit({ exitCode: 1 });
   assert.equal(output.length, 1);
   assert.equal(exitEvents.length, 1);
+});
+
+test('optional loader accepts direct and CommonJS-default node-pty module shapes', async () => {
+  const direct = createModule();
+  const directFactory = await loadNodePtyInteractiveTerminalProcessFactory(async (specifier) => {
+    assert.equal(specifier, 'node-pty');
+    return direct.module;
+  });
+  assert.ok(directFactory);
+  assert.equal(directFactory.create({ shell: 'cmd', cwd: 'C:\\', cols: 80, rows: 24, env: {} }).supportsResize, true);
+
+  const nested = createModule();
+  const nestedFactory = await loadNodePtyInteractiveTerminalProcessFactory(async () => ({ default: nested.module }));
+  assert.ok(nestedFactory);
+  assert.equal(nestedFactory.create({ shell: 'cmd', cwd: 'C:\\', cols: 80, rows: 24, env: {} }).supportsResize, true);
+});
+
+test('optional loader falls back cleanly when node-pty is missing or malformed', async () => {
+  assert.equal(await loadNodePtyInteractiveTerminalProcessFactory(async () => { throw new Error('MODULE_NOT_FOUND'); }), undefined);
+  assert.equal(await loadNodePtyInteractiveTerminalProcessFactory(async () => ({ default: {} })), undefined);
 });
