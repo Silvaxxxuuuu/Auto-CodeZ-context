@@ -1,0 +1,330 @@
+.topbar{
+  height:58px!important;
+  padding:0 18px!important;
+}
+.brand{
+  gap:11px!important;
+  font-size:13px!important;
+}
+.top-action{
+  height:34px!important;
+  font-size:12px!important;
+}
+.rail{
+  width:62px!important;
+  padding:12px 0!important;
+  gap:6px!important;
+}
+.rail-button{
+  width:40px!important;
+  height:40px!important;
+}
+.nav-panel{
+  width:294px!important;
+  padding:18px 13px!important;
+}
+.panel-title{
+  padding:2px 10px 13px!important;
+  font-size:14px!important;
+  line-height:1.35!important;
+}
+.group-label,.eyebrow{
+  padding:10px!important;
+  font-size:10px!important;
+  line-height:1.35!important;
+}
+.new-item{
+  min-height:42px!important;
+  padding:10px 11px!important;
+  font-size:12px!important;
+}
+.chat-item,.project-item{
+  min-height:50px!important;
+  padding:10px 11px!important;
+  font-size:12px!important;
+  line-height:1.35!important;
+}
+.chat-item small,.project-item small{
+  margin-top:4px!important;
+  font-size:10px!important;
+  line-height:1.35!important;
+}
+.empty-panel{
+  padding:20px 11px!important;
+  font-size:11px!important;
+  line-height:1.65!important;
+}
+.plugin-card{
+  gap:11px!important;
+  padding:15px!important;
+  margin-bottom:13px!important;
+}
+.plugin-card strong{
+  font-size:12px!important;
+  line-height:1.4!important;
+}
+.plugin-card span{
+  margin-top:5px!important;
+  font-size:11px!important;
+  line-height:1.6!important;
+}
+.chat-header{
+  height:74px!important;
+  padding-left:34px!important;
+  padding-right:34px!important;
+}
+.chat-header h1{
+  font-size:16px!important;
+  line-height:1.35!important;
+}
+.chat-subtitle{
+  margin-top:5px!important;
+  font-size:10.5px!important;
+  line-height:1.4!important;
+}
+.header-button,.provider-chip{
+  height:34px!important;
+  padding:0 12px!important;
+  font-size:11px!important;
+}
+.messages{
+  padding:28px 34px 36px!important;
+}
+.message{
+  margin-bottom:30px!important;
+}
+.message-label{
+  margin-bottom:8px!important;
+  font-size:10px!important;
+  line-height:1.3!important;
+}
+.message.assistant .message-content,
+.message.tool .message-content,
+.message.system .message-content{
+  font-size:13px!important;
+  line-height:1.72!important;
+}
+.message.user .message-content{
+  padding:10px 13px!important;
+  font-size:13px!important;
+  line-height:1.58!important;
+}
+.activity-card{
+  margin-bottom:24px!important;
+}
+.activity-line{
+  gap:9px!important;
+  font-size:11px!important;
+  line-height:1.55!important;
+}
+.welcome{
+  width:min(600px,calc(100% - 56px))!important;
+  margin-top:17vh!important;
+}
+.welcome h2{
+  font-size:22px!important;
+  line-height:1.3!important;
+}
+.welcome p{
+  max-width:470px!important;
+  margin-top:10px!important;
+  font-size:12px!important;
+  line-height:1.68!important;
+}
+.composer-wrap{
+  padding:12px 34px 17px!important;
+}
+.composer{
+  min-height:54px!important;
+  height:54px!important;
+  padding-left:6px!important;
+  padding-right:7px!important;
+}
+.composer textarea{
+  height:40px!important;
+  min-height:40px!important;
+  padding:9px 8px!important;
+  font-size:12.5px!important;
+  line-height:21px!important;
+}
+.intelligence-button{
+  height:38px!important;
+  padding:0 10px!important;
+}
+.intelligence-text{
+  font-size:11px!important;
+}
+.intelligence-current{
+  font-size:10px!important;
+}
+.intelligence-option{
+  min-height:40px!important;
+}
+.intelligence-option-label{
+  font-size:11px!important;
+}
+.composer-hint{
+  padding-top:8px!important;
+  font-size:9.5px!important;
+  line-height:1.45!important;
+}
+.settings-page{
+  padding-top:42px!important;
+}
+.settings-header{
+  margin-bottom:30px!important;
+}
+.settings-eyebrow{
+  font-size:10px!important;
+}
+.settings-header h1{
+  font-size:24px!important;
+}
+.settings-header p{
+  font-size:12.5px!important;
+  line-height:1.65!important;
+}
+.settings-layout{
+  grid-template-columns:250px minmax(0,1fr)!important;
+  gap:22px!important;
+}
+.settings-nav{
+  padding:8px!important;
+}
+.settings-nav-item{
+  min-height:58px!important;
+  gap:11px!important;
+  padding:10px 11px!important;
+}
+.settings-nav-item strong{
+  font-size:11.5px!important;
+}
+.settings-nav-item small{
+  margin-top:4px!important;
+  font-size:9.5px!important;
+  line-height:1.4!important;
+}
+.settings-section-header{
+  margin-bottom:18px!important;
+}
+.settings-section-header h2{
+  font-size:18px!important;
+}
+.settings-section-header p{
+  font-size:11.5px!important;
+  line-height:1.6!important;
+}
+.settings-row{
+  min-height:84px!important;
+  padding:15px 18px!important;
+}
+.settings-row-copy strong{
+  font-size:11.5px!important;
+}
+.settings-row-copy span{
+  margin-top:6px!important;
+  font-size:10px!important;
+  line-height:1.55!important;
+}
+.settings-row-value>span{
+  font-size:10px!important;
+}
+.settings-footnote{
+  margin-top:14px!important;
+  font-size:10px!important;
+  line-height:1.6!important;
+}
+.profile-page{
+  padding-top:44px!important;
+}
+.profile-header{
+  margin-bottom:32px!important;
+}
+.profile-eyebrow{
+  font-size:10px!important;
+}
+.profile-header h1{
+  font-size:24px!important;
+}
+.profile-header p{
+  font-size:12.5px!important;
+  line-height:1.65!important;
+}
+.profile-identity-card{
+  min-height:102px!important;
+  gap:17px!important;
+  padding:20px 22px!important;
+}
+.profile-identity-copy strong{
+  font-size:14px!important;
+}
+.profile-identity-copy span,
+.profile-identity-copy small{
+  font-size:11px!important;
+}
+.profile-status{
+  font-size:10px!important;
+}
+.profile-grid{
+  gap:20px!important;
+}
+.profile-section{
+  padding:22px!important;
+}
+.profile-section-heading{
+  margin-bottom:19px!important;
+}
+.profile-section-heading h2{
+  font-size:13.5px!important;
+}
+.profile-section-heading p{
+  margin-top:6px!important;
+  font-size:11px!important;
+  line-height:1.55!important;
+}
+.profile-provider-row,.profile-method-row{
+  min-height:72px!important;
+}
+.profile-provider-copy strong,.profile-method-row strong{
+  font-size:11px!important;
+}
+.profile-provider-copy span,.profile-method-row span{
+  margin-top:4px!important;
+  font-size:10px!important;
+  line-height:1.5!important;
+}
+.profile-secondary-button{
+  height:30px!important;
+  font-size:10px!important;
+}
+.profile-link-button{
+  font-size:11px!important;
+}
+.profile-note{
+  padding:16px 18px!important;
+}
+.profile-note strong{
+  font-size:11px!important;
+}
+.profile-note span{
+  font-size:10px!important;
+  line-height:1.6!important;
+}
+@media(max-width:900px){
+  .nav-panel{width:276px!important}
+  .chat-header,.messages,.composer-wrap{padding-left:22px!important;padding-right:22px!important}
+}
+@media(max-width:800px){
+  .settings-layout{grid-template-columns:1fr!important}
+}
+@media(max-width:720px){
+  .topbar{height:54px!important;padding:0 14px!important}
+  .rail{width:56px!important;padding-top:10px!important;padding-bottom:10px!important}
+  .rail-button{width:38px!important;height:38px!important}
+  .nav-panel{width:248px!important;padding:15px 10px!important}
+  .chat-header{height:68px!important;padding-left:16px!important;padding-right:16px!important}
+  .messages,.composer-wrap{padding-left:16px!important;padding-right:16px!important}
+  .message.assistant .message-content,.message.tool .message-content,.message.system .message-content,.message.user .message-content{font-size:12.5px!important}
+  .composer{height:52px!important;min-height:52px!important}
+  .composer-hint{font-size:9px!important}
+}
