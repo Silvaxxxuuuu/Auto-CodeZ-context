@@ -65,6 +65,25 @@ function validateChanges(changes: FileDiff[]): FileDiff[] {
   return cloneChanges(changes);
 }
 
+function validateCheckpoint(checkpoint: ExecutionCheckpoint): ExecutionCheckpoint {
+  const normalized: ExecutionCheckpoint = {
+    id: requireId(checkpoint.id, 'ID do checkpoint'),
+    chatId: requireId(checkpoint.chatId, 'Chat'),
+    runId: requireId(checkpoint.runId, 'Execução'),
+    projectId: requireId(checkpoint.projectId, 'Projeto'),
+    toolCallId: requireId(checkpoint.toolCallId, 'Tool call'),
+    createdAt: checkpoint.createdAt,
+    status: checkpoint.status,
+    changes: validateChanges(checkpoint.changes),
+    ...(checkpoint.restoredAt !== undefined ? { restoredAt: checkpoint.restoredAt } : {}),
+  };
+  if (!Number.isFinite(normalized.createdAt) || normalized.createdAt < 0) throw new Error('Data do checkpoint inválida.');
+  if (normalized.status !== 'ready' && normalized.status !== 'restored') throw new Error('Status do checkpoint inválido.');
+  if (normalized.status === 'ready' && normalized.restoredAt !== undefined) throw new Error('Checkpoint pronto não pode possuir data de restauração.');
+  if (normalized.status === 'restored' && (!Number.isFinite(normalized.restoredAt) || normalized.restoredAt! < normalized.createdAt)) throw new Error('Data de restauração do checkpoint inválida.');
+  return normalized;
+}
+
 async function matchesExpectedState(workspace: ExecutionCheckpointWorkspace, projectId: string, change: FileDiff): Promise<boolean> {
   try {
     if (change.type === 'deleted') return !(await workspace.exists(projectId, change.path));
@@ -88,6 +107,18 @@ export class ExecutionCheckpointRuntime {
     private readonly createId: () => string = () => `checkpoint-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
   ) {}
 
+  hydrate(checkpoints: ExecutionCheckpoint[]): void {
+    if (!Array.isArray(checkpoints)) throw new Error('Lista de checkpoints inválida.');
+    const normalized = checkpoints.map(validateCheckpoint);
+    const ids = new Set<string>();
+    for (const checkpoint of normalized) {
+      if (ids.has(checkpoint.id)) throw new Error(`Checkpoint duplicado: ${checkpoint.id}`);
+      ids.add(checkpoint.id);
+    }
+    this.checkpoints.clear();
+    for (const checkpoint of normalized) this.checkpoints.set(checkpoint.id, cloneCheckpoint(checkpoint));
+  }
+
   record(input: {
     chatId: string;
     runId: string;
@@ -95,17 +126,16 @@ export class ExecutionCheckpointRuntime {
     toolCallId: string;
     changes: FileDiff[];
   }): ExecutionCheckpoint {
-    const checkpoint: ExecutionCheckpoint = {
-      id: requireId(this.createId(), 'ID do checkpoint'),
-      chatId: requireId(input.chatId, 'Chat'),
-      runId: requireId(input.runId, 'Execução'),
-      projectId: requireId(input.projectId, 'Projeto'),
-      toolCallId: requireId(input.toolCallId, 'Tool call'),
+    const checkpoint = validateCheckpoint({
+      id: this.createId(),
+      chatId: input.chatId,
+      runId: input.runId,
+      projectId: input.projectId,
+      toolCallId: input.toolCallId,
       createdAt: this.now(),
       status: 'ready',
-      changes: validateChanges(input.changes),
-    };
-    if (!Number.isFinite(checkpoint.createdAt) || checkpoint.createdAt < 0) throw new Error('Data do checkpoint inválida.');
+      changes: input.changes,
+    });
     if (this.checkpoints.has(checkpoint.id)) throw new Error(`Checkpoint duplicado: ${checkpoint.id}`);
     this.checkpoints.set(checkpoint.id, checkpoint);
     return cloneCheckpoint(checkpoint);
