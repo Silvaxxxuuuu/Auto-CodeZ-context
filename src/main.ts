@@ -27,6 +27,8 @@ import { ExecutionTimelinePersistence, ExecutionTimelineStore } from './executio
 import { ExecutionCoordinator } from './execution-coordinator';
 import { ExecutionPlanner, type ExecutionPlanChange } from './execution-planner';
 import { ExecutionPlanPersistence, ExecutionPlanStore } from './execution-plan-store';
+import { ExecutionPlanHistory } from './execution-plan-history';
+import { ExecutionPlanHistoryPersistence, ExecutionPlanHistoryStore } from './execution-plan-history-store';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
@@ -65,9 +67,13 @@ const executionCoordinator = new ExecutionCoordinator(executionManager, executio
 toolRuntime.configureExecutionPlanner(executionPlanner);
 const executionPlanStore = new ExecutionPlanStore(storage);
 const executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore);
+const executionPlanHistory = new ExecutionPlanHistory();
+const executionPlanHistoryStore = new ExecutionPlanHistoryStore(storage);
+const executionPlanHistoryPersistence = new ExecutionPlanHistoryPersistence(executionPlanHistoryStore);
 let executionPersistenceEnabled = false;
 let executionTimelinePersistenceEnabled = false;
 let executionPlanPersistenceEnabled = false;
+let executionPlanHistoryPersistenceEnabled = false;
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 const approvalRunLocks = new Set<string>();
 let mainWindow: BrowserWindow | null = null;
@@ -94,7 +100,9 @@ function sendExecutionPlanChange(change: ExecutionPlanChange): void {
 
 executionPlanner.subscribe((change) => {
   sendExecutionPlanChange(change);
+  const historyChanged = executionPlanHistory.record(change);
   if (executionPlanPersistenceEnabled) executionPlanPersistence.schedule(executionPlanner.list());
+  if (executionPlanHistoryPersistenceEnabled && historyChanged) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
 });
 
 executionManager.subscribe((change) => {
@@ -264,6 +272,7 @@ ipcMain.handle('chat:create', async (_event, input: unknown) => chatManager.crea
 ipcMain.handle('chat:delete', async (_event, chatId: string) => {
   const id = requireIdentifier(chatId, 'Chat');
   await clearChatExecution(id);
+  if (executionPlanHistory.purgeChat(id) && executionPlanHistoryPersistenceEnabled) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
   return chatManager.remove(id);
 });
 ipcMain.handle('chat:rename', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome do chat'); return chatManager.rename(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.title, 'Nome do chat')); });
@@ -412,6 +421,13 @@ ipcMain.handle('agent:list-execution-plans', async (_event, filters?: { chatId?:
     return plan ? [plan] : [];
   }
   return executionPlanner.list().filter((plan) => runId === undefined || plan.runId === runId);
+});
+ipcMain.handle('agent:list-execution-plan-history', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return executionPlanHistory.list();
+  const value = requireObject(filters, 'Filtro do histórico de planos');
+  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  return executionPlanHistory.list({ chatId, runId });
 });
 ipcMain.handle('agent:list-recoverable-runs', async () => listRecoverableRuns(agentRuntime));
 ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
@@ -570,6 +586,7 @@ app.whenReady().then(async () => {
   await toolRuntime.init();
   await agentRuntime.init();
   executionTimeline.restore(await executionTimelineStore.load());
+  executionPlanHistory.restore(await executionPlanHistoryStore.load());
   await restorePersistedExecutionSnapshots();
   executionPlanner.restore(await executionPlanStore.load());
   restoreExecutionSnapshots();
@@ -578,9 +595,11 @@ app.whenReady().then(async () => {
   executionPersistenceEnabled = true;
   executionTimelinePersistenceEnabled = true;
   executionPlanPersistenceEnabled = true;
+  executionPlanHistoryPersistenceEnabled = true;
   executionStatePersistence.schedule(executionManager.list());
   executionTimelinePersistence.schedule(executionTimeline.list());
   executionPlanPersistence.schedule(executionPlanner.list());
+  executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
   activityRuntime.subscribe((event) => sendActivity(event));
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
