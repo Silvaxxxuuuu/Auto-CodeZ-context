@@ -49,9 +49,15 @@ jobs:
         env:
           AUTO_CODEZ_SMOKE: '1'
         run: |
-          $process = Start-Process -FilePath 'npm.cmd' -ArgumentList 'start' -PassThru -WorkingDirectory $PWD
+          $stdout = Join-Path $env:RUNNER_TEMP 'auto-codez-smoke.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'auto-codez-smoke.stderr.log'
+          $process = Start-Process -FilePath 'npm.cmd' -ArgumentList 'start' -PassThru -WorkingDirectory $PWD -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           Start-Sleep -Seconds 10
           if ($process.HasExited) {
+            Write-Host '--- Electron smoke stdout ---'
+            if (Test-Path $stdout) { Get-Content $stdout }
+            Write-Host '--- Electron smoke stderr ---'
+            if (Test-Path $stderr) { Get-Content $stderr }
             if ($process.ExitCode -ne 0) {
               throw "Electron smoke test exited with code $($process.ExitCode)."
             }
