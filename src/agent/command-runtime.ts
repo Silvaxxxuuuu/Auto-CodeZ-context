@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { ProjectRecord } from '../ai/types';
 import { currentAbortSignal } from '../ai/request-cancellation';
+import { normalizeUnicodeText } from '../core/unicode-normalization';
 import { SYSTEM_WORKSPACE_ID, getSystemWorkspaceRoot } from './system-workspace';
 
 export const SYSTEM_PROJECT_ID = SYSTEM_WORKSPACE_ID;
@@ -57,7 +58,7 @@ function terminateProcessTree(child: ChildProcess): void {
 function commandForPlatform(command: string): { executable: string; args: string[] } {
   if (process.platform === 'win32') {
     const comspec = process.env.ComSpec ?? 'cmd.exe';
-    return { executable: comspec, args: ['/d', '/s', '/c', command] };
+    return { executable: comspec, args: ['/d', '/s', '/c', `chcp 65001>nul & ${command}`] };
   }
   return { executable: '/bin/sh', args: ['-lc', command] };
 }
@@ -85,7 +86,7 @@ export class CommandRuntime {
   }
 
   async run(projectId: string, command: string, options: CommandRunOptions = {}): Promise<CommandResult> {
-    const normalizedCommand = command.trim();
+    const normalizedCommand = normalizeUnicodeText(command.trim());
     if (!normalizedCommand) throw new Error('O comando não pode estar vazio.');
     const executionSignal = options.signal ?? currentAbortSignal();
     executionSignal?.throwIfAborted();
@@ -120,13 +121,13 @@ export class CommandRuntime {
       };
 
       const append = (target: 'stdout' | 'stderr', chunk: Buffer | string): void => {
-        const value = chunk.toString();
+        const decoded = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+        const value = normalizeUnicodeText(decoded);
         if (target === 'stdout') stdout = (stdout + value).slice(-MAX_OUTPUT_CHARS);
         else stderr = (stderr + value).slice(-MAX_OUTPUT_CHARS);
         try {
           options.onOutput?.({ stream: target, text: value });
         } catch {
-          // A UI observer must never be able to break the command process.
         }
       };
 
