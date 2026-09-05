@@ -1,22 +1,14 @@
-import { ExecutionManager, type ExecutionSnapshot } from './execution-manager';
+import { ExecutionManager, type ExecutionChange, type ExecutionSnapshot, type ExecutionState } from './execution-manager';
 
-type StreamExecutionEvent = {
-  type?: string;
-  chatId?: string;
-  runId?: string;
-  toolCall?: { name?: string };
-  activity?: { type?: string; status?: string; message?: string };
-  error?: string;
-};
-
-type StreamBridge = {
-  onStreamEvent: (listener: (event: StreamExecutionEvent) => void) => () => void;
+type ExecutionBridge = {
+  onExecutionEvent?: (listener: (event: ExecutionChange) => void) => () => void;
   listExecutions?: () => Promise<unknown>;
 };
 
-const bridge = (window as unknown as { autoCodez?: StreamBridge }).autoCodez;
+const bridge = (window as unknown as { autoCodez?: ExecutionBridge }).autoCodez;
 const manager = new ExecutionManager();
 const STYLE_ID = 'auto-codez-execution-visibility';
+const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
 let hydrateToken = 0;
 
 function installStyle(): void {
@@ -105,11 +97,51 @@ function syncUi(): void {
   syncComposer();
 }
 
+function isSnapshot(value: unknown): value is ExecutionSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const snapshot = value as Partial<ExecutionSnapshot>;
+  return typeof snapshot.chatId === 'string'
+    && typeof snapshot.runId === 'string'
+    && typeof snapshot.state === 'string'
+    && EXECUTION_STATES.has(snapshot.state as ExecutionState)
+    && typeof snapshot.startedAt === 'number'
+    && Number.isFinite(snapshot.startedAt)
+    && typeof snapshot.updatedAt === 'number'
+    && Number.isFinite(snapshot.updatedAt)
+    && snapshot.updatedAt >= snapshot.startedAt;
+}
+
 function applySnapshot(snapshot: ExecutionSnapshot): void {
+  const current = manager.get(snapshot.chatId);
+  if (current && current.runId === snapshot.runId && current.updatedAt > snapshot.updatedAt) return;
   manager.remove(snapshot.chatId);
-  if (!active(snapshot)) return;
   manager.start(snapshot.chatId, snapshot.startedAt, snapshot.runId);
-  manager.update(snapshot.chatId, { state: snapshot.state, currentTool: snapshot.currentTool, error: snapshot.error }, snapshot.updatedAt);
+  manager.update(snapshot.chatId, {
+    state: snapshot.state,
+    currentTool: snapshot.currentTool,
+    error: snapshot.error,
+    runId: snapshot.runId,
+  }, snapshot.updatedAt);
+}
+
+function handleExecutionChange(change: ExecutionChange): void {
+  if (!change || typeof change !== 'object') return;
+  try {
+    if (change.type === 'upsert') {
+      if (!isSnapshot(change.snapshot)) return;
+      applySnapshot(change.snapshot);
+    } else if (change.type === 'remove') {
+      if (typeof change.chatId !== 'string') return;
+      const current = manager.get(change.chatId);
+      if (change.runId && current?.runId !== change.runId) return;
+      manager.remove(change.chatId);
+    } else {
+      return;
+    }
+    syncUi();
+  } catch {
+    // A malformed or stale backend snapshot must never interrupt the renderer.
+  }
 }
 
 async function hydrateExecutions(): Promise<void> {
@@ -118,63 +150,21 @@ async function hydrateExecutions(): Promise<void> {
   try {
     const value = await bridge.listExecutions();
     if (token !== hydrateToken || !Array.isArray(value)) return;
-    const snapshots = value.filter((item): item is ExecutionSnapshot => {
-      if (!item || typeof item !== 'object') return false;
-      const snapshot = item as Partial<ExecutionSnapshot>;
-      return typeof snapshot.chatId === 'string' && typeof snapshot.runId === 'string' && typeof snapshot.state === 'string';
-    });
-    const activeChatIds = new Set(snapshots.filter((snapshot) => active(snapshot)).map((snapshot) => snapshot.chatId));
+    const snapshots = value.filter(isSnapshot);
+    const backendChatIds = new Set(snapshots.map((snapshot) => snapshot.chatId));
     for (const snapshot of manager.list()) {
-      if (!activeChatIds.has(snapshot.chatId)) manager.remove(snapshot.chatId);
+      if (!backendChatIds.has(snapshot.chatId)) manager.remove(snapshot.chatId);
     }
-    for (const snapshot of snapshots) {
-      const current = manager.get(snapshot.chatId);
-      if (!current || current.runId !== snapshot.runId || snapshot.updatedAt >= current.updatedAt) applySnapshot(snapshot);
-    }
+    for (const snapshot of snapshots) applySnapshot(snapshot);
     syncUi();
   } catch {
     // A renderer-side hydration failure must not interrupt the chat UI.
   }
 }
 
-function currentEventExecution(event: StreamExecutionEvent): ExecutionSnapshot | undefined {
-  const current = event.chatId ? manager.get(event.chatId) : undefined;
-  if (!current) return undefined;
-  if (event.runId !== undefined && event.runId !== current.runId) return undefined;
-  return current;
-}
-
-function handleEvent(event: StreamExecutionEvent): void {
-  if (!event.chatId) return;
-  try {
-    if (event.type === 'start') {
-      const existing = manager.get(event.chatId);
-      if (existing && (!event.runId || existing.runId !== event.runId)) manager.remove(event.chatId);
-      if (!manager.get(event.chatId)) manager.start(event.chatId, Date.now(), event.runId);
-    } else {
-      const current = currentEventExecution(event);
-      if (!current) return;
-      if (event.type === 'tool_call') {
-        manager.update(event.chatId, { state: 'running', currentTool: event.toolCall?.name });
-      } else if (event.type === 'approval_required') {
-        manager.update(event.chatId, { state: 'waiting_approval' });
-      } else if (event.type === 'activity' && event.activity?.type === 'complete' && event.activity.status === 'success') {
-        manager.update(event.chatId, { state: 'completed' });
-      } else if (event.type === 'error') {
-        manager.update(event.chatId, { state: 'failed', error: event.error });
-      } else if (event.type === 'cancelled') {
-        manager.remove(event.chatId);
-      }
-    }
-  } catch {
-    // A duplicate/stale stream event must never affect the renderer.
-  }
-  syncUi();
-}
-
 function initialize(): void {
   installStyle();
-  if (bridge?.onStreamEvent) bridge.onStreamEvent(handleEvent);
+  bridge?.onExecutionEvent?.(handleExecutionChange);
   const nav = document.querySelector<HTMLElement>('#nav-panel');
   if (nav) {
     const observer = new MutationObserver(syncUi);
