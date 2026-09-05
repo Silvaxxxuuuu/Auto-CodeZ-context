@@ -50,11 +50,17 @@ export class TerminalService {
         : 'chcp 65001>nul & set TERM=xterm-256color & set FORCE_COLOR=1 & set CLICOLOR_FORCE=1';
       try {
         this.runtime.write(session.id, setup);
-      } catch {
-        // A sessão continua utilizável mesmo se o shell rejeitar uma preferência visual.
-      }
+      } catch {}
     }
     return session;
+  }
+
+  writeInput(sessionId: string, data: string): TerminalSession {
+    return this.runtime.writeInput(sessionId, data);
+  }
+
+  resize(sessionId: string, cols: number, rows: number): TerminalSession {
+    return this.runtime.resize(sessionId, cols, rows);
   }
 
   kill(sessionId: string): TerminalSession {
@@ -108,9 +114,7 @@ export class TerminalService {
     for (const listener of this.listeners) {
       try {
         listener(event);
-      } catch {
-        // Um observador visual não deve afetar a execução do terminal.
-      }
+      } catch {}
     }
   }
 }
