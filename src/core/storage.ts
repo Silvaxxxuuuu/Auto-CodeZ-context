@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import { app, safeStorage } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -9,11 +8,22 @@ export interface SecureStorageAdapter {
   decrypt(value: Buffer): string;
 }
 
-const electronSecureStorage: SecureStorageAdapter = {
-  isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
-  encrypt: (value) => safeStorage.encryptString(value),
-  decrypt: (value) => safeStorage.decryptString(value),
-};
+type ElectronRuntime = typeof import('electron');
+
+let electronRuntime: ElectronRuntime | undefined;
+
+function getElectronRuntime(): ElectronRuntime {
+  if (!electronRuntime) electronRuntime = require('electron') as ElectronRuntime;
+  return electronRuntime;
+}
+
+function electronSecureStorage(): SecureStorageAdapter {
+  return {
+    isEncryptionAvailable: () => getElectronRuntime().safeStorage.isEncryptionAvailable(),
+    encrypt: (value) => getElectronRuntime().safeStorage.encryptString(value),
+    decrypt: (value) => getElectronRuntime().safeStorage.decryptString(value),
+  };
+}
 
 const SENSITIVE_JSON_FILES = new Set([
   'agent-runs.json',
@@ -26,13 +36,17 @@ function isMissingFile(error: unknown): boolean {
 }
 
 export class LocalStorage {
+  private readonly secureStorage: SecureStorageAdapter;
+
   constructor(
     private readonly rootPath?: string,
-    private readonly secureStorage: SecureStorageAdapter = electronSecureStorage,
-  ) {}
+    secureStorage?: SecureStorageAdapter,
+  ) {
+    this.secureStorage = secureStorage ?? electronSecureStorage();
+  }
 
   private get root(): string {
-    return this.rootPath || path.join(app.getPath('userData'), 'data');
+    return this.rootPath || path.join(getElectronRuntime().app.getPath('userData'), 'data');
   }
 
   async init(): Promise<void> {
