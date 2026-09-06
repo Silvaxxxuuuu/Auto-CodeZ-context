@@ -152,7 +152,7 @@ test('create delete rename e search usam o mesmo overlay da execução', async (
   }
 });
 
-test('Git falha fechado depois que a run possui alterações isoladas', async () => {
+test('mutação Git falha fechado depois que a run possui alterações isoladas', async () => {
   const fx = await fixture();
   try {
     const write = await fx.tools.execute(
@@ -168,12 +168,12 @@ test('Git falha fechado depois que a run possui alterações isoladas', async ()
       'chat-a',
       'project-a',
       'unrestricted',
-      toolCall('git-after-shadow', 'git_status', {}),
+      toolCall('git-after-shadow', 'git_stage_all', {}),
       'run-a',
     );
 
     assert.equal(git.ok, false);
-    assert.match(git.error ?? '', /Git bloqueada/i);
+    assert.match(git.error ?? '', /Git mutável bloqueada/i);
     assert.equal(await fx.base.readFile('project-a', 'a.txt'), 'base');
   } finally {
     await fx.cleanup();
