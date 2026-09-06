@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
+import { normalizeOptionalExecutionAllowedPaths } from './execution-path-scope-request';
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return await ipcRenderer.invoke(channel, ...args) as T;
@@ -78,13 +79,23 @@ contextBridge.exposeInMainWorld('autoCodez', {
       permissionLevel: requireIdentifier(value.permissionLevel, 'Permissão'),
     });
   },
-  sendChat: (input: { chatId: string; content: string }) => {
+  sendChat: (input: { chatId: string; content: string; allowedPaths?: string[] }) => {
     const value = requireObject(input, 'Mensagem');
-    return invoke('chat:send', { chatId: requireIdentifier(value.chatId, 'Chat'), content: requireNonEmptyString(value.content, 'Mensagem') });
+    const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
+    return invoke('chat:send', {
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      content: requireNonEmptyString(value.content, 'Mensagem'),
+      ...(allowedPaths === undefined ? {} : { allowedPaths }),
+    });
   },
-  streamChat: async (input: { chatId: string; content: string }) => {
+  streamChat: async (input: { chatId: string; content: string; allowedPaths?: string[] }) => {
     const value = requireObject(input, 'Mensagem');
-    const result = await invoke<{ pendingApprovalIds: string[]; chat: unknown; error?: string }>('chat:stream', { chatId: requireIdentifier(value.chatId, 'Chat'), content: requireNonEmptyString(value.content, 'Mensagem') });
+    const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
+    const result = await invoke<{ pendingApprovalIds: string[]; chat: unknown; error?: string }>('chat:stream', {
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      content: requireNonEmptyString(value.content, 'Mensagem'),
+      ...(allowedPaths === undefined ? {} : { allowedPaths }),
+    });
     if (result.error) throw new Error(result.error);
     return result;
   },
@@ -111,11 +122,12 @@ contextBridge.exposeInMainWorld('autoCodez', {
   configureExecutionPathScope: (input: { chatId: string; runId: string; allowedPaths: string[] }) => {
     const value = requireObject(input, 'Configuração do escopo de caminhos');
     if ('projectId' in value) throw new Error('O projeto do escopo é definido pela Task Capsule.');
-    if (!Array.isArray(value.allowedPaths) || value.allowedPaths.length === 0 || value.allowedPaths.some((item) => typeof item !== 'string')) throw new Error('Caminhos permitidos inválidos.');
+    const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
+    if (allowedPaths === undefined) throw new Error('Caminhos permitidos inválidos.');
     return invoke('agent:configure-execution-path-scope', {
       chatId: requireIdentifier(value.chatId, 'Chat'),
       runId: requireIdentifier(value.runId, 'Execução'),
-      allowedPaths: value.allowedPaths.map((item) => requireNonEmptyString(item, 'Caminho permitido')),
+      allowedPaths,
     });
   },
   getExecutionPathScope: (input: { chatId: string; runId: string }) => {
