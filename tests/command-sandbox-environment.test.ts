@@ -54,15 +54,18 @@ test('command sandbox isola home, config, temp e configuração Git do ambiente 
   try {
     fx.shadows.begin('chat-a', 'run-a', 'project-a');
     const runtime = new CommandSandboxRuntime(fx.projects, fx.shadows, undefined, fx.parentEnvironment);
-    const command = `node -e "const os=require('os'); const fs=require('fs'); const path=require('path'); const home=os.homedir(); const cwd=process.cwd(); const gitCeiling=process.env.GIT_CEILING_DIRECTORIES??null; process.stdout.write(JSON.stringify({cwd,cwdReal:fs.realpathSync(cwd),home,envHome:process.env.HOME??null,profile:process.env.USERPROFILE??null,appData:process.env.APPDATA??null,localAppData:process.env.LOCALAPPDATA??null,temp:process.env.TEMP??null,tmp:process.env.TMP??null,tmpdir:process.env.TMPDIR??null,osTmp:os.tmpdir(),npmrc:fs.existsSync(path.join(home,'.npmrc')),gitPrompt:process.env.GIT_TERMINAL_PROMPT??null,gcm:process.env.GCM_INTERACTIVE??null,gitNoSystem:process.env.GIT_CONFIG_NOSYSTEM??null,gitAttrNoSystem:process.env.GIT_ATTR_NOSYSTEM??null,gitCeiling,gitCeilingReal:gitCeiling?fs.realpathSync(gitCeiling):null}))"`;
+    const command = `node -e "const os=require('os'); const fs=require('fs'); const path=require('path'); const home=os.homedir(); process.stdout.write(JSON.stringify({cwd:process.cwd(),home,envHome:process.env.HOME??null,profile:process.env.USERPROFILE??null,appData:process.env.APPDATA??null,localAppData:process.env.LOCALAPPDATA??null,temp:process.env.TEMP??null,tmp:process.env.TMP??null,tmpdir:process.env.TMPDIR??null,osTmp:os.tmpdir(),npmrc:fs.existsSync(path.join(home,'.npmrc')),gitPrompt:process.env.GIT_TERMINAL_PROMPT??null,gcm:process.env.GCM_INTERACTIVE??null,gitNoSystem:process.env.GIT_CONFIG_NOSYSTEM??null,gitAttrNoSystem:process.env.GIT_ATTR_NOSYSTEM??null,gitCeiling:process.env.GIT_CEILING_DIRECTORIES??null}))"`;
 
     const result = await runtime.run('chat-a', 'run-a', 'project-a', command);
     const values = JSON.parse(result.stdout.trim()) as Record<string, string | boolean | null>;
     const home = String(values.home);
     const temporaryRoot = path.dirname(home);
+    const sandboxDirectoryName = path.basename(temporaryRoot);
+    const cwd = String(values.cwd);
+    const gitCeiling = String(values.gitCeiling);
 
     assert.notEqual(home, fx.fakeHome);
-    assert.match(path.basename(temporaryRoot), /^auto-codez-command-sandbox-/);
+    assert.match(sandboxDirectoryName, /^auto-codez-command-sandbox-/);
     assert.equal(values.envHome, home);
     assert.equal(values.profile, home);
     assert.equal(values.npmrc, false);
@@ -70,8 +73,10 @@ test('command sandbox isola home, config, temp e configuração Git do ambiente 
     assert.equal(values.gcm, 'Never');
     assert.equal(values.gitNoSystem, '1');
     assert.equal(values.gitAttrNoSystem, '1');
-    assert.ok(values.gitCeiling);
-    assert.equal(values.gitCeilingReal, values.cwdReal);
+    assert.equal(path.basename(gitCeiling).toLowerCase(), 'workspace');
+    assert.equal(path.basename(path.dirname(gitCeiling)), sandboxDirectoryName);
+    assert.equal(path.basename(cwd).toLowerCase(), 'workspace');
+    assert.equal(path.basename(path.dirname(cwd)), sandboxDirectoryName);
 
     for (const key of ['appData', 'localAppData'] as const) {
       assert.ok(String(values[key]).startsWith(`${home}${path.sep}`));
