@@ -15,6 +15,7 @@ const directMutationPatterns = [
 ];
 
 const rawGitMutationPattern = /\bgit(?:\.exe)?\s+(?:add|commit|checkout|switch|reset|clean|rm|mv|restore|config|update-ref|merge|rebase|cherry-pick|revert|tag)\b/i;
+const shellApprovalReason = 'shell sem confinamento completo do sistema operacional';
 
 function stronger(left: PermissionDecision, right: PermissionDecision): PermissionDecision {
   const severity = (value: PermissionDecision): number => value === 'deny' ? 2 : value === 'ask' ? 1 : 0;
@@ -35,10 +36,12 @@ export class CommandSafetyPolicy {
     const value = command.trim();
     if (!value) return { decision: 'deny', reasons: ['comando vazio'], matchedPaths: [] };
 
-    let decision: PermissionDecision = rawGitMutationPattern.test(value) ? 'ask' : 'allow';
-    const reasons: string[] = rawGitMutationPattern.test(value) ? ['mutação Git direta pelo shell'] : [];
+    let decision: PermissionDecision = 'ask';
+    const reasons: string[] = [shellApprovalReason];
     const matchedPaths: string[] = [];
     const mutatesDirectly = directMutationPatterns.some((pattern) => pattern.test(value));
+
+    if (rawGitMutationPattern.test(value)) reasons.push('mutação Git direta pelo shell');
 
     for (const token of candidateTokens(value)) {
       const readEvaluation = this.pathPolicy.evaluate('read_file', [token]);

@@ -91,7 +91,7 @@ test('approvals created by different chats retain independent ownership', async 
   } finally { await fixture.cleanup(); }
 });
 
-test('activity summaries describe the concrete operation being executed', async () => {
+test('activity summaries describe approval and concrete command execution', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-activity-test-'));
   try {
     const project: ProjectRecord = { id: 'project-test', name: 'Activity Test Project', rootPath: root, createdAt: Date.now(), updatedAt: Date.now() };
@@ -101,10 +101,14 @@ test('activity summaries describe the concrete operation being executed', async 
     activity.subscribe((event) => events.push({ message: event.message, status: event.status }));
     const commands = new CommandRuntime(async () => [project]);
     const runtime = new ToolRuntime(workspace, undefined, activity, undefined, commands);
-    const result = await runtime.execute('chat-test', 'project-test', 'unrestricted', call('call-activity', 'run_command', { command: 'mkdir activity-test' }));
+    const pending = await runtime.execute('chat-test', 'project-test', 'unrestricted', call('call-activity', 'run_command', { command: 'mkdir activity-test' }));
+    assert.equal(pending.pendingApproval, true);
+    assert.ok(pending.approvalId);
+    assert.equal(events.some((event) => event.status === 'pending' && /aguardando aprovação/i.test(event.message)), true);
+
+    const result = await runtime.approve(pending.approvalId as string);
     assert.equal(result.ok, true);
-    assert.equal(events[0]?.message, 'Executando mkdir activity-test');
-    assert.equal(events[0]?.status, 'running');
+    assert.equal(events.some((event) => event.message === 'Executando mkdir activity-test' && event.status === 'running'), true);
     assert.equal(events.some((event) => event.status === 'success' && event.message === 'Concluído: run_command'), true);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

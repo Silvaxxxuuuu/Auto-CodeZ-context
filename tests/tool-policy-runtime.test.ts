@@ -93,6 +93,21 @@ test('unrestricted system workspace read preserves explicit unrestricted behavio
   assert.equal(result.sources.systemWorkspace, 'allow');
 });
 
+test('ordinary shell command requires approval in unrestricted mode without an execution path scope', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('run_command', { command: 'npm test' }),
+  });
+
+  assert.equal(result.decision, 'ask');
+  assert.equal(result.blockedBy, null);
+  assert.equal(result.sources.permission, 'allow');
+  assert.equal(result.sources.command, 'ask');
+  assert.equal(result.sources.executionScope, 'allow');
+  assert.match(result.reasons.join(' '), /confinamento completo do sistema operacional/i);
+});
+
 test('direct Git mutation through the shell still requires approval in unrestricted mode', () => {
   const result = runtime.evaluate({
     permissionLevel: 'unrestricted',
@@ -174,7 +189,7 @@ test('execution scope composes as a security boundary', () => {
   assert.equal(denied.sources.executionScope, 'deny');
 });
 
-test('active execution scope forces shell approval even in unrestricted mode', () => {
+test('active execution scope keeps shell approval in unrestricted mode', () => {
   const scopes = new ExecutionPathScopeRuntime(() => 1000);
   scopes.configure({ chatId: 'chat-a', runId: 'run-a', projectId: 'project-a', allowedPaths: ['src'] });
   const scopedRuntime = new ToolPolicyRuntime();
@@ -188,6 +203,7 @@ test('active execution scope forces shell approval even in unrestricted mode', (
   });
 
   assert.equal(result.decision, 'ask');
+  assert.equal(result.sources.command, 'ask');
   assert.equal(result.sources.executionScope, 'ask');
   assert.match(result.reasons.join(' '), /shell/i);
 });

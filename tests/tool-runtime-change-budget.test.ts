@@ -146,13 +146,18 @@ test('registra consumo somente depois de ferramenta bem-sucedida', async () => {
     assert.equal(failed.ok, false);
     assert.equal(current.runtime.getChangeBudgetUsage('chat-a', 'run-a').toolCalls, 0);
 
-    const command = await current.runtime.execute(
+    const pending = await current.runtime.execute(
       'chat-a',
       'project-test',
       'unrestricted',
       call('command', 'run_command', { command: 'node -e "process.exit(0)"' }),
       'run-a',
     );
+    assert.equal(pending.pendingApproval, true);
+    assert.ok(pending.approvalId);
+    assert.equal(current.runtime.getChangeBudgetUsage('chat-a', 'run-a').toolCalls, 0);
+
+    const command = await current.runtime.approve(pending.approvalId as string);
     assert.equal(command.ok, true);
     const usage = current.runtime.getChangeBudgetUsage('chat-a', 'run-a');
     assert.equal(usage.commands, 1);

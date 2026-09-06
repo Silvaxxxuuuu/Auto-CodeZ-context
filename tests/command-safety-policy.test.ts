@@ -4,11 +4,12 @@ import { CommandSafetyPolicy } from '../src/agent/command-safety-policy';
 
 const policy = new CommandSafetyPolicy();
 
-test('comandos comuns permanecem permitidos pela camada adicional', () => {
+test('comandos comuns exigem aprovação enquanto o shell não possui confinamento completo do sistema operacional', () => {
   for (const command of ['npm test', 'npm run build', 'node scripts/check.mjs', 'git status', 'git diff']) {
     const result = policy.evaluate(command);
-    assert.equal(result.decision, 'allow', command);
+    assert.equal(result.decision, 'ask', command);
     assert.deepEqual(result.matchedPaths, [], command);
+    assert.match(result.reasons.join(' '), /confinamento completo do sistema operacional/i, command);
   }
 });
 
@@ -58,8 +59,9 @@ test('mutações Git via shell sempre exigem aprovação adicional', () => {
 
 test('templates de env não são confundidos com segredo', () => {
   const result = policy.evaluate('type .env.production.example');
-  assert.equal(result.decision, 'allow');
+  assert.equal(result.decision, 'ask');
   assert.deepEqual(result.matchedPaths, []);
+  assert.match(result.reasons.join(' '), /confinamento completo do sistema operacional/i);
 });
 
 test('detecta segredo embutido em redirecionamento e atribuição simples', () => {
