@@ -63,7 +63,7 @@ export class WorkspaceRuntime {
 
     let current = candidate;
     const unresolved: string[] = [];
-    while (true) {
+    for (;;) {
       try {
         const real = await fs.realpath(current);
         const canonical = path.resolve(real, ...unresolved);
