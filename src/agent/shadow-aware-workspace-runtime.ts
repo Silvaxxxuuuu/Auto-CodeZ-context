@@ -19,6 +19,10 @@ export class ShadowAwareWorkspaceRuntime extends WorkspaceRuntime {
     return this.baseWorkspace.resolve(projectId, requestedPath);
   }
 
+  override canonicalRelativePath(projectId: string, requestedPath: string): Promise<string> {
+    return this.baseWorkspace.canonicalRelativePath(projectId, requestedPath);
+  }
+
   override async exists(projectId: string, requestedPath: string): Promise<boolean> {
     const shadow = this.existingShadow(projectId);
     return shadow
