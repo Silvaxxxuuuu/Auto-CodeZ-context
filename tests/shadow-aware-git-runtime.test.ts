@@ -106,11 +106,11 @@ test('qualquer mutação Git é bloqueada enquanto existe shadow ativo no projet
     await fs.writeFile(path.join(fx.root, 'a.txt'), 'external-dirty\n', 'utf8');
     const indexBefore = await fs.readFile(fx.indexPath);
 
-    await assert.rejects(
+    assert.throws(
       () => fx.runtime.stageAll('project-a'),
       /Shadow Workspace ativo/i,
     );
-    await assert.rejects(
+    assert.throws(
       () => fx.runtime.createBranch('project-a', 'blocked-branch'),
       /Shadow Workspace ativo/i,
     );
