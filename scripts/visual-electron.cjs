@@ -1,21 +1,28 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
-const { _electron: electron } = require('playwright');
+const net = require('node:net');
+const { spawn, spawnSync } = require('node:child_process');
+const { chromium } = require('playwright');
 
 const root = path.resolve(__dirname, '..');
 const outputDir = path.resolve(root, process.env.AUTO_CODEZ_VISUAL_DIR || 'artifacts/visual');
 const packagedExecutable = process.env.AUTO_CODEZ_ELECTRON_EXECUTABLE?.trim();
 const electronExecutable = packagedExecutable || require('electron');
 const VISUAL_WATCHDOG_MS = 6 * 60 * 1000;
+const CDP_CONNECT_TIMEOUT_MS = 60 * 1000;
 const CLOSE_TIMEOUT_MS = 10 * 1000;
+const PROCESS_LOG_LIMIT = 512 * 1024;
 
 const results = [];
 const pageErrors = [];
 const consoleErrors = [];
-let electronApp;
+let browser;
 let page;
+let appProcess;
+let appExit;
 let watchdog;
+let electronStdout = '';
+let electronStderr = '';
 
 function errorText(error) {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -25,9 +32,24 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function appendProcessLog(current, chunk) {
+  const next = `${current}${String(chunk)}`;
+  return next.length <= PROCESS_LOG_LIMIT ? next : next.slice(-PROCESS_LOG_LIMIT);
+}
+
+function processExitText() {
+  if (!appExit) return 'processo ainda ativo';
+  return `code=${String(appExit.code)} signal=${String(appExit.signal)}`;
+}
+
 async function writeDiagnostic(name, value) {
   await fs.mkdir(outputDir, { recursive: true });
   await fs.writeFile(path.join(outputDir, name), `${value}\n`, 'utf8');
+}
+
+async function writeProcessDiagnostics() {
+  await writeDiagnostic('electron-stdout.txt', electronStdout).catch(() => {});
+  await writeDiagnostic('electron-stderr.txt', electronStderr).catch(() => {});
 }
 
 async function screenshot(name) {
@@ -82,6 +104,100 @@ async function closeTransientUi() {
   await page.waitForTimeout(120);
 }
 
+async function reserveTcpPort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = address && typeof address === 'object' ? address.port : 0;
+      server.close((error) => {
+        if (error) reject(error);
+        else if (!port) reject(new Error('Não foi possível reservar uma porta CDP local.'));
+        else resolve(port);
+      });
+    });
+  });
+}
+
+async function spawnElectron(cdpPort) {
+  const args = [
+    `--remote-debugging-port=${cdpPort}`,
+    '--no-first-run',
+  ];
+  if (!packagedExecutable) args.push('.');
+
+  appProcess = spawn(electronExecutable, args, {
+    cwd: root,
+    env: {
+      ...process.env,
+      AUTO_CODEZ_VISUAL_TEST: '1',
+      ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+    },
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  appProcess.stdout?.setEncoding('utf8');
+  appProcess.stderr?.setEncoding('utf8');
+  appProcess.stdout?.on('data', (chunk) => {
+    electronStdout = appendProcessLog(electronStdout, chunk);
+  });
+  appProcess.stderr?.on('data', (chunk) => {
+    electronStderr = appendProcessLog(electronStderr, chunk);
+  });
+  appProcess.once('exit', (code, signal) => {
+    appExit = { code, signal };
+  });
+
+  await new Promise((resolve, reject) => {
+    const onSpawn = () => {
+      appProcess.off('error', onError);
+      resolve();
+    };
+    const onError = (error) => {
+      appProcess.off('spawn', onSpawn);
+      reject(error);
+    };
+    appProcess.once('spawn', onSpawn);
+    appProcess.once('error', onError);
+  });
+}
+
+async function connectToRenderer(cdpPort) {
+  const endpoint = `http://127.0.0.1:${cdpPort}`;
+  const deadline = Date.now() + CDP_CONNECT_TIMEOUT_MS;
+  let lastError;
+
+  while (Date.now() < deadline) {
+    if (appExit) {
+      const stderr = electronStderr.trim();
+      throw new Error(`Electron encerrou antes do CDP ficar disponível (${processExitText()}).${stderr ? `\n${stderr}` : ''}`);
+    }
+
+    let candidate;
+    try {
+      candidate = await chromium.connectOverCDP(endpoint, { timeout: 2500 });
+      const context = candidate.contexts()[0];
+      if (!context) throw new Error('O CDP abriu sem um contexto Chromium padrão.');
+
+      let target = context.pages().find((item) => !item.url().startsWith('devtools://'));
+      if (!target) target = await context.waitForEvent('page', { timeout: 5000 });
+
+      browser = candidate;
+      page = target;
+      return endpoint;
+    } catch (error) {
+      lastError = error;
+      if (candidate) await candidate.close().catch(() => {});
+      await delay(350);
+    }
+  }
+
+  throw new Error(`CDP do Electron não ficou disponível em ${CDP_CONNECT_TIMEOUT_MS}ms. Último erro: ${errorText(lastError)}`);
+}
+
 async function stopVisualTerminalSessions() {
   if (!page || page.isClosed()) return;
   await page.evaluate(async () => {
@@ -98,9 +214,8 @@ async function stopVisualTerminalSessions() {
 }
 
 function forceKillElectronTree() {
-  const child = electronApp?.process();
-  const pid = child?.pid;
-  if (!pid) return;
+  const pid = appProcess?.pid;
+  if (!pid || appExit) return;
   if (process.platform === 'win32') {
     spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], {
       windowsHide: true,
@@ -109,19 +224,46 @@ function forceKillElectronTree() {
     return;
   }
   try {
-    child.kill('SIGKILL');
+    appProcess.kill('SIGKILL');
   } catch {}
 }
 
+async function waitForElectronExit(timeoutMs) {
+  if (!appProcess || appExit) return true;
+  return new Promise((resolve) => {
+    let timer;
+    const onExit = () => {
+      if (timer) clearTimeout(timer);
+      resolve(true);
+    };
+    appProcess.once('exit', onExit);
+    timer = setTimeout(() => {
+      appProcess.off('exit', onExit);
+      resolve(false);
+    }, timeoutMs);
+    timer.unref?.();
+  });
+}
+
 async function closeElectronSafely() {
-  if (!electronApp) return;
   await stopVisualTerminalSessions();
-  let closed = false;
-  await Promise.race([
-    electronApp.close().then(() => { closed = true; }).catch(() => {}),
-    delay(CLOSE_TIMEOUT_MS),
-  ]);
-  if (!closed) forceKillElectronTree();
+
+  if (page && !page.isClosed()) {
+    await Promise.race([
+      page.close({ runBeforeUnload: true }).catch(() => {}),
+      delay(2500),
+    ]);
+  }
+
+  if (browser) await browser.close().catch(() => {});
+
+  const exited = await waitForElectronExit(CLOSE_TIMEOUT_MS);
+  if (!exited) {
+    forceKillElectronTree();
+    await waitForElectronExit(3000);
+  }
+
+  await writeProcessDiagnostics();
 }
 
 async function main() {
@@ -131,24 +273,17 @@ async function main() {
 
   watchdog = setTimeout(async () => {
     await writeDiagnostic('fatal-error.txt', `Visual watchdog exceeded ${VISUAL_WATCHDOG_MS}ms.`).catch(() => {});
+    await writeProcessDiagnostics();
     forceKillElectronTree();
     process.exit(1);
   }, VISUAL_WATCHDOG_MS);
   watchdog.unref?.();
 
-  electronApp = await electron.launch({
-    executablePath: electronExecutable,
-    args: packagedExecutable ? [] : ['.'],
-    cwd: root,
-    env: {
-      ...process.env,
-      AUTO_CODEZ_VISUAL_TEST: '1',
-      ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
-    },
-    timeout: 60000,
-  });
+  const cdpPort = await reserveTcpPort();
+  await spawnElectron(cdpPort);
+  const cdpEndpoint = await connectToRenderer(cdpPort);
+  await writeDiagnostic('transport.txt', `cdp=${cdpEndpoint}\nmode=${packagedExecutable ? 'packaged' : 'development-runtime'}`);
 
-  page = await electronApp.firstWindow({ timeout: 60000 });
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => pageErrors.push(errorText(error)));
   page.on('console', (message) => {
@@ -247,6 +382,7 @@ async function main() {
   const manifest = {
     generatedAt: new Date().toISOString(),
     executable: packagedExecutable ? 'packaged' : 'development-runtime',
+    transport: 'cdp',
     platform: process.platform,
     arch: process.arch,
     viewport: await page.evaluate(() => ({ width: innerWidth, height: innerHeight, devicePixelRatio })),
@@ -269,7 +405,7 @@ main()
   .catch(async (error) => {
     const message = errorText(error);
     console.error(error);
-    await writeDiagnostic('fatal-error.txt', message).catch(() => {});
+    await writeDiagnostic('fatal-error.txt', `${message}\nElectron: ${processExitText()}`).catch(() => {});
     process.exitCode = 1;
   })
   .finally(async () => {
