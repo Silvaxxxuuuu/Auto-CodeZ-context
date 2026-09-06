@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
@@ -12,6 +13,7 @@ const VISUAL_WATCHDOG_MS = 6 * 60 * 1000;
 const CDP_CONNECT_TIMEOUT_MS = 60 * 1000;
 const CLOSE_TIMEOUT_MS = 10 * 1000;
 const PROCESS_LOG_LIMIT = 512 * 1024;
+const VISUAL_VIEWPORT = { width: 1440, height: 900 };
 
 const results = [];
 const pageErrors = [];
@@ -21,6 +23,7 @@ let page;
 let appProcess;
 let appExit;
 let watchdog;
+let visualStateRoot;
 let electronStdout = '';
 let electronStderr = '';
 
@@ -68,10 +71,26 @@ async function assertHealthy() {
   }
 }
 
+async function assertNoHorizontalOverflow() {
+  const metrics = await page.evaluate(() => ({
+    viewportWidth: innerWidth,
+    documentClientWidth: document.documentElement.clientWidth,
+    documentScrollWidth: document.documentElement.scrollWidth,
+    bodyClientWidth: document.body.clientWidth,
+    bodyScrollWidth: document.body.scrollWidth,
+  }));
+  const documentOverflow = metrics.documentScrollWidth - metrics.documentClientWidth;
+  const bodyOverflow = metrics.bodyScrollWidth - metrics.bodyClientWidth;
+  if (documentOverflow > 1 || bodyOverflow > 1) {
+    throw new Error(`Overflow horizontal detectado: document=${documentOverflow}px body=${bodyOverflow}px viewport=${metrics.viewportWidth}px.`);
+  }
+}
+
 async function step(name, action) {
   try {
     await action();
     await assertHealthy();
+    await assertNoHorizontalOverflow();
     await screenshot(name);
     results.push({ name, status: 'passed' });
   } catch (error) {
@@ -104,6 +123,46 @@ async function closeTransientUi() {
   await page.waitForTimeout(120);
 }
 
+async function prepareVisualState() {
+  visualStateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-visual-'));
+  if (process.platform === 'win32') {
+    await Promise.all([
+      fs.mkdir(path.join(visualStateRoot, 'AppData', 'Roaming'), { recursive: true }),
+      fs.mkdir(path.join(visualStateRoot, 'AppData', 'Local'), { recursive: true }),
+    ]);
+  } else {
+    await Promise.all([
+      fs.mkdir(path.join(visualStateRoot, '.config'), { recursive: true }),
+      fs.mkdir(path.join(visualStateRoot, '.cache'), { recursive: true }),
+    ]);
+  }
+}
+
+function visualEnvironment() {
+  if (!visualStateRoot) throw new Error('Estado isolado do teste visual ainda não foi preparado.');
+  const env = {
+    ...process.env,
+    AUTO_CODEZ_VISUAL_TEST: '1',
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+    HOME: visualStateRoot,
+  };
+  if (process.platform === 'win32') {
+    env.USERPROFILE = visualStateRoot;
+    env.APPDATA = path.join(visualStateRoot, 'AppData', 'Roaming');
+    env.LOCALAPPDATA = path.join(visualStateRoot, 'AppData', 'Local');
+  } else {
+    env.XDG_CONFIG_HOME = path.join(visualStateRoot, '.config');
+    env.XDG_CACHE_HOME = path.join(visualStateRoot, '.cache');
+  }
+  return env;
+}
+
+async function cleanupVisualState() {
+  if (!visualStateRoot) return;
+  await fs.rm(visualStateRoot, { recursive: true, force: true }).catch(() => {});
+  visualStateRoot = undefined;
+}
+
 async function reserveTcpPort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -124,17 +183,14 @@ async function reserveTcpPort() {
 async function spawnElectron(cdpPort) {
   const args = [
     `--remote-debugging-port=${cdpPort}`,
+    '--remote-debugging-address=127.0.0.1',
     '--no-first-run',
   ];
   if (!packagedExecutable) args.push('.');
 
   appProcess = spawn(electronExecutable, args, {
     cwd: root,
-    env: {
-      ...process.env,
-      AUTO_CODEZ_VISUAL_TEST: '1',
-      ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
-    },
+    env: visualEnvironment(),
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -269,6 +325,7 @@ async function closeElectronSafely() {
 async function main() {
   await fs.rm(outputDir, { recursive: true, force: true });
   await fs.mkdir(outputDir, { recursive: true });
+  await prepareVisualState();
   await writeDiagnostic('run-started.txt', `Visual run started at ${new Date().toISOString()}`);
 
   watchdog = setTimeout(async () => {
@@ -282,9 +339,10 @@ async function main() {
   const cdpPort = await reserveTcpPort();
   await spawnElectron(cdpPort);
   const cdpEndpoint = await connectToRenderer(cdpPort);
-  await writeDiagnostic('transport.txt', `cdp=${cdpEndpoint}\nmode=${packagedExecutable ? 'packaged' : 'development-runtime'}`);
+  await writeDiagnostic('transport.txt', `cdp=${cdpEndpoint}\nmode=${packagedExecutable ? 'packaged' : 'development-runtime'}\nstate=isolated`);
 
   page.setDefaultTimeout(15000);
+  await page.setViewportSize(VISUAL_VIEWPORT);
   page.on('pageerror', (error) => pageErrors.push(errorText(error)));
   page.on('console', (message) => {
     if (message.type() === 'error') consoleErrors.push(message.text());
@@ -302,6 +360,7 @@ async function main() {
     content: '*{animation-duration:0s!important;transition-duration:0s!important;caret-color:transparent!important}',
   });
   await assertHealthy();
+  await assertNoHorizontalOverflow();
 
   await step('aba-home-chats', async () => {
     await closeTransientUi();
@@ -383,8 +442,10 @@ async function main() {
     generatedAt: new Date().toISOString(),
     executable: packagedExecutable ? 'packaged' : 'development-runtime',
     transport: 'cdp',
+    isolatedState: true,
     platform: process.platform,
     arch: process.arch,
+    targetViewport: VISUAL_VIEWPORT,
     viewport: await page.evaluate(() => ({ width: innerWidth, height: innerHeight, devicePixelRatio })),
     results,
     pageErrors,
@@ -411,4 +472,5 @@ main()
   .finally(async () => {
     if (watchdog) clearTimeout(watchdog);
     await closeElectronSafely();
+    await cleanupVisualState();
   });
