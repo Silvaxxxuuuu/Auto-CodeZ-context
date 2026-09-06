@@ -146,7 +146,7 @@ export class ShadowGitReadRuntime {
   async diff(chatId: string, runId: string, projectId: string): Promise<string> {
     const { context, sandbox } = await this.materialize(chatId, runId, projectId);
     try {
-      return this.gitInSandbox(context, sandbox, [
+      return await this.gitInSandbox(context, sandbox, [
         'diff',
         '--no-ext-diff',
         '--no-textconv',
