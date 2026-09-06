@@ -43,6 +43,7 @@ import { ExecutionChangeBudgetPersistence, ExecutionChangeBudgetStore } from './
 import { ExecutionPathScopeRuntime } from './execution-path-scope';
 import { ExecutionPathScopePersistence, ExecutionPathScopeStore } from './execution-path-scope-store';
 import { ExecutionPathScopeController } from './execution-path-scope-controller';
+import { normalizeOptionalExecutionAllowedPaths } from './execution-path-scope-request';
 import { ExecutionShadowWorkspaceRuntime } from './execution-shadow-workspace';
 import { ExecutionShadowWorkspacePersistence, ExecutionShadowWorkspaceStore } from './execution-shadow-workspace-store';
 import { ExecutionShadowWorkspaceController } from './execution-shadow-workspace-controller';
@@ -365,6 +366,11 @@ function captureExecutionTaskCapsule(
   if (executionTaskCapsulePersistenceEnabled) executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
 }
 
+async function configureInitialExecutionPathScope(chatId: string, runId: string, allowedPaths?: string[]): Promise<void> {
+  if (allowedPaths === undefined) return;
+  await executionPathScopeController.configure({ chatId, runId, allowedPaths });
+}
+
 ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.list(), chats: await chatManager.list(), projects: await projectManager.list() }));
 ipcMain.handle('providers:list-models', async (_event, identifier: string) => {
   const value = requireIdentifier(identifier, 'Provider');
@@ -407,13 +413,14 @@ ipcMain.handle('chat:update-settings', async (_event, input: unknown) => {
   return chatManager.updateSettings({ chatId, providerId, model: requireIdentifier(value.model, 'Modelo'), apiKeyId, intelligence: requireIdentifier(value.intelligence, 'Inteligência'), permissionLevel: requireIdentifier(value.permissionLevel, 'Permissão') });
 });
 
-async function executeChat(chatId: string, content: string): Promise<{ pendingApprovalIds: string[]; chat: Awaited<ReturnType<ChatManager['list']>>[number] | undefined }> {
+async function executeChat(chatId: string, content: string, allowedPaths?: string[]): Promise<{ pendingApprovalIds: string[]; chat: Awaited<ReturnType<ChatManager['list']>>[number] | undefined }> {
   const { chat, config, projectContext } = await getChatContext(chatId);
   reconcileExecutionSlot(chatId);
   const execution = executionManager.start(chatId);
   const runId = execution.runId;
-  captureExecutionTaskCapsule(chat, runId, content);
   try {
+    captureExecutionTaskCapsule(chat, runId, content);
+    await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
     await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const current = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!current) throw new Error('Chat desapareceu durante a execução.');
@@ -432,7 +439,14 @@ async function executeChat(chatId: string, content: string): Promise<{ pendingAp
   }
 }
 
-ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => { const value = requireObject(input, 'Mensagem'); return executeChat(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.content, 'Mensagem')); });
+ipcMain.handle('chat:send', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Mensagem');
+  return executeChat(
+    requireIdentifier(value.chatId, 'Chat'),
+    requireNonEmptyString(value.content, 'Mensagem'),
+    normalizeOptionalExecutionAllowedPaths(value.allowedPaths),
+  );
+});
 ipcMain.handle('chat:stop', async (_event, chatId: string) => {
   const id = requireIdentifier(chatId, 'Chat');
   const active = activeStreamControllers.get(id);
@@ -448,10 +462,11 @@ ipcMain.handle('chat:stop', async (_event, chatId: string) => {
   reconcileExecutionSlot(id);
   return { stopped: false };
 });
-ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
+ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   const value = requireObject(input, 'Mensagem');
   const chatId = requireIdentifier(value.chatId, 'Chat');
   const content = requireNonEmptyString(value.content, 'Mensagem');
+  const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
   const { chat, config, projectContext } = await getChatContext(chatId);
   const lastMessage = chat.messages.at(-1);
   const isRetryOfPersistedUserMessage = lastMessage?.role === 'user' && lastMessage.content === content;
@@ -471,7 +486,6 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
   const controller = new AbortController();
   activeStreamControllers.set(chatId, { runId: execution.runId, controller });
   const runId = execution.runId;
-  captureExecutionTaskCapsule(chat, runId, content);
 
   const emit = (event: AIStreamEvent): void => {
     try {
@@ -486,6 +500,8 @@ ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: s
 
   emit({ type: 'start', chatId, runId });
   try {
+    captureExecutionTaskCapsule(chat, runId, content);
+    await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
     if (!isRetryOfPersistedUserMessage) await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const workingChat = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
@@ -584,11 +600,12 @@ ipcMain.handle('agent:list-execution-task-capsules', async (_event, chatId?: str
 ipcMain.handle('agent:configure-execution-path-scope', async (_event, input: unknown) => {
   const value = requireObject(input, 'Configuração do escopo de caminhos');
   if ('projectId' in value) throw new Error('O projeto do escopo é definido pela Task Capsule e não pode ser informado pelo renderer.');
-  if (!Array.isArray(value.allowedPaths) || value.allowedPaths.length === 0 || value.allowedPaths.some((item) => typeof item !== 'string')) throw new Error('Caminhos permitidos inválidos.');
+  const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
+  if (allowedPaths === undefined) throw new Error('Caminhos permitidos inválidos.');
   return executionPathScopeController.configure({
     chatId: requireIdentifier(value.chatId, 'Chat'),
     runId: requireIdentifier(value.runId, 'Execução'),
-    allowedPaths: value.allowedPaths.map((item) => requireNonEmptyString(item, 'Caminho permitido')),
+    allowedPaths,
   });
 });
 ipcMain.handle('agent:get-execution-path-scope', async (_event, input: unknown) => {
