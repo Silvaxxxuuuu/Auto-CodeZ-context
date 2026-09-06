@@ -3,11 +3,7 @@ import type { ExecutionShadowWorkspaceRuntime } from '../execution-shadow-worksp
 import { runWithExecutionWorkspaceContext } from './execution-workspace-context';
 import { ToolRuntime } from './tool-runtime';
 
-const gitWorkspaceTools = new Set<ToolName>([
-  'git_status',
-  'git_diff',
-  'git_log',
-  'git_branches',
+const gitMutationTools = new Set<ToolName>([
   'git_create_branch',
   'git_checkout',
   'git_stage',
@@ -50,11 +46,11 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
   }
 
   private blockedByActiveShadow(chatId: string, runId: string, call: AIToolCall): AIToolResult | undefined {
-    if (!gitWorkspaceTools.has(call.name) || !this.shadowWorkspaces?.get(chatId, runId)) return undefined;
+    if (!gitMutationTools.has(call.name) || !this.shadowWorkspaces?.get(chatId, runId)) return undefined;
     return {
       toolCallId: call.id,
       ok: false,
-      error: 'Operação Git bloqueada enquanto existem alterações isoladas no Shadow Workspace. O Git será habilitado somente quando houver uma visão isolada do repositório com semântica segura de staging e commit.',
+      error: 'Operação Git mutável bloqueada enquanto existem alterações isoladas no Shadow Workspace. Leituras Git usam uma visão isolada; staging, checkout, branches novas e commits permanecem bloqueados até existir publicação Git transacional segura.',
     };
   }
 }
