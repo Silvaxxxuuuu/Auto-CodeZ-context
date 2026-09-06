@@ -134,7 +134,12 @@ async function main() {
     await page.locator('.terminal-rail-button').click();
     await page.locator('.terminal-panel.open').waitFor({ state: 'visible' });
     await waitForText('.terminal-title', 'TERMINAL');
-    await page.waitForTimeout(500);
+    await page.waitForFunction(async () => {
+      const api = window.autoCodez?.terminal;
+      if (!api) return false;
+      const sessions = await api.listSessions();
+      return Array.isArray(sessions) && sessions.length > 0;
+    }, null, { timeout: 15000 });
   });
 
   await step('aba-api-keys', async () => {
