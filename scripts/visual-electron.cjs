@@ -4,7 +4,8 @@ const { _electron: electron } = require('playwright');
 
 const root = path.resolve(__dirname, '..');
 const outputDir = path.resolve(root, process.env.AUTO_CODEZ_VISUAL_DIR || 'artifacts/visual');
-const electronExecutable = require('electron');
+const packagedExecutable = process.env.AUTO_CODEZ_ELECTRON_EXECUTABLE?.trim();
+const electronExecutable = packagedExecutable || require('electron');
 
 const results = [];
 const pageErrors = [];
@@ -80,7 +81,7 @@ async function main() {
 
   electronApp = await electron.launch({
     executablePath: electronExecutable,
-    args: ['.'],
+    args: packagedExecutable ? [] : ['.'],
     cwd: root,
     env: {
       ...process.env,
@@ -183,6 +184,7 @@ async function main() {
 
   const manifest = {
     generatedAt: new Date().toISOString(),
+    executable: packagedExecutable ? 'packaged' : 'development-runtime',
     platform: process.platform,
     arch: process.arch,
     viewport: await page.evaluate(() => ({ width: innerWidth, height: innerHeight, devicePixelRatio })),
