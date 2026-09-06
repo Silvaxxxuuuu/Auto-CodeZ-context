@@ -61,7 +61,7 @@ test('command runtime uses the project directory as the working directory', asyn
   }
 });
 
-test('command runtime filters sensitive parent environment without dropping normal variables', async () => {
+test('command runtime filters sensitive and startup-injection environment without dropping normal variables', async () => {
   const project = await createProject({
     ...process.env,
     AUTO_CODEZ_TEST_API_KEY: 'api-secret',
@@ -69,9 +69,17 @@ test('command runtime filters sensitive parent environment without dropping norm
     AUTO_CODEZ_TEST_SAFE_FLAG: 'safe-value',
     SSH_AUTH_SOCK: 'secret-socket',
     NPM_CONFIG_USERCONFIG: 'secret-config',
+    NPM_CONFIG_GLOBALCONFIG: 'global-secret-config',
+    NODE_OPTIONS: '--require auto-codez-should-not-load',
+    BASH_ENV: 'outside-shell-init',
+    LD_PRELOAD: 'outside-preload',
+    GIT_CONFIG_GLOBAL: 'outside-gitconfig',
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'credential.helper',
+    GIT_CONFIG_VALUE_0: 'manager',
   });
   try {
-    const expression = "process.stdout.write(JSON.stringify({apiKey:process.env.AUTO_CODEZ_TEST_API_KEY??null,token:process.env.AUTO_CODEZ_TEST_TOKEN??null,safe:process.env.AUTO_CODEZ_TEST_SAFE_FLAG??null,ssh:process.env.SSH_AUTH_SOCK??null,npmConfig:process.env.NPM_CONFIG_USERCONFIG??null}))";
+    const expression = "process.stdout.write(JSON.stringify({apiKey:process.env.AUTO_CODEZ_TEST_API_KEY??null,token:process.env.AUTO_CODEZ_TEST_TOKEN??null,safe:process.env.AUTO_CODEZ_TEST_SAFE_FLAG??null,ssh:process.env.SSH_AUTH_SOCK??null,npmConfig:process.env.NPM_CONFIG_USERCONFIG??null,npmGlobal:process.env.NPM_CONFIG_GLOBALCONFIG??null,nodeOptions:process.env.NODE_OPTIONS??null,bashEnv:process.env.BASH_ENV??null,ldPreload:process.env.LD_PRELOAD??null,gitGlobal:process.env.GIT_CONFIG_GLOBAL??null,gitCount:process.env.GIT_CONFIG_COUNT??null,gitKey:process.env.GIT_CONFIG_KEY_0??null,gitValue:process.env.GIT_CONFIG_VALUE_0??null}))";
     const result = await project.runtime.run('project-test', nodeCommand(expression));
     assert.deepEqual(JSON.parse(result.stdout.trim()), {
       apiKey: null,
@@ -79,6 +87,14 @@ test('command runtime filters sensitive parent environment without dropping norm
       safe: 'safe-value',
       ssh: null,
       npmConfig: null,
+      npmGlobal: null,
+      nodeOptions: null,
+      bashEnv: null,
+      ldPreload: null,
+      gitGlobal: null,
+      gitCount: null,
+      gitKey: null,
+      gitValue: null,
     });
   } finally {
     await project.cleanup();

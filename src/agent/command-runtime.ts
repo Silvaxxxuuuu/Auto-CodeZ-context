@@ -37,7 +37,37 @@ const blockedEnvironmentNames = new Set([
   'SSH_AGENT_PID',
   'GIT_ASKPASS',
   'SSH_ASKPASS',
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_SYSTEM',
+  'GIT_CONFIG_COUNT',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_SSH',
+  'GIT_SSH_COMMAND',
+  'GIT_PROXY_COMMAND',
+  'GIT_EXTERNAL_DIFF',
+  'GIT_SEQUENCE_EDITOR',
+  'GIT_EDITOR',
+  'GIT_PAGER',
   'NPM_CONFIG_USERCONFIG',
+  'NPM_CONFIG_GLOBALCONFIG',
+  'YARN_RC_FILENAME',
+  'NODE_OPTIONS',
+  'BASH_ENV',
+  'KSH_ENV',
+  'RUBYOPT',
+  'PERL5OPT',
+  'JAVA_TOOL_OPTIONS',
+  '_JAVA_OPTIONS',
+  'JDK_JAVA_OPTIONS',
+  'DOTNET_STARTUP_HOOKS',
+  'LD_PRELOAD',
+  'DYLD_INSERT_LIBRARIES',
   'AWS_SHARED_CREDENTIALS_FILE',
   'AWS_CONFIG_FILE',
   'KUBECONFIG',
@@ -46,6 +76,7 @@ const blockedEnvironmentNames = new Set([
   'AZURE_CONFIG_DIR',
   'NETRC',
 ]);
+const blockedEnvironmentPrefixes = ['GIT_CONFIG_KEY_', 'GIT_CONFIG_VALUE_'];
 const sensitiveEnvironmentNamePattern = /(?:^|[_-])(?:token|auth[_-]?token|authtoken|secret|password|passwd|passphrase|credentials?|api[_-]?key|access[_-]?key|private[_-]?key)(?:$|[_-])/i;
 
 function createCommandEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -53,7 +84,11 @@ function createCommandEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
   for (const [name, value] of Object.entries(source)) {
     if (value === undefined) continue;
     const normalizedName = name.toUpperCase();
-    if (blockedEnvironmentNames.has(normalizedName) || sensitiveEnvironmentNamePattern.test(normalizedName)) continue;
+    if (
+      blockedEnvironmentNames.has(normalizedName)
+      || blockedEnvironmentPrefixes.some((prefix) => normalizedName.startsWith(prefix))
+      || sensitiveEnvironmentNamePattern.test(normalizedName)
+    ) continue;
     environment[name] = value;
   }
   environment.CI = source.CI ?? '1';

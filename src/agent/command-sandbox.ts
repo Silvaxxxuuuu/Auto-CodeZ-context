@@ -60,6 +60,9 @@ function isolatedCommandEnvironment(base: NodeJS.ProcessEnv, sandbox: Materializ
     TMPDIR: sandbox.tempPath,
     GIT_TERMINAL_PROMPT: '0',
     GCM_INTERACTIVE: 'Never',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_ATTR_NOSYSTEM: '1',
+    GIT_CEILING_DIRECTORIES: sandbox.rootPath,
   };
 
   if (process.platform === 'win32') {

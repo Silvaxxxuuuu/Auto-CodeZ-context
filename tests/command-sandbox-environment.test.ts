@@ -49,12 +49,12 @@ async function fixture() {
   };
 }
 
-test('command sandbox isola home, config e temp do ambiente real do usuário', async () => {
+test('command sandbox isola home, config, temp e configuração Git do ambiente real do usuário', async () => {
   const fx = await fixture();
   try {
     fx.shadows.begin('chat-a', 'run-a', 'project-a');
     const runtime = new CommandSandboxRuntime(fx.projects, fx.shadows, undefined, fx.parentEnvironment);
-    const command = `node -e "const os=require('os'); const fs=require('fs'); const path=require('path'); const home=os.homedir(); process.stdout.write(JSON.stringify({home,envHome:process.env.HOME??null,profile:process.env.USERPROFILE??null,appData:process.env.APPDATA??null,localAppData:process.env.LOCALAPPDATA??null,temp:process.env.TEMP??null,tmp:process.env.TMP??null,tmpdir:process.env.TMPDIR??null,osTmp:os.tmpdir(),npmrc:fs.existsSync(path.join(home,'.npmrc')),gitPrompt:process.env.GIT_TERMINAL_PROMPT??null,gcm:process.env.GCM_INTERACTIVE??null}))"`;
+    const command = `node -e "const os=require('os'); const fs=require('fs'); const path=require('path'); const home=os.homedir(); process.stdout.write(JSON.stringify({cwd:process.cwd(),home,envHome:process.env.HOME??null,profile:process.env.USERPROFILE??null,appData:process.env.APPDATA??null,localAppData:process.env.LOCALAPPDATA??null,temp:process.env.TEMP??null,tmp:process.env.TMP??null,tmpdir:process.env.TMPDIR??null,osTmp:os.tmpdir(),npmrc:fs.existsSync(path.join(home,'.npmrc')),gitPrompt:process.env.GIT_TERMINAL_PROMPT??null,gcm:process.env.GCM_INTERACTIVE??null,gitNoSystem:process.env.GIT_CONFIG_NOSYSTEM??null,gitAttrNoSystem:process.env.GIT_ATTR_NOSYSTEM??null,gitCeiling:process.env.GIT_CEILING_DIRECTORIES??null}))"`;
 
     const result = await runtime.run('chat-a', 'run-a', 'project-a', command);
     const values = JSON.parse(result.stdout.trim()) as Record<string, string | boolean | null>;
@@ -68,6 +68,9 @@ test('command sandbox isola home, config e temp do ambiente real do usuário', a
     assert.equal(values.npmrc, false);
     assert.equal(values.gitPrompt, '0');
     assert.equal(values.gcm, 'Never');
+    assert.equal(values.gitNoSystem, '1');
+    assert.equal(values.gitAttrNoSystem, '1');
+    assert.equal(values.gitCeiling, values.cwd);
 
     for (const key of ['appData', 'localAppData'] as const) {
       assert.ok(String(values[key]).startsWith(`${home}${path.sep}`));
