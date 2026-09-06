@@ -76,11 +76,22 @@ interface WorkspaceIndexStorage {
 }
 
 type ProjectContextPathFilter = (relativePath: string) => boolean | Promise<boolean>;
-
 type RankedFile = WorkspaceIndexFile & { score: number; priority: number };
 
 function toPosixPath(value: string): string {
   return value.replaceAll('\\', '/');
+}
+
+function normalizePathForComparison(value: string): string {
+  const resolved = path.resolve(value);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const root = normalizePathForComparison(rootPath);
+  const candidate = normalizePathForComparison(candidatePath);
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function keyOf(relativePath: string): string {
@@ -257,8 +268,9 @@ export class WorkspaceIndexRuntime {
   }
 
   async refresh(project: ProjectRecord, relativePaths: string[]): Promise<WorkspaceIndexStatus> {
+    const canonicalRoot = await fs.realpath(project.rootPath);
     const existing = this.projects.get(project.id);
-    const rootChanged = existing ? path.resolve(existing.rootPath) !== path.resolve(project.rootPath) : false;
+    const rootChanged = existing ? normalizePathForComparison(existing.rootPath) !== normalizePathForComparison(canonicalRoot) : false;
     const previousFiles = new Map<string, WorkspaceIndexFile>();
     if (existing && !rootChanged) for (const file of existing.files) previousFiles.set(keyOf(file.relativePath), file);
 
@@ -269,10 +281,13 @@ export class WorkspaceIndexRuntime {
     for (const relativePath of relativePaths) {
       if (!isContextCandidate(relativePath)) continue;
       if (automaticContextPathPolicy.evaluate('read_file', [relativePath]).decision !== 'allow') continue;
-      const fullPath = path.join(project.rootPath, relativePath);
+      const fullPath = path.join(canonicalRoot, relativePath);
+      let realPath: string;
       let stat: Awaited<ReturnType<typeof fs.stat>>;
       try {
-        stat = await fs.stat(fullPath);
+        realPath = await fs.realpath(fullPath);
+        if (!isPathInside(canonicalRoot, realPath)) continue;
+        stat = await fs.stat(realPath);
       } catch {
         continue;
       }
@@ -289,8 +304,8 @@ export class WorkspaceIndexRuntime {
       let symbols: WorkspaceIndexSymbol[] = [];
       if (TYPE_SCRIPT_EXTENSIONS.has(path.extname(relativePath).toLowerCase()) && stat.size <= MAX_SYMBOL_SOURCE_BYTES) {
         try {
-          const content = await fs.readFile(fullPath, 'utf8');
-          if (!content.includes('\u0000')) symbols = extractTypeScriptSymbols(fullPath, content);
+          const content = await fs.readFile(realPath, 'utf8');
+          if (!content.includes('\u0000')) symbols = extractTypeScriptSymbols(realPath, content);
         } catch {
           symbols = [];
         }
@@ -305,7 +320,7 @@ export class WorkspaceIndexRuntime {
     const removedFiles = [...previousFiles.keys()].filter((key) => !nextKeys.has(key)).length;
     const changed = !existing || rootChanged || updatedFiles > 0 || removedFiles > 0 || existing.files.length !== nextFiles.length;
     const lastIndexedAt = changed ? this.now() : existing?.lastIndexedAt ?? this.now();
-    const indexedProject: IndexedProject = { projectId: project.id, rootPath: project.rootPath, lastIndexedAt, files: nextFiles };
+    const indexedProject: IndexedProject = { projectId: project.id, rootPath: canonicalRoot, lastIndexedAt, files: nextFiles };
     this.projects.set(project.id, indexedProject);
     if (changed) await this.persist();
 

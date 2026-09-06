@@ -14,6 +14,18 @@ const automaticContextPathPolicy = new WorkspacePathPolicy();
 interface ProjectStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
 type ProjectContextPathFilter = (relativePath: string) => boolean | Promise<boolean>;
 
+function normalizePathForComparison(value: string): string {
+  const resolved = path.resolve(value);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const root = normalizePathForComparison(rootPath);
+  const candidate = normalizePathForComparison(candidatePath);
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 export class ProjectManager {
   private projects: ProjectRecord[] = [];
   private readonly workspaceIndex: WorkspaceIndexRuntime;
@@ -57,7 +69,8 @@ export class ProjectManager {
 
   async buildContext(projectId: string, includePath?: ProjectContextPathFilter, taskQuery = ''): Promise<string> {
     const project = this.require(projectId);
-    const files = await this.scan(project.rootPath);
+    const canonicalRoot = await fs.realpath(project.rootPath);
+    const files = await this.scan(canonicalRoot);
     const indexStatus = await this.workspaceIndex.refresh(project, files);
     const selected = await this.workspaceIndex.rank(projectId, taskQuery, includePath, MAX_CONTEXT_FILES);
     const chunks: string[] = [
@@ -70,15 +83,17 @@ export class ProjectManager {
       const relative = indexedFile.relativePath;
       if (automaticContextPathPolicy.evaluate('read_file', [relative]).decision !== 'allow') continue;
       if (includePath && !(await includePath(relative))) continue;
-      const filePath = path.join(project.rootPath, relative);
+      const filePath = path.join(canonicalRoot, relative);
       try {
-        const stat = await fs.stat(filePath);
+        const realFilePath = await fs.realpath(filePath);
+        if (!isPathInside(canonicalRoot, realFilePath)) continue;
+        const stat = await fs.stat(realFilePath);
         if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
         const header = `\n--- ${relative} ---\n`;
         const headerBytes = Buffer.byteLength(header, 'utf8');
         const remaining = MAX_CONTEXT_BYTES - contextBytes - headerBytes;
         if (remaining <= 0) break;
-        const buffer = await fs.readFile(filePath);
+        const buffer = await fs.readFile(realFilePath);
         if (buffer.includes(0)) continue;
         const contentBuffer = buffer.length > remaining ? buffer.subarray(0, remaining) : buffer;
         let content = contentBuffer.toString('utf8');

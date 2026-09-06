@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { ProjectManager } from '../src/project/project-manager';
+import { WorkspaceIndexRuntime } from '../src/project/workspace-index';
 
 type Stored = Record<string, unknown>;
 
@@ -111,5 +112,27 @@ test('workspace index never persists sensitive automatic-context paths', async (
     assert.doesNotMatch(context, /DO_NOT_INDEX/);
   } finally {
     await data.cleanup();
+  }
+});
+
+test('workspace index refuses a linked path whose real target escapes the workspace', async () => {
+  const data = await fixture();
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-workspace-index-outside-'));
+  try {
+    await fs.writeFile(path.join(outside, 'secret.ts'), 'export const EXTERNAL_SECRET = "never-index";', 'utf8');
+    const linkedDirectory = path.join(data.root, 'linked-outside');
+    await fs.symlink(outside, linkedDirectory, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const storage = new MemoryStorage();
+    const runtime = new WorkspaceIndexRuntime(storage);
+    await runtime.init();
+    const status = await runtime.refresh(data.project, [path.join('linked-outside', 'secret.ts')]);
+    const stored = storage.get('workspace-index-v1.json') as { projects?: Array<{ files?: Array<{ relativePath?: string }> }> } | undefined;
+
+    assert.equal(status.indexedFiles, 0);
+    assert.deepEqual(stored?.projects?.[0]?.files ?? [], []);
+  } finally {
+    await data.cleanup();
+    await fs.rm(outside, { recursive: true, force: true });
   }
 });
