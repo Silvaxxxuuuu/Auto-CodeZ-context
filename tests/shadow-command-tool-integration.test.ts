@@ -103,7 +103,7 @@ test('run_command aprovado retoma no mesmo shadow e só executa depois da aprova
   }
 });
 
-test('Git continua bloqueado enquanto o command sandbox está disponível', async () => {
+test('mutação Git continua bloqueada enquanto o command sandbox está disponível', async () => {
   const fx = await fixture();
   try {
     await fx.tools.execute(
@@ -118,12 +118,12 @@ test('Git continua bloqueado enquanto o command sandbox está disponível', asyn
       'chat-a',
       'project-a',
       'unrestricted',
-      call('git-shadow', 'git_status', {}),
+      call('git-shadow', 'git_stage_all', {}),
       'run-a',
     );
 
     assert.equal(git.ok, false);
-    assert.match(git.error ?? '', /Git bloqueada/i);
+    assert.match(git.error ?? '', /Git mutável bloqueada/i);
   } finally {
     await fx.cleanup();
   }
