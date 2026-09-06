@@ -319,7 +319,7 @@ async function restoreShadowWorkspaceBootstrapState(): Promise<void> {
   executionShadowWorkspaceRuntime.restore(snapshots);
 }
 
-async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnType<ChatManager['list']>>[number]; config: AIProviderConfig; projectContext?: string }> {
+async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnType<ChatManager['list']>>[number]; config: AIProviderConfig }> {
   const storedChat = (await chatManager.list()).find((item) => item.id === chatId);
   if (!storedChat) throw new Error('Chat não encontrado.');
 
@@ -344,9 +344,7 @@ async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnTyp
   }
 
   if (config.id !== chat.providerId) throw new Error('A API key selecionada não pertence ao provider salvo neste chat.');
-  const computerContext = computerContextRuntime.build();
-  const projectContext = chat.projectId ? `${computerContext}\n\n${await projectManager.buildContext(chat.projectId)}` : computerContext;
-  return { chat, config, projectContext };
+  return { chat, config };
 }
 
 function captureExecutionTaskCapsule(
@@ -369,6 +367,27 @@ function captureExecutionTaskCapsule(
 async function configureInitialExecutionPathScope(chatId: string, runId: string, allowedPaths?: string[]): Promise<void> {
   if (allowedPaths === undefined) return;
   await executionPathScopeController.configure({ chatId, runId, allowedPaths });
+}
+
+async function buildExecutionContext(
+  chat: Awaited<ReturnType<ChatManager['list']>>[number],
+  runId: string,
+): Promise<string> {
+  const computerContext = computerContextRuntime.build();
+  if (!chat.projectId) return computerContext;
+  const projectId = chat.projectId;
+  const scope = executionPathScopeRuntime.get(chat.id, runId);
+  if (scope && scope.projectId !== projectId) throw new Error('O escopo de caminhos da execução pertence a outro projeto.');
+  const projectContext = await projectManager.buildContext(
+    projectId,
+    scope
+      ? async (relativePath) => {
+          const canonicalPath = await workspaceRuntime.canonicalRelativePath(projectId, relativePath);
+          return executionPathScopeRuntime.allowsPath(chat.id, runId, projectId, canonicalPath);
+        }
+      : undefined,
+  );
+  return `${computerContext}\n\n${projectContext}`;
 }
 
 ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.list(), chats: await chatManager.list(), projects: await projectManager.list() }));
@@ -414,13 +433,14 @@ ipcMain.handle('chat:update-settings', async (_event, input: unknown) => {
 });
 
 async function executeChat(chatId: string, content: string, allowedPaths?: string[]): Promise<{ pendingApprovalIds: string[]; chat: Awaited<ReturnType<ChatManager['list']>>[number] | undefined }> {
-  const { chat, config, projectContext } = await getChatContext(chatId);
+  const { chat, config } = await getChatContext(chatId);
   reconcileExecutionSlot(chatId);
   const execution = executionManager.start(chatId);
   const runId = execution.runId;
   try {
     captureExecutionTaskCapsule(chat, runId, content);
     await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
+    const projectContext = await buildExecutionContext(chat, runId);
     await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const current = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!current) throw new Error('Chat desapareceu durante a execução.');
@@ -467,7 +487,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   const chatId = requireIdentifier(value.chatId, 'Chat');
   const content = requireNonEmptyString(value.content, 'Mensagem');
   const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
-  const { chat, config, projectContext } = await getChatContext(chatId);
+  const { chat, config } = await getChatContext(chatId);
   const lastMessage = chat.messages.at(-1);
   const isRetryOfPersistedUserMessage = lastMessage?.role === 'user' && lastMessage.content === content;
   const current = (await chatManager.list()).find((item) => item.id === chat.id);
@@ -502,6 +522,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   try {
     captureExecutionTaskCapsule(chat, runId, content);
     await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
+    const projectContext = await buildExecutionContext(chat, runId);
     if (!isRetryOfPersistedUserMessage) await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const workingChat = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
