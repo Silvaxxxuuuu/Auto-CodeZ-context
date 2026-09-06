@@ -16,6 +16,11 @@ function errorText(error) {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
+async function writeDiagnostic(name, value) {
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.writeFile(path.join(outputDir, name), `${value}\n`, 'utf8');
+}
+
 async function screenshot(name) {
   await page.waitForTimeout(220);
   await page.screenshot({
@@ -52,19 +57,26 @@ async function waitForText(selector, text) {
   await locator.waitFor({ state: 'visible', timeout: 15000 });
 }
 
+async function clickIfVisible(selector) {
+  const locator = page.locator(selector).first();
+  if (!(await locator.count())) return;
+  if (!(await locator.isVisible().catch(() => false))) return;
+  await locator.click().catch(() => {});
+}
+
 async function closeTransientUi() {
+  await clickIfVisible('.api-key-manager-close');
+  await clickIfVisible('[data-profile-close]');
+  await clickIfVisible('[data-settings-close]');
+  await clickIfVisible('#terminal-close');
   await page.keyboard.press('Escape').catch(() => {});
-  const terminalClose = page.locator('#terminal-close');
-  if (await terminalClose.count()) {
-    const panel = page.locator('.terminal-panel.open');
-    if (await panel.count()) await terminalClose.click().catch(() => {});
-  }
-  await page.waitForTimeout(100);
+  await page.waitForTimeout(120);
 }
 
 async function main() {
   await fs.rm(outputDir, { recursive: true, force: true });
   await fs.mkdir(outputDir, { recursive: true });
+  await writeDiagnostic('run-started.txt', `Visual run started at ${new Date().toISOString()}`);
 
   electronApp = await electron.launch({
     executablePath: electronExecutable,
@@ -190,8 +202,10 @@ async function main() {
 }
 
 main()
-  .catch((error) => {
+  .catch(async (error) => {
+    const message = errorText(error);
     console.error(error);
+    await writeDiagnostic('fatal-error.txt', message).catch(() => {});
     process.exitCode = 1;
   })
   .finally(async () => {
