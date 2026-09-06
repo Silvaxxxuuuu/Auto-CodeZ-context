@@ -108,6 +108,21 @@ contextBridge.exposeInMainWorld('autoCodez', {
   listExecutionQualityGates: (chatId?: string) => invoke('agent:list-execution-quality-gates', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
   getExecutionTaskCapsule: (input: { chatId: string; runId: string }) => { const value = requireObject(input, 'Identificação da Task Capsule'); return invoke('agent:get-execution-task-capsule', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') }); },
   listExecutionTaskCapsules: (chatId?: string) => invoke('agent:list-execution-task-capsules', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  configureExecutionPathScope: (input: { chatId: string; runId: string; allowedPaths: string[] }) => {
+    const value = requireObject(input, 'Configuração do escopo de caminhos');
+    if ('projectId' in value) throw new Error('O projeto do escopo é definido pela Task Capsule.');
+    if (!Array.isArray(value.allowedPaths) || value.allowedPaths.length === 0 || value.allowedPaths.some((item) => typeof item !== 'string')) throw new Error('Caminhos permitidos inválidos.');
+    return invoke('agent:configure-execution-path-scope', {
+      chatId: requireIdentifier(value.chatId, 'Chat'),
+      runId: requireIdentifier(value.runId, 'Execução'),
+      allowedPaths: value.allowedPaths.map((item) => requireNonEmptyString(item, 'Caminho permitido')),
+    });
+  },
+  getExecutionPathScope: (input: { chatId: string; runId: string }) => {
+    const value = requireObject(input, 'Identificação do escopo de caminhos');
+    return invoke('agent:get-execution-path-scope', { chatId: requireIdentifier(value.chatId, 'Chat'), runId: requireIdentifier(value.runId, 'Execução') });
+  },
+  listExecutionPathScopes: (filters?: ApprovalScope) => invoke('agent:list-execution-path-scopes', requireApprovalScope(filters)),
   listExecutionCheckpoints: (filters?: ApprovalScope) => invoke('agent:list-execution-checkpoints', requireApprovalScope(filters)),
   restoreExecutionCheckpoint: (input: { checkpointId: string; chatId: string; runId: string }) => {
     const value = requireObject(input, 'Identificação do checkpoint');
