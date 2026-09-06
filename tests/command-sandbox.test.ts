@@ -18,6 +18,10 @@ async function write(root: string, relative: string, content: string): Promise<v
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-command-sandbox-test-'));
   await write(root, 'a.txt', 'base');
+  await write(root, '.env', 'SECRET=top-secret');
+  await write(root, '.env.example', 'SECRET=replace-me');
+  await write(root, '.npmrc', '//registry.npmjs.org/:_authToken=secret');
+  await write(root, '.ssh/id_ed25519', 'private-key');
   await write(root, '.git/config', 'git-private');
   await write(root, 'dist/stale.txt', 'stale');
   await write(root, 'node_modules/example/index.js', 'module.exports = 42;');
@@ -39,7 +43,7 @@ async function fixture() {
   };
 }
 
-test('materialização aplica o estado final do shadow sem copiar Git ou outputs gerados', async () => {
+test('materialização aplica o estado final do shadow sem copiar Git, outputs ou arquivos sensíveis', async () => {
   const fx = await fixture();
   const diffs = new DiffRuntime();
   try {
@@ -51,7 +55,11 @@ test('materialização aplica o estado final do shadow sem copiar Git ou outputs
     try {
       assert.equal(await fs.readFile(path.join(sandbox.rootPath, 'a.txt'), 'utf8'), 'shadow');
       assert.equal(await fs.readFile(path.join(sandbox.rootPath, 'created.txt'), 'utf8'), 'created');
+      assert.equal(await fs.readFile(path.join(sandbox.rootPath, '.env.example'), 'utf8'), 'SECRET=replace-me');
       assert.equal(await fs.readFile(path.join(sandbox.rootPath, 'node_modules/example/index.js'), 'utf8'), 'module.exports = 42;');
+      await assert.rejects(fs.access(path.join(sandbox.rootPath, '.env')));
+      await assert.rejects(fs.access(path.join(sandbox.rootPath, '.npmrc')));
+      await assert.rejects(fs.access(path.join(sandbox.rootPath, '.ssh')));
       await assert.rejects(fs.access(path.join(sandbox.rootPath, '.git')));
       await assert.rejects(fs.access(path.join(sandbox.rootPath, 'dist')));
 
@@ -64,6 +72,49 @@ test('materialização aplica o estado final do shadow sem copiar Git ou outputs
       await sandbox.cleanup();
       await assert.rejects(fs.access(temporaryRoot));
     }
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test('materialização não segue alias interno para conteúdo sensível', async (t) => {
+  const fx = await fixture();
+  try {
+    const link = path.join(fx.root, 'safe-credentials');
+    try {
+      await fs.symlink(path.join(fx.root, '.ssh'), link, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EPERM' || code === 'EACCES' || code === 'ENOTSUP') {
+        t.skip(`Links não suportados neste runner: ${code}`);
+        return;
+      }
+      throw error;
+    }
+
+    const materializer = new CommandSandboxMaterializer(fx.projects);
+    const sandbox = await materializer.materialize('project-a', []);
+    try {
+      await assert.rejects(fs.access(path.join(sandbox.rootPath, 'safe-credentials')));
+    } finally {
+      await sandbox.cleanup();
+    }
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test('materialização rejeita shadow que tente reintroduzir caminho sensível', async () => {
+  const fx = await fixture();
+  const diffs = new DiffRuntime();
+  try {
+    const materializer = new CommandSandboxMaterializer(fx.projects);
+    await assert.rejects(
+      () => materializer.materialize('project-a', [
+        diffs.create('.env', 'modified', 'SECRET=top-secret', 'SECRET=changed'),
+      ]),
+      /caminho sensível/i,
+    );
   } finally {
     await fx.cleanup();
   }

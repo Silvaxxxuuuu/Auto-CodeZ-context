@@ -6,6 +6,7 @@ import type { ProjectRecord } from '../ai/types';
 import type { ExecutionShadowWorkspaceRuntime } from '../execution-shadow-workspace';
 import { compactShadowWorkspaceChanges } from '../shadow-workspace-publication';
 import { CommandRuntime, SYSTEM_PROJECT_ID, type CommandResult, type CommandRunOptions } from './command-runtime';
+import { WorkspacePathPolicy } from './workspace-path-policy';
 
 const ignoredSegments = new Set(['.git', '.vite', '.test-dist', 'dist', 'build', 'out', 'coverage']);
 
@@ -27,7 +28,20 @@ function safeRelativePath(value: string): string {
   return normalized;
 }
 
+function normalizeRelativePath(value: string): string {
+  return value.replaceAll('\\', '/').replace(/^\.\//, '');
+}
+
+function isAllowedSandboxSource(relative: string, policy: WorkspacePathPolicy): boolean {
+  const normalized = normalizeRelativePath(relative);
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.some((segment) => ignoredSegments.has(segment.toLowerCase()))) return false;
+  return policy.evaluate('read_file', [normalized]).decision === 'allow';
+}
+
 export class CommandSandboxMaterializer {
+  private readonly pathPolicy = new WorkspacePathPolicy();
+
   constructor(private readonly projects: () => Promise<ProjectRecord[]>) {}
 
   async materialize(projectId: string, changes: ReturnType<typeof compactShadowWorkspaceChanges>): Promise<MaterializedCommandSandbox> {
@@ -51,13 +65,15 @@ export class CommandSandboxMaterializer {
         filter: async (source) => {
           const relative = path.relative(sourceRoot, source);
           if (!relative) return true;
-          const segments = relative.split(path.sep);
-          if (segments.some((segment) => ignoredSegments.has(segment))) return false;
+          if (!isAllowedSandboxSource(relative, this.pathPolicy)) return false;
           try {
             const stat = await fs.lstat(source);
             if (!stat.isSymbolicLink()) return true;
             const target = await fs.realpath(source);
-            return isInside(sourceRoot, target);
+            if (!isInside(sourceRoot, target)) return false;
+            const targetRelative = path.relative(sourceRoot, target);
+            if (!targetRelative) return false;
+            return isAllowedSandboxSource(targetRelative, this.pathPolicy);
           } catch {
             return false;
           }
@@ -66,6 +82,9 @@ export class CommandSandboxMaterializer {
 
       for (const change of compactShadowWorkspaceChanges(changes)) {
         const relative = safeRelativePath(change.path);
+        if (this.pathPolicy.evaluate('read_file', [relative]).decision !== 'allow') {
+          throw new Error('Shadow Workspace contém caminho sensível não materializável no command sandbox.');
+        }
         const destination = path.resolve(sandboxRoot, relative);
         if (!isInside(sandboxRoot, destination)) throw new Error('Alteração escapou do command sandbox.');
 
