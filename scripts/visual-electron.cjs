@@ -1,0 +1,199 @@
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { _electron: electron } = require('playwright');
+
+const root = path.resolve(__dirname, '..');
+const outputDir = path.resolve(root, process.env.AUTO_CODEZ_VISUAL_DIR || 'artifacts/visual');
+const electronExecutable = require('electron');
+
+const results = [];
+const pageErrors = [];
+const consoleErrors = [];
+let electronApp;
+let page;
+
+function errorText(error) {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+async function screenshot(name) {
+  await page.waitForTimeout(220);
+  await page.screenshot({
+    path: path.join(outputDir, `${name}.png`),
+    animations: 'disabled',
+  });
+}
+
+async function assertHealthy() {
+  const failureMarker = page.locator('#auto-codez-module-failures');
+  if (await failureMarker.count()) {
+    const text = (await failureMarker.first().innerText()).trim();
+    throw new Error(text || 'Um módulo da interface falhou ao inicializar.');
+  }
+}
+
+async function step(name, action) {
+  try {
+    await action();
+    await assertHealthy();
+    await screenshot(name);
+    results.push({ name, status: 'passed' });
+  } catch (error) {
+    const message = errorText(error);
+    results.push({ name, status: 'failed', error: message });
+    try {
+      if (page && !page.isClosed()) await screenshot(`falha-${name}`);
+    } catch {}
+  }
+}
+
+async function waitForText(selector, text) {
+  const locator = page.locator(selector).filter({ hasText: text }).first();
+  await locator.waitFor({ state: 'visible', timeout: 15000 });
+}
+
+async function closeTransientUi() {
+  await page.keyboard.press('Escape').catch(() => {});
+  const terminalClose = page.locator('#terminal-close');
+  if (await terminalClose.count()) {
+    const panel = page.locator('.terminal-panel.open');
+    if (await panel.count()) await terminalClose.click().catch(() => {});
+  }
+  await page.waitForTimeout(100);
+}
+
+async function main() {
+  await fs.rm(outputDir, { recursive: true, force: true });
+  await fs.mkdir(outputDir, { recursive: true });
+
+  electronApp = await electron.launch({
+    executablePath: electronExecutable,
+    args: ['.'],
+    cwd: root,
+    env: {
+      ...process.env,
+      AUTO_CODEZ_VISUAL_TEST: '1',
+      ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+    },
+    timeout: 60000,
+  });
+
+  page = await electronApp.firstWindow({ timeout: 60000 });
+  page.setDefaultTimeout(15000);
+  page.on('pageerror', (error) => pageErrors.push(errorText(error)));
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+
+  await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30000 });
+  await page.locator('.rail-button[data-panel="chats"]').waitFor({ state: 'visible' });
+  await page.locator('.rail-button[data-panel="projects"]').waitFor({ state: 'visible' });
+  await page.locator('.rail-button[data-panel="plugins"]').waitFor({ state: 'visible' });
+  await page.locator('.terminal-rail-button').waitFor({ state: 'visible' });
+  await page.locator('.api-key-rail-button').waitFor({ state: 'visible' });
+  await page.locator('#ac-app-settings').waitFor({ state: 'visible' });
+  await page.evaluate(() => document.fonts.ready);
+  await page.addStyleTag({
+    content: '*{animation-duration:0s!important;transition-duration:0s!important;caret-color:transparent!important}',
+  });
+  await assertHealthy();
+
+  await step('aba-home-chats', async () => {
+    await closeTransientUi();
+    await page.locator('.rail-button[data-panel="chats"]').click();
+    await waitForText('.panel-title', 'Chats');
+  });
+
+  await step('aba-projetos', async () => {
+    await closeTransientUi();
+    await page.locator('.rail-button[data-panel="projects"]').click();
+    await waitForText('.panel-title', 'Projetos');
+  });
+
+  await step('aba-plugins', async () => {
+    await closeTransientUi();
+    await page.locator('.rail-button[data-panel="plugins"]').click();
+    await waitForText('.panel-title', 'Plugins');
+  });
+
+  await step('aba-terminal', async () => {
+    await closeTransientUi();
+    await page.locator('.terminal-rail-button').click();
+    await page.locator('.terminal-panel.open').waitFor({ state: 'visible' });
+    await waitForText('.terminal-title', 'TERMINAL');
+    await page.waitForTimeout(500);
+  });
+
+  await step('aba-api-keys', async () => {
+    await closeTransientUi();
+    await page.locator('.api-key-rail-button').click();
+    await page.locator('.api-key-manager-backdrop').waitFor({ state: 'visible' });
+    await waitForText('#api-key-manager-title', 'API Keys');
+  });
+
+  await closeTransientUi();
+
+  await step('aba-perfil', async () => {
+    await page.locator('.rail-button[data-action="profile"]').click();
+    await page.locator('.profile-overlay').waitFor({ state: 'visible' });
+    await waitForText('.profile-header h1', 'Perfil');
+  });
+
+  await closeTransientUi();
+
+  await step('aba-configuracoes-geral', async () => {
+    await page.locator('#ac-app-settings').click();
+    await page.locator('.settings-overlay').waitFor({ state: 'visible' });
+    await waitForText('.settings-section-header h2', 'Geral');
+  });
+
+  const settingsSections = [
+    ['ai', 'Inteligência', 'aba-configuracoes-inteligencia'],
+    ['editor', 'Editor', 'aba-configuracoes-editor'],
+    ['terminal', 'Terminal', 'aba-configuracoes-terminal'],
+    ['security', 'Segurança', 'aba-configuracoes-seguranca'],
+    ['sync', 'Sincronização', 'aba-configuracoes-sincronizacao'],
+  ];
+
+  for (const [id, title, name] of settingsSections) {
+    await step(name, async () => {
+      const overlay = page.locator('.settings-overlay');
+      if (!(await overlay.count())) {
+        await page.locator('#ac-app-settings').click();
+        await overlay.waitFor({ state: 'visible' });
+      }
+      await page.locator(`[data-settings-section="${id}"]`).click();
+      await waitForText('.settings-section-header h2', title);
+    });
+  }
+
+  await closeTransientUi();
+
+  const manifest = {
+    generatedAt: new Date().toISOString(),
+    platform: process.platform,
+    arch: process.arch,
+    viewport: await page.evaluate(() => ({ width: innerWidth, height: innerHeight, devicePixelRatio })),
+    results,
+    pageErrors,
+    consoleErrors,
+  };
+
+  await fs.writeFile(path.join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  await fs.writeFile(path.join(outputDir, 'console-errors.txt'), `${consoleErrors.join('\n')}\n`, 'utf8');
+  await fs.writeFile(path.join(outputDir, 'page-errors.txt'), `${pageErrors.join('\n')}\n`, 'utf8');
+
+  const failed = results.filter((item) => item.status === 'failed');
+  if (pageErrors.length || failed.length) {
+    throw new Error(`Fluxo visual falhou: ${failed.length} etapa(s) com falha e ${pageErrors.length} page error(s).`);
+  }
+}
+
+main()
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    if (electronApp) await electronApp.close().catch(() => {});
+  });
