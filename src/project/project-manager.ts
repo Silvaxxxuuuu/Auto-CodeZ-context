@@ -2,12 +2,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectRecord } from '../ai/types';
+import { WorkspacePathPolicy } from '../agent/workspace-path-policy';
 
 const STATE_FILE = 'projects.json';
 const MAX_CONTEXT_FILES = 80;
 const MAX_FILE_BYTES = 256 * 1024;
+const automaticContextPathPolicy = new WorkspacePathPolicy();
 
 interface ProjectStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
+type ProjectContextPathFilter = (relativePath: string) => boolean | Promise<boolean>;
 
 export class ProjectManager {
   private projects: ProjectRecord[] = [];
@@ -42,10 +45,16 @@ export class ProjectManager {
     return this.list();
   }
 
-  async buildContext(projectId: string): Promise<string> {
+  async buildContext(projectId: string, includePath?: ProjectContextPathFilter): Promise<string> {
     const project = this.require(projectId);
     const files = await this.scan(project.rootPath);
-    const selected = files.slice(0, MAX_CONTEXT_FILES);
+    const selected: string[] = [];
+    for (const relative of files) {
+      if (selected.length >= MAX_CONTEXT_FILES) break;
+      if (automaticContextPathPolicy.evaluate('read_file', [relative]).decision !== 'allow') continue;
+      if (includePath && !(await includePath(relative))) continue;
+      selected.push(relative);
+    }
     const chunks: string[] = [`Workspace: ${project.name}\nRoot: ${project.rootPath}`];
     for (const relative of selected) {
       const filePath = path.join(project.rootPath, relative);
