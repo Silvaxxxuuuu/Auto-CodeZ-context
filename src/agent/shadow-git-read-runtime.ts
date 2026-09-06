@@ -29,6 +29,11 @@ type ShadowGitSandbox = {
   cleanup(): Promise<void>;
 };
 
+type MaterializedShadowGit = {
+  context: RepositoryContext;
+  sandbox: ShadowGitSandbox;
+};
+
 function isInside(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -124,9 +129,8 @@ export class ShadowGitReadRuntime {
   ) {}
 
   async status(chatId: string, runId: string, projectId: string): Promise<GitStatus> {
-    const sandbox = await this.materialize(chatId, runId, projectId);
+    const { context, sandbox } = await this.materialize(chatId, runId, projectId);
     try {
-      const context = await this.repositoryContext(projectId);
       const output = await this.gitInSandbox(context, sandbox, [
         'status',
         '--porcelain=v1',
@@ -140,9 +144,8 @@ export class ShadowGitReadRuntime {
   }
 
   async diff(chatId: string, runId: string, projectId: string): Promise<string> {
-    const sandbox = await this.materialize(chatId, runId, projectId);
+    const { context, sandbox } = await this.materialize(chatId, runId, projectId);
     try {
-      const context = await this.repositoryContext(projectId);
       return this.gitInSandbox(context, sandbox, [
         'diff',
         '--no-ext-diff',
@@ -200,7 +203,7 @@ export class ShadowGitReadRuntime {
     };
   }
 
-  private async materialize(chatId: string, runId: string, projectId: string): Promise<ShadowGitSandbox> {
+  private async materialize(chatId: string, runId: string, projectId: string): Promise<MaterializedShadowGit> {
     const shadow = this.shadows.get(chatId, runId);
     if (!shadow) throw new Error('Shadow Workspace ativo não encontrado para a visão Git isolada.');
     if (shadow.projectId !== projectId) throw new Error('Shadow Workspace pertence a outro projeto.');
@@ -262,10 +265,13 @@ export class ShadowGitReadRuntime {
 
       ready = true;
       return {
-        rootPath: sandboxRoot,
-        indexPath: sandboxIndex,
-        cleanup: async () => {
-          await fs.rm(temporaryRoot, { recursive: true, force: true });
+        context,
+        sandbox: {
+          rootPath: sandboxRoot,
+          indexPath: sandboxIndex,
+          cleanup: async () => {
+            await fs.rm(temporaryRoot, { recursive: true, force: true });
+          },
         },
       };
     } finally {
