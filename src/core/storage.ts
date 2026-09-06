@@ -19,6 +19,7 @@ const SENSITIVE_JSON_FILES = new Set([
   'execution-task-capsules.json',
   'execution-timeline.json',
   'execution-change-budget.json',
+  'execution-path-scopes.json',
   'execution-shadow-workspaces.json',
 ]);
 
@@ -89,7 +90,6 @@ export class LocalStorage {
       const encrypted = await this.readEncrypted(name);
       if (encrypted !== null) return JSON.parse(encrypted) as T;
     } catch {
-      // A legacy plaintext file is migrated on the next write.
     }
 
     return this.readPlain(name, fallback);
@@ -118,13 +118,11 @@ export class LocalStorage {
         try {
           await handle.close();
         } catch {
-          // Cleanup is best-effort after a failed persistence operation.
         }
       }
       try {
         await fs.rm(temporary, { force: true });
       } catch {
-        // Cleanup is best-effort after a failed persistence operation.
       }
     }
   }
@@ -167,13 +165,11 @@ export class LocalStorage {
         try {
           await handle.close();
         } catch {
-          // Cleanup is best-effort after a failed persistence operation.
         }
       }
       try {
         await fs.rm(temporary, { force: true });
       } catch {
-        // Cleanup is best-effort after a failed persistence operation.
       }
     }
   }
