@@ -12,6 +12,7 @@ function fakeWorkspace() {
   let reads = 0;
   let writes = 0;
   const workspace = {
+    canonicalRelativePath: async (_projectId: string, requestedPath: string) => requestedPath.trim().replaceAll('\\', '/').replace(/^\.\//, '') || '.',
     exists: async () => true,
     readFile: async () => {
       reads += 1;
