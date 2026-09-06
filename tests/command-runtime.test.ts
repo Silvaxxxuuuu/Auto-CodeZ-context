@@ -7,7 +7,7 @@ import { CommandRuntime, SYSTEM_PROJECT_ID } from '../src/agent/command-runtime'
 import { runWithAbortSignal } from '../src/ai/request-cancellation';
 import type { ProjectRecord } from '../src/ai/types';
 
-async function createProject(): Promise<{ root: string; runtime: CommandRuntime; cleanup: () => Promise<void> }> {
+async function createProject(parentEnvironment: NodeJS.ProcessEnv = process.env): Promise<{ root: string; runtime: CommandRuntime; cleanup: () => Promise<void> }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-command-test-'));
   const project: ProjectRecord = {
     id: 'project-test',
@@ -18,7 +18,7 @@ async function createProject(): Promise<{ root: string; runtime: CommandRuntime;
   };
   return {
     root,
-    runtime: new CommandRuntime(async () => [project]),
+    runtime: new CommandRuntime(async () => [project], parentEnvironment),
     cleanup: () => fs.rm(root, { recursive: true, force: true }),
   };
 }
@@ -56,6 +56,30 @@ test('command runtime uses the project directory as the working directory', asyn
     const result = await project.runtime.run('project-test', nodeCommand("process.stdout.write(process.cwd())"));
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout.trim(), await fs.realpath(project.root));
+  } finally {
+    await project.cleanup();
+  }
+});
+
+test('command runtime filters sensitive parent environment without dropping normal variables', async () => {
+  const project = await createProject({
+    ...process.env,
+    AUTO_CODEZ_TEST_API_KEY: 'api-secret',
+    AUTO_CODEZ_TEST_TOKEN: 'token-secret',
+    AUTO_CODEZ_TEST_SAFE_FLAG: 'safe-value',
+    SSH_AUTH_SOCK: 'secret-socket',
+    NPM_CONFIG_USERCONFIG: 'secret-config',
+  });
+  try {
+    const expression = "process.stdout.write(JSON.stringify({apiKey:process.env.AUTO_CODEZ_TEST_API_KEY??null,token:process.env.AUTO_CODEZ_TEST_TOKEN??null,safe:process.env.AUTO_CODEZ_TEST_SAFE_FLAG??null,ssh:process.env.SSH_AUTH_SOCK??null,npmConfig:process.env.NPM_CONFIG_USERCONFIG??null}))";
+    const result = await project.runtime.run('project-test', nodeCommand(expression));
+    assert.deepEqual(JSON.parse(result.stdout.trim()), {
+      apiKey: null,
+      token: null,
+      safe: 'safe-value',
+      ssh: null,
+      npmConfig: null,
+    });
   } finally {
     await project.cleanup();
   }

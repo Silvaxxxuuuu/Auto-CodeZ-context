@@ -32,6 +32,33 @@ export interface CommandResult {
 const MAX_OUTPUT_CHARS = 2_000_000;
 const TIMEOUT_MS = 10 * 60 * 1000;
 const TERMINATION_GRACE_MS = 2_000;
+const blockedEnvironmentNames = new Set([
+  'SSH_AUTH_SOCK',
+  'SSH_AGENT_PID',
+  'GIT_ASKPASS',
+  'SSH_ASKPASS',
+  'NPM_CONFIG_USERCONFIG',
+  'AWS_SHARED_CREDENTIALS_FILE',
+  'AWS_CONFIG_FILE',
+  'KUBECONFIG',
+  'DOCKER_CONFIG',
+  'CLOUDSDK_CONFIG',
+  'AZURE_CONFIG_DIR',
+  'NETRC',
+]);
+const sensitiveEnvironmentNamePattern = /(?:^|[_-])(?:token|auth[_-]?token|authtoken|secret|password|passwd|passphrase|credentials?|api[_-]?key|access[_-]?key|private[_-]?key)(?:$|[_-])/i;
+
+function createCommandEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+    const normalizedName = name.toUpperCase();
+    if (blockedEnvironmentNames.has(normalizedName) || sensitiveEnvironmentNamePattern.test(normalizedName)) continue;
+    environment[name] = value;
+  }
+  environment.CI = source.CI ?? '1';
+  return environment;
+}
 
 function terminateProcessTree(child: ChildProcess): void {
   if (child.killed) return;
@@ -55,9 +82,9 @@ function terminateProcessTree(child: ChildProcess): void {
   }
 }
 
-function commandForPlatform(command: string): { executable: string; args: string[] } {
+function commandForPlatform(command: string, environment: NodeJS.ProcessEnv): { executable: string; args: string[] } {
   if (process.platform === 'win32') {
-    const comspec = process.env.ComSpec ?? 'cmd.exe';
+    const comspec = environment.ComSpec ?? environment.COMSPEC ?? 'cmd.exe';
     return { executable: comspec, args: ['/d', '/s', '/c', `chcp 65001>nul & ${command}`] };
   }
   return { executable: '/bin/sh', args: ['-lc', command] };
@@ -77,7 +104,10 @@ function createAbortError(signal?: AbortSignal): Error {
 }
 
 export class CommandRuntime {
-  constructor(private readonly projects: () => Promise<ProjectRecord[]>) {}
+  constructor(
+    private readonly projects: () => Promise<ProjectRecord[]>,
+    private readonly parentEnvironment: NodeJS.ProcessEnv = process.env,
+  ) {}
 
   private async project(projectId: string): Promise<ProjectRecord> {
     const project = (await this.projects()).find((item) => item.id === projectId);
@@ -95,7 +125,8 @@ export class CommandRuntime {
       ? await fs.realpath(getSystemWorkspaceRoot())
       : await fs.realpath(path.resolve((await this.project(projectId)).rootPath));
     executionSignal?.throwIfAborted();
-    const { executable, args } = commandForPlatform(normalizedCommand);
+    const environment = createCommandEnvironment(this.parentEnvironment);
+    const { executable, args } = commandForPlatform(normalizedCommand, environment);
     const startedAt = Date.now();
 
     const result = await new Promise<CommandResult>((resolve, reject) => {
@@ -105,7 +136,7 @@ export class CommandRuntime {
         windowsHide: true,
         windowsVerbatimArguments: process.platform === 'win32',
         detached: process.platform !== 'win32',
-        env: { ...process.env, CI: process.env.CI ?? '1' },
+        env: environment,
       });
       let stdout = '';
       let stderr = '';
