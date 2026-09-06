@@ -152,7 +152,7 @@ async function renderSection(id: SectionId): Promise<void> {
   }
 
   if (id === 'security') {
-    const keys = bridge.listApiKeys ? await bridge.listApiKeys().catch(() => []) : [];
+    const keys = bridge.listApiKeys ? await bridge.listApiKeys().catch((): unknown[] => []) : [];
     if (token !== renderToken) return;
     const card = `<section class="settings-card">${[
       row('Credenciais de IA', 'Chaves cadastradas atualmente no cofre local do Auto CodeZ.', badge(`${keys.length} cadastrada${keys.length === 1 ? '' : 's'}`)),
