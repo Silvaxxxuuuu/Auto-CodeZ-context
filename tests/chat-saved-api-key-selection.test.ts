@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ChatManager } from '../src/ai/chat-manager';
+import { ChatManager, UNCONFIGURED_MODEL_ID, UNCONFIGURED_PROVIDER_ID } from '../src/ai/chat-manager';
 import { ProviderManager } from '../src/ai/provider-manager';
-import type { AIModel, AIProviderAdapter } from '../src/ai/types';
+import type { AIModel, AIProviderAdapter, ChatRecord } from '../src/ai/types';
 
 class MemoryStorage {
   private readonly values = new Map<string, unknown>();
@@ -19,6 +19,51 @@ const adapter: AIProviderAdapter = {
   listModels: async (config) => [{ id: config.selectedModel || 'model', name: config.selectedModel || 'model', providerId: config.id, capabilities: ['text', 'streaming'] } as AIModel],
   send: async () => ({ content: 'ok', model: 'model', providerId: 'openai' }),
 };
+
+test('unconfigured chat keeps a valid model sentinel so intelligence can be updated before provider setup', async () => {
+  const storage = new MemoryStorage();
+  const manager = new ChatManager(storage);
+  await manager.init();
+
+  const created = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
+  assert.equal(created.providerId, UNCONFIGURED_PROVIDER_ID);
+  assert.equal(created.model, UNCONFIGURED_MODEL_ID);
+
+  const updated = await manager.updateSettings({
+    chatId: created.id,
+    providerId: created.providerId,
+    model: created.model,
+    intelligence: 'high',
+    permissionLevel: 'ask',
+  });
+
+  assert.equal(updated.intelligence, 'high');
+  assert.equal(updated.permissionLevel, 'ask');
+  assert.equal(updated.model, UNCONFIGURED_MODEL_ID);
+});
+
+test('initialization migrates legacy unconfigured chats with a blank model', async () => {
+  const storage = new MemoryStorage();
+  const legacy: ChatRecord = {
+    id: 'legacy-unconfigured',
+    title: 'Novo chat',
+    providerId: UNCONFIGURED_PROVIDER_ID,
+    model: '',
+    intelligence: 'normal',
+    permissionLevel: 'safe',
+    messages: [],
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  await storage.write('chats.json', [legacy]);
+
+  const manager = new ChatManager(storage);
+  await manager.init();
+
+  assert.equal((await manager.list())[0]?.model, UNCONFIGURED_MODEL_ID);
+  const persisted = await storage.read<ChatRecord[]>('chats.json', []);
+  assert.equal(persisted[0]?.model, UNCONFIGURED_MODEL_ID);
+});
 
 test('chat persists the exact saved API key selection', async () => {
   const storage = new MemoryStorage();

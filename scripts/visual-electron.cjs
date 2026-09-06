@@ -97,6 +97,27 @@ async function assertScrollable(selector) {
   }
 }
 
+async function assertContentReachable(containerSelector, contentSelector) {
+  const metrics = await page.evaluate(({ containerSelector, contentSelector }) => {
+    const container = document.querySelector(containerSelector);
+    const content = document.querySelector(contentSelector);
+    if (!(container instanceof HTMLElement) || !(content instanceof HTMLElement)) return null;
+    const containerRect = container.getBoundingClientRect();
+    const contentRect = content.getBoundingClientRect();
+    return {
+      clientHeight: container.clientHeight,
+      scrollHeight: container.scrollHeight,
+      containerBottom: containerRect.bottom,
+      contentBottom: contentRect.bottom,
+    };
+  }, { containerSelector, contentSelector });
+  if (!metrics) throw new Error(`Não foi possível medir ${containerSelector} / ${contentSelector}.`);
+  if (metrics.scrollHeight > metrics.clientHeight + 1) return;
+  if (metrics.contentBottom > metrics.containerBottom + 1) {
+    throw new Error(`${contentSelector} está cortado dentro de ${containerSelector}.`);
+  }
+}
+
 async function step(name, action) {
   try {
     await action();
@@ -419,12 +440,89 @@ async function main() {
     await waitForText('.profile-header h1', 'Perfil');
   });
 
+  await step('funcional-perfil-persistencia', async () => {
+    const overlay = page.locator('.profile-overlay');
+    if (!(await overlay.count())) {
+      await page.locator('.rail-button[data-action="profile"]').click();
+      await overlay.waitFor({ state: 'visible' });
+    }
+    const nameInput = page.locator('[data-profile-name-input]');
+    await nameInput.fill('Visual Test');
+    await page.locator('[data-profile-local-form] .profile-primary-button').click();
+    await waitForText('[data-profile-save-state]', 'Perfil salvo neste dispositivo.');
+    await page.locator('[data-profile-close]').click();
+    await page.locator('.rail-button[data-action="profile"]').click();
+    await page.locator('.profile-overlay').waitFor({ state: 'visible' });
+    if ((await page.locator('[data-profile-name-input]').inputValue()) !== 'Visual Test') throw new Error('Nome local não persistiu ao reabrir o Perfil.');
+    await waitForText('[data-profile-display-name]', 'Visual Test');
+    await page.locator('[data-profile-name-input]').fill('Usuário local');
+    await page.locator('[data-profile-local-form] .profile-primary-button').click();
+    await waitForText('[data-profile-save-state]', 'Perfil salvo neste dispositivo.');
+  });
+
   await closeTransientUi();
+
+  await step('funcional-inteligencia-persistencia', async () => {
+    await page.locator('.rail-button[data-panel="chats"]').click();
+    await waitForText('.panel-title', 'Chats');
+    await page.locator('.new-item').filter({ hasText: 'Novo chat' }).first().click();
+    const selected = page.locator('.chat-item.selected[data-chat]');
+    await selected.waitFor({ state: 'visible' });
+    const chatId = await selected.getAttribute('data-chat');
+    if (!chatId) throw new Error('Novo chat não recebeu identidade no DOM.');
+    await page.locator('#intelligence-button').click();
+    await page.locator('.intelligence-menu').waitFor({ state: 'visible' });
+    await page.locator('[data-intelligence-option="high"]').click();
+    await waitForText('.intelligence-current', 'Alto');
+    await page.waitForFunction(async (id) => {
+      const state = await window.autoCodez?.getState();
+      const chats = Array.isArray(state?.chats) ? state.chats : [];
+      return chats.some((chat) => chat && typeof chat === 'object' && chat.id === id && chat.intelligence === 'high');
+    }, chatId, { timeout: 15000 });
+  });
+
+  await step('funcional-configuracoes-persistencia', async () => {
+    await page.locator('#ac-app-settings').click();
+    await page.locator('.settings-overlay').waitFor({ state: 'visible' });
+    await waitForText('.settings-section-header h2', 'Geral');
+    await page.locator('[data-settings-control="density"]').selectOption('compact');
+    await page.waitForFunction(() => document.documentElement.dataset.acDensity === 'compact');
+    const animationInput = page.locator('[data-settings-control="animations"]');
+    if (!(await animationInput.isChecked())) throw new Error('Animações deveriam começar ativadas no estado visual isolado.');
+    await page.locator('.settings-toggle').click();
+    await page.waitForFunction(() => document.documentElement.classList.contains('ac-reduced-motion'));
+    await page.locator('[data-settings-close]').click();
+    await page.locator('#ac-app-settings').click();
+    await page.locator('.settings-overlay').waitFor({ state: 'visible' });
+    if ((await page.locator('[data-settings-control="density"]').inputValue()) !== 'compact') throw new Error('Densidade não persistiu ao reabrir Settings.');
+    if (await page.locator('[data-settings-control="animations"]').isChecked()) throw new Error('Preferência de animações não persistiu ao reabrir Settings.');
+    await page.locator('[data-settings-control="density"]').selectOption('comfortable');
+    await page.locator('.settings-toggle').click();
+    await page.waitForFunction(() => document.documentElement.dataset.acDensity === 'comfortable' && !document.documentElement.classList.contains('ac-reduced-motion'));
+    await page.locator('[data-settings-close]').click();
+  });
 
   await step('aba-configuracoes-geral', async () => {
     await page.locator('#ac-app-settings').click();
     await page.locator('.settings-overlay').waitFor({ state: 'visible' });
     await waitForText('.settings-section-header h2', 'Geral');
+  });
+
+  await step('funcional-configuracoes-chat', async () => {
+    await page.locator('[data-settings-section="ai"]').click();
+    await waitForText('.settings-section-header h2', 'Inteligência');
+    const intelligence = page.locator('[data-settings-control="chat-intelligence"]');
+    await intelligence.waitFor({ state: 'visible' });
+    if ((await intelligence.inputValue()) !== 'high') throw new Error('Settings não refletiu a Inteligência persistida pelo composer.');
+    const permission = page.locator('[data-settings-control="chat-permission"]');
+    await permission.selectOption('ask');
+    const chatId = await page.locator('.chat-item.selected[data-chat]').getAttribute('data-chat');
+    if (!chatId) throw new Error('Chat selecionado desapareceu durante Settings.');
+    await page.waitForFunction(async (id) => {
+      const state = await window.autoCodez?.getState();
+      const chats = Array.isArray(state?.chats) ? state.chats : [];
+      return chats.some((chat) => chat && typeof chat === 'object' && chat.id === id && chat.permissionLevel === 'ask' && chat.intelligence === 'high');
+    }, chatId, { timeout: 15000 });
   });
 
   const settingsSections = [
@@ -471,7 +569,7 @@ async function main() {
     await page.locator('#ac-app-settings').click();
     await page.locator('.settings-overlay').waitFor({ state: 'visible' });
     await waitForText('.settings-section-header h2', 'Geral');
-    await assertScrollable('.settings-overlay');
+    await assertContentReachable('.settings-overlay', '.settings-page');
   });
 
   await closeTransientUi();
@@ -496,8 +594,8 @@ async function main() {
   await fs.writeFile(path.join(outputDir, 'page-errors.txt'), `${pageErrors.join('\n')}\n`, 'utf8');
 
   const failed = results.filter((item) => item.status === 'failed');
-  if (pageErrors.length || failed.length) {
-    throw new Error(`Fluxo visual falhou: ${failed.length} etapa(s) com falha e ${pageErrors.length} page error(s).`);
+  if (pageErrors.length || consoleErrors.length || failed.length) {
+    throw new Error(`Fluxo visual falhou: ${failed.length} etapa(s) com falha, ${pageErrors.length} page error(s) e ${consoleErrors.length} console error(s).`);
   }
 }
 
