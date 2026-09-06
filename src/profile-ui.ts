@@ -1,7 +1,9 @@
+import { getAppPreferences, updateAppPreferences } from './app-preferences';
+
 const profileProviders = [
-  { id: 'google', name: 'Google', description: 'Use sua conta Google para acessar o Auto CodeZ.', icon: 'globe-2' },
-  { id: 'github', name: 'GitHub', description: 'Vincule sua identidade do GitHub ao mesmo perfil.', icon: 'github' },
-  { id: 'microsoft', name: 'Microsoft', description: 'Adicione sua conta Microsoft como método de acesso.', icon: 'monitor' },
+  { id: 'google', name: 'Google', description: 'Login e sincronização via conta Google.', icon: 'globe-2' },
+  { id: 'github', name: 'GitHub', description: 'Identidade GitHub vinculada à mesma conta Auto CodeZ.', icon: 'github' },
+  { id: 'microsoft', name: 'Microsoft', description: 'Identidade Microsoft vinculada à mesma conta Auto CodeZ.', icon: 'monitor' },
 ];
 
 const icon = (name: string): string => {
@@ -19,6 +21,10 @@ const icon = (name: string): string => {
   return `<svg class="profile-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths['user-round']}</svg>`;
 };
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
+}
+
 function closeLegacyProfileModal(): void {
   document.querySelector<HTMLElement>('#modal-root')?.replaceChildren();
 }
@@ -27,8 +33,11 @@ function renderProfile(): void {
   if (document.querySelector('.profile-overlay')) return;
   const shell = document.querySelector<HTMLElement>('.app-shell');
   if (!shell) return;
-
   closeLegacyProfileModal();
+  const preferences = getAppPreferences();
+  const displayName = escapeHtml(preferences.profile.displayName);
+  const localId = escapeHtml(preferences.profile.id);
+  const platform = escapeHtml(navigator.platform || 'Desktop');
 
   const overlay = document.createElement('section');
   overlay.className = 'profile-overlay';
@@ -39,7 +48,7 @@ function renderProfile(): void {
         <div>
           <div class="profile-eyebrow">CONTA</div>
           <h1>Perfil</h1>
-          <p>Gerencie sua identidade e os métodos usados para acessar o Auto CodeZ.</p>
+          <p>Identidade local funcionando agora; conta cloud e login externo serão conectados sobre esta base.</p>
         </div>
         <button class="profile-close" type="button" data-profile-close title="Fechar perfil" aria-label="Fechar perfil">${icon('x')}</button>
       </header>
@@ -48,53 +57,75 @@ function renderProfile(): void {
         <section class="profile-card profile-identity-card">
           <div class="profile-avatar">${icon('user-round')}</div>
           <div class="profile-identity-copy">
-            <strong>Sua conta Auto CodeZ</strong>
-            <span>Não conectada</span>
-            <small>Conecte uma identidade para sincronizar sua conta entre dispositivos.</small>
+            <strong data-profile-display-name>${displayName}</strong>
+            <span>Perfil local</span>
+            <small>Este perfil permanece disponível offline e será a identidade local vinculada à futura conta Auto CodeZ.</small>
           </div>
-          <span class="profile-status profile-status-neutral">Não conectada</span>
+          <span class="profile-status profile-status-neutral">Local</span>
         </section>
 
         <div class="profile-grid">
           <section class="profile-section">
             <div class="profile-section-heading">
+              <div class="profile-section-icon">${icon('user-round')}</div>
+              <div><h2>Identidade neste dispositivo</h2><p>Edite seu nome local e consulte a identidade persistente desta instalação.</p></div>
+            </div>
+            <form class="profile-local-form" data-profile-local-form>
+              <label><span>Nome de exibição</span><input data-profile-name-input maxlength="80" value="${displayName}" autocomplete="off"></label>
+              <label><span>ID local</span><div class="profile-id-row"><code data-profile-local-id>${localId}</code><button type="button" class="profile-secondary-button enabled" data-profile-copy-id>Copiar</button></div></label>
+              <label><span>Plataforma</span><div class="profile-static-value">${platform}</div></label>
+              <button class="profile-primary-button" type="submit">Salvar perfil</button>
+              <span class="profile-save-state" data-profile-save-state aria-live="polite"></span>
+            </form>
+          </section>
+
+          <section class="profile-section">
+            <div class="profile-section-heading">
               <div class="profile-section-icon">${icon('link')}</div>
-              <div><h2>Contas vinculadas</h2><p>Identidades externas pertencentes à mesma conta Auto CodeZ.</p></div>
+              <div><h2>Conta Auto CodeZ</h2><p>Login externo será ligado ao serviço de conta sem substituir a identidade local.</p></div>
             </div>
             <div class="profile-provider-list">
               ${profileProviders.map((provider) => `
                 <div class="profile-provider-row">
                   <div class="profile-provider-icon">${icon(provider.icon)}</div>
                   <div class="profile-provider-copy"><strong>${provider.name}</strong><span>${provider.description}</span></div>
-                  <button class="profile-secondary-button" type="button" disabled title="A autenticação externa será conectada ao servidor da conta.">Vincular</button>
+                  <button class="profile-secondary-button" type="button" disabled title="Requer o serviço de conta Auto CodeZ.">Em breve</button>
                 </div>
               `).join('')}
             </div>
-            <button class="profile-link-button" type="button" disabled>+ Vincular outra conta</button>
+          </section>
+        </div>
+
+        <div class="profile-grid profile-grid-secondary">
+          <section class="profile-section">
+            <div class="profile-section-heading">
+              <div class="profile-section-icon">${icon('shield-check')}</div>
+              <div><h2>Métodos de acesso</h2><p>Modelo passwordless-first definido para a futura conta sincronizada.</p></div>
+            </div>
+            <div class="profile-method-list">
+              <div class="profile-method-row"><div class="profile-method-icon">${icon('fingerprint')}</div><div><strong>Passkeys</strong><span>Chaves de acesso seguras, sem senha tradicional.</span></div><span class="profile-method-state">Não conectado</span></div>
+              <div class="profile-method-row"><div class="profile-method-icon">${icon('mail')}</div><div><strong>Magic Link</strong><span>Acesso temporário por e-mail.</span></div><span class="profile-method-state">Não conectado</span></div>
+            </div>
           </section>
 
           <section class="profile-section">
             <div class="profile-section-heading">
-              <div class="profile-section-icon">${icon('shield-check')}</div>
-              <div><h2>Métodos de acesso</h2><p>Opções de autenticação sem senha para a mesma conta.</p></div>
+              <div class="profile-section-icon">${icon('monitor')}</div>
+              <div><h2>Este dispositivo</h2><p>A identidade local já persiste sem depender de login ou internet.</p></div>
             </div>
-            <div class="profile-method-list">
-              <div class="profile-method-row"><div class="profile-method-icon">${icon('fingerprint')}</div><div><strong>Passkeys</strong><span>Chaves de acesso para login seguro.</span></div><span class="profile-method-state">Nenhuma</span></div>
-              <div class="profile-method-row"><div class="profile-method-icon">${icon('mail')}</div><div><strong>Magic Link</strong><span>Acesso por link temporário enviado ao e-mail.</span></div><span class="profile-method-state">Não configurado</span></div>
-            </div>
+            <div class="profile-device-summary"><strong>${platform}</strong><span>Perfil local ativo</span><small>Backup e sincronização serão adicionados como camada separada e recuperável.</small></div>
           </section>
         </div>
 
         <section class="profile-note">
           ${icon('shield-check')}
-          <div><strong>Segurança permanece separada do Perfil</strong><span>Sessões, dispositivos conectados, recuperação e eventos de segurança ficarão na área Segurança.</span></div>
+          <div><strong>Conta cloud não é simulada</strong><span>Google, GitHub e Microsoft permanecem claramente indisponíveis até existir autenticação real, sessão e backend de sincronização.</span></div>
         </section>
       </div>
     </div>`;
 
   shell.appendChild(overlay);
-  const railButton = document.querySelector<HTMLElement>('.rail-button[data-action="profile"]');
-  railButton?.classList.add('active');
+  document.querySelector<HTMLElement>('.rail-button[data-action="profile"]')?.classList.add('active');
   overlay.querySelector<HTMLButtonElement>('[data-profile-close]')?.focus();
 }
 
@@ -104,22 +135,56 @@ function closeProfile(): void {
   document.querySelector<HTMLElement>('.rail-button[data-action="profile"]')?.classList.remove('active');
 }
 
+async function copyLocalId(): Promise<void> {
+  const id = getAppPreferences().profile.id;
+  const state = document.querySelector<HTMLElement>('[data-profile-save-state]');
+  try {
+    await navigator.clipboard.writeText(id);
+    if (state) state.textContent = 'ID copiado.';
+  } catch {
+    if (state) state.textContent = 'Não foi possível copiar automaticamente.';
+  }
+}
+
 document.addEventListener('click', (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
-
   if (target.closest('[data-action="profile"]')) {
     event.preventDefault();
     event.stopImmediatePropagation();
     renderProfile();
     return;
   }
-
   if (target.closest('[data-profile-close]')) {
     event.preventDefault();
     event.stopImmediatePropagation();
     closeProfile();
+    return;
   }
+  if (target.closest('[data-profile-copy-id]')) {
+    event.preventDefault();
+    void copyLocalId();
+  }
+}, true);
+
+document.addEventListener('submit', (event) => {
+  const form = event.target instanceof HTMLFormElement ? event.target : null;
+  if (!form?.matches('[data-profile-local-form]')) return;
+  event.preventDefault();
+  const input = form.querySelector<HTMLInputElement>('[data-profile-name-input]');
+  const state = form.querySelector<HTMLElement>('[data-profile-save-state]');
+  const displayName = input?.value.trim() || '';
+  if (!displayName) {
+    if (state) state.textContent = 'Informe um nome de exibição.';
+    input?.focus();
+    return;
+  }
+  const current = getAppPreferences();
+  const next = updateAppPreferences({ profile: { ...current.profile, displayName } });
+  const heading = document.querySelector<HTMLElement>('[data-profile-display-name]');
+  if (heading) heading.textContent = next.profile.displayName;
+  if (input) input.value = next.profile.displayName;
+  if (state) state.textContent = 'Perfil salvo neste dispositivo.';
 }, true);
 
 document.addEventListener('keydown', (event) => {
