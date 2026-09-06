@@ -14,6 +14,7 @@ const CDP_CONNECT_TIMEOUT_MS = 60 * 1000;
 const CLOSE_TIMEOUT_MS = 10 * 1000;
 const PROCESS_LOG_LIMIT = 512 * 1024;
 const VISUAL_VIEWPORT = { width: 1440, height: 900 };
+const COMPACT_VIEWPORT = { width: 1008, height: 689 };
 
 const results = [];
 const pageErrors = [];
@@ -83,6 +84,16 @@ async function assertNoHorizontalOverflow() {
   const bodyOverflow = metrics.bodyScrollWidth - metrics.bodyClientWidth;
   if (documentOverflow > 1 || bodyOverflow > 1) {
     throw new Error(`Overflow horizontal detectado: document=${documentOverflow}px body=${bodyOverflow}px viewport=${metrics.viewportWidth}px.`);
+  }
+}
+
+async function assertScrollable(selector) {
+  const metrics = await page.locator(selector).evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  if (metrics.scrollHeight <= metrics.clientHeight + 1) {
+    throw new Error(`${selector} deveria estar scrollável no viewport compacto, mas scrollHeight=${metrics.scrollHeight}px e clientHeight=${metrics.clientHeight}px.`);
   }
 }
 
@@ -437,6 +448,33 @@ async function main() {
   }
 
   await closeTransientUi();
+  await page.setViewportSize(COMPACT_VIEWPORT);
+  await page.waitForTimeout(180);
+
+  await step('compact-home-chats', async () => {
+    await closeTransientUi();
+    await page.locator('.rail-button[data-panel="chats"]').click();
+    await waitForText('.panel-title', 'Chats');
+  });
+
+  await step('compact-perfil', async () => {
+    await closeTransientUi();
+    await page.locator('.rail-button[data-action="profile"]').click();
+    await page.locator('.profile-overlay').waitFor({ state: 'visible' });
+    await waitForText('.profile-header h1', 'Perfil');
+    await assertScrollable('.profile-overlay');
+  });
+
+  await closeTransientUi();
+
+  await step('compact-configuracoes-geral', async () => {
+    await page.locator('#ac-app-settings').click();
+    await page.locator('.settings-overlay').waitFor({ state: 'visible' });
+    await waitForText('.settings-section-header h2', 'Geral');
+    await assertScrollable('.settings-overlay');
+  });
+
+  await closeTransientUi();
 
   const manifest = {
     generatedAt: new Date().toISOString(),
@@ -446,6 +484,7 @@ async function main() {
     platform: process.platform,
     arch: process.arch,
     targetViewport: VISUAL_VIEWPORT,
+    compactViewport: COMPACT_VIEWPORT,
     viewport: await page.evaluate(() => ({ width: innerWidth, height: innerHeight, devicePixelRatio })),
     results,
     pageErrors,
