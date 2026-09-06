@@ -45,7 +45,7 @@ jobs:
       - name: Capture visual flow
         env:
           AUTO_CODEZ_VISUAL_DIR: artifacts/visual
-        run: node scripts/visual-electron.cjs
+        run: npm run test:visual
 
       - name: Upload visual screenshots
         if: always()
