@@ -1,0 +1,57 @@
+name: Visual Auto CodeZ
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+      - 'fix/**'
+  pull_request:
+    branches:
+      - main
+      - 'feature/**'
+      - 'fix/**'
+
+permissions:
+  contents: read
+
+jobs:
+  visual:
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Install pinned Playwright runtime
+        run: npm install --no-save --package-lock=false playwright@1.61.0
+
+      - name: Rebuild node-pty for Electron 44
+        run: npx electron-rebuild -f -w node-pty -v 44.0.0 -a x64 --build-from-source
+
+      - name: Build Electron application
+        run: npm run package
+
+      - name: Capture visual flow
+        env:
+          AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+        run: node scripts/visual-electron.cjs
+
+      - name: Upload visual screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-codez-visual-${{ github.run_id }}
+          path: artifacts/visual
+          if-no-files-found: error
+          retention-days: 14
