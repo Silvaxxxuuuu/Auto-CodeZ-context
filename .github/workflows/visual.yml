@@ -15,6 +15,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: visual-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   visual:
     runs-on: windows-2022
@@ -34,7 +38,7 @@ jobs:
         run: npm ci
 
       - name: Install pinned Playwright runtime
-        run: npm install --no-save --package-lock=false playwright@1.61.0
+        run: npm install --prefix .visual-tools --no-save --package-lock=false playwright@1.61.0
 
       - name: Rebuild node-pty for Electron 44
         run: npx electron-rebuild -f -w node-pty -v 44.0.0 -a x64 --build-from-source
@@ -42,9 +46,19 @@ jobs:
       - name: Build Electron application
         run: npm run package
 
+      - name: Resolve packaged executable
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path (Join-Path $PWD 'out') -Filter 'Auto CodeZ.exe' -Recurse -File | Select-Object -First 1
+          if (-not $exe) {
+            throw 'Auto CodeZ.exe was not found in the Electron Forge package output.'
+          }
+          "AUTO_CODEZ_ELECTRON_EXECUTABLE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Capture visual flow
         env:
           AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
         run: npm run test:visual
 
       - name: Upload visual screenshots
