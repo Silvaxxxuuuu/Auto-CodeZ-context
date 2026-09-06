@@ -1,6 +1,7 @@
 name: Visual Auto CodeZ
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -16,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: visual-${{ github.workflow }}-${{ github.ref }}
+  group: visual-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
