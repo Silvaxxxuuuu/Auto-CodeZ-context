@@ -12,6 +12,8 @@ const ignoredSegments = new Set(['.git', '.vite', '.test-dist', 'dist', 'build',
 
 export type MaterializedCommandSandbox = {
   rootPath: string;
+  homePath: string;
+  tempPath: string;
   cleanup(): Promise<void>;
 };
 
@@ -39,6 +41,35 @@ function isAllowedSandboxSource(relative: string, policy: WorkspacePathPolicy): 
   return policy.evaluate('read_file', [normalized]).decision === 'allow';
 }
 
+function isolatedCommandEnvironment(base: NodeJS.ProcessEnv, sandbox: MaterializedCommandSandbox): NodeJS.ProcessEnv {
+  const appData = path.join(sandbox.homePath, 'AppData', 'Roaming');
+  const localAppData = path.join(sandbox.homePath, 'AppData', 'Local');
+  const environment: NodeJS.ProcessEnv = {
+    ...base,
+    HOME: sandbox.homePath,
+    USERPROFILE: sandbox.homePath,
+    APPDATA: appData,
+    LOCALAPPDATA: localAppData,
+    XDG_CONFIG_HOME: path.join(sandbox.homePath, '.config'),
+    XDG_CACHE_HOME: path.join(sandbox.homePath, '.cache'),
+    XDG_DATA_HOME: path.join(sandbox.homePath, '.local', 'share'),
+    TEMP: sandbox.tempPath,
+    TMP: sandbox.tempPath,
+    TMPDIR: sandbox.tempPath,
+    GIT_TERMINAL_PROMPT: '0',
+    GCM_INTERACTIVE: 'Never',
+  };
+
+  if (process.platform === 'win32') {
+    const root = path.parse(sandbox.homePath).root;
+    const drive = root.replace(/[\\/]+$/, '');
+    environment.HOMEDRIVE = drive;
+    environment.HOMEPATH = sandbox.homePath.slice(drive.length) || '\\';
+  }
+
+  return environment;
+}
+
 export class CommandSandboxMaterializer {
   private readonly pathPolicy = new WorkspacePathPolicy();
 
@@ -52,9 +83,20 @@ export class CommandSandboxMaterializer {
     const sourceRoot = await fs.realpath(path.resolve(project.rootPath));
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-command-sandbox-'));
     const sandboxRoot = path.join(temporaryRoot, 'workspace');
+    const homePath = path.join(temporaryRoot, 'home');
+    const tempPath = path.join(temporaryRoot, 'tmp');
     let ready = false;
 
     try {
+      await Promise.all([
+        fs.mkdir(path.join(homePath, 'AppData', 'Roaming'), { recursive: true }),
+        fs.mkdir(path.join(homePath, 'AppData', 'Local'), { recursive: true }),
+        fs.mkdir(path.join(homePath, '.config'), { recursive: true }),
+        fs.mkdir(path.join(homePath, '.cache'), { recursive: true }),
+        fs.mkdir(path.join(homePath, '.local', 'share'), { recursive: true }),
+        fs.mkdir(tempPath, { recursive: true }),
+      ]);
+
       await fs.cp(sourceRoot, sandboxRoot, {
         recursive: true,
         dereference: true,
@@ -102,6 +144,8 @@ export class CommandSandboxMaterializer {
       ready = true;
       return {
         rootPath: sandboxRoot,
+        homePath,
+        tempPath,
         cleanup: async () => {
           await fs.rm(temporaryRoot, { recursive: true, force: true });
         },
@@ -119,6 +163,7 @@ export class CommandSandboxRuntime {
     private readonly projects: () => Promise<ProjectRecord[]>,
     private readonly shadows: ExecutionShadowWorkspaceRuntime,
     materializer?: CommandSandboxMaterializer,
+    private readonly parentEnvironment: NodeJS.ProcessEnv = process.env,
   ) {
     this.materializer = materializer ?? new CommandSandboxMaterializer(projects);
   }
@@ -138,7 +183,8 @@ export class CommandSandboxRuntime {
     try {
       const project = (await this.projects()).find((item) => item.id === projectId);
       if (!project) throw new Error('Projeto não encontrado para executar o command sandbox.');
-      const runtime = new CommandRuntime(async () => [{ ...project, rootPath: sandbox.rootPath }]);
+      const environment = isolatedCommandEnvironment(this.parentEnvironment, sandbox);
+      const runtime = new CommandRuntime(async () => [{ ...project, rootPath: sandbox.rootPath }], environment);
       return await runtime.run(projectId, command, options);
     } finally {
       await sandbox.cleanup();
