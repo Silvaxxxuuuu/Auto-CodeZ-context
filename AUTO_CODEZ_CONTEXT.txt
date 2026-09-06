@@ -1854,3 +1854,202 @@ Preservar:
 - approvals observáveis e revalidados;
 - run_command sujeito a aprovação quando o escopo não consegue provar confinamento;
 - PR #9 sem merge até autorização explícita do usuário.
+
+------------------------------------------------------------
+24.7. HOME, CONFIG E TEMP ISOLADOS POR EXECUÇÃO
+------------------------------------------------------------
+
+A fronteira descrita em 24.5 foi endurecida no commit:
+6774230a365f6e8d3950b5089f189a5a25abbced
+fix(security): isolate command sandbox home
+
+O CommandSandboxMaterializer passou a criar, dentro do mesmo diretório temporário descartável da execução:
+- workspace;
+- home;
+- tmp;
+- AppData/Roaming;
+- AppData/Local;
+- .config;
+- .cache;
+- .local/share.
+
+O processo filho recebe ambiente específico do sandbox:
+- HOME aponta para o home temporário;
+- USERPROFILE aponta para o home temporário;
+- APPDATA e LOCALAPPDATA apontam para subdiretórios temporários;
+- XDG_CONFIG_HOME, XDG_CACHE_HOME e XDG_DATA_HOME apontam para o sandbox;
+- TEMP, TMP e TMPDIR apontam para o tmp temporário;
+- HOMEDRIVE e HOMEPATH são derivados do home temporário no Windows;
+- GIT_TERMINAL_PROMPT = 0;
+- GCM_INTERACTIVE = Never.
+
+Objetivo: impedir que ferramentas encontrem silenciosamente .npmrc, .gitconfig, caches, configurações e arquivos de credenciais do perfil real apenas por resolverem o home do usuário.
+
+O head 6774230a passou Validate Auto CodeZ #2475 e Visual Auto CodeZ #68.
+
+------------------------------------------------------------
+24.8. SYSTEM PROJECT TAMBÉM USA COMMAND SANDBOX
+------------------------------------------------------------
+
+A auditoria encontrou uma exceção específica para SYSTEM_PROJECT_ID: chats sem projeto ainda executavam run_command diretamente contra o Desktop real depois da aprovação, embora as file tools já usassem Shadow Workspace.
+
+Correção:
+a02f22565a63f522553b3cd8947cbe731f6087b6
+fix(security): sandbox system workspace commands
+
+Estado após a correção:
+- SYSTEM_PROJECT_ID não desvia mais do CommandSandboxRuntime;
+- a execução em chat sem projeto cria/reutiliza Shadow Workspace da mesma run;
+- o Desktop controlado é materializado em workspace temporário;
+- run_command trabalha contra essa cópia temporária;
+- mutações do shell não atingem diretamente o Desktop real durante a execução;
+- o sandbox continua excluindo paths sensíveis da materialização;
+- o comportamento sem contexto de execução continua separado e não foi alterado inadvertidamente.
+
+Cobertura adicionada confirma que uma execução SYSTEM_PROJECT_ID altera somente o sandbox temporário e deixa o Desktop base intacto.
+
+O head a02f2256 passou Validate Auto CodeZ #2477 e Visual Auto CodeZ #69.
+
+------------------------------------------------------------
+24.9. BLOQUEIO DE STARTUP INJECTION E CONFIGURAÇÃO GLOBAL IMPLÍCITA
+------------------------------------------------------------
+
+Mesmo com home isolado, o ambiente herdado ainda podia conter variáveis que carregam código, hooks ou configuração antes do comando normal.
+
+Correção principal:
+f243a9e982d09c75ad4cee844f3cc6b00d28d665
+fix(security): block command startup injection env
+
+A sanitização do CommandRuntime passou a remover, entre outras rotas equivalentes cobertas pela política implementada, variáveis de autoexecução e injeção como:
+- NODE_OPTIONS;
+- BASH_ENV;
+- ENV;
+- LD_PRELOAD;
+- LD_LIBRARY_PATH;
+- DYLD_INSERT_LIBRARIES;
+- DYLD_LIBRARY_PATH;
+- PYTHONSTARTUP;
+- PYTHONPATH;
+- PERL5OPT;
+- RUBYOPT;
+- JAVA_TOOL_OPTIONS;
+- JDK_JAVA_OPTIONS;
+- _JAVA_OPTIONS;
+- DOTNET_STARTUP_HOOKS;
+- COMPlus_StartupHooks;
+- VSCODE_NODE_OPTIONS;
+- ELECTRON_RUN_AS_NODE;
+- GIT_CONFIG_GLOBAL;
+- GIT_CONFIG_SYSTEM;
+- GIT_CONFIG_COUNT;
+- GIT_EXEC_PATH;
+- GIT_SSH;
+- GIT_SSH_COMMAND;
+- GIT_PROXY_COMMAND.
+
+O sandbox também define explicitamente:
+- GIT_CONFIG_NOSYSTEM = 1;
+- GIT_ATTR_NOSYSTEM = 1;
+- GIT_CEILING_DIRECTORIES = workspace temporário.
+
+Isso reduz leitura implícita de configuração global/sistema e impede que o processo filho receba várias rotas comuns de inicialização arbitrária a partir do processo pai.
+
+------------------------------------------------------------
+24.10. PARTICULARIDADE DO WINDOWS 8.3 ENCONTRADA PELO CI
+------------------------------------------------------------
+
+O primeiro CI do hardening de startup injection falhou em um teste de ambiente porque o mesmo diretório temporário apareceu em duas representações textuais válidas no Windows:
+- C:\Users\RUNNER~1\...;
+- C:\Users\runneradmin\....
+
+O runtime de segurança estava funcionando. A falha era uma comparação textual estrita no teste.
+
+Primeiro ajuste:
+52b3ac5b389342b01fd971064dc29da9983685c8
+test(security): compare canonical sandbox Git paths
+
+Esse ajuste ainda não foi suficiente porque fs.realpathSync também preservou a forma 8.3 em uma das representações no runner.
+
+Ajuste final:
+e971941d38332ef534ecc020b24f7e24fabf4adf
+test(security): tolerate Windows short sandbox paths
+
+A cobertura passou a validar a identidade estrutural relevante do sandbox em vez de exigir que duas representações equivalentes do mesmo prefixo Windows tenham texto idêntico.
+
+Nenhuma proteção de runtime foi removida ou afrouxada pelos dois commits de teste.
+
+------------------------------------------------------------
+24.11. BASELINE FINAL VALIDADO DESTA RODADA
+------------------------------------------------------------
+
+Head técnico validado antes desta atualização documental:
+e971941d38332ef534ecc020b24f7e24fabf4adf
+test(security): tolerate Windows short sandbox paths
+
+Validate Auto CodeZ:
+- run id: 34041859080;
+- run number: 2483;
+- conclusão: success;
+- TypeScript validation: passou;
+- core tests: 630/630 passaram;
+- ESLint validation: passou;
+- Electron Forge package build: passou;
+- Electron startup smoke test: passou.
+
+Visual Auto CodeZ:
+- run id: 34041859052;
+- run number: 72;
+- artifact id: 9991965484;
+- conclusão: success;
+- 15/15 capturas passaram;
+- viewports cobertos: 1440x900 e 1008x689;
+- pageErrors: nenhum;
+- consoleErrors: nenhum;
+- contact sheet revisado visualmente;
+- nenhuma regressão perceptível nas telas cobertas;
+- foram verificadas API Keys, Settings Geral, Editor, Inteligência, Segurança, Sincronização, Terminal, Chats, Perfil, Plugins, Projetos e variações compactas.
+
+PR #9 no momento desta atualização:
+- open;
+- draft;
+- mergeable;
+- não mesclado;
+- head e971941d38332ef534ecc020b24f7e24fabf4adf antes deste commit de documentação;
+- não fazer merge sem autorização explícita do usuário.
+
+------------------------------------------------------------
+24.12. FRONTEIRA REAL QUE AINDA NÃO ESTÁ RESOLVIDA
+------------------------------------------------------------
+
+O command sandbox atual é substancialmente mais hermético, mas não é um sandbox de sistema operacional completo.
+
+Já endurecido:
+- workspace temporário;
+- Shadow Workspace;
+- paths sensíveis excluídos da materialização;
+- symlink/junction validado;
+- ambiente de processo sanitizado;
+- home/config/cache/temp isolados;
+- SYSTEM_PROJECT_ID executado contra cópia temporária;
+- Git sem configuração de sistema e sem prompts interativos;
+- principais variáveis de startup injection removidas;
+- aprovação explícita continua obrigatória quando ExecutionPathScope não consegue provar confinamento do shell.
+
+Ainda não provado/confinado pelo sistema operacional:
+- acesso direto a paths absolutos fora do sandbox por um comando aprovado;
+- acesso de rede do processo filho;
+- mecanismos de credencial mantidos pelo próprio sistema operacional ou por ferramentas externas fora das variáveis já sanitizadas;
+- acesso a recursos do usuário concedidos pelo token normal do processo;
+- isolamento de processo contra outras superfícies do Windows.
+
+Não tentar resolver isso com regex de comandos, blacklist crescente de strings ou afirmação falsa de que uma allowlist de paths confina um shell geral.
+
+Próximo passo correto:
+- fazer um spike técnico específico de isolamento real de processo no Windows;
+- avaliar mecanismos compatíveis com Electron/Node e distribuição desktop;
+- separar claramente Job Object/limites de processo de isolamento de filesystem/token/rede;
+- definir comportamento quando isolamento forte não estiver disponível;
+- preservar approval explícita como fallback de segurança;
+- somente depois decidir qual implementação de process sandbox entra na Fase 3.
+
+Até essa decisão, run_command continua sendo uma ferramenta aprovada e controlada, mas não deve ser descrita como execução totalmente confinada pelo SO.
