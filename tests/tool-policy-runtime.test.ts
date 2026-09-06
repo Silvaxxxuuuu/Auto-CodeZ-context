@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AIToolCall } from '../src/ai/types';
+import { ExecutionPathScopeRuntime } from '../src/execution-path-scope';
 import { SYSTEM_WORKSPACE_ID } from '../src/agent/system-workspace';
 import { ToolPolicyRuntime } from '../src/agent/tool-policy-runtime';
 
@@ -26,6 +27,7 @@ test('normal read remains allowed in unrestricted mode', () => {
     path: 'allow',
     command: 'allow',
     systemWorkspace: 'allow',
+    executionScope: 'allow',
   });
 });
 
@@ -126,4 +128,66 @@ test('rename evaluates both source and destination paths', () => {
   assert.deepEqual(result.paths, ['src/config.ts', '.env']);
   assert.equal(result.decision, 'deny');
   assert.equal(result.blockedBy, 'security');
+});
+
+test('canonical paths drive sensitive-path classification instead of lexical aliases', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('write_file', { path: 'src/config-link', content: 'TOKEN=x' }),
+    paths: ['.env'],
+  });
+
+  assert.deepEqual(result.paths, ['.env']);
+  assert.equal(result.classification, 'sensitive');
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.sources.path, 'deny');
+});
+
+test('execution scope composes as a security boundary', () => {
+  const scopes = new ExecutionPathScopeRuntime(() => 1000);
+  scopes.configure({ chatId: 'chat-a', runId: 'run-a', projectId: 'project-a', allowedPaths: ['src'] });
+  const scopedRuntime = new ToolPolicyRuntime();
+  scopedRuntime.configureExecutionPathScope(scopes);
+
+  const allowed = scopedRuntime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    chatId: 'chat-a',
+    runId: 'run-a',
+    call: call('read_file', { path: 'src/a.ts' }),
+    paths: ['src/a.ts'],
+  });
+  const denied = scopedRuntime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    chatId: 'chat-a',
+    runId: 'run-a',
+    call: call('read_file', { path: 'package.json' }),
+    paths: ['package.json'],
+  });
+
+  assert.equal(allowed.decision, 'allow');
+  assert.equal(allowed.sources.executionScope, 'allow');
+  assert.equal(denied.decision, 'deny');
+  assert.equal(denied.blockedBy, 'security');
+  assert.equal(denied.sources.executionScope, 'deny');
+});
+
+test('active execution scope forces shell approval even in unrestricted mode', () => {
+  const scopes = new ExecutionPathScopeRuntime(() => 1000);
+  scopes.configure({ chatId: 'chat-a', runId: 'run-a', projectId: 'project-a', allowedPaths: ['src'] });
+  const scopedRuntime = new ToolPolicyRuntime();
+  scopedRuntime.configureExecutionPathScope(scopes);
+  const result = scopedRuntime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    chatId: 'chat-a',
+    runId: 'run-a',
+    call: call('run_command', { command: 'npm test' }),
+  });
+
+  assert.equal(result.decision, 'ask');
+  assert.equal(result.sources.executionScope, 'ask');
+  assert.match(result.reasons.join(' '), /shell/i);
 });
