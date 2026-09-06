@@ -1,20 +1,28 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { _electron: electron } = require('playwright');
 
 const root = path.resolve(__dirname, '..');
 const outputDir = path.resolve(root, process.env.AUTO_CODEZ_VISUAL_DIR || 'artifacts/visual');
 const packagedExecutable = process.env.AUTO_CODEZ_ELECTRON_EXECUTABLE?.trim();
 const electronExecutable = packagedExecutable || require('electron');
+const VISUAL_WATCHDOG_MS = 6 * 60 * 1000;
+const CLOSE_TIMEOUT_MS = 10 * 1000;
 
 const results = [];
 const pageErrors = [];
 const consoleErrors = [];
 let electronApp;
 let page;
+let watchdog;
 
 function errorText(error) {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function writeDiagnostic(name, value) {
@@ -74,10 +82,59 @@ async function closeTransientUi() {
   await page.waitForTimeout(120);
 }
 
+async function stopVisualTerminalSessions() {
+  if (!page || page.isClosed()) return;
+  await page.evaluate(async () => {
+    const api = window.autoCodez?.terminal;
+    if (!api) return;
+    const sessions = await api.listSessions();
+    for (const session of sessions) {
+      if (session.status !== 'running') continue;
+      try {
+        await api.kill(session.id);
+      } catch {}
+    }
+  }).catch(() => {});
+}
+
+function forceKillElectronTree() {
+  const child = electronApp?.process();
+  const pid = child?.pid;
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    return;
+  }
+  try {
+    child.kill('SIGKILL');
+  } catch {}
+}
+
+async function closeElectronSafely() {
+  if (!electronApp) return;
+  await stopVisualTerminalSessions();
+  let closed = false;
+  await Promise.race([
+    electronApp.close().then(() => { closed = true; }).catch(() => {}),
+    delay(CLOSE_TIMEOUT_MS),
+  ]);
+  if (!closed) forceKillElectronTree();
+}
+
 async function main() {
   await fs.rm(outputDir, { recursive: true, force: true });
   await fs.mkdir(outputDir, { recursive: true });
   await writeDiagnostic('run-started.txt', `Visual run started at ${new Date().toISOString()}`);
+
+  watchdog = setTimeout(async () => {
+    await writeDiagnostic('fatal-error.txt', `Visual watchdog exceeded ${VISUAL_WATCHDOG_MS}ms.`).catch(() => {});
+    forceKillElectronTree();
+    process.exit(1);
+  }, VISUAL_WATCHDOG_MS);
+  watchdog.unref?.();
 
   electronApp = await electron.launch({
     executablePath: electronExecutable,
@@ -216,5 +273,6 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    if (electronApp) await electronApp.close().catch(() => {});
+    if (watchdog) clearTimeout(watchdog);
+    await closeElectronSafely();
   });
