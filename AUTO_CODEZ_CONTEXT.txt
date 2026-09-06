@@ -1690,3 +1690,167 @@ Na próxima etapa, reorganizar TODO o roadmap considerando estas áreas:
 A reorganização deve considerar dependências. Não colocar uma feature visual antes da infraestrutura da qual ela depende. Não implementar Orchestrator antes de o estado de execução/contexto permitir continuidade confiável. Não implementar Auto Change como simples troca de dropdown; ele exige checkpoint/context handoff. Não implementar Usage Analytics sem uma camada normalizada de usage/cost telemetry.
 
 Não fazer merge do PR #9 sem autorização explícita do usuário.
+
+============================================================
+24. ATUALIZAÇÃO DE EXECUÇÃO E SEGURANÇA — 06/09/2026
+============================================================
+
+Esta seção registra o baseline técnico validado durante a continuação da Fase 3. As seções históricas anteriores permanecem preservadas e não devem ser reinterpretadas como o roadmap técnico atual.
+
+------------------------------------------------------------
+24.1. BASELINE VALIDADO
+------------------------------------------------------------
+
+Branch de trabalho:
+feature/ui-hierarchy-polish
+
+PR #9:
+- continua aberto;
+- continua draft;
+- não foi mesclado;
+- não fazer merge sem autorização explícita do usuário.
+
+Head técnico validado antes deste commit de documentação:
+2a3bba691855331bd753b551302f144d5693494c
+fix(security): sanitize command process environment
+
+Validate Auto CodeZ:
+- run id: 34040074110;
+- run number: 2471;
+- conclusão: success;
+- TypeScript validation: passou;
+- core tests: passaram;
+- ESLint validation: passou;
+- Electron Forge package build: passou;
+- Electron startup smoke test: passou.
+
+Visual Auto CodeZ:
+- run id: 34040074101;
+- run number: 66;
+- conclusão: success;
+- Electron empacotado foi aberto pelo fluxo visual;
+- 15 capturas passaram;
+- viewports cobertos: 1440x900 e 1008x689;
+- page errors: nenhum;
+- console errors: nenhum;
+- revisão visual não encontrou regressão óbvia nas telas capturadas.
+
+------------------------------------------------------------
+24.2. ALLOWED PATHS POR EXECUÇÃO — BLOCO TECNICAMENTE FECHADO
+------------------------------------------------------------
+
+O escopo de caminhos por execução agora cobre a cadeia completa:
+- allowedPaths pode acompanhar sendChat/streamChat;
+- preload valida o payload;
+- processo principal valida novamente;
+- projectId continua vindo exclusivamente da Task Capsule imutável;
+- o ExecutionPathScope é configurado antes do AgentRuntime iniciar a execução;
+- a política é imutável depois de configurada para chatId + runId;
+- paths são normalizados e deduplicados;
+- canonicalização do workspace impede bypass lexical por path;
+- symlink/junction é resolvido contra o workspace real;
+- aprovações persistidas são revalidadas;
+- persistência de escopo permanece protegida localmente;
+- Shadow Workspace usa canonicalização explícita do workspace base.
+
+O contexto automático do provider também respeita essa fronteira:
+- ProjectManager.buildContext() reutiliza WorkspacePathPolicy;
+- .env, .npmrc, chaves, credenciais e outros paths sensíveis não entram silenciosamente no contexto automático;
+- .env.example continua permitido;
+- buildContext aceita filtro assíncrono de paths;
+- cada candidato é canonicalizado pelo WorkspaceRuntime;
+- ExecutionPathScopeRuntime confirma que o arquivo continua dentro da allowlist antes da leitura;
+- conteúdo fora da allowlist não entra no contexto enviado ao modelo.
+
+Commit que fechou a exposição de contexto:
+3101eb47997c268e3336b85a649d5349c9ef720d
+fix(security): constrain provider context to execution scope
+
+O head 3101eb47 passou posteriormente Validate Auto CodeZ #2467 e Visual Auto CodeZ #64.
+
+------------------------------------------------------------
+24.3. HARDENING DO COMMAND SANDBOX
+------------------------------------------------------------
+
+A auditoria seguinte encontrou que o command sandbox materializava quase todo o workspace temporário antes de executar comandos aprovados. Isso podia copiar arquivos sensíveis que as file tools já protegiam.
+
+Correção:
+093eeca328eb9c070b451209fe57ce543b794faf
+fix(security): exclude secrets from command sandbox
+
+Estado após a correção:
+- CommandSandboxMaterializer reutiliza WorkspacePathPolicy;
+- .env é excluído;
+- .npmrc é excluído;
+- .ssh e chaves privadas são excluídos;
+- outros paths classificados como sensíveis pela política canônica são excluídos;
+- .env.example continua permitido;
+- diretórios de output já ignorados continuam fora do sandbox;
+- node_modules continua disponível para não quebrar builds e ferramentas locais;
+- links internos são validados pelo alvo real antes de serem copiados;
+- alias com nome aparentemente seguro apontando para conteúdo sensível é recusado;
+- link que sai do workspace é recusado;
+- Shadow Workspace não pode reinserir um path sensível durante a materialização;
+- a falha é fechada quando um shadow inconsistente tenta materializar conteúdo protegido.
+
+Testes específicos cobrem arquivos sensíveis, template .env.example, node_modules, link/junction e reinserção pelo Shadow Workspace.
+
+O commit 093eeca passou TypeScript, core tests, ESLint, Forge package e Electron startup smoke antes do avanço para o hardening seguinte.
+
+------------------------------------------------------------
+24.4. AMBIENTE DE PROCESSO DO RUN_COMMAND
+------------------------------------------------------------
+
+A auditoria encontrou uma segunda superfície independente: CommandRuntime herdava process.env inteiro para o processo filho. Um comando aprovado podia receber tokens e credenciais presentes no ambiente do processo mesmo quando esses secrets nunca estavam no projeto.
+
+Correção:
+2a3bba691855331bd753b551302f144d5693494c
+fix(security): sanitize command process environment
+
+Estado após a correção:
+- CommandRuntime constrói o ambiente do processo filho antes de spawn;
+- nomes associados a token, auth token, secret, password, passwd, passphrase, credentials, API key, access key e private key são filtrados;
+- canais implícitos como SSH_AUTH_SOCK, SSH_AGENT_PID, GIT_ASKPASS e SSH_ASKPASS são removidos;
+- NPM_CONFIG_USERCONFIG é removido;
+- AWS_SHARED_CREDENTIALS_FILE e AWS_CONFIG_FILE são removidos;
+- KUBECONFIG, DOCKER_CONFIG, CLOUDSDK_CONFIG e AZURE_CONFIG_DIR são removidos;
+- NETRC é removido;
+- variáveis normais necessárias ao processo continuam disponíveis;
+- CI continua definido para a execução;
+- ComSpec continua resolvido no Windows;
+- teste de regressão confirma que uma variável normal permanece disponível enquanto API key, token e ponteiros sensíveis não chegam ao processo filho.
+
+O head 2a3bba passou Validate Auto CodeZ #2471 e Visual Auto CodeZ #66 integralmente.
+
+------------------------------------------------------------
+24.5. FRONTEIRA DE SEGURANÇA QUE CONTINUA ABERTA
+------------------------------------------------------------
+
+run_command continua sendo uma ferramenta de shell e não deve ser descrita como um sandbox de sistema operacional completo.
+
+ExecutionPathScopeRuntime força decisão ask para run_command quando existe Allowed Paths porque o shell não é totalmente confinável pela allowlist de paths. Essa aprovação permanece uma fronteira explícita e observável.
+
+A próxima auditoria deve tratar o contrato do processo, especialmente superfícies implícitas que ainda podem existir fora do workspace temporário, por exemplo home do usuário, arquivos globais de configuração de ferramentas e credenciais resolvidas por mecanismos próprios do sistema ou de CLIs.
+
+Antes de ampliar run_command, decidir tecnicamente entre:
+- ambiente de execução mais hermético e home temporário controlado;
+- exceções explícitas e observáveis para ferramentas que realmente precisam de configuração do usuário;
+- um contrato de environment/configuração próprio do Auto CodeZ.
+
+Não mascarar essa fronteira como resolvida apenas porque os arquivos do workspace e nomes comuns de secrets em process.env foram endurecidos.
+
+------------------------------------------------------------
+24.6. REGRA DE CONTINUIDADE
+------------------------------------------------------------
+
+O próximo trabalho permanece na infraestrutura de execução e segurança da Fase 3. Não iniciar refinamento visual amplo antes de fechar a próxima fronteira técnica escolhida.
+
+Preservar:
+- Task Capsule como binding imutável do projeto;
+- Allowed Paths por chatId/runId;
+- WorkspacePathPolicy como política canônica de paths sensíveis;
+- canonicalização real contra symlink/junction;
+- Shadow Workspace isolado;
+- approvals observáveis e revalidados;
+- run_command sujeito a aprovação quando o escopo não consegue provar confinamento;
+- PR #9 sem merge até autorização explícita do usuário.
