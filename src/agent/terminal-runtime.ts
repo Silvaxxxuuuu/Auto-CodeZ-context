@@ -30,10 +30,18 @@ export interface TerminalSession {
   pty: boolean;
 }
 
+type PendingFinish = {
+  status: TerminalSession['status'];
+  exitCode: number;
+  signal?: string;
+};
+
 type BaseSessionEntry = {
   session: TerminalSession;
   output: string;
   killRequested: boolean;
+  windowsTreeKillPending: boolean;
+  pendingFinish?: PendingFinish;
 };
 
 type InteractiveSessionEntry = BaseSessionEntry & {
@@ -127,13 +135,25 @@ export class TerminalRuntime {
     entry.killRequested = true;
     const pid = entry.kind === 'interactive' ? entry.process.pid : entry.child.pid;
     if (pid && process.platform === 'win32') {
-      const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore', shell: false });
-      killer.unref();
-    } else {
+      entry.windowsTreeKillPending = true;
       try {
-        if (entry.kind === 'interactive') entry.process.kill();
-        else entry.child.kill();
-      } catch {}
+        const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore', shell: false });
+        let settled = false;
+        const settle = (failed: boolean): void => {
+          if (settled) return;
+          settled = true;
+          if (failed) this.killDirect(entry);
+          entry.windowsTreeKillPending = false;
+          this.flushPendingFinish(entry);
+        };
+        killer.once('error', () => settle(true));
+        killer.once('close', (exitCode) => settle(exitCode !== 0));
+      } catch {
+        entry.windowsTreeKillPending = false;
+        this.killDirect(entry);
+      }
+    } else {
+      this.killDirect(entry);
     }
     return { ...entry.session };
   }
@@ -145,10 +165,8 @@ export class TerminalRuntime {
   dispose(): void {
     for (const entry of this.sessions.values()) {
       if (entry.session.status !== 'running') continue;
-      entry.killRequested = true;
       try {
-        if (entry.kind === 'interactive') entry.process.kill();
-        else entry.child.kill();
+        this.kill(entry.session.id);
       } catch {}
     }
     this.sessions.clear();
@@ -185,6 +203,7 @@ export class TerminalRuntime {
       process: processHandle,
       output: '',
       killRequested: false,
+      windowsTreeKillPending: false,
     };
     this.sessions.set(id, entry);
     this.attachInteractive(entry);
@@ -227,6 +246,7 @@ export class TerminalRuntime {
       child,
       output: '',
       killRequested: false,
+      windowsTreeKillPending: false,
     };
     this.sessions.set(id, entry);
     this.attachCommand(entry);
@@ -276,6 +296,13 @@ export class TerminalRuntime {
     entry.child.once('close', (exitCode, signal) => this.finish(entry, entry.killRequested || Boolean(signal) ? 'killed' : exitCode === 0 ? 'exited' : 'failed', exitCode ?? 1, signal ?? (entry.killRequested ? 'SIGTERM' : undefined)));
   }
 
+  private killDirect(entry: SessionEntry): void {
+    try {
+      if (entry.kind === 'interactive') entry.process.kill();
+      else entry.child.kill();
+    } catch {}
+  }
+
   private pruneFinishedSessions(): void {
     if (this.sessions.size < MAX_SESSIONS) return;
     const finished = [...this.sessions.entries()]
@@ -285,6 +312,22 @@ export class TerminalRuntime {
   }
 
   private finish(entry: SessionEntry, status: TerminalSession['status'], exitCode: number, signal?: string): void {
+    if (entry.session.finishedAt !== undefined) return;
+    if (entry.killRequested && entry.windowsTreeKillPending) {
+      entry.pendingFinish = { status, exitCode, signal };
+      return;
+    }
+    this.finalizeFinish(entry, status, exitCode, signal);
+  }
+
+  private flushPendingFinish(entry: SessionEntry): void {
+    const pending = entry.pendingFinish;
+    if (!pending) return;
+    entry.pendingFinish = undefined;
+    this.finalizeFinish(entry, pending.status, pending.exitCode, pending.signal);
+  }
+
+  private finalizeFinish(entry: SessionEntry, status: TerminalSession['status'], exitCode: number, signal?: string): void {
     if (entry.session.finishedAt !== undefined) return;
     entry.session.finishedAt = Date.now();
     entry.session.exitCode = exitCode;
