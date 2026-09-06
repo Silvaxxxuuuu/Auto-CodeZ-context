@@ -1,4 +1,5 @@
 import type { AIToolCall, PermissionLevel } from '../ai/types';
+import type { ExecutionPathScopeRuntime } from '../execution-path-scope';
 import { SYSTEM_WORKSPACE_ID } from './system-workspace';
 import { CommandSafetyPolicy } from './command-safety-policy';
 import { PermissionRuntime, type PermissionDecision } from './permission-runtime';
@@ -9,6 +10,7 @@ export type ToolPolicyDecisionSource = {
   path: PermissionDecision;
   command: PermissionDecision;
   systemWorkspace: PermissionDecision;
+  executionScope: PermissionDecision;
 };
 
 export type ToolPolicyResult = {
@@ -34,7 +36,7 @@ const systemFileTools = new Set<AIToolCall['name']>([
   'search_files',
 ]);
 
-function policyPaths(call: AIToolCall): string[] {
+export function extractToolPolicyPaths(call: AIToolCall): string[] {
   if (call.name === 'rename_file') {
     const from = typeof call.input.from === 'string' ? call.input.from : '';
     const to = typeof call.input.to === 'string' ? call.input.to : '';
@@ -73,18 +75,27 @@ function stronger(left: PermissionDecision, right: PermissionDecision): Permissi
 }
 
 export class ToolPolicyRuntime {
+  private executionScopes?: ExecutionPathScopeRuntime;
+
   constructor(
     private readonly permissions = new PermissionRuntime(),
     private readonly workspacePaths = new WorkspacePathPolicy(),
     private readonly commands = new CommandSafetyPolicy(workspacePaths),
   ) {}
 
+  configureExecutionPathScope(runtime: ExecutionPathScopeRuntime): void {
+    this.executionScopes = runtime;
+  }
+
   evaluate(input: {
     permissionLevel: PermissionLevel;
     projectId: string;
     call: AIToolCall;
+    chatId?: string;
+    runId?: string;
+    paths?: string[];
   }): ToolPolicyResult {
-    const paths = policyPaths(input.call);
+    const paths = input.paths ?? extractToolPolicyPaths(input.call);
     const permissionDecision = this.permissions.decide(input.permissionLevel, input.call.name);
     const pathPolicy = this.workspacePaths.evaluate(input.call.name, paths);
     const commandPolicy = input.call.name === 'run_command'
@@ -95,17 +106,28 @@ export class ToolPolicyRuntime {
       && systemFileTools.has(input.call.name)
       ? 'ask'
       : 'allow';
+    const executionScopePolicy = this.executionScopes?.evaluate({
+      chatId: input.chatId,
+      runId: input.runId,
+      projectId: input.projectId,
+      toolName: input.call.name,
+      paths,
+    }) ?? { configured: false, decision: 'allow' as const, reasons: [], allowedPaths: [], requestedPaths: [] };
 
     let decision = stronger(permissionDecision, pathPolicy.decision);
     decision = stronger(decision, commandPolicy.decision);
     decision = stronger(decision, systemWorkspaceDecision);
+    decision = stronger(decision, executionScopePolicy.decision);
 
     const reasons = [...new Set([
       ...pathPolicy.reasons,
       ...commandPolicy.reasons,
       ...(systemWorkspaceDecision === 'ask' ? ['workspace interno do Auto CodeZ'] : []),
+      ...executionScopePolicy.reasons,
     ])];
-    const securityDenied = pathPolicy.decision === 'deny' || commandPolicy.decision === 'deny';
+    const securityDenied = pathPolicy.decision === 'deny'
+      || commandPolicy.decision === 'deny'
+      || executionScopePolicy.decision === 'deny';
 
     return {
       decision,
@@ -118,6 +140,7 @@ export class ToolPolicyRuntime {
         path: pathPolicy.decision,
         command: commandPolicy.decision,
         systemWorkspace: systemWorkspaceDecision,
+        executionScope: executionScopePolicy.decision,
       },
     };
   }
