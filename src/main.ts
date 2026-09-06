@@ -40,6 +40,9 @@ import { ExecutionCheckpointPersistence, ExecutionCheckpointStore } from './exec
 import { ExecutionCheckpointController } from './execution-checkpoint-controller';
 import { ExecutionChangeBudgetRuntime } from './execution-change-budget';
 import { ExecutionChangeBudgetPersistence, ExecutionChangeBudgetStore } from './execution-change-budget-store';
+import { ExecutionPathScopeRuntime } from './execution-path-scope';
+import { ExecutionPathScopePersistence, ExecutionPathScopeStore } from './execution-path-scope-store';
+import { ExecutionPathScopeController } from './execution-path-scope-controller';
 import { ExecutionShadowWorkspaceRuntime } from './execution-shadow-workspace';
 import { ExecutionShadowWorkspacePersistence, ExecutionShadowWorkspaceStore } from './execution-shadow-workspace-store';
 import { ExecutionShadowWorkspaceController } from './execution-shadow-workspace-controller';
@@ -101,6 +104,11 @@ const executionQualityGatePersistence = new ExecutionQualityGatePersistence(exec
 const executionTaskCapsuleRuntime = new ExecutionTaskCapsuleRuntime();
 const executionTaskCapsuleStore = new ExecutionTaskCapsuleStore(storage);
 const executionTaskCapsulePersistence = new ExecutionTaskCapsulePersistence(executionTaskCapsuleStore);
+const executionPathScopeRuntime = new ExecutionPathScopeRuntime();
+const executionPathScopeStore = new ExecutionPathScopeStore(storage);
+const executionPathScopePersistence = new ExecutionPathScopePersistence(executionPathScopeStore);
+toolRuntime.configureExecutionPathScope(executionPathScopeRuntime);
+const executionPathScopeController = new ExecutionPathScopeController(executionTaskCapsuleRuntime, executionPathScopeRuntime, toolRuntime);
 const executionCheckpointRuntime = new ExecutionCheckpointRuntime();
 const executionCheckpointStore = new ExecutionCheckpointStore(storage);
 const executionCheckpointPersistence = new ExecutionCheckpointPersistence(executionCheckpointStore);
@@ -112,6 +120,7 @@ let executionPlanPersistenceEnabled = false;
 let executionPlanHistoryPersistenceEnabled = false;
 let executionQualityGatePersistenceEnabled = false;
 let executionTaskCapsulePersistenceEnabled = false;
+let executionPathScopePersistenceEnabled = false;
 let executionCheckpointPersistenceEnabled = false;
 let executionChangeBudgetPersistenceEnabled = false;
 let executionShadowWorkspacePersistenceEnabled = false;
@@ -138,6 +147,9 @@ const executionShadowLifecycle = new ExecutionShadowLifecycle(
 executionChangeBudgetRuntime.subscribe((snapshots) => {
   if (executionChangeBudgetPersistenceEnabled) executionChangeBudgetPersistence.schedule(snapshots);
 });
+executionPathScopeRuntime.subscribe((snapshots) => {
+  if (executionPathScopePersistenceEnabled) executionPathScopePersistence.schedule(snapshots);
+});
 executionShadowWorkspaceRuntime.subscribe((snapshots) => {
   if (executionShadowWorkspacePersistenceEnabled) executionShadowWorkspacePersistence.schedule(snapshots);
 });
@@ -157,7 +169,6 @@ function sendTerminalEvent(event: unknown): void {
 function sendActivity(event: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('agent:activity', event);
 }
-
 function sendStreamEvent(event: AIStreamEvent): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', event);
 }
@@ -374,6 +385,7 @@ ipcMain.handle('chat:delete', async (_event, chatId: string) => {
   await clearChatExecution(id);
   if (executionPlanHistory.purgeChat(id) && executionPlanHistoryPersistenceEnabled) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
   if (executionQualityGateRuntime.removeChat(id) && executionQualityGatePersistenceEnabled) executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
+  executionPathScopeController.removeChat(id);
   if (executionTaskCapsuleRuntime.removeChat(id) && executionTaskCapsulePersistenceEnabled) executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
   if (executionCheckpointRuntime.removeChat(id) && executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
   executionChangeBudgetRuntime.removeChat(id);
@@ -569,6 +581,28 @@ ipcMain.handle('agent:get-execution-task-capsule', async (_event, input: unknown
   return executionTaskCapsuleRuntime.get(requireIdentifier(value.chatId, 'Chat'), requireIdentifier(value.runId, 'Execução')) ?? null;
 });
 ipcMain.handle('agent:list-execution-task-capsules', async (_event, chatId?: string) => executionTaskCapsuleRuntime.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));
+ipcMain.handle('agent:configure-execution-path-scope', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Configuração do escopo de caminhos');
+  if ('projectId' in value) throw new Error('O projeto do escopo é definido pela Task Capsule e não pode ser informado pelo renderer.');
+  if (!Array.isArray(value.allowedPaths) || value.allowedPaths.length === 0 || value.allowedPaths.some((item) => typeof item !== 'string')) throw new Error('Caminhos permitidos inválidos.');
+  return executionPathScopeController.configure({
+    chatId: requireIdentifier(value.chatId, 'Chat'),
+    runId: requireIdentifier(value.runId, 'Execução'),
+    allowedPaths: value.allowedPaths.map((item) => requireNonEmptyString(item, 'Caminho permitido')),
+  });
+});
+ipcMain.handle('agent:get-execution-path-scope', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação do escopo de caminhos');
+  return executionPathScopeController.get(requireIdentifier(value.chatId, 'Chat'), requireIdentifier(value.runId, 'Execução')) ?? null;
+});
+ipcMain.handle('agent:list-execution-path-scopes', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return executionPathScopeController.list();
+  const value = requireObject(filters, 'Filtro dos escopos de caminhos');
+  return executionPathScopeController.list({
+    chatId: value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat'),
+    runId: value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução'),
+  });
+});
 ipcMain.handle('agent:list-execution-checkpoints', async (_event, filters?: { chatId?: string; runId?: string }) => {
   if (filters === undefined) return executionCheckpointController.list();
   const value = requireObject(filters, 'Filtro dos checkpoints de execução');
@@ -746,6 +780,7 @@ app.whenReady().then(async () => {
   await projectManager.init();
   await terminalService.init();
   await chatRuntime.init();
+  executionPathScopeRuntime.restore(await executionPathScopeStore.load());
   await toolRuntime.init();
   await agentRuntime.init();
   await restoreShadowWorkspaceBootstrapState();
@@ -765,6 +800,7 @@ app.whenReady().then(async () => {
   executionPlanHistoryPersistenceEnabled = true;
   executionQualityGatePersistenceEnabled = true;
   executionTaskCapsulePersistenceEnabled = true;
+  executionPathScopePersistenceEnabled = true;
   executionCheckpointPersistenceEnabled = true;
   executionChangeBudgetPersistenceEnabled = true;
   executionShadowWorkspacePersistenceEnabled = true;
@@ -774,6 +810,7 @@ app.whenReady().then(async () => {
   executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
   executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
   executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
+  executionPathScopePersistence.schedule(executionPathScopeRuntime.list());
   executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
   executionChangeBudgetPersistence.schedule(executionChangeBudgetRuntime.list());
   executionShadowWorkspacePersistence.schedule(executionShadowWorkspaceRuntime.list());
