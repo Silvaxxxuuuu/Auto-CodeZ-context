@@ -6,9 +6,11 @@ import type { ProjectRecord } from '../ai/types';
 import type { ExecutionShadowWorkspaceRuntime } from '../execution-shadow-workspace';
 import { compactShadowWorkspaceChanges } from '../shadow-workspace-publication';
 import { CommandRuntime, SYSTEM_PROJECT_ID, type CommandResult, type CommandRunOptions } from './command-runtime';
+import { getSystemWorkspaceRoot } from './system-workspace';
 import { WorkspacePathPolicy } from './workspace-path-policy';
 
 const ignoredSegments = new Set(['.git', '.vite', '.test-dist', 'dist', 'build', 'out', 'coverage']);
+const COMMAND_SANDBOX_PROJECT_ID = '__auto_codez_command_sandbox__';
 
 export type MaterializedCommandSandbox = {
   rootPath: string;
@@ -73,14 +75,22 @@ function isolatedCommandEnvironment(base: NodeJS.ProcessEnv, sandbox: Materializ
 export class CommandSandboxMaterializer {
   private readonly pathPolicy = new WorkspacePathPolicy();
 
-  constructor(private readonly projects: () => Promise<ProjectRecord[]>) {}
+  constructor(
+    private readonly projects: () => Promise<ProjectRecord[]>,
+    private readonly systemWorkspaceRoot: () => string = getSystemWorkspaceRoot,
+  ) {}
 
   async materialize(projectId: string, changes: ReturnType<typeof compactShadowWorkspaceChanges>): Promise<MaterializedCommandSandbox> {
-    if (projectId === SYSTEM_PROJECT_ID) throw new Error('Command sandbox não materializa o workspace de sistema.');
-    const project = (await this.projects()).find((item) => item.id === projectId);
-    if (!project) throw new Error('Projeto não encontrado para o command sandbox.');
+    let sourcePath: string;
+    if (projectId === SYSTEM_PROJECT_ID) {
+      sourcePath = this.systemWorkspaceRoot();
+    } else {
+      const project = (await this.projects()).find((item) => item.id === projectId);
+      if (!project) throw new Error('Projeto não encontrado para o command sandbox.');
+      sourcePath = project.rootPath;
+    }
 
-    const sourceRoot = await fs.realpath(path.resolve(project.rootPath));
+    const sourceRoot = await fs.realpath(path.resolve(sourcePath));
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-command-sandbox-'));
     const sandboxRoot = path.join(temporaryRoot, 'workspace');
     const homePath = path.join(temporaryRoot, 'home');
@@ -181,11 +191,16 @@ export class CommandSandboxRuntime {
 
     const sandbox = await this.materializer.materialize(projectId, shadow.changes);
     try {
-      const project = (await this.projects()).find((item) => item.id === projectId);
-      if (!project) throw new Error('Projeto não encontrado para executar o command sandbox.');
       const environment = isolatedCommandEnvironment(this.parentEnvironment, sandbox);
-      const runtime = new CommandRuntime(async () => [{ ...project, rootPath: sandbox.rootPath }], environment);
-      return await runtime.run(projectId, command, options);
+      const sandboxProject: ProjectRecord = {
+        id: COMMAND_SANDBOX_PROJECT_ID,
+        name: 'Command Sandbox',
+        rootPath: sandbox.rootPath,
+        createdAt: 0,
+        updatedAt: 0,
+      };
+      const runtime = new CommandRuntime(async () => [sandboxProject], environment);
+      return await runtime.run(COMMAND_SANDBOX_PROJECT_ID, command, options);
     } finally {
       await sandbox.cleanup();
     }

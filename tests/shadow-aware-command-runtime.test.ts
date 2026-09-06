@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { ProjectRecord } from '../src/ai/types';
+import { SYSTEM_PROJECT_ID } from '../src/agent/command-runtime';
+import { CommandSandboxMaterializer, CommandSandboxRuntime } from '../src/agent/command-sandbox';
 import { runWithExecutionWorkspaceContext } from '../src/agent/execution-workspace-context';
 import { ShadowAwareCommandRuntime } from '../src/agent/shadow-aware-command-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
@@ -24,6 +26,7 @@ async function fixture() {
   const runtime = new ShadowAwareCommandRuntime(projects, shadows);
   return {
     root,
+    projects,
     shadows,
     runtime,
     cleanup: async () => fs.rm(root, { recursive: true, force: true }),
@@ -95,18 +98,33 @@ test('contexto de outro projeto falha fechado em vez de tocar no workspace real'
   }
 });
 
-test('workspace de sistema com shadow ativo falha fechado', async () => {
+test('workspace de sistema executa comando contra sandbox temporário sem tocar no Desktop real', async () => {
   const fx = await fixture();
+  const systemRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-shadow-system-command-'));
   try {
-    fx.shadows.begin('chat-system', 'run-system', '__system__');
-    await assert.rejects(
-      () => runWithExecutionWorkspaceContext(
-        { chatId: 'chat-system', runId: 'run-system', projectId: '__system__' },
-        () => fx.runtime.run('__system__', 'node -v'),
+    await fs.writeFile(path.join(systemRoot, 'a.txt'), 'desktop-base', 'utf8');
+    const materializer = new CommandSandboxMaterializer(fx.projects, () => systemRoot);
+    const sandbox = new CommandSandboxRuntime(fx.projects, fx.shadows, materializer);
+    const runtime = new ShadowAwareCommandRuntime(fx.projects, fx.shadows, sandbox);
+
+    const result = await runWithExecutionWorkspaceContext(
+      { chatId: 'chat-system', runId: 'run-system', projectId: SYSTEM_PROJECT_ID },
+      () => runtime.run(
+        SYSTEM_PROJECT_ID,
+        'node -e "const fs=require(\'fs\'); console.log(fs.readFileSync(\'a.txt\',\'utf8\')); fs.writeFileSync(\'a.txt\',\'command-only\')"',
       ),
-      /workspace de sistema/i,
     );
+
+    assert.match(result.stdout, /desktop-base/);
+    assert.equal(await fs.readFile(path.join(systemRoot, 'a.txt'), 'utf8'), 'desktop-base');
+    const shadow = fx.shadows.get('chat-system', 'run-system');
+    assert.ok(shadow);
+    assert.equal(shadow.projectId, SYSTEM_PROJECT_ID);
+    assert.equal(shadow.changes.length, 0);
   } finally {
-    await fx.cleanup();
+    await Promise.all([
+      fx.cleanup(),
+      fs.rm(systemRoot, { recursive: true, force: true }),
+    ]);
   }
 });

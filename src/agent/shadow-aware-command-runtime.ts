@@ -1,6 +1,6 @@
 import type { ProjectRecord } from '../ai/types';
 import type { ExecutionShadowWorkspaceRuntime } from '../execution-shadow-workspace';
-import { CommandRuntime, SYSTEM_PROJECT_ID, type CommandResult, type CommandRunOptions } from './command-runtime';
+import { CommandRuntime, type CommandResult, type CommandRunOptions } from './command-runtime';
 import { CommandSandboxRuntime } from './command-sandbox';
 import { currentExecutionWorkspaceContext } from './execution-workspace-context';
 
@@ -20,13 +20,6 @@ export class ShadowAwareCommandRuntime extends CommandRuntime {
     const context = currentExecutionWorkspaceContext();
     if (!context) return super.run(projectId, command, options);
     if (context.projectId !== projectId) throw new Error('Contexto de execução pertence a outro projeto.');
-
-    if (projectId === SYSTEM_PROJECT_ID) {
-      if (this.shadows.get(context.chatId, context.runId)) {
-        throw new Error('Command sandbox não executa alterações isoladas no workspace de sistema.');
-      }
-      return super.run(projectId, command, options);
-    }
 
     this.shadows.begin(context.chatId, context.runId, projectId);
     return this.sandbox.run(context.chatId, context.runId, projectId, command, options);

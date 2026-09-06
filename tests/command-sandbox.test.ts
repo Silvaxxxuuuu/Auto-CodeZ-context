@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { ProjectRecord } from '../src/ai/types';
+import { SYSTEM_PROJECT_ID } from '../src/agent/command-runtime';
 import { DiffRuntime } from '../src/agent/diff-runtime';
 import { CommandSandboxMaterializer, CommandSandboxRuntime } from '../src/agent/command-sandbox';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
@@ -120,6 +121,30 @@ test('materialização rejeita shadow que tente reintroduzir caminho sensível',
   }
 });
 
+test('materialização suporta workspace de sistema usando raiz controlada', async () => {
+  const fx = await fixture();
+  const systemRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-system-command-sandbox-test-'));
+  try {
+    await write(systemRoot, 'desktop-file.txt', 'desktop-base');
+    await write(systemRoot, '.env', 'SECRET=desktop-secret');
+    const materializer = new CommandSandboxMaterializer(fx.projects, () => systemRoot);
+    const sandbox = await materializer.materialize(SYSTEM_PROJECT_ID, []);
+    try {
+      assert.equal(await fs.readFile(path.join(sandbox.rootPath, 'desktop-file.txt'), 'utf8'), 'desktop-base');
+      await assert.rejects(fs.access(path.join(sandbox.rootPath, '.env')));
+      await fs.writeFile(path.join(sandbox.rootPath, 'desktop-file.txt'), 'sandbox-only', 'utf8');
+      assert.equal(await fs.readFile(path.join(systemRoot, 'desktop-file.txt'), 'utf8'), 'desktop-base');
+    } finally {
+      await sandbox.cleanup();
+    }
+  } finally {
+    await Promise.all([
+      fx.cleanup(),
+      fs.rm(systemRoot, { recursive: true, force: true }),
+    ]);
+  }
+});
+
 test('command sandbox executa contra o overlay e descarta mutações feitas pelo comando', async () => {
   const fx = await fixture();
   try {
@@ -162,7 +187,7 @@ test('command sandbox consegue resolver dependência copiada sem usar o node_mod
   }
 });
 
-test('command sandbox rejeita run ausente, projeto divergente e workspace de sistema', async () => {
+test('command sandbox rejeita run ausente e projeto divergente', async () => {
   const fx = await fixture();
   try {
     const runtime = new CommandSandboxRuntime(fx.projects, fx.shadows);
@@ -175,12 +200,6 @@ test('command sandbox rejeita run ausente, projeto divergente e workspace de sis
     await assert.rejects(
       () => runtime.run('chat-a', 'run-a', 'project-b', 'node -v'),
       /outro projeto/i,
-    );
-
-    const materializer = new CommandSandboxMaterializer(fx.projects);
-    await assert.rejects(
-      () => materializer.materialize('__system__', []),
-      /workspace de sistema/i,
     );
   } finally {
     await fx.cleanup();
