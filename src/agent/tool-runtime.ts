@@ -4,7 +4,7 @@ import { ApprovalRuntime } from './approval-runtime';
 import { PermissionRuntime } from './permission-runtime';
 import { WorkspacePathPolicy } from './workspace-path-policy';
 import { CommandSafetyPolicy } from './command-safety-policy';
-import { ToolPolicyRuntime } from './tool-policy-runtime';
+import { extractToolPolicyPaths, ToolPolicyRuntime, type ToolPolicyResult } from './tool-policy-runtime';
 import { WorkspaceRuntime } from './workspace-runtime';
 import { CommandRuntime } from './command-runtime';
 import { DiffRuntime } from './diff-runtime';
@@ -14,6 +14,7 @@ import { StructuralEditRuntime, type StructuralSymbolKind } from './structural-e
 import { TypeScriptStructuralLocator } from './typescript-structural-locator';
 import { ExecutionPlanner, type ExecutionPlan } from '../execution-planner';
 import { ExecutionChangeBudgetRuntime, type ExecutionChangeBudget, type ExecutionChangeUsage } from '../execution-change-budget';
+import { ExecutionPathScopeRuntime, type ExecutionPathScopeSnapshot } from '../execution-path-scope';
 
 const definitions: AIToolDefinition[] = [
   { name: 'plan_execution', description: 'Declare a concrete execution plan for a multi-step task. Auto CodeZ starts the first step immediately. Use this before substantial multi-step tool work, then execute real tools and call complete_plan_step only after the current step has runtime-recorded evidence.', parameters: { type: 'object', properties: { objective: { type: 'string', description: 'Concrete objective of this execution.' }, steps: { type: 'array', items: { type: 'string' }, description: 'Ordered, concise execution steps.' } }, required: ['objective', 'steps'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -123,6 +124,7 @@ export class ToolRuntime {
   private gitRuntime?: GitRuntime;
   private executionPlanner?: ExecutionPlanner;
   private executionChangeBudget?: ExecutionChangeBudgetRuntime;
+  private executionPathScope?: ExecutionPathScopeRuntime;
   private executionCheckpointRecorder?: ExecutionCheckpointRecorder;
 
   constructor(private readonly workspace: WorkspaceRuntime, permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()]), workspacePathPolicy = new WorkspacePathPolicy(), commandSafetyPolicy = new CommandSafetyPolicy(workspacePathPolicy), private readonly toolPolicy = new ToolPolicyRuntime(permissions, workspacePathPolicy, commandSafetyPolicy)) {}
@@ -130,10 +132,17 @@ export class ToolRuntime {
   configureGitRuntime(runtime: GitRuntime): void { this.gitRuntime = runtime; }
   configureExecutionPlanner(runtime: ExecutionPlanner): void { this.executionPlanner = runtime; }
   configureExecutionChangeBudget(runtime: ExecutionChangeBudgetRuntime): void { this.executionChangeBudget = runtime; }
+  configureExecutionPathScope(runtime: ExecutionPathScopeRuntime): void { this.executionPathScope = runtime; this.toolPolicy.configureExecutionPathScope(runtime); }
   configureExecutionCheckpointRecorder(recorder: ExecutionCheckpointRecorder): void { this.executionCheckpointRecorder = recorder; }
   configureChangeBudget(chatId: string, runId: string, budget: ExecutionChangeBudget): ExecutionChangeBudget {
     if (!this.executionChangeBudget) throw new Error('O runtime de Change Budget não foi configurado.');
     return this.executionChangeBudget.configure(chatId, runId, budget);
+  }
+  async configureExecutionAllowedPaths(chatId: string, runId: string, projectId: string, allowedPaths: string[]): Promise<ExecutionPathScopeSnapshot> {
+    if (!this.executionPathScope) throw new Error('O runtime de escopo de caminhos não foi configurado.');
+    if (!Array.isArray(allowedPaths) || allowedPaths.length === 0) throw new Error('O escopo precisa conter pelo menos um caminho permitido.');
+    const canonical = await Promise.all(allowedPaths.map((value) => this.workspace.canonicalRelativePath(projectId, value)));
+    return this.executionPathScope.configure({ chatId, runId, projectId, allowedPaths: canonical });
   }
   getChangeBudgetUsage(chatId: string, runId: string): ExecutionChangeUsage {
     return this.executionChangeBudget?.getUsage(chatId, runId) ?? { files: [], changedLines: 0, commands: 0, toolCalls: 0 };
@@ -158,15 +167,18 @@ export class ToolRuntime {
     const definition = definitions.find((item) => item.name === normalizedCall.name);
     if (!definition) return { toolCallId: normalizedCall.id, ok: false, error: `Ferramenta desconhecida: ${normalizedCall.name}` };
     try { validateToolInput(definition, normalizedCall.input); } catch (error) { return { toolCallId: normalizedCall.id, ok: false, error: error instanceof Error ? error.message : String(error) }; }
-    const policy = this.toolPolicy.evaluate({ permissionLevel: permission, projectId, call: normalizedCall });
+
+    let policy: ToolPolicyResult;
+    try {
+      policy = await this.evaluateToolPolicy(projectId, permission, normalizedCall, { chatId, runId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { toolCallId: normalizedCall.id, ok: false, error: `Operação bloqueada pela política de segurança do workspace: ${message}.` };
+    }
     const decision = policy.decision;
     const securityReasons = policy.reasons;
-    if (decision === 'deny') {
-      const error = policy.blockedBy === 'security'
-        ? `Operação bloqueada pela política de segurança do workspace${securityReasons.length ? `: ${securityReasons.join(' · ')}` : ''}.`
-        : 'Operação bloqueada pelas permissões do chat.';
-      return { toolCallId: normalizedCall.id, ok: false, error };
-    }
+    if (decision === 'deny') return { toolCallId: normalizedCall.id, ok: false, error: this.policyDeniedMessage(policy) };
+
     const pending = this.approvals.list({ chatId, runId });
     if (pending.length) {
       const error = 'Operação adiada porque uma operação anterior deste ciclo ainda aguarda aprovação. Se ela continuar necessária após a decisão do usuário, solicite a operação novamente.';
@@ -193,7 +205,7 @@ export class ToolRuntime {
         return { toolCallId: normalizedCall.id, ok: false, error: message, ...(diffPlan ? { diffPlan } : {}) };
       }
       const approval = this.approvals.request({ projectId, chatId, runId, permissionLevel: permission, toolCall: normalizedCall, ...(diffPlan ? { diffPlan } : {}) });
-      const securityReason = (policy.sources.path === 'ask' || policy.sources.command === 'ask') && securityReasons.length ? ` Segurança: ${securityReasons.join(' · ')}.` : '';
+      const securityReason = (policy.sources.path === 'ask' || policy.sources.command === 'ask' || policy.sources.executionScope === 'ask') && securityReasons.length ? ` Segurança: ${securityReasons.join(' · ')}.` : '';
       this.activity.emit({ type: 'action', message: `Aguardando aprovação para ${normalizedCall.name}.${securityReason}`, status: 'pending', toolCallId: normalizedCall.id, toolName: normalizedCall.name, chatId, runId, ...(diffPlan ? { diffPlan } : {}) });
       return { toolCallId: normalizedCall.id, ok: false, error: 'Operação requer aprovação do usuário.', approvalId: approval.id, pendingApproval: true, ...(diffPlan ? { diffPlan } : {}) };
     }
@@ -217,6 +229,8 @@ export class ToolRuntime {
       return journalResult;
     }
     try {
+      const policy = await this.evaluateToolPolicy(approval.projectId, approval.permissionLevel, approval.toolCall, { chatId: approval.chatId, runId: approval.runId });
+      if (policy.decision === 'deny') throw new Error(this.policyDeniedMessage(policy));
       await this.assertPrecondition(approval.projectId, approval.diffPlan);
       this.assertChangeBudget(approval.chatId, approval.runId, approval.toolCall, approval.diffPlan);
       const result = await this.executeNow(approval.projectId, approval.toolCall, approvalId, approval.diffPlan, { chatId: approval.chatId, runId: approval.runId });
@@ -235,6 +249,18 @@ export class ToolRuntime {
     this.approvals.resolve(approval.id);
     this.activity.emit({ type: 'action', message: 'Operação recusada pelo usuário.', status: 'failed', toolCallId: approval.toolCall.id, toolName: approval.toolCall.name, chatId: approval.chatId, runId: approval.runId });
     return true;
+  }
+
+  private async evaluateToolPolicy(projectId: string, permissionLevel: PermissionLevel, call: AIToolCall, context: ActivityContext): Promise<ToolPolicyResult> {
+    const rawPaths = extractToolPolicyPaths(call);
+    const canonicalPaths = await Promise.all(rawPaths.map((value) => this.workspace.canonicalRelativePath(projectId, value)));
+    return this.toolPolicy.evaluate({ permissionLevel, projectId, call, chatId: context.chatId, runId: context.runId, paths: canonicalPaths });
+  }
+
+  private policyDeniedMessage(policy: ToolPolicyResult): string {
+    return policy.blockedBy === 'security'
+      ? `Operação bloqueada pela política de segurança do workspace${policy.reasons.length ? `: ${policy.reasons.join(' · ')}` : ''}.`
+      : 'Operação bloqueada pelas permissões do chat.';
   }
 
   private async preview(projectId: string, call: AIToolCall): Promise<DiffPlan | undefined> {
@@ -397,6 +423,19 @@ export class ToolRuntime {
   private async reconcileJournal(): Promise<void> { for (const [approvalId, entry] of this.journal) if (await this.matchesExpectedState(entry)) this.activity.emit({ type: 'action', message: `Operação ${approvalId} concluída durante uma interrupção anterior.`, status: 'success', toolCallId: entry.toolCall.id, toolName: entry.toolCall.name }); await this.persistJournal(); }
   private async persistJournal(): Promise<void> { if (!this.journalStorage) return; const snapshot = [...this.journal.values()]; const write = this.journalWrite.then(() => this.journalStorage!.write(JOURNAL_FILE, snapshot)); this.journalWrite = write.catch(() => {}); await write; }
 
+  private async visibleSearchPaths(projectId: string, paths: string[], context: ActivityContext): Promise<string[]> {
+    if (!this.executionPathScope || !context.chatId || !context.runId || !this.executionPathScope.get(context.chatId, context.runId)) return paths;
+    const visible = new Set<string>();
+    for (const value of paths) {
+      try {
+        const canonical = await this.workspace.canonicalRelativePath(projectId, value);
+        if (this.executionPathScope.allowsPath(context.chatId, context.runId, projectId, canonical)) visible.add(canonical);
+      } catch {
+      }
+    }
+    return [...visible].sort();
+  }
+
   private async executeAllowed(projectId: string, name: ToolName, input: Record<string, unknown>, context: ActivityContext = {}): Promise<ToolExecution> {
     switch (name) {
       case 'plan_execution': {
@@ -435,7 +474,7 @@ export class ToolRuntime {
       case 'create_file': { const path = this.stringValue(input, 'path'); const content = String(input.content ?? ''); await this.workspace.createFile(projectId, path, content); const after = await this.workspace.readFile(projectId, path); return { output: 'Arquivo criado.', changes: [this.diffs.create(path, 'created', '', after)] }; }
       case 'delete_file': { const path = this.stringValue(input, 'path'); const before = await this.workspace.readFile(projectId, path); await this.workspace.deleteFile(projectId, path); return { output: 'Arquivo excluído.', changes: [this.diffs.create(path, 'deleted', before, '')] }; }
       case 'rename_file': { const from = this.stringValue(input, 'from'); const to = this.stringValue(input, 'to'); const before = await this.workspace.readFile(projectId, from); await this.workspace.renameFile(projectId, from, to); const after = await this.workspace.readFile(projectId, to); return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] }; }
-      case 'search_files': return { output: JSON.stringify(await this.workspace.searchFiles(projectId, this.stringValue(input, 'query'))) };
+      case 'search_files': { const matches = await this.workspace.searchFiles(projectId, this.stringValue(input, 'query')); return { output: JSON.stringify(await this.visibleSearchPaths(projectId, matches, context)) }; }
       case 'run_command': { const result = await this.commands.run(projectId, this.stringValue(input, 'command')); return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result }; }
       case 'git_status': return this.gitExecution(projectId, await this.requireGit().status(projectId));
       case 'git_diff': return this.gitExecution(projectId, await this.requireGit().diff(projectId));
