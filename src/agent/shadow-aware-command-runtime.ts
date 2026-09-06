@@ -18,9 +18,17 @@ export class ShadowAwareCommandRuntime extends CommandRuntime {
 
   override async run(projectId: string, command: string, options: CommandRunOptions = {}): Promise<CommandResult> {
     const context = currentExecutionWorkspaceContext();
-    if (!context || context.projectId !== projectId) return super.run(projectId, command, options);
-    if (!this.shadows.get(context.chatId, context.runId)) return super.run(projectId, command, options);
-    if (projectId === SYSTEM_PROJECT_ID) throw new Error('Command sandbox não executa alterações isoladas no workspace de sistema.');
+    if (!context) return super.run(projectId, command, options);
+    if (context.projectId !== projectId) throw new Error('Contexto de execução pertence a outro projeto.');
+
+    if (projectId === SYSTEM_PROJECT_ID) {
+      if (this.shadows.get(context.chatId, context.runId)) {
+        throw new Error('Command sandbox não executa alterações isoladas no workspace de sistema.');
+      }
+      return super.run(projectId, command, options);
+    }
+
+    this.shadows.begin(context.chatId, context.runId, projectId);
     return this.sandbox.run(context.chatId, context.runId, projectId, command, options);
   }
 }
