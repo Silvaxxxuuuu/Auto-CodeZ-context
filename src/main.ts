@@ -372,6 +372,7 @@ async function configureInitialExecutionPathScope(chatId: string, runId: string,
 async function buildExecutionContext(
   chat: Awaited<ReturnType<ChatManager['list']>>[number],
   runId: string,
+  taskQuery: string,
 ): Promise<string> {
   const computerContext = computerContextRuntime.build();
   if (!chat.projectId) return computerContext;
@@ -386,6 +387,7 @@ async function buildExecutionContext(
           return executionPathScopeRuntime.allowsPath(chat.id, runId, projectId, canonicalPath);
         }
       : undefined,
+    taskQuery,
   );
   return `${computerContext}\n\n${projectContext}`;
 }
@@ -440,7 +442,7 @@ async function executeChat(chatId: string, content: string, allowedPaths?: strin
   try {
     captureExecutionTaskCapsule(chat, runId, content);
     await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
-    const projectContext = await buildExecutionContext(chat, runId);
+    const projectContext = await buildExecutionContext(chat, runId, content);
     await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const current = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!current) throw new Error('Chat desapareceu durante a execução.');
@@ -522,7 +524,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   try {
     captureExecutionTaskCapsule(chat, runId, content);
     await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
-    const projectContext = await buildExecutionContext(chat, runId);
+    const projectContext = await buildExecutionContext(chat, runId, content);
     if (!isRetryOfPersistedUserMessage) await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const workingChat = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
