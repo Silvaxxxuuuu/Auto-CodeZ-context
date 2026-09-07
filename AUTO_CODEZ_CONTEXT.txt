@@ -2053,3 +2053,299 @@ Próximo passo correto:
 - somente depois decidir qual implementação de process sandbox entra na Fase 3.
 
 Até essa decisão, run_command continua sendo uma ferramenta aprovada e controlada, mas não deve ser descrita como execução totalmente confinada pelo SO.
+
+------------------------------------------------------------
+24.13. RUN_COMMAND SEM EXECUÇÃO SILENCIOSA
+------------------------------------------------------------
+
+A auditoria do ToolPolicyRuntime/PermissionRuntime encontrou que o nível unrestricted ainda permitia run_command comum sem confirmação, apesar de o command sandbox ser uma cópia temporária endurecida e não um isolamento completo do sistema operacional.
+
+Correção:
+d47581004f1da547433acf791fdbd883fcd809fb
+fix(security): require approval for shell commands
+
+Estado após a correção:
+- todo run_command não vazio parte de decisão ask;
+- a razão base registra que o shell não possui confinamento completo do sistema operacional;
+- mutações diretas sensíveis continuam podendo elevar a decisão para deny;
+- leituras sensíveis continuam em ask;
+- comandos Git mutáveis continuam em ask com razão específica;
+- ferramentas de arquivo em unrestricted não foram transformadas em approval obrigatório quando suas próprias políticas permitem execução;
+- ToolRuntime.approve reavalia a política e permite executar uma decisão ask somente depois da decisão explícita do usuário.
+
+Validate Auto CodeZ #2487 passou integralmente.
+Visual Auto CodeZ #74 passou integralmente, com 15/15 cenários, pageErrors vazio e consoleErrors vazio.
+
+------------------------------------------------------------
+24.14. CONTRATO DO SHELL E SPIKE DE ISOLAMENTO WIN32
+------------------------------------------------------------
+
+O contrato exposto ao modelo foi alinhado no commit:
+470baaca27b55e5843f2b5348e66f45c607c80d0
+fix(agent): align shell tool approval contract
+
+A descrição de run_command agora informa explicitamente:
+- read-only bloqueia shell;
+- os demais níveis atualmente exigem aprovação explícita antes do processo iniciar;
+- o motivo é a ausência de confinamento completo do sistema operacional;
+- mutações diretas sensíveis ainda podem ser bloqueadas integralmente.
+
+Validate Auto CodeZ #2489 passou integralmente.
+
+Spike técnico de isolamento Windows:
+- Job Objects são úteis para árvore de processos, cancelamento e limites de recursos, mas não constituem sandbox de filesystem/rede;
+- Restricted Tokens reduzem privilégios, mas não resolvem sozinhos a fronteira de workspace;
+- AppContainer é a direção preferida para um isolamento forte compatível com Windows 10+;
+- o desenho futuro deve combinar AppContainer com ACLs explícitas para workspace/home/tmp e, quando útil, Job Object para controle da árvore;
+- handles herdados devem ser limitados explicitamente aos necessários para stdin/stdout/stderr;
+- ferramentas externas como Node, npm, Git e Python podem exigir grants read/execute específicos, nunca acesso amplo ao perfil do usuário;
+- CreateProcessInSandbox é uma API experimental de Windows 11 e pode ser avaliada como caminho opcional futuro, não como baseline enquanto Windows 10 for suportado;
+- o fallback obrigatório continua sendo a política atual de approval explícita quando isolamento forte não estiver disponível.
+
+Não descrever o command sandbox atual como isolamento completo do SO.
+
+------------------------------------------------------------
+24.15. PERFIL, SETTINGS E INTELIGÊNCIA PERSISTENTES
+------------------------------------------------------------
+
+Commits principais:
+2c6b013974d08da6d540ff2fdfe0d0bde2846d6d
+feat(settings): make preferences and local profile functional
+
+3b76a31f854c8b1a48fc7c701e2cd73453fd98e4
+fix(settings): keep API key fallback typed
+
+a8ac959f406402fd474b80822e0275f2504bdcdc
+test(ui): verify persisted settings and intelligence
+
+Estado:
+- Perfil local passou a persistir identidade no dispositivo;
+- Settings Geral passou a persistir densidade e preferência de animações;
+- Inteligência selecionada no composer é persistida no chat e refletida em Settings;
+- nível de acesso do chat pode ser alterado pela nova Settings funcional;
+- a UI diferencia recursos implementados de recursos planejados;
+- testes visuais passaram a verificar persistência reabrindo Perfil e Settings;
+- Visual Auto CodeZ #78 confirmou 19/19 cenários sem page errors ou console errors.
+
+------------------------------------------------------------
+24.16. TERMINAL WINDOWS — FINALIZAÇÃO REAL DA ÁRVORE
+------------------------------------------------------------
+
+Foi identificado um race no encerramento de sessões do Terminal no Windows: cmd.exe podia encerrar antes de taskkill /T /F terminar, deixando um processo descendente temporariamente com o cwd aberto e causando EBUSY no cleanup.
+
+Correção:
+bd12323b978de45758d25e3e55dc8dffd0099783
+fix(terminal): await Windows process tree termination
+
+Estado:
+- sessão morta no Windows só publica estado terminal depois de o processo principal fechar e o taskkill da árvore terminar;
+- dispose usa a mesma semântica de encerramento de árvore;
+- processos descendentes não são tratados como encerrados prematuramente.
+
+Validate Auto CodeZ #2497 passou integralmente.
+Visual Auto CodeZ #79 passou integralmente.
+
+------------------------------------------------------------
+24.17. FAMÍLIA OPENAI-COMPATIBLE
+------------------------------------------------------------
+
+Commit:
+5ee4c4e15ef70bae780cf1c1d0060ab172eeb386
+feat(ai): add OpenAI-compatible provider family
+
+Providers adicionados por um adapter compartilhado:
+- Groq;
+- DeepSeek;
+- xAI;
+- Mistral AI;
+- OpenRouter;
+- Together AI;
+- Fireworks AI;
+- Cerebras;
+- Hugging Face Inference Providers.
+
+O adapter comum usa Chat Completions como interseção de compatibilidade e cobre:
+- model discovery por /models;
+- chat normal;
+- streaming SSE;
+- tool calling;
+- reconstrução de tool calls fragmentadas durante streaming;
+- usage normalizado;
+- base URL customizada;
+- erros tipados preservando identidade do provider;
+- capabilities derivadas de metadata quando disponível e defaults conservadores quando necessário;
+- reasoning enviado somente quando o modelo foi identificado como compatível com o estilo do provider.
+
+stream_options não foi incluído no contrato comum para evitar depender de uma extensão que não faz parte da interseção segura entre todos os serviços.
+
+Validate Auto CodeZ #2499 passou integralmente.
+Visual Auto CodeZ #80 passou integralmente.
+
+------------------------------------------------------------
+24.18. CATÁLOGO DE PROVIDERS VALIDADO NO APP EMPACOTADO
+------------------------------------------------------------
+
+Commit:
+2fcffe1bf5c65e4becd1a70b3cfa6fceaf74a1b7
+test(ui): verify provider catalog in packaged app
+
+Foi adicionado um E2E específico que:
+- inicia o Electron empacotado;
+- abre API Keys;
+- aciona Nova API Key;
+- lê o select real de providers no renderer;
+- exige IDs e nomes exatos do catálogo;
+- falha se houver page error ou console error.
+
+Validate Auto CodeZ #2501 passou integralmente.
+Visual Auto CodeZ #81:
+- run id 34056133084;
+- conclusão success;
+- artifact id 9996056452;
+- fluxo visual principal 19/19;
+- provider catalog passed;
+- pageErrors vazio;
+- consoleErrors vazio.
+
+Catálogo validado no app:
+- Google Gemini;
+- OpenAI;
+- Anthropic;
+- Groq;
+- DeepSeek;
+- xAI;
+- Mistral AI;
+- OpenRouter;
+- Together AI;
+- Fireworks AI;
+- Cerebras;
+- Hugging Face.
+
+------------------------------------------------------------
+24.19. WORKSPACE INTELLIGENCE PERSISTENTE
+------------------------------------------------------------
+
+Commit:
+17f8395fd5f9695ba6881dd5d4ace652f448bfd4
+feat(project): add persistent workspace intelligence index
+
+O ProjectManager de produção é src/project/project-manager.ts. Existe outro ProjectManager em src/core, mas ele não é o importado pelo main.ts para o fluxo principal.
+
+Antes desta mudança, buildContext:
+- escaneava até 2000 arquivos;
+- escolhia até 80 em ordem;
+- relia conteúdo a cada execução;
+- não possuía índice persistente;
+- não possuía ranking pelo objetivo atual;
+- não possuía orçamento total de contexto.
+
+Nova infraestrutura:
+- workspace-index-v1.json persistente e local;
+- metadata por arquivo;
+- fingerprint incremental baseado em path/tamanho/mtime de alta resolução;
+- extração estrutural via AST TypeScript para TS/JS;
+- símbolos: functions, methods, classes, interfaces, types, enums e variables;
+- no máximo 160 símbolos por arquivo;
+- source estrutural limitado a 256 KiB por arquivo;
+- arquivos inalterados reutilizam metadata/símbolos persistidos;
+- arquivos alterados são reindexados;
+- arquivos removidos saem do índice;
+- estado persistido é revalidado na carga;
+- .env e demais caminhos classificados como sensíveis não entram no índice automático;
+- .env.example continua permitido.
+
+Ranking:
+- texto da tarefa é normalizado;
+- camelCase e tokens de path/símbolos entram na pontuação;
+- matches de basename e símbolos têm peso alto;
+- arquivos de configuração, src, README e manifests recebem prioridade determinística;
+- testes recebem prioridade adicional quando a tarefa menciona testes;
+- desempate final é determinístico por path.
+
+Context budget:
+- máximo de 24 arquivos selecionados;
+- máximo total aproximado de 768 KiB de conteúdo;
+- máximo de 256 KiB por arquivo;
+- binários com NUL são ignorados;
+- Allowed Paths continua sendo aplicado antes da seleção e novamente imediatamente antes da leitura;
+- WorkspacePathPolicy continua sendo reavaliado na fronteira final.
+
+Testes adicionados cobrem:
+- ranking por símbolos;
+- reconstrução do manager reutilizando índice persistido;
+- reindexação de arquivo alterado;
+- remoção de arquivo apagado;
+- exclusão de .env do índice e do contexto.
+
+Validate Auto CodeZ #2503 passou integralmente, incluindo TypeScript, core tests, ESLint, Forge package e startup smoke.
+
+------------------------------------------------------------
+24.20. RANKING PELO OBJETIVO ATUAL
+------------------------------------------------------------
+
+Commit:
+6aa8cfcdd88b66eb351bab9460b80ec291135d8f
+feat(project): rank workspace context by active task
+
+O main.ts agora passa explicitamente o content da solicitação atual para buildExecutionContext e daí para ProjectManager.buildContext.
+
+Isso é importante porque buildExecutionContext é montado antes de a nova mensagem ser inserida no histórico persistido.
+
+Decisão arquitetural:
+- não usar variável global de “última tarefa”;
+- não inferir o objetivo de estado ambiente;
+- não compartilhar consulta entre chats;
+- passar taskQuery explicitamente por chamada.
+
+Resultado: o ranking é correto por execução e seguro para chats concorrentes.
+
+Validate Auto CodeZ #2505 passou integralmente, incluindo TypeScript, core tests, ESLint, Forge package e startup smoke.
+
+------------------------------------------------------------
+24.21. CONFINAMENTO REALPATH DO WORKSPACE INDEX
+------------------------------------------------------------
+
+Durante a revisão final do índice foi identificada uma janela TOCTOU: mesmo que o scan normal ignore symlinks, um path poderia teoricamente mudar entre scan, stat e leitura.
+
+Correção:
+44e1a4505de1e348318a40cfd65d7a7acea30279
+fix(project): confine workspace index real paths
+
+Estado:
+- a raiz do projeto é canonicalizada com fs.realpath;
+- todo candidato do índice resolve seu realpath antes de stat/leitura;
+- alvo real fora da raiz canônica é recusado;
+- a leitura final de contexto resolve novamente o realpath;
+- a leitura final recusa alvo que escape da raiz;
+- a raiz canônica é armazenada no estado do índice;
+- comparação de raiz respeita case-insensitivity no Windows;
+- teste específico cria um link/junction apontando para diretório externo e comprova que o arquivo externo não entra no índice.
+
+O Allowed Paths e WorkspacePathPolicy continuam sendo fronteiras independentes e permanecem aplicados além desta proteção física contra links.
+
+Validate Auto CodeZ #2507:
+- run id 34057492041;
+- conclusão success;
+- TypeScript validation passou;
+- core tests passaram;
+- ESLint validation passou;
+- Electron Forge package build passou;
+- Electron startup smoke test passou.
+
+Visual Auto CodeZ #84:
+- run id 34057492040;
+- conclusão success;
+- artifact id 9996455891;
+- digest sha256:a9123be80865d4bc4f68e24adbdc331279f3deb7291dac8cc3c28f3716ccf540;
+- Electron empacotado;
+- 19/19 cenários do fluxo principal passaram;
+- catálogo de providers passou;
+- pageErrors vazio;
+- consoleErrors vazio;
+- contact sheet revisado sem regressão visual perceptível.
+
+PR #9 permanece:
+- open;
+- draft;
+- não mesclado;
+- não fazer merge sem autorização explícita do usuário.
