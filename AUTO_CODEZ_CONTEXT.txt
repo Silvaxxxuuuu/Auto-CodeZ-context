@@ -2349,3 +2349,124 @@ PR #9 permanece:
 - draft;
 - não mesclado;
 - não fazer merge sem autorização explícita do usuário.
+
+------------------------------------------------------------
+24.22. GRAFO ESTRUTURAL DE DEPENDÊNCIAS DO WORKSPACE
+------------------------------------------------------------
+
+Commit principal:
+aadb58714f3bb9be431e0c74183279dd9a997e93
+feat(project): rank workspace dependency relationships
+
+O índice persistente foi evoluído de workspace-index-v1.json para workspace-index-v2.json para armazenar, além de símbolos, referências de módulos internos extraídas estruturalmente.
+
+Estado implementado:
+- imports TypeScript/JavaScript são extraídos via AST;
+- re-exports com module specifier entram na mesma estrutura;
+- import equals externo é reconhecido;
+- import() dinâmico com literal é reconhecido;
+- require() com literal é reconhecido;
+- no máximo 96 referências de import são persistidas por arquivo;
+- imports de pacotes externos não são convertidos em arquivos do workspace;
+- somente caminhos relativos internos participam do grafo;
+- resolução considera extensão omitida e index files;
+- imports de runtime .js/.jsx/.mjs/.cjs podem resolver para a fonte TypeScript correspondente quando ela existe no índice;
+- relações são construídas nos dois sentidos: dependencies e dependents;
+- arquivos diretamente relacionados recebem boost inferior a uma correspondência direta forte de símbolo/path;
+- propagação transitiva é limitada a vizinhos próximos e recebe peso ainda menor;
+- no máximo 8 seeds relevantes iniciam propagação por execução;
+- boost acumulado possui teto para evitar que um arquivo central domine o ranking;
+- importCount passou a fazer parte do status do índice;
+- a migração para v2 força uma reconstrução limpa uma vez, evitando tratar dados v1 sem imports como se fossem estrutura v2 completa;
+- após a primeira indexação v2, fingerprints inalterados voltam a ser reutilizados normalmente.
+
+Cobertura adicionada prova:
+- promoção de dependência direta de arquivo relevante;
+- promoção de dependente reverso;
+- resolução de source TypeScript importado com extensão JavaScript de runtime;
+- extração de import, re-export, import() e require();
+- persistência e reuso de imports depois de reconstruir o ProjectManager.
+
+Validate Auto CodeZ #2511:
+- run id 34077168834;
+- conclusão success;
+- TypeScript validation passou;
+- core tests passaram;
+- ESLint validation passou;
+- Electron Forge package build passou;
+- Electron startup smoke test passou.
+
+Visual Auto CodeZ #86:
+- run id 34077168783;
+- conclusão success;
+- fluxo visual empacotado passou integralmente.
+
+------------------------------------------------------------
+24.23. ALLOWED PATHS TAMBÉM CONFina METADATA DE RANKING
+------------------------------------------------------------
+
+Durante a revisão do grafo foi identificada uma fronteira adicional: mesmo quando um arquivo fora de Allowed Paths já era impedido de ser lido/enviado ao provider, seus símbolos/imports persistidos ainda poderiam teoricamente influenciar a posição de arquivos permitidos por meio do scoring e do grafo.
+
+Correção principal:
+90e2c9f8c70e72ddfe0619ac1eae0e63431af35b
+fix(security): scope workspace ranking metadata
+
+Novo contrato:
+- quando existe includePath/Allowed Paths, os candidatos são filtrados antes de scoreFile;
+- somente o subconjunto permitido participa de buildDependencyRelations;
+- metadata fora do escopo não pode virar seed;
+- metadata fora do escopo não pode conceder boost a vizinhos permitidos;
+- o filtro é avaliado com concorrência limitada a 16 workers para não serializar milhares de verificações;
+- erro do callback de escopo falha fechado para aquele arquivo;
+- a leitura final continua revalidando escopo e realpath, mantendo duas fronteiras independentes: seleção e envio.
+
+Teste específico cria um arquivo fora do escopo com um símbolo altamente relevante e um import para um vizinho permitido. A consulta usa exatamente esse símbolo privado e comprova que o vizinho permitido não recebe promoção indireta pelo arquivo bloqueado.
+
+O primeiro Validate desse hardening, #2513, comprovou:
+- TypeScript passou;
+- 649/649 core tests passaram;
+- o novo teste de isolamento de metadata passou;
+- a única falha foi ESLint no uso de while (true) dentro do worker;
+- package e startup foram pulados exclusivamente porque o gate de lint encerrou o workflow.
+
+Correção exclusivamente de lint:
+ef0c533a630c9d0761db15fa150e26534f0a1618
+fix(project): satisfy scoped ranking lint
+
+O diff do lint-fix toca somente src/project/workspace-index.ts e substitui o laço constante por uma condição explícita baseada no índice. Nenhum peso, parser, filtro, teste ou regra de segurança foi alterado.
+
+Baseline final validado:
+ef0c533a630c9d0761db15fa150e26534f0a1618
+
+Validate Auto CodeZ #2515:
+- run id 34077706252;
+- conclusão success;
+- TypeScript validation passou;
+- core tests passaram;
+- ESLint validation passou;
+- Electron Forge package build passou;
+- Electron startup smoke test passou.
+
+Visual Auto CodeZ #88:
+- run id 34077706257;
+- conclusão success;
+- artifact id 10002695580;
+- artifact auto-codez-visual-34077706257;
+- digest sha256:0689c34932944d8779b7e24a9c06dfd233732538e42ca8bdfa82973fdadabbd6;
+- Electron empacotado;
+- transporte CDP;
+- estado isolado;
+- Windows x64;
+- viewport principal 1440x900;
+- viewport compacta 1008x689;
+- 19/19 cenários passaram;
+- pageErrors vazio;
+- consoleErrors vazio;
+- stderr contém apenas a linha normal DevTools listening;
+- contact sheet revisada sem regressão visual perceptível.
+
+PR #9 permanece:
+- open;
+- draft;
+- não mesclado;
+- não fazer merge sem autorização explícita do usuário.
