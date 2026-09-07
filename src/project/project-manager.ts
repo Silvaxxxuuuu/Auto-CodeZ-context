@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectRecord } from '../ai/types';
 import { WorkspacePathPolicy } from '../agent/workspace-path-policy';
+import { buildTaskFocusedExcerpt } from './context-excerpts';
 import { WorkspaceIndexRuntime, type WorkspaceIndexFile, type WorkspaceIndexStatus } from './workspace-index';
 import { WorkspaceLexicalIndexRuntime, type WorkspaceLexicalMatch } from './workspace-lexical-index';
 
@@ -10,6 +11,7 @@ const STATE_FILE = 'projects.json';
 const MAX_CONTEXT_FILES = 24;
 const MAX_CONTEXT_BYTES = 768 * 1024;
 const MAX_FILE_BYTES = 256 * 1024;
+const MAX_CONTEXT_FILE_EXCERPT_BYTES = 64 * 1024;
 const STRUCTURAL_CONTEXT_CANDIDATES = 48;
 const LEXICAL_CONTEXT_CANDIDATES = 24;
 const RANK_FUSION_OFFSET = 4;
@@ -159,9 +161,12 @@ export class ProjectManager {
         if (remaining <= 0) break;
         const buffer = await fs.readFile(realFilePath);
         if (buffer.includes(0)) continue;
-        const contentBuffer = buffer.length > remaining ? buffer.subarray(0, remaining) : buffer;
-        let content = contentBuffer.toString('utf8');
-        if (buffer.length > contentBuffer.length) content = content.replace(/\uFFFD+$/, '');
+        const content = buildTaskFocusedExcerpt(
+          buffer.toString('utf8'),
+          taskQuery,
+          Math.min(remaining, MAX_CONTEXT_FILE_EXCERPT_BYTES),
+        );
+        if (!content) continue;
         chunks.push(`${header}${content}`);
         contextBytes += headerBytes + Buffer.byteLength(content, 'utf8');
         if (contextBytes >= MAX_CONTEXT_BYTES) break;
