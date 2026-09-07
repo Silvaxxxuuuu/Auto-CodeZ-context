@@ -5,13 +5,16 @@ import ts from 'typescript';
 import type { ProjectRecord } from '../ai/types';
 import { WorkspacePathPolicy } from '../agent/workspace-path-policy';
 
-const INDEX_FILE = 'workspace-index-v1.json';
-const INDEX_VERSION = 1;
+const INDEX_FILE = 'workspace-index-v2.json';
+const INDEX_VERSION = 2;
 const MAX_SYMBOL_SOURCE_BYTES = 256 * 1024;
 const MAX_SYMBOLS_PER_FILE = 160;
+const MAX_IMPORTS_PER_FILE = 96;
 const automaticContextPathPolicy = new WorkspacePathPolicy();
 
 const TYPE_SCRIPT_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
+const MODULE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '.json'];
+const RUNTIME_MODULE_EXTENSIONS = new Set(['.js', '.jsx', '.mjs', '.cjs']);
 const CONTEXT_EXTENSIONS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts',
   '.json', '.md', '.mdx', '.txt', '.css', '.scss', '.sass', '.less',
@@ -46,12 +49,14 @@ export type WorkspaceIndexFile = {
   mtimeMs: number;
   fingerprint: string;
   symbols: WorkspaceIndexSymbol[];
+  imports: string[];
 };
 
 export type WorkspaceIndexStatus = {
   projectId: string;
   indexedFiles: number;
   symbolCount: number;
+  importCount: number;
   lastIndexedAt: number;
   updatedFiles: number;
   reusedFiles: number;
@@ -66,7 +71,7 @@ type IndexedProject = {
 };
 
 type StoredWorkspaceIndex = {
-  version: 1;
+  version: 2;
   projects: IndexedProject[];
 };
 
@@ -77,6 +82,12 @@ interface WorkspaceIndexStorage {
 
 type ProjectContextPathFilter = (relativePath: string) => boolean | Promise<boolean>;
 type RankedFile = WorkspaceIndexFile & { score: number; priority: number };
+type TypeScriptStructure = { symbols: WorkspaceIndexSymbol[]; imports: string[] };
+
+type DependencyRelations = {
+  dependencies: Map<string, string[]>;
+  dependents: Map<string, string[]>;
+};
 
 function toPosixPath(value: string): string {
   return value.replaceAll('\\', '/');
@@ -141,24 +152,52 @@ function pushSymbol(symbols: WorkspaceIndexSymbol[], sourceFile: ts.SourceFile, 
   symbols.push({ name, kind, line: symbolLine(sourceFile, node) });
 }
 
-function extractTypeScriptSymbols(filePath: string, content: string): WorkspaceIndexSymbol[] {
+function moduleSpecifierText(value: ts.Expression | undefined): string | undefined {
+  if (!value) return undefined;
+  if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) {
+    const text = value.text.trim();
+    return text || undefined;
+  }
+  return undefined;
+}
+
+function extractTypeScriptStructure(filePath: string, content: string): TypeScriptStructure {
   const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true, scriptKind(filePath));
   const symbols: WorkspaceIndexSymbol[] = [];
+  const imports = new Set<string>();
+
+  const addImport = (value: string | undefined): void => {
+    if (!value || imports.size >= MAX_IMPORTS_PER_FILE) return;
+    imports.add(value);
+  };
 
   const visit = (node: ts.Node): void => {
-    if (symbols.length >= MAX_SYMBOLS_PER_FILE) return;
-    if (ts.isFunctionDeclaration(node)) pushSymbol(symbols, sourceFile, node, node.name?.text, 'function');
-    else if (ts.isMethodDeclaration(node) || ts.isMethodSignature(node)) pushSymbol(symbols, sourceFile, node, propertyName(node.name), 'method');
-    else if (ts.isClassDeclaration(node)) pushSymbol(symbols, sourceFile, node, node.name?.text, 'class');
-    else if (ts.isInterfaceDeclaration(node)) pushSymbol(symbols, sourceFile, node, node.name.text, 'interface');
-    else if (ts.isTypeAliasDeclaration(node)) pushSymbol(symbols, sourceFile, node, node.name.text, 'type');
-    else if (ts.isEnumDeclaration(node)) pushSymbol(symbols, sourceFile, node, node.name.text, 'enum');
-    else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) pushSymbol(symbols, sourceFile, node, node.name.text, 'variable');
+    if (symbols.length < MAX_SYMBOLS_PER_FILE) {
+      if (ts.isFunctionDeclaration(node)) pushSymbol(symbols, sourceFile, node, node.name?.text, 'function');
+      else if (ts.isMethodDeclaration(node) || ts.isMethodSignature(node)) pushSymbol(symbols, sourceFile, node, propertyName(node.name), 'method');
+      else if (ts.isClassDeclaration(node)) pushSymbol(symbols, sourceFile, node, node.name?.text, 'class');
+      else if (ts.isInterfaceDeclaration(node)) pushSymbol(symbols, sourceFile, node, node.name.text, 'interface');
+      else if (ts.isTypeAliasDeclaration(node)) pushSymbol(symbols, sourceFile, node, node.name.text, 'type');
+      else if (ts.isEnumDeclaration(node)) pushSymbol(symbols, sourceFile, node, node.name.text, 'enum');
+      else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) pushSymbol(symbols, sourceFile, node, node.name.text, 'variable');
+    }
+
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      addImport(moduleSpecifierText(node.moduleSpecifier));
+    } else if (ts.isImportEqualsDeclaration(node)
+      && ts.isExternalModuleReference(node.moduleReference)) {
+      addImport(moduleSpecifierText(node.moduleReference.expression));
+    } else if (ts.isCallExpression(node) && node.arguments.length === 1) {
+      const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require';
+      if (isDynamicImport || isRequire) addImport(moduleSpecifierText(node.arguments[0]));
+    }
+
     ts.forEachChild(node, visit);
   };
 
   visit(sourceFile);
-  return symbols;
+  return { symbols, imports: [...imports] };
 }
 
 function normalizeSearchText(value: string): string {
@@ -196,6 +235,7 @@ function scoreFile(file: WorkspaceIndexFile, queryTokens: string[]): number {
   const pathTokens = new Set(searchTokens(file.relativePath));
   const basename = normalizeSearchText(path.posix.basename(toPosixPath(file.relativePath), path.posix.extname(toPosixPath(file.relativePath))));
   const symbols = file.symbols.map((symbol) => ({ normalized: normalizeSearchText(symbol.name), tokens: new Set(searchTokens(symbol.name)) }));
+  const imports = file.imports.map((specifier) => normalizeSearchText(specifier));
   let score = 0;
 
   for (const token of queryTokens) {
@@ -207,6 +247,10 @@ function scoreFile(file: WorkspaceIndexFile, queryTokens: string[]): number {
       else if (symbol.tokens.has(token)) score += 20;
       else if (symbol.normalized.includes(token)) score += 8;
     }
+    for (const specifier of imports) {
+      if (specifier === token) score += 6;
+      else if (specifier.includes(token)) score += 2;
+    }
   }
 
   if ((queryTokens.includes('test') || queryTokens.includes('tests') || queryTokens.includes('teste') || queryTokens.includes('testes'))
@@ -215,7 +259,11 @@ function scoreFile(file: WorkspaceIndexFile, queryTokens: string[]): number {
 }
 
 function cloneFile(file: WorkspaceIndexFile): WorkspaceIndexFile {
-  return { ...file, symbols: file.symbols.map((symbol) => ({ ...symbol })) };
+  return {
+    ...file,
+    symbols: file.symbols.map((symbol) => ({ ...symbol })),
+    imports: [...file.imports],
+  };
 }
 
 function validStoredFile(value: unknown): WorkspaceIndexFile | undefined {
@@ -236,7 +284,104 @@ function validStoredFile(value: unknown): WorkspaceIndexFile | undefined {
       && typeof (symbol as WorkspaceIndexSymbol).line === 'number',
     )).slice(0, MAX_SYMBOLS_PER_FILE).map((symbol) => ({ ...symbol }))
     : [];
-  return { relativePath: file.relativePath, size: file.size, mtimeMs: file.mtimeMs, fingerprint: file.fingerprint, symbols };
+  const imports = Array.isArray(file.imports)
+    ? file.imports.filter((specifier): specifier is string => typeof specifier === 'string' && Boolean(specifier.trim())).slice(0, MAX_IMPORTS_PER_FILE)
+    : [];
+  return {
+    relativePath: file.relativePath,
+    size: file.size,
+    mtimeMs: file.mtimeMs,
+    fingerprint: file.fingerprint,
+    symbols,
+    imports,
+  };
+}
+
+function importCandidates(importerPath: string, specifier: string): string[] {
+  if (!specifier.startsWith('./') && !specifier.startsWith('../')) return [];
+  const importerDirectory = path.posix.dirname(toPosixPath(importerPath));
+  const normalizedSpecifier = toPosixPath(specifier);
+  const target = path.posix.normalize(path.posix.join(importerDirectory, normalizedSpecifier));
+  if (target === '..' || target.startsWith('../') || path.posix.isAbsolute(target)) return [];
+
+  const candidates = [target];
+  const extension = path.posix.extname(target).toLowerCase();
+  if (!extension) {
+    for (const moduleExtension of MODULE_EXTENSIONS) candidates.push(`${target}${moduleExtension}`);
+    for (const moduleExtension of MODULE_EXTENSIONS) candidates.push(path.posix.join(target, `index${moduleExtension}`));
+  } else if (RUNTIME_MODULE_EXTENSIONS.has(extension)) {
+    const stem = target.slice(0, -extension.length);
+    for (const moduleExtension of MODULE_EXTENSIONS) candidates.push(`${stem}${moduleExtension}`);
+  }
+  return [...new Set(candidates.map((candidate) => path.posix.normalize(candidate)))];
+}
+
+function buildDependencyRelations(files: WorkspaceIndexFile[]): DependencyRelations {
+  const filesByKey = new Map(files.map((file) => [keyOf(file.relativePath), file]));
+  const dependencies = new Map<string, string[]>();
+  const dependents = new Map<string, string[]>();
+
+  for (const file of files) {
+    const sourceKey = keyOf(file.relativePath);
+    const resolved = new Set<string>();
+    for (const specifier of file.imports) {
+      for (const candidate of importCandidates(file.relativePath, specifier)) {
+        const target = filesByKey.get(keyOf(candidate));
+        if (!target) continue;
+        const targetKey = keyOf(target.relativePath);
+        if (targetKey !== sourceKey) resolved.add(targetKey);
+        break;
+      }
+    }
+    const dependencyKeys = [...resolved].sort();
+    dependencies.set(sourceKey, dependencyKeys);
+    for (const targetKey of dependencyKeys) {
+      const existing = dependents.get(targetKey) ?? [];
+      existing.push(sourceKey);
+      dependents.set(targetKey, existing);
+    }
+  }
+
+  for (const values of dependents.values()) values.sort();
+  return { dependencies, dependents };
+}
+
+function applyDependencyBoosts(ranked: RankedFile[], queryTokens: string[]): void {
+  if (!queryTokens.length) return;
+  const relations = buildDependencyRelations(ranked);
+  const seeds = ranked
+    .filter((file) => file.score > 0)
+    .sort((left, right) => right.score - left.score
+      || right.priority - left.priority
+      || toPosixPath(left.relativePath).localeCompare(toPosixPath(right.relativePath)))
+    .slice(0, 8);
+  const boosts = new Map<string, number>();
+
+  const addBoost = (seedKey: string, targetKey: string, value: number): void => {
+    if (seedKey === targetKey) return;
+    boosts.set(targetKey, Math.min(48, (boosts.get(targetKey) ?? 0) + value));
+  };
+
+  for (const seed of seeds) {
+    const seedKey = keyOf(seed.relativePath);
+    const directDependencies = relations.dependencies.get(seedKey) ?? [];
+    const directDependents = relations.dependents.get(seedKey) ?? [];
+
+    for (const dependencyKey of directDependencies) {
+      addBoost(seedKey, dependencyKey, 18);
+      for (const transitiveKey of relations.dependencies.get(dependencyKey) ?? []) {
+        addBoost(seedKey, transitiveKey, 5);
+      }
+    }
+    for (const dependentKey of directDependents) {
+      addBoost(seedKey, dependentKey, 14);
+      for (const transitiveKey of relations.dependents.get(dependentKey) ?? []) {
+        addBoost(seedKey, transitiveKey, 4);
+      }
+    }
+  }
+
+  for (const file of ranked) file.score += boosts.get(keyOf(file.relativePath)) ?? 0;
 }
 
 export class WorkspaceIndexRuntime {
@@ -302,16 +447,22 @@ export class WorkspaceIndexRuntime {
       }
 
       let symbols: WorkspaceIndexSymbol[] = [];
+      let imports: string[] = [];
       if (TYPE_SCRIPT_EXTENSIONS.has(path.extname(relativePath).toLowerCase()) && stat.size <= MAX_SYMBOL_SOURCE_BYTES) {
         try {
           const content = await fs.readFile(realPath, 'utf8');
-          if (!content.includes('\u0000')) symbols = extractTypeScriptSymbols(realPath, content);
+          if (!content.includes('\u0000')) {
+            const structure = extractTypeScriptStructure(realPath, content);
+            symbols = structure.symbols;
+            imports = structure.imports;
+          }
         } catch {
           symbols = [];
+          imports = [];
         }
       }
 
-      nextFiles.push({ relativePath, size: stat.size, mtimeMs: stat.mtimeMs, fingerprint, symbols });
+      nextFiles.push({ relativePath, size: stat.size, mtimeMs: stat.mtimeMs, fingerprint, symbols, imports });
       updatedFiles += 1;
     }
 
@@ -334,6 +485,7 @@ export class WorkspaceIndexRuntime {
     if (!project || limit <= 0) return [];
     const queryTokens = searchTokens(query);
     const ranked: RankedFile[] = project.files.map((file) => ({ ...cloneFile(file), score: scoreFile(file, queryTokens), priority: defaultPriority(file.relativePath) }));
+    applyDependencyBoosts(ranked, queryTokens);
     ranked.sort((left, right) => right.score - left.score
       || right.priority - left.priority
       || toPosixPath(left.relativePath).localeCompare(toPosixPath(right.relativePath)));
@@ -365,6 +517,7 @@ export class WorkspaceIndexRuntime {
       projectId: project.projectId,
       indexedFiles: project.files.length,
       symbolCount: project.files.reduce((count, file) => count + file.symbols.length, 0),
+      importCount: project.files.reduce((count, file) => count + file.imports.length, 0),
       lastIndexedAt: project.lastIndexedAt,
       ...refresh,
     };
