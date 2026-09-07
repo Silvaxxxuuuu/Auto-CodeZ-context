@@ -1,4 +1,5 @@
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker';
+import { APP_PREFERENCES_EVENT, getAppPreferences, type AppPreferences } from './app-preferences';
 
 type DiffChange = {
   path: string;
@@ -160,6 +161,32 @@ function languageForPath(path: string): string {
   return languages[extension] || 'plaintext';
 }
 
+function editorFontFamily(preferences: AppPreferences): string {
+  if (preferences.editor.fontFamily === 'cascadia') return '"Cascadia Code", Consolas, monospace';
+  if (preferences.editor.fontFamily === 'system') return 'ui-monospace, "Cascadia Code", Consolas, "SFMono-Regular", Menlo, monospace';
+  return 'Consolas, "Cascadia Code", monospace';
+}
+
+function editorPreferenceOptions(preferences = getAppPreferences()) {
+  return {
+    minimap: { enabled: preferences.editor.minimap },
+    wordWrap: preferences.editor.wordWrap ? 'on' as const : 'off' as const,
+    fontSize: preferences.editor.fontSize,
+    lineHeight: Math.max(17, Math.round(preferences.editor.fontSize * 1.58)),
+    fontFamily: editorFontFamily(preferences),
+  };
+}
+
+function applyModelPreferences(model: TextModel | null, preferences: AppPreferences): void {
+  model?.updateOptions({ tabSize: preferences.editor.tabSize, insertSpaces: true });
+}
+
+function applyEditorPreferences(preferences = getAppPreferences()): void {
+  diffEditor?.updateOptions(editorPreferenceOptions(preferences));
+  applyModelPreferences(originalModel, preferences);
+  applyModelPreferences(modifiedModel, preferences);
+}
+
 function disposeModels(): void {
   originalModel?.dispose();
   modifiedModel?.dispose();
@@ -182,13 +209,9 @@ async function ensureEditor(): Promise<{ monaco: MonacoModule; editor: DiffEdito
       renderSideBySide: true,
       enableSplitViewResizing: true,
       renderOverviewRuler: true,
-      minimap: { enabled: false },
-      wordWrap: 'off',
+      ...editorPreferenceOptions(),
       scrollBeyondLastLine: false,
       smoothScrolling: true,
-      fontSize: 12,
-      lineHeight: 19,
-      fontFamily: 'Consolas, "Cascadia Code", monospace',
       padding: { top: 10, bottom: 10 },
       ignoreTrimWhitespace: false,
       renderIndicators: true,
@@ -241,10 +264,13 @@ async function renderSelectedChange(): Promise<void> {
     if (approval !== currentApproval || change !== currentApproval.diffPlan?.changes[currentChangeIndex]) return;
     disposeModels();
     const language = languageForPath(change.path);
+    const preferences = getAppPreferences();
     originalModel = monaco.editor.createModel(change.before, language);
     modifiedModel = monaco.editor.createModel(change.after, language);
+    applyModelPreferences(originalModel, preferences);
+    applyModelPreferences(modifiedModel, preferences);
     editor.setModel({ original: originalModel, modified: modifiedModel });
-    editor.updateOptions({ renderSideBySide: window.innerWidth >= 760 });
+    editor.updateOptions({ renderSideBySide: window.innerWidth >= 760, ...editorPreferenceOptions(preferences) });
     editor.getOriginalEditor().setScrollPosition({ scrollTop: 0, scrollLeft: 0 });
     editor.getModifiedEditor().setScrollPosition({ scrollTop: 0, scrollLeft: 0 });
     loading.hidden = true;
@@ -346,6 +372,8 @@ bridge.onStreamEvent((event) => {
   if (event.chatId && event.chatId !== currentApproval.chatId) return;
   if (event.type === 'approval_required' || event.type === 'complete' || event.type === 'error' || event.type === 'cancelled') void refreshOpenReview();
 });
+
+window.addEventListener(APP_PREFERENCES_EVENT, () => applyEditorPreferences());
 
 window.addEventListener('resize', () => {
   if (diffEditor) diffEditor.updateOptions({ renderSideBySide: window.innerWidth >= 760 });

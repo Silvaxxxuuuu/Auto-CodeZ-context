@@ -62,6 +62,12 @@ jobs:
           NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
         run: npm run test:visual
 
+      - name: Verify editor settings persistence
+        env:
+          AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
+        run: node scripts/visual-editor-settings.cjs
+
       - name: Upload visual screenshots
         if: always()
         uses: actions/upload-artifact@v4
