@@ -11,6 +11,7 @@ const MAX_SYMBOL_SOURCE_BYTES = 256 * 1024;
 const MAX_SYMBOLS_PER_FILE = 160;
 const MAX_IMPORTS_PER_FILE = 96;
 const RANK_SCOPE_CONCURRENCY = 16;
+const RECENT_CHANGE_BOOSTS = [8, 5, 3] as const;
 const automaticContextPathPolicy = new WorkspacePathPolicy();
 
 const TYPE_SCRIPT_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
@@ -49,6 +50,7 @@ export type WorkspaceIndexFile = {
   size: number;
   mtimeMs: number;
   fingerprint: string;
+  lastChangedAt: number;
   symbols: WorkspaceIndexSymbol[];
   imports: string[];
 };
@@ -288,11 +290,15 @@ function validStoredFile(value: unknown): WorkspaceIndexFile | undefined {
   const imports = Array.isArray(file.imports)
     ? file.imports.filter((specifier): specifier is string => typeof specifier === 'string' && Boolean(specifier.trim())).slice(0, MAX_IMPORTS_PER_FILE)
     : [];
+  const lastChangedAt = typeof file.lastChangedAt === 'number' && Number.isFinite(file.lastChangedAt) && file.lastChangedAt >= 0
+    ? file.lastChangedAt
+    : 0;
   return {
     relativePath: file.relativePath,
     size: file.size,
     mtimeMs: file.mtimeMs,
     fingerprint: file.fingerprint,
+    lastChangedAt,
     symbols,
     imports,
   };
@@ -385,6 +391,19 @@ function applyDependencyBoosts(ranked: RankedFile[], queryTokens: string[]): voi
   for (const file of ranked) file.score += boosts.get(keyOf(file.relativePath)) ?? 0;
 }
 
+function applyRecentChangeBoosts(ranked: RankedFile[]): void {
+  const recentEvents = [...new Set(ranked
+    .map((file) => file.lastChangedAt)
+    .filter((value) => Number.isFinite(value) && value > 0))]
+    .sort((left, right) => right - left)
+    .slice(0, RECENT_CHANGE_BOOSTS.length);
+  if (!recentEvents.length) return;
+
+  const boosts = new Map<number, number>();
+  recentEvents.forEach((event, index) => boosts.set(event, RECENT_CHANGE_BOOSTS[index]));
+  for (const file of ranked) file.score += boosts.get(file.lastChangedAt) ?? 0;
+}
+
 async function filterRankableFiles(files: WorkspaceIndexFile[], includePath?: ProjectContextPathFilter): Promise<WorkspaceIndexFile[]> {
   if (!includePath) return files.map(cloneFile);
   if (!files.length) return [];
@@ -445,6 +464,8 @@ export class WorkspaceIndexRuntime {
     const previousFiles = new Map<string, WorkspaceIndexFile>();
     if (existing && !rootChanged) for (const file of existing.files) previousFiles.set(keyOf(file.relativePath), file);
 
+    const observedAt = this.now();
+    const markChangesAsRecent = Boolean(existing && !rootChanged);
     const nextFiles: WorkspaceIndexFile[] = [];
     let updatedFiles = 0;
     let reusedFiles = 0;
@@ -488,7 +509,15 @@ export class WorkspaceIndexRuntime {
         }
       }
 
-      nextFiles.push({ relativePath, size: stat.size, mtimeMs: stat.mtimeMs, fingerprint, symbols, imports });
+      nextFiles.push({
+        relativePath,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        fingerprint,
+        lastChangedAt: markChangesAsRecent ? observedAt : 0,
+        symbols,
+        imports,
+      });
       updatedFiles += 1;
     }
 
@@ -496,7 +525,7 @@ export class WorkspaceIndexRuntime {
     const nextKeys = new Set(nextFiles.map((file) => keyOf(file.relativePath)));
     const removedFiles = [...previousFiles.keys()].filter((key) => !nextKeys.has(key)).length;
     const changed = !existing || rootChanged || updatedFiles > 0 || removedFiles > 0 || existing.files.length !== nextFiles.length;
-    const lastIndexedAt = changed ? this.now() : existing?.lastIndexedAt ?? this.now();
+    const lastIndexedAt = changed ? observedAt : existing?.lastIndexedAt ?? observedAt;
     const indexedProject: IndexedProject = { projectId: project.id, rootPath: canonicalRoot, lastIndexedAt, files: nextFiles };
     this.projects.set(project.id, indexedProject);
     if (changed) await this.persist();
@@ -513,6 +542,7 @@ export class WorkspaceIndexRuntime {
     const scopedFiles = await filterRankableFiles(project.files, includePath);
     const ranked: RankedFile[] = scopedFiles.map((file) => ({ ...cloneFile(file), score: scoreFile(file, queryTokens), priority: defaultPriority(file.relativePath) }));
     applyDependencyBoosts(ranked, queryTokens);
+    applyRecentChangeBoosts(ranked);
     ranked.sort((left, right) => right.score - left.score
       || right.priority - left.priority
       || toPosixPath(left.relativePath).localeCompare(toPosixPath(right.relativePath)));

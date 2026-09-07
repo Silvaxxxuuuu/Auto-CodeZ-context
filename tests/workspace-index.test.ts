@@ -13,6 +13,7 @@ type StoredIndex = {
     files?: Array<{
       relativePath?: string;
       imports?: string[];
+      lastChangedAt?: number;
     }>;
   }>;
 };
@@ -67,6 +68,8 @@ test('workspace index ranks TypeScript symbols against the current task', async 
     assert.equal(status?.indexedFiles, 3);
     assert.ok((status?.symbolCount ?? 0) >= 3);
     assert.equal(status?.importCount, 0);
+    const indexedFiles = storedIndex(data.storage)?.projects?.[0]?.files ?? [];
+    assert.equal(indexedFiles.every((file) => (file.lastChangedAt ?? 0) === 0), true);
   } finally {
     await data.cleanup();
   }
@@ -201,6 +204,39 @@ test('workspace index refreshes changed files and removes deleted files', async 
     assert.equal(status?.updatedFiles, 1);
     assert.equal(status?.removedFiles, 1);
     assert.equal(status?.indexedFiles, 2);
+  } finally {
+    await data.cleanup();
+  }
+});
+
+test('workspace index promotes observed recent changes without overriding strong task matches', async () => {
+  const data = await fixture();
+  try {
+    await data.manager.buildContext(data.project.id, undefined, 'initial baseline');
+    const rendererPath = path.join(data.root, 'src', 'renderer.ts');
+    await fs.writeFile(rendererPath, 'export function renderSidebar() { return "recent sidebar update"; }', 'utf8');
+    const future = new Date(Date.now() + 5000);
+    await fs.utimes(rendererPath, future, future);
+
+    const neutralContext = normalized(await data.manager.buildContext(data.project.id, undefined, 'unrelated objective'));
+    const recentPosition = neutralContext.indexOf('--- src/renderer.ts ---');
+    const readmePosition = neutralContext.indexOf('--- README.md ---');
+    assert.ok(recentPosition >= 0);
+    assert.ok(readmePosition >= 0);
+    assert.ok(recentPosition < readmePosition);
+
+    const focusedContext = normalized(await data.manager.buildContext(data.project.id, undefined, 'TokenRefreshService'));
+    const authPosition = focusedContext.indexOf('--- src/auth.ts ---');
+    const focusedRecentPosition = focusedContext.indexOf('--- src/renderer.ts ---');
+    assert.ok(authPosition >= 0);
+    assert.ok(focusedRecentPosition >= 0);
+    assert.ok(authPosition < focusedRecentPosition);
+
+    const indexedFiles = storedIndex(data.storage)?.projects?.[0]?.files ?? [];
+    const auth = indexedFiles.find((file) => normalized(file.relativePath || '') === 'src/auth.ts');
+    const renderer = indexedFiles.find((file) => normalized(file.relativePath || '') === 'src/renderer.ts');
+    assert.equal(auth?.lastChangedAt ?? 0, 0);
+    assert.ok((renderer?.lastChangedAt ?? 0) > 0);
   } finally {
     await data.cleanup();
   }
