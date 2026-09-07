@@ -18,6 +18,8 @@ const EXPECTED_PROVIDERS = new Map([
   ['fireworks', 'Fireworks AI'],
   ['cerebras', 'Cerebras'],
   ['huggingface', 'Hugging Face'],
+  ['sambanova', 'SambaNova'],
+  ['siliconflow', 'SiliconFlow'],
 ]);
 
 if (!executable) throw new Error('AUTO_CODEZ_ELECTRON_EXECUTABLE é obrigatório para o teste visual de providers.');

@@ -1,11 +1,13 @@
 import type { AIModel, AIProviderAdapter, AIProviderConfig, ProviderId, ProviderSummary } from './types';
 import { createOpenAICompatibleProviderAdapters } from './providers/openai-compatible';
+import { createExpandedProviderAdapters } from './providers/provider-expansion';
 
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, AIProviderAdapter>();
 
   constructor() {
     for (const adapter of createOpenAICompatibleProviderAdapters()) this.register(adapter);
+    for (const adapter of createExpandedProviderAdapters()) this.register(adapter);
   }
 
   register(adapter: AIProviderAdapter): void {
