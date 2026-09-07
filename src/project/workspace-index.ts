@@ -10,6 +10,7 @@ const INDEX_VERSION = 2;
 const MAX_SYMBOL_SOURCE_BYTES = 256 * 1024;
 const MAX_SYMBOLS_PER_FILE = 160;
 const MAX_IMPORTS_PER_FILE = 96;
+const RANK_SCOPE_CONCURRENCY = 16;
 const automaticContextPathPolicy = new WorkspacePathPolicy();
 
 const TYPE_SCRIPT_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
@@ -384,6 +385,30 @@ function applyDependencyBoosts(ranked: RankedFile[], queryTokens: string[]): voi
   for (const file of ranked) file.score += boosts.get(keyOf(file.relativePath)) ?? 0;
 }
 
+async function filterRankableFiles(files: WorkspaceIndexFile[], includePath?: ProjectContextPathFilter): Promise<WorkspaceIndexFile[]> {
+  if (!includePath) return files.map(cloneFile);
+  if (!files.length) return [];
+
+  const allowed = new Array<boolean>(files.length).fill(false);
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= files.length) return;
+      try {
+        allowed[index] = Boolean(await includePath(files[index].relativePath));
+      } catch {
+        allowed[index] = false;
+      }
+    }
+  };
+
+  const workerCount = Math.min(RANK_SCOPE_CONCURRENCY, files.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return files.filter((_file, index) => allowed[index]).map(cloneFile);
+}
+
 export class WorkspaceIndexRuntime {
   private readonly projects = new Map<string, IndexedProject>();
   private readonly refreshStatus = new Map<string, WorkspaceIndexStatus>();
@@ -484,19 +509,14 @@ export class WorkspaceIndexRuntime {
     const project = this.projects.get(projectId);
     if (!project || limit <= 0) return [];
     const queryTokens = searchTokens(query);
-    const ranked: RankedFile[] = project.files.map((file) => ({ ...cloneFile(file), score: scoreFile(file, queryTokens), priority: defaultPriority(file.relativePath) }));
+    const scopedFiles = await filterRankableFiles(project.files, includePath);
+    const ranked: RankedFile[] = scopedFiles.map((file) => ({ ...cloneFile(file), score: scoreFile(file, queryTokens), priority: defaultPriority(file.relativePath) }));
     applyDependencyBoosts(ranked, queryTokens);
     ranked.sort((left, right) => right.score - left.score
       || right.priority - left.priority
       || toPosixPath(left.relativePath).localeCompare(toPosixPath(right.relativePath)));
 
-    const selected: WorkspaceIndexFile[] = [];
-    for (const file of ranked) {
-      if (selected.length >= limit) break;
-      if (includePath && !(await includePath(file.relativePath))) continue;
-      selected.push(cloneFile(file));
-    }
-    return selected;
+    return ranked.slice(0, limit).map(cloneFile);
   }
 
   getStatus(projectId: string): WorkspaceIndexStatus | undefined {

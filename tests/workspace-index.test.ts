@@ -206,6 +206,30 @@ test('workspace index refreshes changed files and removes deleted files', async 
   }
 });
 
+test('workspace ranking excludes out-of-scope metadata before dependency scoring', async () => {
+  const data = await fixture();
+  try {
+    await fs.writeFile(
+      path.join(data.root, 'src', 'secret-signal.ts'),
+      'import { allowedNeighbor } from "./allowed-neighbor"; export class PrivateSignalBeacon { read() { return allowedNeighbor; } }',
+      'utf8',
+    );
+    await fs.writeFile(path.join(data.root, 'src', 'allowed-neighbor.ts'), 'export const allowedNeighbor = "allowed";', 'utf8');
+
+    const includePath = async (relativePath: string): Promise<boolean> => normalized(relativePath) !== 'src/secret-signal.ts';
+    const context = normalized(await data.manager.buildContext(data.project.id, includePath, 'PrivateSignalBeacon'));
+    const readmePosition = context.indexOf('--- README.md ---');
+    const neighborPosition = context.indexOf('--- src/allowed-neighbor.ts ---');
+
+    assert.doesNotMatch(context, /PrivateSignalBeacon/);
+    assert.ok(readmePosition >= 0);
+    assert.ok(neighborPosition >= 0);
+    assert.ok(readmePosition < neighborPosition);
+  } finally {
+    await data.cleanup();
+  }
+});
+
 test('workspace index never persists sensitive automatic-context paths', async () => {
   const data = await fixture();
   try {
