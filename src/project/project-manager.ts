@@ -3,16 +3,24 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectRecord } from '../ai/types';
 import { WorkspacePathPolicy } from '../agent/workspace-path-policy';
-import { WorkspaceIndexRuntime, type WorkspaceIndexStatus } from './workspace-index';
+import { WorkspaceIndexRuntime, type WorkspaceIndexFile, type WorkspaceIndexStatus } from './workspace-index';
+import { WorkspaceLexicalIndexRuntime, type WorkspaceLexicalMatch } from './workspace-lexical-index';
 
 const STATE_FILE = 'projects.json';
 const MAX_CONTEXT_FILES = 24;
 const MAX_CONTEXT_BYTES = 768 * 1024;
 const MAX_FILE_BYTES = 256 * 1024;
+const STRUCTURAL_CONTEXT_CANDIDATES = 48;
+const LEXICAL_CONTEXT_CANDIDATES = 24;
+const RANK_FUSION_OFFSET = 4;
+const STRUCTURAL_RANK_WEIGHT = 2;
+const LEXICAL_RANK_WEIGHT = 1.5;
 const automaticContextPathPolicy = new WorkspacePathPolicy();
 
 interface ProjectStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
 type ProjectContextPathFilter = (relativePath: string) => boolean | Promise<boolean>;
+type ContextCandidate = { relativePath: string };
+type FusedCandidate = ContextCandidate & { score: number; structuralRank: number; lexicalRank: number };
 
 function normalizePathForComparison(value: string): string {
   const resolved = path.resolve(value);
@@ -26,18 +34,64 @@ function isPathInside(rootPath: string, candidatePath: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function contextCandidateKey(relativePath: string): string {
+  const normalized = relativePath.replaceAll('\\', '/');
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function fuseContextCandidates(structural: WorkspaceIndexFile[], lexical: WorkspaceLexicalMatch[]): ContextCandidate[] {
+  const candidates = new Map<string, FusedCandidate>();
+  const ensure = (relativePath: string): FusedCandidate => {
+    const key = contextCandidateKey(relativePath);
+    const existing = candidates.get(key);
+    if (existing) return existing;
+    const candidate: FusedCandidate = {
+      relativePath,
+      score: 0,
+      structuralRank: Number.POSITIVE_INFINITY,
+      lexicalRank: Number.POSITIVE_INFINITY,
+    };
+    candidates.set(key, candidate);
+    return candidate;
+  };
+
+  structural.forEach((file, index) => {
+    const rank = index + 1;
+    const candidate = ensure(file.relativePath);
+    candidate.structuralRank = rank;
+    candidate.score += STRUCTURAL_RANK_WEIGHT / (RANK_FUSION_OFFSET + rank);
+  });
+  lexical.forEach((match, index) => {
+    const rank = index + 1;
+    const candidate = ensure(match.relativePath);
+    candidate.lexicalRank = rank;
+    candidate.score += LEXICAL_RANK_WEIGHT / (RANK_FUSION_OFFSET + rank);
+  });
+
+  return [...candidates.values()]
+    .sort((left, right) => right.score - left.score
+      || left.structuralRank - right.structuralRank
+      || left.lexicalRank - right.lexicalRank
+      || left.relativePath.localeCompare(right.relativePath))
+    .slice(0, MAX_CONTEXT_FILES)
+    .map(({ relativePath }) => ({ relativePath }));
+}
+
 export class ProjectManager {
   private projects: ProjectRecord[] = [];
   private readonly workspaceIndex: WorkspaceIndexRuntime;
+  private readonly workspaceLexicalIndex: WorkspaceLexicalIndexRuntime;
 
   constructor(private readonly storage: ProjectStorage) {
     this.workspaceIndex = new WorkspaceIndexRuntime(storage);
+    this.workspaceLexicalIndex = new WorkspaceLexicalIndexRuntime(storage);
   }
 
   async init(): Promise<void> {
     const [stored] = await Promise.all([
       this.storage.read<ProjectRecord[]>(STATE_FILE, []),
       this.workspaceIndex.init(),
+      this.workspaceLexicalIndex.init(),
     ]);
     this.projects = Array.isArray(stored) ? stored : [];
   }
@@ -63,7 +117,10 @@ export class ProjectManager {
     const existed = this.projects.some((project) => project.id === projectId);
     this.projects = this.projects.filter((project) => project.id !== projectId);
     await this.persist();
-    if (existed) await this.workspaceIndex.removeProject(projectId);
+    if (existed) await Promise.all([
+      this.workspaceIndex.removeProject(projectId),
+      this.workspaceLexicalIndex.removeProject(projectId),
+    ]);
     return this.list();
   }
 
@@ -71,11 +128,18 @@ export class ProjectManager {
     const project = this.require(projectId);
     const canonicalRoot = await fs.realpath(project.rootPath);
     const files = await this.scan(canonicalRoot);
-    const indexStatus = await this.workspaceIndex.refresh(project, files);
-    const selected = await this.workspaceIndex.rank(projectId, taskQuery, includePath, MAX_CONTEXT_FILES);
+    const [indexStatus, lexicalStatus] = await Promise.all([
+      this.workspaceIndex.refresh(project, files),
+      this.workspaceLexicalIndex.refresh(project, files, includePath),
+    ]);
+    const [structural, lexical] = await Promise.all([
+      this.workspaceIndex.rank(projectId, taskQuery, includePath, STRUCTURAL_CONTEXT_CANDIDATES),
+      this.workspaceLexicalIndex.rank(projectId, taskQuery, includePath, LEXICAL_CONTEXT_CANDIDATES),
+    ]);
+    const selected = fuseContextCandidates(structural, lexical);
     const chunks: string[] = [
       `Workspace: ${project.name}\nRoot: ${project.rootPath}`,
-      `Local index: ${indexStatus.indexedFiles} files, ${indexStatus.symbolCount} TypeScript/JavaScript symbols. Context is ranked for the current task.`,
+      `Local index: ${indexStatus.indexedFiles} files, ${indexStatus.symbolCount} TypeScript/JavaScript symbols, ${indexStatus.importCount} imports, ${lexicalStatus.signatureFiles} lexical signatures. Context is ranked for the current task.`,
     ];
     let contextBytes = Buffer.byteLength(chunks.join('\n'), 'utf8');
 
