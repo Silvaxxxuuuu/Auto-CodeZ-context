@@ -22,7 +22,7 @@ export function classifyProviderError(status: number, message: string): Provider
   if (status === 401 || status === 403 || /invalid\s+(?:api\s*)?key|api\s*key.*(?:invalid|incorrect|not\s+valid)|invalid\s+authentication|unauthorized|authentication.*failed|permission\s+denied|forbidden/.test(normalized)) return 'authentication';
   if (status === 429 || /quota|rate limit|rate_limit|too many requests|resource exhausted|free tier/.test(normalized)) return /quota|free tier|resource exhausted/.test(normalized) ? 'quota' : 'rate_limit';
   if (/network|fetch failed|timed out|timeout|socket|econn|enotfound|dns/.test(normalized)) return 'network';
-  if (status >= 500) return 'server';
+  if (status >= 500 || /service unavailable|temporarily unavailable|server unavailable|service is unavailable/.test(normalized)) return 'server';
   if (status === 400 || status === 404 || /invalid request|invalid argument|unsupported|malformed/.test(normalized)) return 'invalid_request';
   return 'unknown';
 }
@@ -30,7 +30,8 @@ export function classifyProviderError(status: number, message: string): Provider
 export function normalizeProviderError(provider: string, operation: string, error: unknown): ProviderRequestError {
   if (error instanceof ProviderRequestError) return error;
   const message = error instanceof Error ? error.message : String(error);
-  return new ProviderRequestError(message || 'Falha desconhecida do provider.', 0, provider, undefined, operation);
+  const status = error && typeof error === 'object' && 'status' in error && typeof (error as { status?: unknown }).status === 'number' ? (error as { status: number }).status : 0;
+  return new ProviderRequestError(message || 'Falha desconhecida do provider.', status, provider, undefined, operation);
 }
 
 export function isAuthenticationError(error: unknown): boolean {
@@ -49,11 +50,11 @@ export function formatProviderError(error: unknown): string {
   if (!(error instanceof ProviderRequestError)) return error instanceof Error ? error.message : String(error);
   const prefix = `${error.provider}:`;
   switch (error.kind) {
-    case 'authentication': return `${prefix} a API key foi recusada. Verifique a chave nas configurações de IA.`;
-    case 'billing': return `${prefix} a conta não possui créditos ou faturamento disponível para esta solicitação. A API key continua salva.`;
-    case 'quota': return `${prefix} a cota disponível para este modelo foi atingida. A API key continua salva.`;
+    case 'authentication': return `${prefix} a API key foi recusada. Abra Configurações de IA para verificar ou trocar a chave.`;
+    case 'billing': return `${prefix} não há créditos ou faturamento disponível para esta solicitação. Sua API key continua salva. Abra Configurações de IA para usar outra chave.`;
+    case 'quota': return `${prefix} a cota disponível para este modelo foi atingida. Sua API key continua salva. Tente outro modelo ou outra chave em Configurações de IA.`;
     case 'rate_limit': return `${prefix} o limite de requisições foi atingido. Aguarde e tente novamente.`;
-    case 'server': return `${prefix} o serviço do provider apresentou um erro temporário. Tente novamente.`;
+    case 'server': return `${prefix} o serviço apresentou um erro temporário. Tente novamente.`;
     case 'network': return `${prefix} não foi possível alcançar o serviço. Verifique a conexão e tente novamente.`;
     case 'invalid_request': return `${prefix} a solicitação foi recusada. ${error.message}`;
     default: return `${prefix} ${error.message}`;

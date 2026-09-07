@@ -2,20 +2,43 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectRecord } from '../ai/types';
+import { WorkspacePathPolicy } from '../agent/workspace-path-policy';
+import { WorkspaceIndexRuntime, type WorkspaceIndexStatus } from './workspace-index';
 
 const STATE_FILE = 'projects.json';
-const MAX_CONTEXT_FILES = 80;
+const MAX_CONTEXT_FILES = 24;
+const MAX_CONTEXT_BYTES = 768 * 1024;
 const MAX_FILE_BYTES = 256 * 1024;
+const automaticContextPathPolicy = new WorkspacePathPolicy();
 
 interface ProjectStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
+type ProjectContextPathFilter = (relativePath: string) => boolean | Promise<boolean>;
+
+function normalizePathForComparison(value: string): string {
+  const resolved = path.resolve(value);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const root = normalizePathForComparison(rootPath);
+  const candidate = normalizePathForComparison(candidatePath);
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
 
 export class ProjectManager {
   private projects: ProjectRecord[] = [];
+  private readonly workspaceIndex: WorkspaceIndexRuntime;
 
-  constructor(private readonly storage: ProjectStorage) {}
+  constructor(private readonly storage: ProjectStorage) {
+    this.workspaceIndex = new WorkspaceIndexRuntime(storage);
+  }
 
   async init(): Promise<void> {
-    const stored = await this.storage.read<ProjectRecord[]>(STATE_FILE, []);
+    const [stored] = await Promise.all([
+      this.storage.read<ProjectRecord[]>(STATE_FILE, []),
+      this.workspaceIndex.init(),
+    ]);
     this.projects = Array.isArray(stored) ? stored : [];
   }
 
@@ -37,27 +60,57 @@ export class ProjectManager {
   }
 
   async remove(projectId: string): Promise<ProjectRecord[]> {
+    const existed = this.projects.some((project) => project.id === projectId);
     this.projects = this.projects.filter((project) => project.id !== projectId);
     await this.persist();
+    if (existed) await this.workspaceIndex.removeProject(projectId);
     return this.list();
   }
 
-  async buildContext(projectId: string): Promise<string> {
+  async buildContext(projectId: string, includePath?: ProjectContextPathFilter, taskQuery = ''): Promise<string> {
     const project = this.require(projectId);
-    const files = await this.scan(project.rootPath);
-    const selected = files.slice(0, MAX_CONTEXT_FILES);
-    const chunks: string[] = [`Workspace: ${project.name}\nRoot: ${project.rootPath}`];
-    for (const relative of selected) {
-      const filePath = path.join(project.rootPath, relative);
+    const canonicalRoot = await fs.realpath(project.rootPath);
+    const files = await this.scan(canonicalRoot);
+    const indexStatus = await this.workspaceIndex.refresh(project, files);
+    const selected = await this.workspaceIndex.rank(projectId, taskQuery, includePath, MAX_CONTEXT_FILES);
+    const chunks: string[] = [
+      `Workspace: ${project.name}\nRoot: ${project.rootPath}`,
+      `Local index: ${indexStatus.indexedFiles} files, ${indexStatus.symbolCount} TypeScript/JavaScript symbols. Context is ranked for the current task.`,
+    ];
+    let contextBytes = Buffer.byteLength(chunks.join('\n'), 'utf8');
+
+    for (const indexedFile of selected) {
+      const relative = indexedFile.relativePath;
+      if (automaticContextPathPolicy.evaluate('read_file', [relative]).decision !== 'allow') continue;
+      if (includePath && !(await includePath(relative))) continue;
+      const filePath = path.join(canonicalRoot, relative);
       try {
-        const stat = await fs.stat(filePath);
+        const realFilePath = await fs.realpath(filePath);
+        if (!isPathInside(canonicalRoot, realFilePath)) continue;
+        const stat = await fs.stat(realFilePath);
         if (!stat.isFile() || stat.size > MAX_FILE_BYTES) continue;
-        const content = await fs.readFile(filePath, 'utf8');
-        if (/\u0000/.test(content)) continue;
-        chunks.push(`\n--- ${relative} ---\n${content.slice(0, MAX_FILE_BYTES)}`);
-      } catch { /* File changed or became unavailable while building context. */ }
+        const header = `\n--- ${relative} ---\n`;
+        const headerBytes = Buffer.byteLength(header, 'utf8');
+        const remaining = MAX_CONTEXT_BYTES - contextBytes - headerBytes;
+        if (remaining <= 0) break;
+        const buffer = await fs.readFile(realFilePath);
+        if (buffer.includes(0)) continue;
+        const contentBuffer = buffer.length > remaining ? buffer.subarray(0, remaining) : buffer;
+        let content = contentBuffer.toString('utf8');
+        if (buffer.length > contentBuffer.length) content = content.replace(/\uFFFD+$/, '');
+        chunks.push(`${header}${content}`);
+        contextBytes += headerBytes + Buffer.byteLength(content, 'utf8');
+        if (contextBytes >= MAX_CONTEXT_BYTES) break;
+      } catch {
+        // File changed or became unavailable while building context.
+      }
     }
     return chunks.join('\n');
+  }
+
+  getWorkspaceIndexStatus(projectId: string): WorkspaceIndexStatus | undefined {
+    this.require(projectId);
+    return this.workspaceIndex.getStatus(projectId);
   }
 
   async scan(rootPath: string): Promise<string[]> { return this.scanDirectory(await fs.realpath(path.resolve(rootPath))); }

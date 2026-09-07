@@ -1,0 +1,72 @@
+name: Visual Auto CodeZ
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+      - 'feature/**'
+      - 'fix/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  visual:
+    runs-on: windows-2022
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout feature head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Install pinned Playwright runtime
+        run: npm install --prefix .visual-tools --no-save --package-lock=false playwright@1.61.0
+
+      - name: Rebuild node-pty for Electron 44
+        run: npx electron-rebuild -f -w node-pty -v 44.0.0 -a x64 --build-from-source
+
+      - name: Build Electron application
+        run: npm run package
+
+      - name: Resolve packaged executable
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path (Join-Path $PWD 'out') -Filter 'Auto CodeZ.exe' -Recurse -File | Select-Object -First 1
+          if (-not $exe) {
+            throw 'Auto CodeZ.exe was not found in the Electron Forge package output.'
+          }
+          "AUTO_CODEZ_ELECTRON_EXECUTABLE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Capture visual flow
+        env:
+          AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
+        run: npm run test:visual
+
+      - name: Upload visual screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-codez-visual-${{ github.run_id }}
+          path: artifacts/visual
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,24 @@
+.send-button.is-stop {
+  position: relative !important;
+  font-size: 0 !important;
+  opacity: 1 !important;
+  cursor: pointer !important;
+}
+
+.send-button.is-stop::before {
+  display: none !important;
+  content: none !important;
+}
+
+.send-button.is-stop > .ac-lucide-icon {
+  display: none !important;
+}
+
+.send-button.is-stop .stop-icon {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+  pointer-events: none;
+}
