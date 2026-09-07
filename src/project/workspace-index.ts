@@ -392,15 +392,16 @@ async function filterRankableFiles(files: WorkspaceIndexFile[], includePath?: Pr
   const allowed = new Array<boolean>(files.length).fill(false);
   let cursor = 0;
   const worker = async (): Promise<void> => {
-    while (true) {
-      const index = cursor;
-      cursor += 1;
-      if (index >= files.length) return;
+    let index = cursor;
+    cursor += 1;
+    while (index < files.length) {
       try {
         allowed[index] = Boolean(await includePath(files[index].relativePath));
       } catch {
         allowed[index] = false;
       }
+      index = cursor;
+      cursor += 1;
     }
   };
 
