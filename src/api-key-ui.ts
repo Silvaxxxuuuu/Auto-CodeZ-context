@@ -1,4 +1,4 @@
-type ProviderSummary = { id: string; displayName: string; configured: boolean };
+type ProviderSummary = { id: string; displayName: string; configured: boolean; requiresApiKey?: boolean };
 type ApiKeySummary = { id: string; name: string; providerId: string; providerName: string; maskedKey: string; selectedModel?: string; active: boolean; createdAt: number; updatedAt: number };
 type ApiKeyApi = {
   getState: () => Promise<{ providers: ProviderSummary[] }>;
@@ -55,7 +55,7 @@ async function openApiKeyManager(): Promise<void> {
   try {
     const state = await withTimeout(bridge.getState(), 15_000);
     if (!backdrop.isConnected) return;
-    const providers = state.providers;
+    const providers = state.providers.filter((provider) => provider.requiresApiKey !== false);
     providerInput.innerHTML = providers.map((provider) => `<option value="${escapeHtml(provider.id)}">${escapeHtml(provider.displayName)}</option>`).join('');
     addButton.disabled = providers.length === 0;
     if (!providers.length) list.innerHTML = '<div class="api-key-flow-error">Nenhum provider está disponível para cadastrar uma chave.</div>';
