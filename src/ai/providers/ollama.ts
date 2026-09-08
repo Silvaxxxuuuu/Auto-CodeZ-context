@@ -159,7 +159,7 @@ export class OllamaAdapter implements AIProviderAdapter {
         body: JSON.stringify({ model, verbose: false }),
       }, MODEL_LIST_TIMEOUT_MS);
       if (!response.ok) return undefined;
-      return asRecord(await response.json().catch(() => undefined));
+      return asRecord(await response.json().catch((): undefined => undefined));
     } catch {
       return undefined;
     }
