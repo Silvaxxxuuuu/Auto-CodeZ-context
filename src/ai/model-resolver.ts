@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
-import type { AIModel, AIProviderConfig, ProviderId } from './types';
+import type { AIModel, AIProviderConfig, Capability, ProviderId } from './types';
 import { ProviderRegistry } from './provider-registry';
 import { selectDefaultModel } from './model-selection';
 
 const UNCONFIGURED_MODEL_IDS = new Set(['unconfigured', 'Unconfigured']);
+const DEFAULT_FALLBACK_CAPABILITIES: Capability[] = ['text', 'streaming', 'tools'];
 
 export class ModelResolver {
   private readonly cache = new Map<string, { models: AIModel[]; fetchedAt: number }>();
@@ -54,11 +55,13 @@ export class ModelResolver {
     if (!modelId.trim() || UNCONFIGURED_MODEL_IDS.has(modelId)) throw new Error('Nenhum modelo foi configurado para este chat.');
     const cached = this.cache.get(this.cacheKey(config))?.models.find((model) => model.id === modelId);
     if (cached) return cached;
+    const adapter = this.registry.get(config.id);
+    const capabilities = adapter.fallbackCapabilities?.length ? [...adapter.fallbackCapabilities] : [...DEFAULT_FALLBACK_CAPABILITIES];
     return {
       id: modelId,
       name: modelId,
       providerId: config.id,
-      capabilities: ['text', 'streaming', 'tools'],
+      capabilities,
       reasoningLevels: ['normal'],
     };
   }

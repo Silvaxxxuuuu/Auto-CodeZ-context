@@ -1,6 +1,7 @@
 import type { AIModel, AIProviderAdapter, AIProviderConfig, ProviderId, ProviderSummary } from './types';
 import { createOpenAICompatibleProviderAdapters } from './providers/openai-compatible';
 import { createExpandedProviderAdapters } from './providers/provider-expansion';
+import { OllamaAdapter } from './providers/ollama';
 
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, AIProviderAdapter>();
@@ -8,6 +9,7 @@ export class ProviderRegistry {
   constructor() {
     for (const adapter of createOpenAICompatibleProviderAdapters()) this.register(adapter);
     for (const adapter of createExpandedProviderAdapters()) this.register(adapter);
+    this.register(new OllamaAdapter());
   }
 
   register(adapter: AIProviderAdapter): void {
@@ -31,12 +33,14 @@ export class ProviderRegistry {
   summaries(configs: AIProviderConfig[]): ProviderSummary[] {
     return this.list().map((adapter) => {
       const config = configs.find((item) => item.id === adapter.id);
+      const requiresApiKey = adapter.requiresApiKey !== false;
       const apiKeyConfigured = Boolean(config?.apiKey);
       return {
         id: adapter.id,
         displayName: adapter.displayName,
-        configured: Boolean(config?.enabled && apiKeyConfigured),
+        configured: requiresApiKey ? Boolean(config?.enabled && apiKeyConfigured) : config?.enabled !== false,
         apiKeyConfigured,
+        requiresApiKey,
         selectedModel: config?.selectedModel,
       };
     });

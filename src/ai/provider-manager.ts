@@ -59,6 +59,8 @@ export class ProviderManager {
 
   async init(): Promise<void> {
     const metadata = await this.storage.read<ProviderState>(STATE_FILE, { configs: [] });
+    const metadataConfigs = Array.isArray(metadata.configs) ? metadata.configs : [];
+    this.configs = metadataConfigs.map((item) => normalizeConfig({ ...item, apiKey: '' }));
     const keyMetadata = await this.storage.read<ProviderKeyState>(KEY_STATE_FILE, { keys: [], activeKeyIds: {} });
     this.activeKeyIds = keyMetadata.activeKeyIds && typeof keyMetadata.activeKeyIds === 'object' ? { ...keyMetadata.activeKeyIds } : {};
     let secureKeys: ProviderKeyRecord[] = [];
@@ -82,17 +84,25 @@ export class ProviderManager {
     if (!Object.keys(this.activeKeyIds).length) for (const key of this.keys) this.activeKeyIds[key.providerId] = key.id;
     this.syncConfigs();
     if (this.keys.length) await this.persistKeys();
-    else {
-      const metadataConfigs = Array.isArray(metadata.configs) ? metadata.configs : [];
-      this.configs = metadataConfigs.map((item) => normalizeConfig({ ...item, apiKey: '' }));
-      await this.persist();
-    }
+    else await this.persist();
   }
 
   async list(): Promise<ProviderSummary[]> { return this.registry.summaries(this.configs); }
 
   getConfig(providerId: ProviderId): AIProviderConfig {
+    const adapter = this.registry.get(providerId);
     const config = this.configs.find((item) => item.id === providerId);
+    if (adapter.requiresApiKey === false) {
+      if (config && !config.enabled) throw new Error(`Provider '${providerId}' não está configurado.`);
+      return {
+        id: adapter.id,
+        displayName: adapter.displayName,
+        apiKey: '',
+        ...(config?.baseUrl ? { baseUrl: config.baseUrl } : {}),
+        ...(config?.selectedModel ? { selectedModel: config.selectedModel } : {}),
+        enabled: true,
+      };
+    }
     if (!config?.enabled || !config.apiKey) throw new Error(`Provider '${providerId}' não está configurado.`);
     return { ...config };
   }
@@ -101,6 +111,7 @@ export class ProviderManager {
     const key = this.keys.find((item) => item.id === keyId);
     if (!key?.apiKey) throw new Error('API key não encontrada ou indisponível.');
     const adapter = this.registry.get(key.providerId);
+    if (adapter.requiresApiKey === false) throw new Error(`${adapter.displayName} não utiliza API key neste modo.`);
     return { id: key.providerId, displayName: adapter.displayName, apiKey: key.apiKey, ...(key.baseUrl ? { baseUrl: key.baseUrl } : {}), ...(key.selectedModel ? { selectedModel: key.selectedModel } : {}), enabled: true };
   }
 
@@ -121,6 +132,7 @@ export class ProviderManager {
   async saveKey(input: { providerId: string; name: string; apiKey: string; model?: string; baseUrl?: string }): Promise<{ key: ProviderKeySummary; providers: ProviderSummary[]; models: import('./types').AIModel[]; discoveryError?: string }> {
     const providerId = input.providerId as ProviderId;
     const adapter = this.registry.get(providerId);
+    if (adapter.requiresApiKey === false) throw new Error(`${adapter.displayName} não utiliza API key neste modo.`);
     const apiKey = input.apiKey.trim();
     const name = input.name.trim().replace(/\s+/g, ' ');
     if (!apiKey) throw new Error('API key é obrigatória.');
@@ -176,6 +188,14 @@ export class ProviderManager {
     const providerId = input.providerId as ProviderId;
     const adapter = this.registry.get(providerId);
     const apiKey = input.apiKey.trim();
+    if (adapter.requiresApiKey === false) {
+      const config: AIProviderConfig = { id: providerId, displayName: adapter.displayName, apiKey: '', ...(input.baseUrl?.trim() ? { baseUrl: input.baseUrl.trim().replace(/\/$/, '') } : {}), ...(input.model?.trim() ? { selectedModel: input.model.trim() } : {}), enabled: true };
+      const discovery = await this.discover(config);
+      this.configs = [...this.configs.filter((item) => item.id !== providerId), config];
+      await this.persist();
+      return { providers: await this.list(), models: discovery.models, ...(discovery.discoveryError ? { discoveryError: discovery.discoveryError } : {}) };
+    }
+    if (!apiKey) throw new Error('API key é obrigatória.');
     const active = this.keys.find((key) => key.id === this.activeKeyIds[providerId]);
     const config: AIProviderConfig = { id: providerId, displayName: adapter.displayName, apiKey, ...(input.baseUrl?.trim() ? { baseUrl: input.baseUrl.trim().replace(/\/$/, '') } : {}), ...(input.model?.trim() ? { selectedModel: input.model.trim() } : {}), enabled: true };
     const discovery = await this.discover(config);
@@ -195,6 +215,12 @@ export class ProviderManager {
   }
 
   async remove(providerId: ProviderId): Promise<ProviderSummary[]> {
+    const adapter = this.registry.get(providerId);
+    if (adapter.requiresApiKey === false) {
+      this.configs = this.configs.filter((config) => config.id !== providerId);
+      await this.persist();
+      return this.list();
+    }
     this.keys = this.keys.filter((key) => key.providerId !== providerId);
     delete this.activeKeyIds[providerId];
     this.syncConfigs();
@@ -208,11 +234,11 @@ export class ProviderManager {
     const adapter = this.registry.get(config.id);
     try {
       models = await adapter.listModels(config);
-      if (!models.length) discoveryError = 'O provider não retornou modelos disponíveis. A API key foi salva.';
+      if (!models.length) discoveryError = 'O provider não retornou modelos disponíveis.';
     } catch (error) {
       const normalized = normalizeProviderError(config.displayName, 'model discovery', error);
       if (isAuthenticationError(normalized)) throw normalized;
-      discoveryError = normalized.message || 'Não foi possível descobrir os modelos agora. A API key foi salva.';
+      discoveryError = normalized.message || 'Não foi possível descobrir os modelos agora.';
     }
     if (config.selectedModel && models.length && !models.some((model) => model.id === config.selectedModel)) throw new Error('O modelo selecionado não está disponível para este provider.');
     if (!config.selectedModel && models.length) config.selectedModel = selectDefaultModel(config.id, models);
@@ -220,7 +246,12 @@ export class ProviderManager {
   }
 
   private syncConfigs(): void {
+    const previous = new Map(this.configs.map((config) => [config.id, config]));
     this.configs = this.registry.list().flatMap((adapter) => {
+      if (adapter.requiresApiKey === false) {
+        const existing = previous.get(adapter.id);
+        return existing ? [{ id: adapter.id, displayName: adapter.displayName, apiKey: '', ...(existing.baseUrl ? { baseUrl: existing.baseUrl } : {}), ...(existing.selectedModel ? { selectedModel: existing.selectedModel } : {}), enabled: true }] : [];
+      }
       const key = this.keys.find((item) => item.id === this.activeKeyIds[adapter.id]);
       return key ? [{ id: adapter.id, displayName: adapter.displayName, apiKey: key.apiKey, ...(key.baseUrl ? { baseUrl: key.baseUrl } : {}), ...(key.selectedModel ? { selectedModel: key.selectedModel } : {}), enabled: true }] : [];
     });
