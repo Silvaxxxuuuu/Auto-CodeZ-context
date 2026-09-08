@@ -202,11 +202,17 @@ async function verifyChatCanSelectOllama() {
   await page.locator('#save-available-ai-settings').click();
 
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
-  const restoredChat = page.locator(`.chat-item.selected[data-chat="${created.id}"], [data-chat="${created.id}"].selected`).first();
+  const restoredChat = page.locator(`.chat-item.selected[data-chat="${created.id}"]`).first();
   await restoredChat.waitFor({ state: 'visible', timeout: 15_000 });
+  await page.waitForFunction((chatId) => {
+    const selected = document.querySelector(`.chat-item.selected[data-chat="${CSS.escape(chatId)}"]`);
+    const header = document.querySelector('#chat-header');
+    return Boolean(selected?.textContent?.includes('Ollama') && header?.textContent?.includes('Ollama') && header.textContent.includes('qwen3:8b'));
+  }, created.id, { timeout: 15_000 });
+
   const headerText = (await page.locator('#chat-header').innerText()).replace(/\s+/g, ' ');
   const chatText = (await restoredChat.innerText()).replace(/\s+/g, ' ');
-  if (!headerText.includes('Ollama')) throw new Error(`Header não foi reidratado com Ollama: ${headerText}`);
+  if (!headerText.includes('Ollama') || !headerText.includes('qwen3:8b')) throw new Error(`Header não foi reidratado com Ollama: ${headerText}`);
   if (!chatText.includes('Ollama')) throw new Error(`Lista de chats não foi reidratada com Ollama: ${chatText}`);
 
   const persisted = await page.evaluate(async (chatId) => {
