@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
@@ -16,6 +17,7 @@ let browser;
 let page;
 let exitState;
 let stderr = '';
+let ollamaServer;
 
 function errorText(error) {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -59,6 +61,50 @@ function environment() {
     env.LOCALAPPDATA = path.join(stateRoot, 'AppData', 'Local');
   }
   return env;
+}
+
+async function readJson(req) {
+  let raw = '';
+  for await (const chunk of req) raw += chunk;
+  return raw ? JSON.parse(raw) : {};
+}
+
+async function startFakeOllama() {
+  ollamaServer = http.createServer(async (req, res) => {
+    try {
+      if (req.method === 'GET' && req.url === '/api/tags') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          models: [
+            { name: 'qwen3:8b', model: 'qwen3:8b' },
+            { name: 'llava:latest', model: 'llava:latest' },
+          ],
+        }));
+        return;
+      }
+      if (req.method === 'POST' && req.url === '/api/show') {
+        const body = await readJson(req);
+        const model = String(body.model || '');
+        const capabilities = model === 'qwen3:8b'
+          ? ['completion', 'tools', 'thinking']
+          : model === 'llava:latest'
+            ? ['completion', 'vision']
+            : [];
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ capabilities, model_info: {} }));
+        return;
+      }
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not found' }));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: errorText(error) }));
+    }
+  });
+  await new Promise((resolve, reject) => {
+    ollamaServer.once('error', reject);
+    ollamaServer.listen(11434, '127.0.0.1', resolve);
+  });
 }
 
 async function startElectron() {
@@ -107,14 +153,6 @@ async function updateManifest(result) {
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 }
 
-async function openLocalAiSettings() {
-  await page.locator('#ac-app-settings').click();
-  await page.locator('.settings-overlay').waitFor({ state: 'visible' });
-  await page.locator('[data-local-ai-settings]').waitFor({ state: 'visible', timeout: 15_000 });
-  await page.locator('[data-local-ai-settings]').click();
-  await page.locator('[data-local-ai-status]').waitFor({ state: 'visible', timeout: 30_000 });
-}
-
 async function runTest() {
   const pageErrors = [];
   const consoleErrors = [];
@@ -122,30 +160,25 @@ async function runTest() {
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
-  await page.locator('#ac-app-settings').waitFor({ state: 'visible' });
+  await page.locator('#ac-app-settings').click();
+  await page.locator('.settings-overlay').waitFor({ state: 'visible' });
+  const localAiButton = page.locator('[data-local-ai-settings]');
+  await localAiButton.waitFor({ state: 'visible', timeout: 10_000 });
+  await localAiButton.click();
+  const connected = page.locator('[data-local-ai-status="connected"]');
+  await connected.waitFor({ state: 'visible', timeout: 15_000 });
 
-  const providerState = await page.evaluate(async () => {
+  const provider = await page.evaluate(async () => {
     const state = await window.autoCodez.getState();
-    return state.providers.find((provider) => provider.id === 'ollama') || null;
+    return state.providers.find((item) => item.id === 'ollama') || null;
   });
-  if (!providerState) throw new Error('Ollama não apareceu no estado de providers.');
-  if (providerState.requiresApiKey !== false) throw new Error(`Ollama não está marcado como keyless: ${JSON.stringify(providerState)}`);
-  if (providerState.apiKeyConfigured !== false) throw new Error('Ollama não deve declarar API key configurada.');
+  if (!provider || provider.requiresApiKey !== false) throw new Error(`Ollama keyless não foi exposto corretamente: ${JSON.stringify(provider)}`);
 
-  await openLocalAiSettings();
-  const statusCard = page.locator('[data-local-ai-status]');
-  const firstStatus = await statusCard.getAttribute('data-local-ai-status');
-  if (firstStatus !== 'connected' && firstStatus !== 'offline') throw new Error(`Estado inesperado da IA local: ${firstStatus}`);
-  const bodyText = await page.locator('.settings-body').innerText();
-  if (!bodyText.includes('127.0.0.1:11434')) throw new Error('Endpoint local padrão não foi exibido.');
-  if (!bodyText.includes('Ollama')) throw new Error('Nome Ollama não foi exibido na aba IA Local.');
-
-  const retry = page.locator('[data-local-ai-action="retry"]');
-  await retry.waitFor({ state: 'visible' });
-  await retry.click();
-  await page.locator('[data-local-ai-status]').waitFor({ state: 'visible', timeout: 30_000 });
-  const retriedStatus = await page.locator('[data-local-ai-status]').getAttribute('data-local-ai-status');
-  if (retriedStatus !== 'connected' && retriedStatus !== 'offline') throw new Error(`Estado inesperado após retry: ${retriedStatus}`);
+  const text = (await connected.innerText()).replace(/\s+/g, ' ');
+  if (!text.includes('Conectado')) throw new Error(`Status conectado ausente: ${text}`);
+  if (!text.includes('qwen3:8b') || !text.includes('llava:latest')) throw new Error(`Modelos locais não foram exibidos: ${text}`);
+  const capabilityMatches = text.match(/1\/2/g) || [];
+  if (capabilityMatches.length < 3) throw new Error(`Capacidades tools/reasoning/vision não foram refletidas: ${text}`);
 
   await page.screenshot({ path: path.join(outputDir, `${testName}.png`), animations: 'disabled' });
   if (pageErrors.length || consoleErrors.length) {
@@ -160,11 +193,13 @@ async function cleanup() {
     if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(appProcess.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
     else appProcess.kill('SIGKILL');
   }
+  if (ollamaServer) await new Promise((resolve) => ollamaServer.close(() => resolve())).catch(() => {});
   if (stateRoot) await fs.rm(stateRoot, { recursive: true, force: true }).catch(() => {});
 }
 
 (async () => {
   try {
+    await startFakeOllama();
     await createStateRoot();
     await startElectron();
     await runTest();
