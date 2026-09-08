@@ -200,7 +200,14 @@ async function verifyChatCanSelectOllama() {
   await modelSelect.locator('option[value="qwen3:8b"]').waitFor({ state: 'attached', timeout: 15_000 });
   await modelSelect.selectOption('qwen3:8b');
   await page.locator('#save-available-ai-settings').click();
-  await page.locator('#chat-available-ai').waitFor({ state: 'detached', timeout: 10_000 });
+
+  await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
+  const restoredChat = page.locator(`.chat-item.selected[data-chat="${created.id}"], [data-chat="${created.id}"].selected`).first();
+  await restoredChat.waitFor({ state: 'visible', timeout: 15_000 });
+  const headerText = (await page.locator('#chat-header').innerText()).replace(/\s+/g, ' ');
+  const chatText = (await restoredChat.innerText()).replace(/\s+/g, ' ');
+  if (!headerText.includes('Ollama')) throw new Error(`Header não foi reidratado com Ollama: ${headerText}`);
+  if (!chatText.includes('Ollama')) throw new Error(`Lista de chats não foi reidratada com Ollama: ${chatText}`);
 
   const persisted = await page.evaluate(async (chatId) => {
     const state = await window.autoCodez.getState();
