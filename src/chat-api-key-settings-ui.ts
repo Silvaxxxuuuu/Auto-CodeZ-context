@@ -190,7 +190,7 @@ function restoreChatAfterReload(): void {
       const chatButton = document.querySelector<HTMLElement>(`.chat-item[data-chat="${CSS.escape(chatId)}"]`);
       if (chat && provider && chatButton) {
         chatButton.click();
-        await new Promise((resolve) => window.setTimeout(resolve, 80));
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 80));
         const selected = document.querySelector<HTMLElement>(`.chat-item.selected[data-chat="${CSS.escape(chatId)}"]`);
         const headerText = document.querySelector<HTMLElement>('#chat-header')?.textContent || '';
         const chatText = selected?.textContent || '';
@@ -204,10 +204,10 @@ function restoreChatAfterReload(): void {
     } catch {
       // A inicialização ainda pode estar hidratando o estado; tente novamente até o deadline.
     }
-    window.setTimeout(() => void tryRestore(), 80);
+    window.setTimeout((): void => { void tryRestore(); }, 80);
   };
 
-  window.setTimeout(() => void tryRestore(), 0);
+  window.setTimeout((): void => { void tryRestore(); }, 0);
 }
 
 document.addEventListener('click', async (event) => {
