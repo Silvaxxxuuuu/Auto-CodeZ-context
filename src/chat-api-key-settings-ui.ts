@@ -179,17 +179,35 @@ async function saveSettings(): Promise<void> {
 function restoreChatAfterReload(): void {
   const chatId = sessionStorage.getItem(RESTORE_CHAT_KEY);
   if (!chatId) return;
-  sessionStorage.removeItem(RESTORE_CHAT_KEY);
   const deadline = Date.now() + 10_000;
-  const tryRestore = (): void => {
-    const chatButton = document.querySelector<HTMLElement>(`.chat-item[data-chat="${CSS.escape(chatId)}"], [data-chat="${CSS.escape(chatId)}"]`);
-    if (chatButton) {
-      chatButton.click();
-      return;
+
+  const tryRestore = async (): Promise<void> => {
+    if (Date.now() >= deadline) return;
+    try {
+      const state = await api().getState();
+      const chat = state.chats.find((item) => item.id === chatId);
+      const provider = chat ? state.providers.find((item) => item.id === chat.providerId) : undefined;
+      const chatButton = document.querySelector<HTMLElement>(`.chat-item[data-chat="${CSS.escape(chatId)}"]`);
+      if (chat && provider && chatButton) {
+        chatButton.click();
+        await new Promise((resolve) => window.setTimeout(resolve, 80));
+        const selected = document.querySelector<HTMLElement>(`.chat-item.selected[data-chat="${CSS.escape(chatId)}"]`);
+        const headerText = document.querySelector<HTMLElement>('#chat-header')?.textContent || '';
+        const chatText = selected?.textContent || '';
+        const providerVisible = headerText.includes(provider.displayName) && chatText.includes(provider.displayName);
+        const modelVisible = headerText.includes(chat.model);
+        if (selected && providerVisible && modelVisible) {
+          sessionStorage.removeItem(RESTORE_CHAT_KEY);
+          return;
+        }
+      }
+    } catch {
+      // A inicialização ainda pode estar hidratando o estado; tente novamente até o deadline.
     }
-    if (Date.now() < deadline) window.setTimeout(tryRestore, 80);
+    window.setTimeout(() => void tryRestore(), 80);
   };
-  window.setTimeout(tryRestore, 0);
+
+  window.setTimeout(() => void tryRestore(), 0);
 }
 
 document.addEventListener('click', async (event) => {
