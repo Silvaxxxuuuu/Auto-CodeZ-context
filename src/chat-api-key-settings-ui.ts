@@ -8,6 +8,13 @@ type SavedApiKey = {
   active: boolean;
 };
 
+type ProviderSummary = {
+  id: string;
+  displayName: string;
+  configured: boolean;
+  requiresApiKey?: boolean;
+};
+
 type Chat = {
   id: string;
   providerId: string;
@@ -20,8 +27,9 @@ type Chat = {
 type Model = { id: string; name: string };
 
 type ChatApi = {
-  getState: () => Promise<{ providers: unknown[]; chats: Chat[]; projects: unknown[] }>;
+  getState: () => Promise<{ providers: ProviderSummary[]; chats: Chat[]; projects: unknown[] }>;
   listApiKeys: () => Promise<SavedApiKey[]>;
+  listModels: (providerId: string) => Promise<Model[]>;
   listModelsForApiKey: (keyId: string) => Promise<Model[]>;
   updateChatSettings: (input: {
     chatId: string;
@@ -33,8 +41,16 @@ type ChatApi = {
   }) => Promise<Chat>;
 };
 
+type AvailableAi = {
+  value: string;
+  providerId: string;
+  label: string;
+  selectedModel?: string;
+  apiKeyId?: string;
+};
+
 let openChat: Chat | null = null;
-let savedKeys: SavedApiKey[] = [];
+let availableAis: AvailableAi[] = [];
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
@@ -48,39 +64,65 @@ function api(): ChatApi {
   return window.autoCodez as unknown as ChatApi;
 }
 
-function currentKeyFor(chat: Chat, keys: SavedApiKey[]): SavedApiKey | undefined {
-  if (chat.apiKeyId) return keys.find((key) => key.id === chat.apiKeyId);
-  return keys.find((key) => key.providerId === chat.providerId && key.active);
-}
-
 function savedAiLabel(key: SavedApiKey): string {
   return `${key.name} · ${key.providerName} · ${key.maskedKey}`;
 }
 
-function openSavedAiSettings(chat: Chat, keys: SavedApiKey[]): void {
+function buildAvailableAis(keys: SavedApiKey[], providers: ProviderSummary[]): AvailableAi[] {
+  const keySources = keys.map((key): AvailableAi => ({
+    value: `key:${key.id}`,
+    providerId: key.providerId,
+    label: savedAiLabel(key),
+    ...(key.selectedModel ? { selectedModel: key.selectedModel } : {}),
+    apiKeyId: key.id,
+  }));
+  const keylessSources = providers
+    .filter((provider) => provider.requiresApiKey === false && provider.configured)
+    .map((provider): AvailableAi => ({
+      value: `provider:${provider.id}`,
+      providerId: provider.id,
+      label: `${provider.displayName} · local`,
+    }));
+  return [...keySources, ...keylessSources];
+}
+
+function currentAiFor(chat: Chat, sources: AvailableAi[], keys: SavedApiKey[]): AvailableAi | undefined {
+  if (chat.apiKeyId) {
+    const exact = sources.find((source) => source.apiKeyId === chat.apiKeyId);
+    if (exact) return exact;
+  }
+  const keyless = sources.find((source) => !source.apiKeyId && source.providerId === chat.providerId);
+  if (keyless) return keyless;
+  const activeKey = keys.find((key) => key.providerId === chat.providerId && key.active);
+  return activeKey ? sources.find((source) => source.apiKeyId === activeKey.id) : undefined;
+}
+
+function openAvailableAiSettings(chat: Chat, keys: SavedApiKey[], providers: ProviderSummary[]): void {
   const root = modalRoot();
   if (!root) return;
 
   openChat = chat;
-  savedKeys = keys;
+  availableAis = buildAvailableAis(keys, providers);
 
-  const currentKey = currentKeyFor(chat, keys);
-  const options = keys.length
-    ? keys.map((key) => `<option value="${escapeHtml(key.id)}" ${key.id === currentKey?.id ? 'selected' : ''}>${escapeHtml(savedAiLabel(key))}</option>`).join('')
-    : '<option value="">Nenhuma IA salva</option>';
+  const current = currentAiFor(chat, availableAis, keys);
+  const options = availableAis.length
+    ? availableAis.map((source) => `<option value="${escapeHtml(source.value)}" ${source.value === current?.value ? 'selected' : ''}>${escapeHtml(source.label)}</option>`).join('')
+    : '<option value="">Nenhuma IA disponível</option>';
 
-  root.innerHTML = `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Configurações do chat</h2><p>Escolha a IA salva específica que esta conversa deve usar. Cada IA salva corresponde a uma API key cadastrada.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><label>IAs salvas<select id="chat-saved-ai">${options}</select></label><label>Modelo<select id="chat-model"><option value="">${currentKey ? 'Carregando modelos...' : 'Selecione uma IA salva'}</option></select></label><label>Nível de acesso<select id="chat-permission"><option value="read-only" ${chat.permissionLevel === 'read-only' ? 'selected' : ''}>Somente leitura</option><option value="safe" ${chat.permissionLevel === 'safe' ? 'selected' : ''}>Acesso seguro</option><option value="ask" ${chat.permissionLevel === 'ask' ? 'selected' : ''}>Acesso solicitado</option><option value="unrestricted" ${chat.permissionLevel === 'unrestricted' ? 'selected' : ''}>Acesso irrestrito</option></select></label><button class="primary-button" id="save-saved-ai-settings" ${currentKey ? '' : 'disabled'}>Salvar configurações</button></div></div>`;
+  root.innerHTML = `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Configurações do chat</h2><p>Escolha uma IA cloud salva ou um provider local disponível para esta conversa.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><label>IAs disponíveis<select id="chat-available-ai">${options}</select></label><label>Modelo<select id="chat-model"><option value="">${current ? 'Carregando modelos...' : 'Selecione uma IA'}</option></select></label><label>Nível de acesso<select id="chat-permission"><option value="read-only" ${chat.permissionLevel === 'read-only' ? 'selected' : ''}>Somente leitura</option><option value="safe" ${chat.permissionLevel === 'safe' ? 'selected' : ''}>Acesso seguro</option><option value="ask" ${chat.permissionLevel === 'ask' ? 'selected' : ''}>Acesso solicitado</option><option value="unrestricted" ${chat.permissionLevel === 'unrestricted' ? 'selected' : ''}>Acesso irrestrito</option></select></label><button class="primary-button" id="save-available-ai-settings" ${current ? '' : 'disabled'}>Salvar configurações</button></div></div>`;
 
-  if (currentKey) void loadModels(currentKey.id, chat.model || currentKey.selectedModel || '');
+  if (current) void loadModels(current, chat.model || current.selectedModel || '');
 }
 
-async function loadModels(keyId: string, selectedModel: string): Promise<void> {
+async function loadModels(source: AvailableAi, selectedModel: string): Promise<void> {
   const select = document.querySelector<HTMLSelectElement>('#chat-model');
   if (!select) return;
 
   select.disabled = true;
   try {
-    const models = await api().listModelsForApiKey(keyId);
+    const models = source.apiKeyId
+      ? await api().listModelsForApiKey(source.apiKeyId)
+      : await api().listModels(source.providerId);
     select.innerHTML = models.length
       ? models.map((model) => `<option value="${escapeHtml(model.id)}" ${model.id === selectedModel ? 'selected' : ''}>${escapeHtml(model.name)}</option>`).join('')
       : `<option value="${escapeHtml(selectedModel)}">${escapeHtml(selectedModel || 'Nenhum modelo disponível')}</option>`;
@@ -96,14 +138,14 @@ async function saveSettings(): Promise<void> {
   const chat = openChat;
   if (!chat) return;
 
-  const aiSelect = document.querySelector<HTMLSelectElement>('#chat-saved-ai');
+  const aiSelect = document.querySelector<HTMLSelectElement>('#chat-available-ai');
   const modelSelect = document.querySelector<HTMLSelectElement>('#chat-model');
   const permissionSelect = document.querySelector<HTMLSelectElement>('#chat-permission');
-  const saveButton = document.querySelector<HTMLButtonElement>('#save-saved-ai-settings');
+  const saveButton = document.querySelector<HTMLButtonElement>('#save-available-ai-settings');
   if (!aiSelect || !modelSelect || !permissionSelect || !saveButton) return;
 
-  const key = savedKeys.find((item) => item.id === aiSelect.value);
-  if (!key || !modelSelect.value) return;
+  const source = availableAis.find((item) => item.value === aiSelect.value);
+  if (!source || !modelSelect.value) return;
 
   saveButton.disabled = true;
   saveButton.textContent = 'Salvando...';
@@ -111,9 +153,9 @@ async function saveSettings(): Promise<void> {
   try {
     const updated = await api().updateChatSettings({
       chatId: chat.id,
-      providerId: key.providerId,
+      providerId: source.providerId,
       model: modelSelect.value,
-      apiKeyId: key.id,
+      ...(source.apiKeyId ? { apiKeyId: source.apiKeyId } : {}),
       intelligence: chat.intelligence,
       permissionLevel: permissionSelect.value,
     });
@@ -142,7 +184,7 @@ document.addEventListener('click', async (event) => {
       const chat = state.chats.find((item) => item.id === settings.dataset.chatSettings);
       if (!chat) return;
       const keys = await api().listApiKeys();
-      openSavedAiSettings(chat, keys);
+      openAvailableAiSettings(chat, keys, state.providers);
     } catch (error) {
       const root = modalRoot();
       if (root) root.innerHTML = `<div class="modal-backdrop"><div class="modal"><div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Não foi possível carregar as configurações</h2><p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div></div></div>`;
@@ -150,7 +192,7 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  if (target.closest('#save-saved-ai-settings')) {
+  if (target.closest('#save-available-ai-settings')) {
     event.preventDefault();
     event.stopImmediatePropagation();
     await saveSettings();
@@ -159,21 +201,21 @@ document.addEventListener('click', async (event) => {
 
 document.addEventListener('change', (event) => {
   const target = event.target instanceof HTMLSelectElement ? event.target : null;
-  if (!target || target.id !== 'chat-saved-ai') return;
+  if (!target || target.id !== 'chat-available-ai') return;
 
   event.stopImmediatePropagation();
-  const key = savedKeys.find((item) => item.id === target.value);
-  const saveButton = document.querySelector<HTMLButtonElement>('#save-saved-ai-settings');
+  const source = availableAis.find((item) => item.value === target.value);
+  const saveButton = document.querySelector<HTMLButtonElement>('#save-available-ai-settings');
   const modelSelect = document.querySelector<HTMLSelectElement>('#chat-model');
 
-  if (saveButton) saveButton.disabled = !key;
+  if (saveButton) saveButton.disabled = !source;
   if (!modelSelect) return;
 
-  if (!key) {
-    modelSelect.innerHTML = '<option value="">Selecione uma IA salva</option>';
+  if (!source) {
+    modelSelect.innerHTML = '<option value="">Selecione uma IA</option>';
     return;
   }
 
   modelSelect.innerHTML = '<option value="">Carregando modelos...</option>';
-  void loadModels(key.id, key.selectedModel || '');
+  void loadModels(source, source.selectedModel || '');
 }, true);

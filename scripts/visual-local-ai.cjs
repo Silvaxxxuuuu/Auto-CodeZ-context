@@ -153,13 +153,7 @@ async function updateManifest(result) {
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 }
 
-async function runTest() {
-  const pageErrors = [];
-  const consoleErrors = [];
-  page.on('pageerror', (error) => pageErrors.push(errorText(error)));
-  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
+async function verifyLocalAiPanel() {
   await page.locator('#ac-app-settings').click();
   await page.locator('.settings-overlay').waitFor({ state: 'visible' });
   const localAiButton = page.locator('[data-local-ai-settings]');
@@ -179,7 +173,53 @@ async function runTest() {
   if (!text.includes('qwen3:8b') || !text.includes('llava:latest')) throw new Error(`Modelos locais não foram exibidos: ${text}`);
   const capabilityMatches = text.match(/1\/2/g) || [];
   if (capabilityMatches.length < 3) throw new Error(`Capacidades tools/reasoning/vision não foram refletidas: ${text}`);
+  await page.locator('[data-settings-close]').click();
+}
 
+async function verifyChatCanSelectOllama() {
+  const created = await page.evaluate(() => window.autoCodez.createChat({ intelligence: 'normal', permissionLevel: 'safe' }));
+  if (!created?.id) throw new Error('Não foi possível criar um chat para testar Ollama.');
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
+  const chatItem = page.locator(`[data-chat="${created.id}"]`).first();
+  await chatItem.waitFor({ state: 'visible', timeout: 15_000 });
+  await chatItem.click();
+
+  const settingsButton = page.locator(`[data-chat-settings="${created.id}"]`).first();
+  await settingsButton.waitFor({ state: 'attached', timeout: 10_000 });
+  await settingsButton.click({ force: true });
+
+  const aiSelect = page.locator('#chat-available-ai');
+  await aiSelect.waitFor({ state: 'visible', timeout: 10_000 });
+  const ollamaOption = aiSelect.locator('option[value="provider:ollama"]');
+  if (await ollamaOption.count() !== 1) throw new Error('Ollama não apareceu em IAs disponíveis do chat.');
+  await aiSelect.selectOption('provider:ollama');
+
+  const modelSelect = page.locator('#chat-model');
+  await modelSelect.locator('option[value="qwen3:8b"]').waitFor({ state: 'attached', timeout: 15_000 });
+  await modelSelect.selectOption('qwen3:8b');
+  await page.locator('#save-available-ai-settings').click();
+  await page.locator('#chat-available-ai').waitFor({ state: 'detached', timeout: 10_000 });
+
+  const persisted = await page.evaluate(async (chatId) => {
+    const state = await window.autoCodez.getState();
+    return state.chats.find((chat) => chat.id === chatId) || null;
+  }, created.id);
+  if (!persisted || persisted.providerId !== 'ollama' || persisted.model !== 'qwen3:8b' || persisted.apiKeyId) {
+    throw new Error(`Ollama não persistiu corretamente no chat: ${JSON.stringify(persisted)}`);
+  }
+}
+
+async function runTest() {
+  const pageErrors = [];
+  const consoleErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(errorText(error)));
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
+  await verifyLocalAiPanel();
+  await verifyChatCanSelectOllama();
   await page.screenshot({ path: path.join(outputDir, `${testName}.png`), animations: 'disabled' });
   if (pageErrors.length || consoleErrors.length) {
     throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
