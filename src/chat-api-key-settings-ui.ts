@@ -49,6 +49,7 @@ type AvailableAi = {
   apiKeyId?: string;
 };
 
+const RESTORE_CHAT_KEY = 'auto-codez.restore-chat-after-settings';
 let openChat: Chat | null = null;
 let availableAis: AvailableAi[] = [];
 
@@ -162,6 +163,10 @@ async function saveSettings(): Promise<void> {
     openChat = updated;
     modalRoot()?.replaceChildren();
     window.dispatchEvent(new CustomEvent('auto-codez-chat-settings-updated', { detail: updated }));
+    if (!source.apiKeyId) {
+      sessionStorage.setItem(RESTORE_CHAT_KEY, updated.id);
+      window.location.reload();
+    }
   } catch (error) {
     saveButton.disabled = false;
     saveButton.textContent = 'Salvar configurações';
@@ -169,6 +174,22 @@ async function saveSettings(): Promise<void> {
       detail: error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.',
     }));
   }
+}
+
+function restoreChatAfterReload(): void {
+  const chatId = sessionStorage.getItem(RESTORE_CHAT_KEY);
+  if (!chatId) return;
+  sessionStorage.removeItem(RESTORE_CHAT_KEY);
+  const deadline = Date.now() + 10_000;
+  const tryRestore = (): void => {
+    const chatButton = document.querySelector<HTMLElement>(`.chat-item[data-chat="${CSS.escape(chatId)}"], [data-chat="${CSS.escape(chatId)}"]`);
+    if (chatButton) {
+      chatButton.click();
+      return;
+    }
+    if (Date.now() < deadline) window.setTimeout(tryRestore, 80);
+  };
+  window.setTimeout(tryRestore, 0);
 }
 
 document.addEventListener('click', async (event) => {
@@ -219,3 +240,5 @@ document.addEventListener('change', (event) => {
   modelSelect.innerHTML = '<option value="">Carregando modelos...</option>';
   void loadModels(source, source.selectedModel || '');
 }, true);
+
+restoreChatAfterReload();
