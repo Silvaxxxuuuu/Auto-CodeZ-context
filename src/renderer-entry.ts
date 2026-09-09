@@ -25,6 +25,7 @@ const criticalEnhancements: Enhancement[] = [
   { name: 'live-activity-ui', load: () => import('./live-activity-ui') },
   { name: 'provider-error-ui', load: () => import('./provider-error-ui') },
   { name: 'message-formatting-ui', load: () => import('./message-formatting-ui') },
+  { name: 'chat-sources-ui', load: () => import('./chat-sources-ui') },
 ];
 
 const secondaryEnhancements: Enhancement[] = [
