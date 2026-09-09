@@ -29,6 +29,11 @@ function capabilities(values: string[] | undefined): Capability[] {
   return mapped;
 }
 
+function environmentApiToken(): string | undefined {
+  const value = process.env.LM_API_TOKEN?.trim();
+  return value || undefined;
+}
+
 export class LMStudioProviderAdapter implements AIProviderAdapter {
   readonly id = 'lm-studio';
   readonly displayName = 'LM Studio';
@@ -40,7 +45,7 @@ export class LMStudioProviderAdapter implements AIProviderAdapter {
 
   constructor(options: LMStudioProviderOptions = {}) {
     this.endpoint = normalizeServerRoot(options.endpoint);
-    this.apiToken = options.apiToken?.trim() || undefined;
+    this.apiToken = options.apiToken?.trim() || environmentApiToken();
     this.transport = new OpenAICompatibleAdapter({
       id: this.id,
       displayName: this.displayName,
