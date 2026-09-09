@@ -145,6 +145,7 @@ test('local keyless provider sources survive AgentRuntime persistence into the a
     title: 'Documentação nativa',
     url: 'https://provider.example/docs',
     origin: 'provider-native',
+    providerId: config.id,
   }]);
   assert.deepEqual(result.response.sources, final?.sources);
 });
