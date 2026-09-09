@@ -8,6 +8,25 @@ const SECRET_PATTERNS = [
   /\beyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{10,}\b/,
 ];
 
+const LOCAL_PATH_PATTERNS = [
+  /\b[A-Za-z]:[\\/](?:Users|Documents|Desktop|Downloads|AppData|Program Files|Windows|src|home)[\\/]/i,
+  /(?:^|\s)\/(?:Users|home|private|var\/folders|etc|proc|sys|mnt)\/\S+/i,
+  /(?:^|\s)~[\\/]\S+/,
+  /\bfile:\/\//i,
+];
+
+const RAW_CODE_PATTERNS = [
+  /```/,
+  /\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=/,
+  /\bfunction\s+[A-Za-z_$][\w$]*\s*\([^)]*\)\s*\{/,
+  /\bclass\s+[A-Za-z_$][\w$]*[^\n{]*\{/,
+  /\bimport\s+[^;]+\s+from\s+['"][^'"]+['"]/,
+  /\bexport\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|var)\b/,
+  /=>\s*[{(]?/,
+  /<\/?(?:script|template|style|div|main|body|html)\b/i,
+  /[{[]\s*["'][A-Za-z0-9_.-]+["']\s*:/,
+];
+
 function containsLikelySecret(value: string): boolean {
   if (SECRET_PATTERNS.some((pattern) => pattern.test(value))) return true;
   if (/\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\s*[:=]\s*\S{8,}/i.test(value)) return true;
@@ -16,12 +35,21 @@ function containsLikelySecret(value: string): boolean {
   return false;
 }
 
+function containsLocalPath(value: string): boolean {
+  return LOCAL_PATH_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function containsRawCode(value: string): boolean {
+  return RAW_CODE_PATTERNS.some((pattern) => pattern.test(value)) || /[{;}]{4,}/.test(value);
+}
+
 export function normalizeWebSearchQuery(input: string): string {
   const query = input.replace(/\s+/g, ' ').trim();
   if (!query) throw new Error('Consulta web vazia.');
   if (query.length > 500) throw new Error('Consulta web excede o limite de 500 caracteres.');
   if (containsLikelySecret(query)) throw new Error('A consulta web parece conter uma credencial ou segredo e foi bloqueada.');
-  if (query.includes('```') || /[{;}]{4,}/.test(query)) throw new Error('A consulta web parece conter código bruto; resuma o objetivo sem enviar conteúdo do projeto.');
+  if (containsLocalPath(query)) throw new Error('A consulta web parece conter um caminho local e foi bloqueada. Resuma apenas o conceito público que precisa ser pesquisado.');
+  if (containsRawCode(query)) throw new Error('A consulta web parece conter código bruto; resuma o objetivo sem enviar conteúdo do projeto.');
   return query;
 }
 
