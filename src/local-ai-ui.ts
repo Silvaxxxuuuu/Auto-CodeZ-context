@@ -87,13 +87,23 @@ function runtimeFor(snapshot: LocalAiSnapshot, runtimeId: string): RuntimeInfo |
 }
 
 function runtimeOperationDescription(runtime: RuntimeInfo): string {
-  if (!runtime.available) return 'O runtime não respondeu. Inicie-o antes de selecionar modelos locais no chat.';
+  if (runtime.id === 'auto-codez-local') {
+    return runtime.available
+      ? 'Runtime gerenciado pelo Auto CodeZ. Engine verificada, download, cancelamento e remoção são controlados pelo próprio aplicativo.'
+      : 'Runtime próprio ainda não é compatível com esta plataforma ou arquitetura.';
+  }
+  if (!runtime.available) return 'O runtime externo não respondeu. Inicie-o caso queira usar os modelos disponíveis por esse backend.';
   const supported = ['inventário'];
   if (runtime.operations.install) supported.push('download pelo chat');
   if (runtime.operations.cancelInstall) supported.push('cancelamento');
   if (runtime.operations.remove) supported.push('remoção');
   const endpoint = runtime.endpoint ? ` Endpoint: ${runtime.endpoint}.` : '';
   return `Operações confirmadas: ${supported.join(', ')}.${endpoint}`;
+}
+
+function runtimeStatus(runtime: RuntimeInfo): string {
+  if (runtime.id === 'auto-codez-local') return runtime.available ? 'Gerenciado' : 'Indisponível';
+  return runtime.available ? 'Conectado' : 'Não detectado';
 }
 
 function removalControl(model: ManagedModel, runtime?: RuntimeInfo): string {
@@ -140,15 +150,15 @@ function renderRuntimes(snapshot: LocalAiSnapshot): string {
   const rows = snapshot.runtimes.map((runtime) => row(
     runtime.displayName,
     runtimeOperationDescription(runtime),
-    badge(runtime.available ? 'Conectado' : 'Não detectado', runtime.available ? 'good' : 'locked'),
+    badge(runtimeStatus(runtime), runtime.available ? 'good' : 'locked'),
     ` data-local-ai-runtime="${escapeHtml(runtime.id)}"`,
   ));
-  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Runtimes locais</strong><span>Diagnóstico de conexão e capacidades. A escolha e instalação de modelos acontece no chat.</span></div>${badge(`${available}/${snapshot.runtimes.length}`, available ? 'good' : 'locked')}</div>${rows.join('')}${row('Atualizar diagnóstico', 'Refaz a leitura de hardware, runtimes e inventário sem reiniciar o aplicativo.', actionButton('Verificar novamente', 'retry'))}</section>`;
+  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Runtimes locais</strong><span>Diagnóstico dos mecanismos internos e externos. No chat, todos eles aparecem como uma única opção: Usar IA local.</span></div>${badge(`${available}/${snapshot.runtimes.length}`, available ? 'good' : 'locked')}</div>${rows.join('')}${row('Atualizar diagnóstico', 'Refaz a leitura de hardware, runtimes e inventário sem reiniciar o aplicativo.', actionButton('Verificar novamente', 'retry'))}</section>`;
 }
 
 function renderInstalled(snapshot: LocalAiSnapshot): string {
   if (!snapshot.installed.length) {
-    return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Modelos no computador</strong><span>Nenhum modelo de texto instalado foi encontrado. Escolha Ollama ou LM Studio nas configurações de um chat para ver modelos e recomendações.</span></div>${badge('0')}</div></section>`;
+    return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Modelos no computador</strong><span>Nenhum modelo de texto instalado foi encontrado. Abra as configurações de um chat e selecione Usar IA local para ver modelos e recomendações.</span></div>${badge('0')}</div></section>`;
   }
   const rows = snapshot.installed.map((model) => {
     const runtime = runtimeFor(snapshot, model.runtimeId);
@@ -165,7 +175,7 @@ function renderInstalled(snapshot: LocalAiSnapshot): string {
 
 function renderChatFlowHint(snapshot: LocalAiSnapshot): string {
   const safeModels = snapshot.catalog.filter((model) => model.compatibility.level === 'excellent' || model.compatibility.level === 'compatible').length;
-  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Escolher um modelo local</strong><span>Abra as configurações de um chat, selecione Ollama ou LM Studio e escolha o modelo. O Auto CodeZ mostra recomendação, compatibilidade, avisos e instalação antes de liberar Salvar.</span></div>${badge(`${safeModels} opção${safeModels === 1 ? '' : 'ões'} segura${safeModels === 1 ? '' : 's'}`, safeModels ? 'good' : 'locked')}</div></section>`;
+  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Escolher um modelo local</strong><span>Abra as configurações de um chat, selecione Usar IA local e escolha o modelo. O Auto CodeZ decide o backend, mostra compatibilidade e controla a instalação quando possível.</span></div>${badge(`${safeModels} opção${safeModels === 1 ? '' : 'ões'} segura${safeModels === 1 ? '' : 's'}`, safeModels ? 'good' : 'locked')}</div></section>`;
 }
 
 async function renderLocalAi(): Promise<void> {
