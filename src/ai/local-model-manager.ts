@@ -196,8 +196,8 @@ export class LocalModelManager {
     this.activeInstalls.set(id, { controller, cancellable });
     const source = install.call(runtime, {
       modelId: normalizedModelId,
-      ...(request?.source ? { source: request.source } : {}),
-      ...(request?.quantization ? { quantization: request.quantization } : {}),
+      ...(request ?? {}),
+      ...(request?.capabilities ? { capabilities: [...request.capabilities] } : {}),
     }, cancellable ? controller.signal : undefined);
     const cleanup = () => this.activeInstalls.delete(id);
 
