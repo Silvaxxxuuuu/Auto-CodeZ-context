@@ -62,6 +62,7 @@ export interface LocalModelRuntimeAdapter {
   getInfo(): Promise<LocalModelRuntimeInfo>;
   listInstalled(): Promise<LocalModelDescriptor[]>;
   install(modelId: string, signal?: AbortSignal): AsyncGenerator<LocalModelInstallProgress>;
+  remove?(modelId: string): Promise<void>;
 }
 
 const GIB = 1024 ** 3;
