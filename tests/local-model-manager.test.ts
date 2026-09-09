@@ -76,9 +76,9 @@ test('local model manager lists runtimes and classifies installed models', async
 test('local model manager recommends the strongest agent model that fits safely', () => {
   const manager = new LocalModelManager();
   const recommendation = manager.recommendModel([
-    { id: 'qwen3:8b', runtimeId: 'ollama', installed: false, sizeBytes: 5.2 * GIB, capabilities: ['tools', 'reasoning'] },
-    { id: 'qwen3:4b', runtimeId: 'ollama', installed: false, sizeBytes: 2.5 * GIB, capabilities: ['tools', 'reasoning'] },
-    { id: 'gemma3:1b', runtimeId: 'ollama', installed: false, sizeBytes: 0.8 * GIB, capabilities: [] },
+    { id: 'qwen3:8b', runtimeId: 'ollama', sizeBytes: 5.2 * GIB, capabilities: ['tools', 'reasoning'] },
+    { id: 'qwen3:4b', runtimeId: 'ollama', sizeBytes: 2.5 * GIB, capabilities: ['tools', 'reasoning'] },
+    { id: 'gemma3:1b', runtimeId: 'ollama', sizeBytes: 0.8 * GIB, capabilities: [] },
   ], {
     totalRamBytes: 8 * GIB,
     availableRamBytes: 6 * GIB,
@@ -92,7 +92,7 @@ test('local model manager recommends the strongest agent model that fits safely'
 test('local model manager returns no recommendation when every catalog model is blocked', () => {
   const manager = new LocalModelManager();
   const recommendation = manager.recommendModel([
-    { id: 'huge:latest', runtimeId: 'ollama', installed: false, sizeBytes: 10 * GIB, capabilities: ['tools'] },
+    { id: 'huge:latest', runtimeId: 'ollama', sizeBytes: 10 * GIB, capabilities: ['tools'] },
   ], {
     totalRamBytes: 4 * GIB,
     availableRamBytes: 3 * GIB,
