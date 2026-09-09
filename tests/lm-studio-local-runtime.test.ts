@@ -109,6 +109,28 @@ test('LM Studio runtime exposes polled download progress without inventing cance
   });
 });
 
+test('LM Studio runtime sends exact trusted Hugging Face source and quantization', async () => {
+  const adapter = new LMStudioLocalRuntimeAdapter({ pollIntervalMs: 0 });
+  await withMockedFetch(async (input, init) => {
+    assert.equal(String(input), 'http://127.0.0.1:1234/api/v1/models/download');
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      model: 'https://huggingface.co/lmstudio-community/Qwen3-1.7B-GGUF',
+      quantization: 'Q4_K_M',
+    });
+    return jsonResponse({ status: 'already_downloaded' });
+  }, async () => {
+    const events = [];
+    for await (const event of adapter.install({
+      modelId: 'qwen3-1.7b-q4-k-m',
+      source: 'https://huggingface.co/lmstudio-community/Qwen3-1.7B-GGUF',
+      quantization: 'Q4_K_M',
+    })) events.push(event);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].modelId, 'qwen3-1.7b-q4-k-m');
+    assert.equal(events[0].done, true);
+  });
+});
+
 test('LM Studio already-downloaded response completes without requiring a job id', async () => {
   const adapter = new LMStudioLocalRuntimeAdapter({ pollIntervalMs: 0 });
   let requests = 0;
