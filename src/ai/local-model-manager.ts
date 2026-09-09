@@ -9,17 +9,23 @@ import {
   type LocalModelRequirements,
   type LocalModelRuntimeAdapter,
   type LocalModelRuntimeInfo,
+  type LocalModelRuntimeOperations,
 } from './local-model-runtime';
 
 export type ManagedLocalModel = LocalModelDescriptor & {
   compatibility: LocalModelCompatibilityResult;
 };
 
+export type ManagedLocalRuntimeInfo = LocalModelRuntimeInfo & {
+  operations: LocalModelRuntimeOperations;
+};
+
 export type LocalModelInstallHandle = {
   id: string;
   runtimeId: string;
   modelId: string;
-  cancel: () => void;
+  canCancel: boolean;
+  cancel: () => boolean;
   progress: AsyncGenerator<LocalModelInstallProgress>;
 };
 
@@ -39,6 +45,11 @@ type RecommendationCandidate = Pick<LocalModelDescriptor, 'id' | 'runtimeId' | '
 type RankedRecommendationCandidate = {
   model: RecommendationCandidate;
   compatibility: LocalModelCompatibilityResult;
+};
+
+type ActiveInstall = {
+  controller: AbortController;
+  cancellable: boolean;
 };
 
 function installId(runtimeId: string, modelId: string): string {
@@ -77,9 +88,18 @@ function sortRecommendationCandidates(entries: RankedRecommendationCandidate[]):
   });
 }
 
+function runtimeOperations(runtime: LocalModelRuntimeAdapter): LocalModelRuntimeOperations {
+  const install = typeof runtime.install === 'function';
+  return {
+    install,
+    cancelInstall: install && runtime.supportsInstallCancellation === true,
+    remove: typeof runtime.remove === 'function',
+  };
+}
+
 export class LocalModelManager {
   private readonly runtimes = new Map<string, LocalModelRuntimeAdapter>();
-  private readonly activeInstalls = new Map<string, AbortController>();
+  private readonly activeInstalls = new Map<string, ActiveInstall>();
 
   constructor(adapters: LocalModelRuntimeAdapter[] = []) {
     for (const adapter of adapters) this.registerRuntime(adapter);
@@ -94,12 +114,14 @@ export class LocalModelManager {
     return [...this.runtimes.keys()];
   }
 
-  async getRuntimeInfo(runtimeId: string): Promise<LocalModelRuntimeInfo> {
-    return this.requireRuntime(runtimeId).getInfo();
+  async getRuntimeInfo(runtimeId: string): Promise<ManagedLocalRuntimeInfo> {
+    const runtime = this.requireRuntime(runtimeId);
+    const info = await runtime.getInfo();
+    return { ...info, operations: runtimeOperations(runtime) };
   }
 
-  async getRuntimeInfos(): Promise<LocalModelRuntimeInfo[]> {
-    return Promise.all([...this.runtimes.values()].map((runtime) => runtime.getInfo()));
+  async getRuntimeInfos(): Promise<ManagedLocalRuntimeInfo[]> {
+    return Promise.all([...this.runtimes.keys()].map((runtimeId) => this.getRuntimeInfo(runtimeId)));
   }
 
   async listInstalled(runtimeId: string, hardware: LocalHardwareSnapshot): Promise<ManagedLocalModel[]> {
@@ -160,14 +182,18 @@ export class LocalModelManager {
 
   beginInstall(runtimeId: string, modelId: string): LocalModelInstallHandle {
     const runtime = this.requireRuntime(runtimeId);
+    const install = runtime.install;
+    if (!install) throw new Error(`${runtime.displayName} não oferece instalação de modelos pelo Auto CodeZ.`);
+
     const normalizedModelId = modelId.trim();
     if (!normalizedModelId) throw new Error('Modelo local inválido.');
     const id = installId(runtimeId, normalizedModelId);
     if (this.activeInstalls.has(id)) throw new Error('Este modelo já está sendo instalado.');
 
     const controller = new AbortController();
-    this.activeInstalls.set(id, controller);
-    const source = runtime.install(normalizedModelId, controller.signal);
+    const cancellable = runtime.supportsInstallCancellation === true;
+    this.activeInstalls.set(id, { controller, cancellable });
+    const source = install.call(runtime, normalizedModelId, cancellable ? controller.signal : undefined);
     const cleanup = () => this.activeInstalls.delete(id);
 
     async function* progress(): AsyncGenerator<LocalModelInstallProgress> {
@@ -182,7 +208,8 @@ export class LocalModelManager {
       id,
       runtimeId,
       modelId: normalizedModelId,
-      cancel: () => controller.abort(),
+      canCancel: cancellable,
+      cancel: () => this.cancelInstall(runtimeId, normalizedModelId),
       progress: progress(),
     };
   }
@@ -199,9 +226,9 @@ export class LocalModelManager {
   }
 
   cancelInstall(runtimeId: string, modelId: string): boolean {
-    const controller = this.activeInstalls.get(installId(runtimeId, modelId.trim()));
-    if (!controller) return false;
-    controller.abort();
+    const active = this.activeInstalls.get(installId(runtimeId, modelId.trim()));
+    if (!active || !active.cancellable) return false;
+    active.controller.abort();
     return true;
   }
 
