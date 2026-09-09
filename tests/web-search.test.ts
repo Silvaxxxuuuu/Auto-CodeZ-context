@@ -30,14 +30,40 @@ test('DuckDuckGo fallback parser returns normalized direct sources and snippets'
   });
 });
 
-test('web query policy normalizes ordinary current-information searches', () => {
+test('web query policy normalizes ordinary public research searches', () => {
   assert.equal(normalizeWebSearchQuery('  previsão   do tempo hoje   amanhã  '), 'previsão do tempo hoje amanhã');
+  assert.equal(
+    normalizeWebSearchQuery('Electron Forge latest Vite plugin documentation'),
+    'Electron Forge latest Vite plugin documentation',
+  );
+  assert.equal(
+    normalizeWebSearchQuery('TypeScript schema validation libraries available 2026'),
+    'TypeScript schema validation libraries available 2026',
+  );
 });
 
 test('web query policy blocks likely secrets and raw code payloads', () => {
   assert.throws(() => normalizeWebSearchQuery('api_key=super-secret-token-value-123456789'), /credencial ou segredo/);
   assert.throws(() => normalizeWebSearchQuery('procure isto ```const secret = 1```'), /código bruto/);
+  assert.throws(() => normalizeWebSearchQuery('pesquise por const privateState = loadProjectState()'), /código bruto/);
+  assert.throws(() => normalizeWebSearchQuery('descubra o erro em function internalBuild(input) { return input; }'), /código bruto/);
+  assert.throws(() => normalizeWebSearchQuery('pesquise {"privateProject":"alpha","token":"value"}'), /código bruto/);
   assert.throws(() => assertSafeWebUrlText('https://example.com/?token=ghp_abcdefghijklmnopqrstuvwxyz123456'), /credencial ou segredo/);
+});
+
+test('web query policy blocks local filesystem paths instead of leaking them to search', () => {
+  assert.throws(
+    () => normalizeWebSearchQuery('pesquise erro C:\\Users\\Gabriel\\Desktop\\Projeto\\src\\main.ts Electron'),
+    /caminho local/,
+  );
+  assert.throws(
+    () => normalizeWebSearchQuery('search this error from /home/user/private-project/src/main.ts'),
+    /caminho local/,
+  );
+  assert.throws(
+    () => normalizeWebSearchQuery('look up file:///Users/example/private/index.ts'),
+    /caminho local/,
+  );
 });
 
 test('web query policy enforces bounded outbound input', () => {
