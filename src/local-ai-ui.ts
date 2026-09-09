@@ -11,7 +11,8 @@ type HardwareSnapshot = {
   cpuModel?: string;
   gpuName?: string;
 };
-type RuntimeInfo = { id: string; displayName: string; available: boolean; endpoint?: string };
+type RuntimeOperations = { install: boolean; cancelInstall: boolean; remove: boolean };
+type RuntimeInfo = { id: string; displayName: string; available: boolean; endpoint?: string; operations: RuntimeOperations };
 type ManagedModel = {
   id: string;
   name: string;
@@ -112,21 +113,31 @@ function compatibilityTone(level: CompatibilityLevel): string {
   return '';
 }
 
-function installControl(model: ManagedModel, runtimeAvailable: boolean): string {
+function runtimeFor(snapshot: LocalAiSnapshot, runtimeId: string): RuntimeInfo | undefined {
+  return snapshot.runtimes.find((runtime) => runtime.id === runtimeId);
+}
+
+function installControl(model: ManagedModel, runtimeAvailable: boolean, operations?: RuntimeOperations): string {
   const current = installProgress.get(installKey(model.runtimeId, model.id));
+  const installSupported = operations?.install === true;
   if (model.installed) return badge('Instalado', 'good');
-  if (current?.type === 'error') return `${badge('Falhou', 'locked')} ${actionButton('Tentar novamente', 'install', model.runtimeId, model.id, model.compatibility.level === 'blocked' || !runtimeAvailable)}`;
-  if (current?.type === 'cancelled') return actionButton('Instalar', 'install', model.runtimeId, model.id, model.compatibility.level === 'blocked' || !runtimeAvailable);
+  if (current?.type === 'error') return `${badge('Falhou', 'locked')} ${actionButton('Tentar novamente', 'install', model.runtimeId, model.id, model.compatibility.level === 'blocked' || !runtimeAvailable || !installSupported)}`;
+  if (current?.type === 'cancelled') return actionButton('Instalar', 'install', model.runtimeId, model.id, model.compatibility.level === 'blocked' || !runtimeAvailable || !installSupported);
   if (model.installing || current?.type === 'progress') {
     const percent = current?.progress?.percent;
     const progressText = percent === undefined ? current?.progress?.status || 'Instalando…' : `${Math.round(percent)}%`;
-    return `<div class="local-ai-install-control" data-local-ai-progress="${escapeHtml(installKey(model.runtimeId, model.id))}">${badge(progressText)}${actionButton('Cancelar', 'cancel', model.runtimeId, model.id)}</div>`;
+    const cancelControl = operations?.cancelInstall === true
+      ? actionButton('Cancelar', 'cancel', model.runtimeId, model.id)
+      : badge('Sem cancelamento');
+    return `<div class="local-ai-install-control" data-local-ai-progress="${escapeHtml(installKey(model.runtimeId, model.id))}">${badge(progressText)}${cancelControl}</div>`;
   }
   if (model.compatibility.level === 'blocked') return badge('Hardware insuficiente', 'locked');
+  if (!installSupported) return badge('Instalação externa');
   return actionButton('Instalar', 'install', model.runtimeId, model.id, !runtimeAvailable);
 }
 
-function removalControl(model: ManagedModel): string {
+function removalControl(model: ManagedModel, operations?: RuntimeOperations): string {
+  if (operations?.remove !== true) return badge('Remoção externa');
   const key = installKey(model.runtimeId, model.id);
   if (!pendingRemoval.has(key)) return actionButton('Remover', 'remove', model.runtimeId, model.id);
   return `${badge('Confirmar remoção', 'locked')} ${actionButton('Manter', 'cancel-remove', model.runtimeId, model.id)} ${actionButton('Remover agora', 'confirm-remove', model.runtimeId, model.id)}`;
@@ -184,7 +195,8 @@ function renderRecommendation(snapshot: LocalAiSnapshot, runtimeAvailable: boole
   }
   const model = snapshot.catalog.find((candidate) => candidate.runtimeId === recommendation.runtimeId && candidate.id === recommendation.modelId);
   if (!model) return '';
-  const control = model.installed ? badge('Já instalado', 'good') : installControl(model, runtimeAvailable);
+  const runtime = runtimeFor(snapshot, model.runtimeId);
+  const control = model.installed ? badge('Já instalado', 'good') : installControl(model, runtimeAvailable, runtime?.operations);
   return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Recomendado para este computador</strong><span>${escapeHtml(recommendation.reason)}</span></div>${badge(compatibilityLabel(recommendation.compatibility.level), compatibilityTone(recommendation.compatibility.level))}</div>${row(model.name, `${model.parameterSize || 'Modelo local'} · ${formatBytes(model.sizeBytes)}${model.capabilities?.includes('tools') ? ' · tools' : ''}${model.capabilities?.includes('reasoning') ? ' · raciocínio' : ''}`, control)}</section>`;
 }
 
@@ -192,23 +204,29 @@ function renderInstalled(snapshot: LocalAiSnapshot): string {
   if (!snapshot.installed.length) {
     return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Modelos no computador</strong><span>Nenhum modelo de texto instalado foi encontrado no runtime ativo.</span></div>${badge('0')}</div></section>`;
   }
-  const rows = snapshot.installed.map((model) => row(
-    model.name || model.id,
-    `${model.parameterSize || 'Tamanho de parâmetros não informado'}${model.quantization ? ` · ${model.quantization}` : ''}${model.sizeBytes ? ` · ${formatBytes(model.sizeBytes)}` : ''}`,
-    `<div class="local-ai-model-actions">${badge(compatibilityLabel(model.compatibility.level), compatibilityTone(model.compatibility.level))}${badge('Pronto', 'good')}${removalControl(model)}</div>`,
-    ` data-local-ai-installed-model="${escapeHtml(installKey(model.runtimeId, model.id))}"`,
-  ));
-  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Modelos no computador</strong><span>Inventário lido diretamente do runtime local. A remoção só acontece após confirmação explícita.</span></div>${badge(String(snapshot.installed.length), 'good')}</div>${rows.join('')}</section>`;
+  const rows = snapshot.installed.map((model) => {
+    const runtime = runtimeFor(snapshot, model.runtimeId);
+    return row(
+      model.name || model.id,
+      `${model.parameterSize || 'Tamanho de parâmetros não informado'}${model.quantization ? ` · ${model.quantization}` : ''}${model.sizeBytes ? ` · ${formatBytes(model.sizeBytes)}` : ''}`,
+      `<div class="local-ai-model-actions">${badge(compatibilityLabel(model.compatibility.level), compatibilityTone(model.compatibility.level))}${badge('Pronto', 'good')}${removalControl(model, runtime?.operations)}</div>`,
+      ` data-local-ai-installed-model="${escapeHtml(installKey(model.runtimeId, model.id))}"`,
+    );
+  });
+  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Modelos no computador</strong><span>Inventário lido diretamente do runtime local. A remoção só acontece após confirmação explícita quando o runtime oferece essa operação.</span></div>${badge(String(snapshot.installed.length), 'good')}</div>${rows.join('')}</section>`;
 }
 
 function renderCatalog(snapshot: LocalAiSnapshot, runtimeAvailable: boolean): string {
-  const rows = snapshot.catalog.map((model) => row(
-    `${model.name}${model.parameterSize ? ` · ${model.parameterSize}` : ''}`,
-    installDescription(model, snapshot),
-    `<div class="local-ai-model-actions">${model.recommended ? badge('Recomendado', 'good') : ''}${badge(formatBytes(model.sizeBytes))}${badge(compatibilityLabel(model.compatibility.level), compatibilityTone(model.compatibility.level))}${installControl(model, runtimeAvailable)}</div>`,
-    ` data-local-ai-model="${escapeHtml(installKey(model.runtimeId, model.id))}"`,
-  ));
-  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Catálogo local</strong><span>Modelos versionados pelo Auto CodeZ, avaliados antes do download e instalados pelo runtime local.</span></div>${badge(String(snapshot.catalog.length))}</div>${rows.join('')}</section>`;
+  const rows = snapshot.catalog.map((model) => {
+    const runtime = runtimeFor(snapshot, model.runtimeId);
+    return row(
+      `${model.name}${model.parameterSize ? ` · ${model.parameterSize}` : ''}`,
+      installDescription(model, snapshot),
+      `<div class="local-ai-model-actions">${model.recommended ? badge('Recomendado', 'good') : ''}${badge(formatBytes(model.sizeBytes))}${badge(compatibilityLabel(model.compatibility.level), compatibilityTone(model.compatibility.level))}${installControl(model, runtimeAvailable, runtime?.operations)}</div>`,
+      ` data-local-ai-model="${escapeHtml(installKey(model.runtimeId, model.id))}"`,
+    );
+  });
+  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Catálogo local</strong><span>Modelos versionados pelo Auto CodeZ, avaliados antes do download e gerenciados somente pelas operações realmente suportadas pelo runtime.</span></div>${badge(String(snapshot.catalog.length))}</div>${rows.join('')}</section>`;
 }
 
 async function renderLocalAi(): Promise<void> {
@@ -227,8 +245,13 @@ async function renderLocalAi(): Promise<void> {
     const ollamaProvider = state.providers.find((provider) => provider.id === 'ollama');
     const ollamaRuntime = snapshot.runtimes.find((runtime) => runtime.id === 'ollama');
     const runtimeAvailable = Boolean(ollamaProvider?.requiresApiKey === false && ollamaRuntime?.available);
+    const runtimeDescription = runtimeAvailable
+      ? ollamaRuntime?.operations.remove
+        ? 'Runtime local detectado e pronto para listar, instalar, cancelar, remover e executar modelos.'
+        : 'Runtime local detectado e pronto. As ações disponíveis respeitam as capacidades reportadas pelo runtime.'
+      : 'O runtime não respondeu. O catálogo continua visível, mas alterações ficam desativadas.';
     const runtimeCard = `<section class="settings-card">${[
-      row('Ollama', runtimeAvailable ? 'Runtime local detectado e pronto para listar, instalar, remover e executar modelos.' : 'O runtime não respondeu. O catálogo continua visível, mas alterações ficam desativadas.', badge(runtimeAvailable ? 'Conectado' : 'Não detectado', runtimeAvailable ? 'good' : 'locked')),
+      row('Ollama', runtimeDescription, badge(runtimeAvailable ? 'Conectado' : 'Não detectado', runtimeAvailable ? 'good' : 'locked')),
       row('Endpoint', 'Conexão permanece restrita ao processo principal do Auto CodeZ.', badge(ollamaRuntime?.endpoint || 'http://127.0.0.1:11434')),
       row('Atualizar diagnóstico', 'Refaz a leitura de hardware, runtime e inventário sem reiniciar o aplicativo.', actionButton('Verificar novamente', 'retry')),
     ].join('')}</section>`;
@@ -238,7 +261,7 @@ async function renderLocalAi(): Promise<void> {
       + renderRecommendation(snapshot, runtimeAvailable)
       + renderInstalled(snapshot)
       + renderCatalog(snapshot, runtimeAvailable)
-      + '<div class="settings-footnote">Bloqueios usam RAM e armazenamento detectados localmente. GPU/VRAM só entram no cálculo quando puderem ser identificadas com confiança. O Auto CodeZ não inventa VRAM ausente.</div>';
+      + '<div class="settings-footnote">Bloqueios usam RAM e armazenamento detectados localmente. GPU/VRAM só entram no cálculo quando puderem ser identificadas com confiança. O Auto CodeZ não inventa VRAM ausente nem capacidades ausentes do runtime.</div>';
   } catch (error) {
     if (token !== renderToken || !localButton.isConnected || !localButton.classList.contains('active')) return;
     const message = error instanceof Error ? error.message : 'A IA Local não respondeu.';
