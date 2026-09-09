@@ -3,6 +3,7 @@ import net from 'node:net';
 
 export type ResolvedWebAddress = { address: string; family: number };
 export type WebHostResolver = (hostname: string) => Promise<ResolvedWebAddress[]>;
+export type PublicWebDestination = { url: URL; addresses: ResolvedWebAddress[] };
 
 const BLOCKED_HOSTNAMES = new Set([
   'localhost',
@@ -89,7 +90,7 @@ export const defaultWebHostResolver: WebHostResolver = async (hostname) => {
   return resolved.map((entry) => ({ address: entry.address, family: entry.family }));
 };
 
-export async function assertPublicWebUrl(input: string | URL, resolver: WebHostResolver = defaultWebHostResolver): Promise<URL> {
+export async function resolvePublicWebUrl(input: string | URL, resolver: WebHostResolver = defaultWebHostResolver): Promise<PublicWebDestination> {
   let url: URL;
   try {
     url = input instanceof URL ? new URL(input.toString()) : new URL(input);
@@ -105,7 +106,7 @@ export async function assertPublicWebUrl(input: string | URL, resolver: WebHostR
   const literalFamily = net.isIP(hostname);
   if (literalFamily) {
     if (isUnsafeWebAddress(hostname)) throw new Error('O endereço web aponta para uma rede local ou reservada.');
-    return url;
+    return { url, addresses: [{ address: hostname, family: literalFamily }] };
   }
 
   const addresses = await resolver(hostname);
@@ -115,5 +116,9 @@ export async function assertPublicWebUrl(input: string | URL, resolver: WebHostR
       throw new Error('O domínio web resolveu para uma rede local ou reservada.');
     }
   }
-  return url;
+  return { url, addresses: addresses.map((entry) => ({ ...entry })) };
+}
+
+export async function assertPublicWebUrl(input: string | URL, resolver: WebHostResolver = defaultWebHostResolver): Promise<URL> {
+  return (await resolvePublicWebUrl(input, resolver)).url;
 }
