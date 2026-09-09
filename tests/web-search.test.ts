@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseDuckDuckGoHtml, parseDuckDuckGoLite } from '../src/web/search/duckduckgo-html';
+import { DuckDuckGoHtmlSearchAdapter, parseDuckDuckGoHtml, parseDuckDuckGoLite } from '../src/web/search/duckduckgo-html';
 import { assertSafeWebUrlText, normalizeWebSearchQuery } from '../src/web/web-query-policy';
+import type { WebHttpTransport } from '../src/web/web-http-client';
 
 const fixture = `
 <html><body>
@@ -44,6 +45,27 @@ test('DuckDuckGo Lite parser provides a second bounded search route', () => {
     { title: 'Documentação & atual', url: 'https://docs.example/latest', snippet: 'Referência atualizada da API.' },
     { title: 'Release 2', url: 'https://release.example/v2', snippet: 'Notas da versão atual.' },
   ]);
+});
+
+test('DuckDuckGo adapter falls back to Lite when the primary search route fails', async () => {
+  const requestedHosts: string[] = [];
+  const transport: WebHttpTransport = async (destination) => {
+    requestedHosts.push(destination.url.hostname);
+    if (destination.url.hostname === 'html.duckduckgo.com') throw new Error('primary unavailable');
+    return {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+      body: new TextEncoder().encode(liteFixture),
+    };
+  };
+  const adapter = new DuckDuckGoHtmlSearchAdapter({
+    resolver: async () => [{ address: '93.184.216.34', family: 4 }],
+    transport,
+  });
+  const results = await adapter.search('current API documentation', { limit: 2 });
+  assert.deepEqual(requestedHosts, ['html.duckduckgo.com', 'lite.duckduckgo.com']);
+  assert.equal(results.length, 2);
+  assert.equal(results[0].url, 'https://docs.example/latest');
 });
 
 test('web query policy normalizes ordinary public research searches', () => {
