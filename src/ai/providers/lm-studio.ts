@@ -7,6 +7,7 @@ import type {
   AIStreamEvent,
   Capability,
 } from '../types';
+import { getLocalRuntimeConnection } from '../local-runtime-settings';
 import { LMStudioLocalRuntimeAdapter } from '../local-runtimes/lm-studio';
 import { OpenAICompatibleAdapter } from './openai-compatible';
 
@@ -29,27 +30,22 @@ function capabilities(values: string[] | undefined): Capability[] {
   return mapped;
 }
 
-function environmentApiToken(): string | undefined {
-  const value = process.env.LM_API_TOKEN?.trim();
-  return value || undefined;
-}
-
 export class LMStudioProviderAdapter implements AIProviderAdapter {
   readonly id = 'lm-studio';
   readonly displayName = 'LM Studio';
   readonly requiresApiKey = false;
   readonly fallbackCapabilities: Capability[] = ['text', 'streaming'];
-  private readonly endpoint: string;
-  private readonly apiToken?: string;
+  private readonly endpointOverride?: string;
+  private readonly apiTokenOverride?: string;
   private readonly transport: OpenAICompatibleAdapter;
 
   constructor(options: LMStudioProviderOptions = {}) {
-    this.endpoint = normalizeServerRoot(options.endpoint);
-    this.apiToken = options.apiToken?.trim() || environmentApiToken();
+    this.endpointOverride = options.endpoint?.trim() ? normalizeServerRoot(options.endpoint) : undefined;
+    this.apiTokenOverride = options.apiToken?.trim() || undefined;
     this.transport = new OpenAICompatibleAdapter({
       id: this.id,
       displayName: this.displayName,
-      baseUrl: `${this.endpoint}/v1`,
+      baseUrl: `${this.endpointOverride || DEFAULT_ENDPOINT}/v1`,
       toolsByDefault: false,
     });
   }
@@ -57,7 +53,7 @@ export class LMStudioProviderAdapter implements AIProviderAdapter {
   async listModels(config: AIProviderConfig): Promise<AIModel[]> {
     const runtime = new LMStudioLocalRuntimeAdapter({
       endpoint: this.serverRoot(config),
-      apiToken: this.apiToken,
+      apiToken: this.apiToken(),
     });
     const models = await runtime.listInstalled();
     return models.map((model) => ({
@@ -79,14 +75,19 @@ export class LMStudioProviderAdapter implements AIProviderAdapter {
   }
 
   private serverRoot(config: AIProviderConfig): string {
-    return normalizeServerRoot(config.baseUrl || this.endpoint);
+    const connection = getLocalRuntimeConnection('lm-studio');
+    return normalizeServerRoot(this.endpointOverride || config.baseUrl || connection.endpoint);
+  }
+
+  private apiToken(): string | undefined {
+    return this.apiTokenOverride || getLocalRuntimeConnection('lm-studio').apiToken;
   }
 
   private transportConfig(config: AIProviderConfig): AIProviderConfig {
     return {
       id: this.id,
       displayName: this.displayName,
-      apiKey: this.apiToken || '',
+      apiKey: this.apiToken() || '',
       baseUrl: `${this.serverRoot(config)}/v1`,
       ...(config.selectedModel ? { selectedModel: config.selectedModel } : {}),
       enabled: true,
