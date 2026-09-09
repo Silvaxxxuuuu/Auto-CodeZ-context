@@ -38,27 +38,15 @@ test('plugin manifest validation fails closed for incompatible API, traversal an
   assert.throws(() => validatePluginManifest(manifest({ permissions: ['system:everything'] })), /permissions/i);
 });
 
-test('plugin contributions require the explicit permission that authorizes the host capability', () => {
-  assert.throws(
-    () => validatePluginManifest(manifest({ contributions: ['tool'], permissions: [] })),
-    /ai:tool/i,
-  );
-  assert.throws(
-    () => validatePluginManifest(manifest({ contributions: ['provider'], permissions: ['ui:contribute'] })),
-    /ai:provider/i,
-  );
-  assert.throws(
-    () => validatePluginManifest(manifest({ contributions: ['right-sidebar'], permissions: ['ai:tool'] })),
-    /ui:contribute/i,
-  );
-});
-
-test('registry owns lifecycle and exposes contributions only from enabled plugins', () => {
+test('registry requires explicit grants and exposes contributions only from enabled plugins', () => {
   const registry = new PluginRegistry();
   const registered = registry.register(manifest(), 100);
   assert.equal(registered.state, 'registered');
+  assert.deepEqual(registered.grantedPermissions, []);
+  assert.throws(() => registry.enable('example.plugin', 150), /não recebeu as permissões/i);
   assert.deepEqual(registry.listContributionOwners('tool'), []);
 
+  registry.grantPermissions('example.plugin', ['ai:tool', 'ui:contribute'], 175);
   const enabled = registry.enable('example.plugin', 200);
   assert.equal(enabled.state, 'enabled');
   assert.deepEqual(registry.listContributionOwners('tool'), [{ pluginId: 'example.plugin', contribution: 'tool' }]);
@@ -70,6 +58,17 @@ test('registry owns lifecycle and exposes contributions only from enabled plugin
   assert.equal(registry.hasPermission('example.plugin', 'ai:tool'), false);
 });
 
+test('registry rejects undeclared grants and disables a plugin when a grant is revoked', () => {
+  const registry = new PluginRegistry();
+  registry.register(manifest());
+  assert.throws(() => registry.grantPermissions('example.plugin', ['workspace:write']), /não solicitou/i);
+  registry.grantPermissions('example.plugin', ['ai:tool', 'ui:contribute']);
+  registry.enable('example.plugin');
+  const revoked = registry.revokePermission('example.plugin', 'ai:tool');
+  assert.equal(revoked.state, 'disabled');
+  assert.deepEqual(revoked.grantedPermissions, ['ui:contribute']);
+});
+
 test('registry rejects duplicate identity, isolates returned objects and supports clean unregister', () => {
   const registry = new PluginRegistry();
   registry.register(manifest());
@@ -78,7 +77,9 @@ test('registry rejects duplicate identity, isolates returned objects and support
   const first = registry.get('example.plugin');
   assert.ok(first);
   first.manifest.permissions.push('workspace:write');
+  first.grantedPermissions.push('workspace:write');
   assert.equal(registry.get('example.plugin')?.manifest.permissions.includes('workspace:write'), false);
+  assert.equal(registry.get('example.plugin')?.grantedPermissions.includes('workspace:write'), false);
 
   assert.equal(registry.unregister('example.plugin'), true);
   assert.equal(registry.unregister('example.plugin'), false);
@@ -87,7 +88,7 @@ test('registry rejects duplicate identity, isolates returned objects and support
 
 test('registry keeps plugin failures explicit and clears them on a deliberate state transition', () => {
   const registry = new PluginRegistry();
-  registry.register(manifest(), 10);
+  registry.register(manifest({ permissions: [] }), 10);
   const failed = registry.fail('example.plugin', 'Activation crashed', 20);
   assert.equal(failed.state, 'failed');
   assert.equal(failed.failureReason, 'Activation crashed');
