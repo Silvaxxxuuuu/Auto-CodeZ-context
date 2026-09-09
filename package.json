@@ -13,7 +13,7 @@
     "lint": "eslint --ext .ts,.tsx .",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node --test .test-dist/tests/*.test.js",
-    "test:visual": "node scripts/visual-electron.cjs && node scripts/visual-provider-catalog.cjs"
+    "test:visual": "node scripts/visual-product.cjs && node scripts/visual-provider-catalog.cjs"
   },
   "keywords": [
     "ai",
@@ -37,7 +37,6 @@
     "@electron-forge/maker-zip": "^7.11.2",
     "@electron-forge/plugin-auto-unpack-natives": "^7.11.2",
     "@electron-forge/plugin-fuses": "^7.11.2",
-    "@electron-forge/plugin-vite": "^7.11.2",
     "@electron/fuses": "^1.8.0",
     "@types/electron-squirrel-startup": "^1.0.2",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
