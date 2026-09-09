@@ -5,11 +5,7 @@ type StreamEvent = {
   chatId?: string;
   text?: string;
   activity?: Partial<ActivityEvent>;
-  toolCall?: {
-    id: string;
-    name: ToolName;
-    input: Record<string, unknown>;
-  };
+  toolCall?: { id: string; name: ToolName; input: Record<string, unknown> };
 };
 
 type Bridge = {
@@ -26,22 +22,22 @@ style.textContent = `
   #messages > .activity-card{display:none!important}
   #messages > .ac-internal-transcript{display:none!important}
   .ac-live-activity{width:min(860px,calc(100% - 56px));margin:5px auto 12px;display:flex;align-items:center;gap:8px;color:#7f8997;font:11px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:20px}
-  .ac-live-activity[hidden]{display:none}
-  .ac-live-activity.status-failed{color:#d58e96}
-  .ac-live-activity.status-success{color:#8995a4}
-  .ac-live-activity-icon{display:grid;place-items:center;width:16px;height:16px;flex:0 0 16px;color:currentColor}
-  .ac-live-activity-icon svg{display:block;width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-  .ac-live-activity-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .ac-live-activity-dots{display:inline-flex;margin-left:1px;letter-spacing:1px;opacity:.7}
-  .ac-live-activity-dots span{animation:ac-live-dot 1.05s infinite;opacity:.25}
-  .ac-live-activity-dots span:nth-child(2){animation-delay:.15s}.ac-live-activity-dots span:nth-child(3){animation-delay:.3s}
-  .ac-live-activity.status-success .ac-live-activity-dots,.ac-live-activity.status-failed .ac-live-activity-dots{display:none}
-  #messages.ac-has-live-activity .ac-thinking-status{display:none!important}
-  @keyframes ac-live-dot{0%,100%{opacity:.25}40%{opacity:1}70%{opacity:.25}}
-  @media(max-width:720px){.ac-live-activity{width:calc(100% - 24px)}}
-  @media(prefers-reduced-motion:reduce){.ac-live-activity-dots span{animation:none;opacity:.65}}
+  .ac-live-activity[hidden]{display:none}.ac-live-activity.status-failed{color:#d58e96}.ac-live-activity.status-success{color:#8995a4}.ac-live-activity.status-pending{color:#a89b7d}
+  .ac-live-activity-icon{display:grid;place-items:center;width:16px;height:16px;flex:0 0 16px;color:currentColor}.ac-live-activity-icon svg{display:block;width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .ac-live-activity-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ac-live-activity-dots{display:inline-flex;margin-left:1px;letter-spacing:1px;opacity:.7}.ac-live-activity-dots span{animation:ac-live-dot 1.05s infinite;opacity:.25}.ac-live-activity-dots span:nth-child(2){animation-delay:.15s}.ac-live-activity-dots span:nth-child(3){animation-delay:.3s}
+  .ac-live-activity.status-success .ac-live-activity-dots,.ac-live-activity.status-failed .ac-live-activity-dots,.ac-live-activity.status-pending .ac-live-activity-dots{display:none}
+  #messages.ac-has-live-activity .ac-thinking-status{display:none!important}@keyframes ac-live-dot{0%,100%{opacity:.25}40%{opacity:1}70%{opacity:.25}}
+  @media(max-width:720px){.ac-live-activity{width:calc(100% - 24px)}}@media(prefers-reduced-motion:reduce){.ac-live-activity-dots span{animation:none;opacity:.65}}
 `;
 document.head.appendChild(style);
+
+const INFRASTRUCTURE_ACTIVITY = [
+  /^Contexto do workspace anexado à solicitação\.?$/i,
+  /^Enviando mensagem para /i,
+  /^Transmitindo resposta de /i,
+  /^Resposta recebida\.?$/i,
+  /^Perfil .+ ajustado para /i,
+];
 
 function selectedChatId(): string {
   return document.querySelector<HTMLElement>('[data-chat-settings]')?.dataset.chatSettings
@@ -51,6 +47,7 @@ function selectedChatId(): string {
 
 function iconFor(toolName?: ToolName): string {
   if (toolName === 'run_command') return '<svg viewBox="0 0 24 24"><path d="m7 8 4 4-4 4"/><path d="M13 16h4"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg>';
+  if (toolName === 'web_search' || toolName === 'web_fetch') return '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18"/><path d="M12 3a14 14 0 0 0 0 18"/></svg>';
   if (toolName === 'search_files') return '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>';
   if (toolName?.startsWith('git_')) return '<svg viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v5a7 7 0 0 0 7 7h3"/></svg>';
   if (toolName === 'plan_execution' || toolName === 'complete_plan_step') return '<svg viewBox="0 0 24 24"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m3 6 1 1 2-2"/><path d="m3 12 1 1 2-2"/><circle cx="4" cy="18" r="1"/></svg>';
@@ -73,9 +70,7 @@ function syncInternalTranscript(): void {
       previous.classList.add('ac-internal-transcript');
       previous = previous.previousElementSibling as HTMLElement | null;
     }
-    if (previous?.classList.contains('message') && previous.classList.contains('assistant') && !previous.classList.contains('streaming')) {
-      previous.classList.add('ac-internal-transcript');
-    }
+    if (previous?.classList.contains('message') && previous.classList.contains('assistant') && !previous.classList.contains('streaming')) previous.classList.add('ac-internal-transcript');
   });
 }
 
@@ -85,53 +80,34 @@ function remove(): void {
   messages?.classList.remove('ac-has-live-activity');
 }
 
+function isInfrastructureMessage(message: string): boolean {
+  return INFRASTRUCTURE_ACTIVITY.some((pattern) => pattern.test(message.trim()));
+}
+
+function normalizedActivityMessage(event: Partial<ActivityEvent>): string {
+  const message = event.message?.trim() || '';
+  if (!message || isInfrastructureMessage(message)) return '';
+  if (event.toolName === 'web_search' && event.status === 'failed') return message.replace(/^Falha em web_search:\s*/i, 'A pesquisa na web falhou: ');
+  if (event.toolName === 'web_fetch' && event.status === 'failed') return message.replace(/^Falha em web_fetch:\s*/i, 'Não foi possível abrir a fonte: ');
+  return message;
+}
+
 function render(message: string, toolName?: ToolName, status: ActivityEvent['status'] = 'running'): void {
   const messages = messagesRoot();
-  if (!messages || !message.trim()) return;
+  const normalized = message.trim();
+  if (!messages || !normalized || isInfrastructureMessage(normalized)) return;
   remove();
   const row = document.createElement('div');
   row.className = `ac-live-activity status-${status}`;
   row.setAttribute('role', 'status');
   row.innerHTML = `<span class="ac-live-activity-icon" aria-hidden="true">${iconFor(toolName)}</span><span class="ac-live-activity-text"></span><span class="ac-live-activity-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>`;
-  row.querySelector<HTMLElement>('.ac-live-activity-text')!.textContent = message.trim();
+  row.querySelector<HTMLElement>('.ac-live-activity-text')!.textContent = normalized;
   const streaming = messages.querySelector('.message.assistant.streaming');
   const approval = messages.querySelector('.ac-approval-root');
   const anchor = streaming || approval;
   if (anchor) messages.insertBefore(row, anchor);
   else messages.appendChild(row);
   messages.classList.add('ac-has-live-activity');
-}
-
-function toolCallFallback(event: StreamEvent): string {
-  const call = event.toolCall;
-  if (!call) return '';
-  const value = (key: string): string | undefined => typeof call.input[key] === 'string' && String(call.input[key]).trim() ? String(call.input[key]).trim() : undefined;
-  switch (call.name) {
-    case 'plan_execution': return 'Preparando plano de execução.';
-    case 'complete_plan_step': return 'Atualizando progresso do plano.';
-    case 'read_file': return value('path') ? `Preparando leitura de ${value('path')}` : 'Preparando leitura de arquivo.';
-    case 'read_symbol': return value('symbol') ? `Preparando leitura do símbolo ${value('symbol')}` : 'Preparando leitura de símbolo.';
-    case 'write_file':
-    case 'replace_range':
-    case 'replace_text':
-    case 'replace_symbol':
-    case 'insert_before':
-    case 'insert_after': return value('path') ? `Preparando edição de ${value('path')}` : 'Preparando edição de arquivo.';
-    case 'create_file': return value('path') ? `Preparando criação de ${value('path')}` : 'Preparando criação de arquivo.';
-    case 'delete_file': return value('path') ? `Preparando exclusão de ${value('path')}` : 'Preparando exclusão de arquivo.';
-    case 'rename_file': return value('from') && value('to') ? `Preparando renomeação de ${value('from')} para ${value('to')}` : 'Preparando renomeação de arquivo.';
-    case 'search_files': return value('query') ? `Preparando pesquisa por ${value('query')}` : 'Preparando pesquisa em arquivos.';
-    case 'run_command': return 'Preparando comando.';
-    case 'git_status':
-    case 'git_diff':
-    case 'git_log':
-    case 'git_branches': return 'Preparando consulta ao Git.';
-    case 'git_create_branch':
-    case 'git_checkout':
-    case 'git_stage':
-    case 'git_stage_all':
-    case 'git_commit': return 'Preparando operação Git.';
-  }
 }
 
 function matchesActiveChat(chatId?: string): boolean {
@@ -145,25 +121,29 @@ const unsubscribeStream = bridge.onStreamEvent((event) => {
     remove();
     return;
   }
-  if (event.type === 'tool_call' && event.toolCall) {
-    render(toolCallFallback(event), event.toolCall.name, 'running');
+  // tool_call by itself is intent, not proof of work. The dynamic model summary or ToolRuntime event renders the activity.
+  if (event.type === 'activity' && event.activity) {
+    const message = normalizedActivityMessage(event.activity);
+    if (message) render(message, event.activity.toolName, event.activity.status || 'running');
     return;
   }
-  if (event.type === 'activity' && event.activity?.message?.trim()) {
-    if (event.activity.type === 'complete' && event.activity.status === 'success') {
-      remove();
-      return;
-    }
-    render(event.activity.message, event.activity.toolName, event.activity.status || 'running');
-    return;
+  if (event.type === 'approval_required') return;
+  if (event.type === 'complete' || event.type === 'cancelled') remove();
+  if (event.type === 'error') {
+    const current = messagesRoot()?.querySelector<HTMLElement>('.ac-live-activity');
+    if (!current?.classList.contains('status-failed')) remove();
   }
-  if (event.type === 'approval_required' || event.type === 'complete' || event.type === 'error' || event.type === 'cancelled') remove();
 });
 
 const unsubscribeActivity = bridge.onActivity((event) => {
   if (!matchesActiveChat(event.chatId)) return;
-  if (event.type === 'complete' && event.status === 'success') return;
-  if (event.message?.trim()) render(event.message, event.toolName, event.status);
+  const message = normalizedActivityMessage(event);
+  if (!message) return;
+  if (event.type === 'complete' && event.status === 'success') {
+    remove();
+    return;
+  }
+  render(message, event.toolName, event.status);
 });
 
 const messages = messagesRoot();
