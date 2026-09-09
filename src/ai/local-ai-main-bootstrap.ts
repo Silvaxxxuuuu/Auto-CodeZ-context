@@ -4,10 +4,14 @@ import { collectLocalHardwareSnapshot } from './local-hardware';
 import { getLocalModelCatalogEntry, listLocalModelCatalog } from './local-model-catalog';
 import { LocalModelManager, type ManagedLocalModel } from './local-model-manager';
 import type { LocalModelInstallProgress } from './local-model-runtime';
+import { LMStudioLocalRuntimeAdapter } from './local-runtimes/lm-studio';
 import { OllamaLocalRuntimeAdapter } from './local-runtimes/ollama';
 import { requireIdentifier, requireObject } from '../core/input-validation';
 
-const manager = new LocalModelManager([new OllamaLocalRuntimeAdapter()]);
+const manager = new LocalModelManager([
+  new OllamaLocalRuntimeAdapter(),
+  new LMStudioLocalRuntimeAdapter({ apiToken: process.env.LM_API_TOKEN }),
+]);
 
 type LocalAiInstallEvent = {
   type: 'progress' | 'complete' | 'cancelled' | 'error';
