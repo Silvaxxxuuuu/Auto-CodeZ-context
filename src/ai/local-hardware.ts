@@ -18,16 +18,22 @@ function statValue(value: number | bigint): number {
 
 async function existingProbePath(probePath: string): Promise<string | undefined> {
   let candidate = path.resolve(probePath);
-  while (true) {
+  let parent = path.dirname(candidate);
+  while (candidate !== parent) {
     try {
       const stat = await fs.stat(candidate);
       if (stat.isDirectory()) return candidate;
     } catch {
       // A future storage directory may not exist yet; probe its existing parent volume.
     }
-    const parent = path.dirname(candidate);
-    if (parent === candidate) return undefined;
     candidate = parent;
+    parent = path.dirname(candidate);
+  }
+  try {
+    const stat = await fs.stat(candidate);
+    return stat.isDirectory() ? candidate : undefined;
+  } catch {
+    return undefined;
   }
 }
 
