@@ -132,4 +132,19 @@ export class OllamaLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
     }
     if (!emittedDone) throw new Error('Ollama encerrou a instalação sem confirmar sucesso.');
   }
+
+  async remove(modelId: string): Promise<void> {
+    const model = modelId.trim();
+    if (!model) throw new Error('Modelo local inválido.');
+    const response = await fetchWithTimeout(`${this.endpoint}/api/delete`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+    }, REQUEST_TIMEOUT_MS);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+      const message = typeof data.error === 'string' && data.error.trim() ? data.error.trim() : `Ollama delete failed: ${response.status}`;
+      throw new Error(message);
+    }
+  }
 }
