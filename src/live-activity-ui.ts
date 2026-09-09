@@ -38,6 +38,7 @@ const INFRASTRUCTURE_ACTIVITY = [
   /^Resposta recebida\.?$/i,
   /^Perfil .+ ajustado para /i,
 ];
+const dynamicToolSummaries = new Map<string, { message: string; toolName?: ToolName }>();
 
 function selectedChatId(): string {
   return document.querySelector<HTMLElement>('[data-chat-settings]')?.dataset.chatSettings
@@ -78,6 +79,10 @@ function remove(): void {
   const messages = messagesRoot();
   messages?.querySelector('.ac-live-activity')?.remove();
   messages?.classList.remove('ac-has-live-activity');
+}
+
+function clearDynamicSummaries(): void {
+  dynamicToolSummaries.clear();
 }
 
 function isInfrastructureMessage(message: string): boolean {
@@ -121,15 +126,23 @@ const unsubscribeStream = bridge.onStreamEvent((event) => {
     remove();
     return;
   }
-  // tool_call by itself is intent, not proof of work. The dynamic model summary or ToolRuntime event renders the activity.
   if (event.type === 'activity' && event.activity) {
     const message = normalizedActivityMessage(event.activity);
+    const toolCallId = event.activity.toolCallId;
+    if (message && event.activity.type === 'thought' && toolCallId) {
+      dynamicToolSummaries.set(toolCallId, { message, toolName: event.activity.toolName });
+    }
     if (message) render(message, event.activity.toolName, event.activity.status || 'running');
     return;
   }
   if (event.type === 'approval_required') return;
-  if (event.type === 'complete' || event.type === 'cancelled') remove();
+  if (event.type === 'complete' || event.type === 'cancelled') {
+    clearDynamicSummaries();
+    remove();
+    return;
+  }
   if (event.type === 'error') {
+    clearDynamicSummaries();
     const current = messagesRoot()?.querySelector<HTMLElement>('.ac-live-activity');
     if (!current?.classList.contains('status-failed')) remove();
   }
@@ -137,9 +150,20 @@ const unsubscribeStream = bridge.onStreamEvent((event) => {
 
 const unsubscribeActivity = bridge.onActivity((event) => {
   if (!matchesActiveChat(event.chatId)) return;
+  const toolCallId = event.toolCallId;
+  const dynamic = toolCallId ? dynamicToolSummaries.get(toolCallId) : undefined;
+
+  if (event.status === 'running' && dynamic) {
+    render(dynamic.message, dynamic.toolName || event.toolName, 'running');
+    return;
+  }
+
+  if (event.status === 'failed' && toolCallId) dynamicToolSummaries.delete(toolCallId);
+  if (event.status === 'success' && toolCallId) dynamicToolSummaries.delete(toolCallId);
   const message = normalizedActivityMessage(event);
   if (!message) return;
   if (event.type === 'complete' && event.status === 'success') {
+    clearDynamicSummaries();
     remove();
     return;
   }
@@ -153,6 +177,7 @@ syncInternalTranscript();
 
 const nav = document.querySelector<HTMLElement>('#nav-panel');
 const navObserver = nav ? new MutationObserver(() => {
+  clearDynamicSummaries();
   remove();
   syncInternalTranscript();
 }) : undefined;
@@ -163,5 +188,6 @@ window.addEventListener('beforeunload', () => {
   unsubscribeActivity();
   transcriptObserver?.disconnect();
   navObserver?.disconnect();
+  clearDynamicSummaries();
   remove();
 }, { once: true });
