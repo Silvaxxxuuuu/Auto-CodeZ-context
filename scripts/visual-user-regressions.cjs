@@ -98,9 +98,7 @@ async function startFakeOllama() {
 
 async function startElectron() {
   const cdpPort = await reservePort();
-  appProcess = spawn(executable, [`--remote-debugging-port=${cdpPort}`, '--remote-debugging-address=127.0.0.1', '--no-first-run'], {
-    cwd: root, env: environment(), windowsHide: true, stdio: 'ignore',
-  });
+  appProcess = spawn(executable, [`--remote-debugging-port=${cdpPort}`, '--remote-debugging-address=127.0.0.1', '--no-first-run'], { cwd: root, env: environment(), windowsHide: true, stdio: 'ignore' });
   const endpoint = `http://127.0.0.1:${cdpPort}`;
   const deadline = Date.now() + 60_000;
   let lastError;
@@ -125,12 +123,20 @@ async function verifyTerminalSessions() {
   await page.locator('.terminal-rail-button').click();
   await page.locator('.terminal-panel.open').waitFor({ state: 'visible' });
   await page.waitForFunction(async () => (await window.autoCodez.terminal.listSessions()).some((session) => session.shell === 'powershell'));
-  await page.locator('#terminal-shell').selectOption('cmd');
+  const shellSelect = page.locator('#terminal-shell');
+  await shellSelect.selectOption('cmd');
   await page.waitForFunction(async () => (await window.autoCodez.terminal.listSessions()).some((session) => session.shell === 'cmd'));
   const sessions = await page.evaluate(() => window.autoCodez.terminal.listSessions());
   const powershell = sessions.find((session) => session.shell === 'powershell');
   const cmd = sessions.find((session) => session.shell === 'cmd');
   if (!powershell || !cmd) throw new Error('As duas sessões não foram criadas.');
+
+  for (let i = 0; i < 6; i += 1) {
+    await shellSelect.selectOption(i % 2 === 0 ? 'powershell' : 'cmd');
+  }
+  const afterSelectorSwitches = await page.evaluate(() => window.autoCodez.terminal.listSessions());
+  if (afterSelectorSwitches.length !== sessions.length) throw new Error(`Alternar CMD/PowerShell criou sessões duplicadas: ${sessions.length} -> ${afterSelectorSwitches.length}.`);
+
   await page.evaluate(async ({ powershellId, cmdId }) => {
     await window.autoCodez.terminal.writeInput({ sessionId: powershellId, data: 'git --version\r' });
     await window.autoCodez.terminal.writeInput({ sessionId: cmdId, data: 'git --version\r' });
@@ -209,10 +215,7 @@ async function main() {
   await fs.writeFile(path.join(outputDir, 'user-regressions.json'), `${JSON.stringify({ pageErrors, consoleErrors, installedOllamaModel }, null, 2)}\n`, 'utf8');
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-}).finally(async () => {
+main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (page && !page.isClosed()) await page.close({ runBeforeUnload: true }).catch(() => {});
   if (browser) await browser.close().catch(() => {});
   await delay(300);
