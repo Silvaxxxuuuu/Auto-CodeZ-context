@@ -98,6 +98,13 @@ function cloneConnection(value: LocalRuntimeConnection): LocalRuntimeConnection 
   return { endpoint: value.endpoint, ...(value.apiToken ? { apiToken: value.apiToken } : {}) };
 }
 
+function cloneConnections(values: Record<LocalRuntimeId, LocalRuntimeConnection>): Record<LocalRuntimeId, LocalRuntimeConnection> {
+  return {
+    ollama: cloneConnection(values.ollama),
+    'lm-studio': cloneConnection(values['lm-studio']),
+  };
+}
+
 function publishConnections(connections: Record<LocalRuntimeId, LocalRuntimeConnection>): void {
   activeConnections.ollama = cloneConnection(connections.ollama);
   activeConnections['lm-studio'] = cloneConnection(connections['lm-studio']);
@@ -182,27 +189,26 @@ export class LocalRuntimeSettingsStore {
           : previous.apiToken
       : undefined;
 
-    this.connections = {
-      ...this.connections,
-      [runtimeId]: { endpoint, ...(apiToken ? { apiToken } : {}) },
-    };
-    await this.persist();
+    const next = cloneConnections(this.connections);
+    next[runtimeId] = { endpoint, ...(apiToken ? { apiToken } : {}) };
+    await this.persist(next);
+    this.connections = next;
     publishConnections(this.connections);
     return this.list().find((item) => item.runtimeId === runtimeId)!;
   }
 
-  private async persist(): Promise<void> {
+  private async persist(connections: Record<LocalRuntimeId, LocalRuntimeConnection>): Promise<void> {
     const metadata: PersistedMetadata = {
       version: VERSION,
       runtimes: {
-        ollama: { endpoint: this.connections.ollama.endpoint },
-        'lm-studio': { endpoint: this.connections['lm-studio'].endpoint },
+        ollama: { endpoint: connections.ollama.endpoint },
+        'lm-studio': { endpoint: connections['lm-studio'].endpoint },
       },
     };
     const secrets: PersistedSecrets = {
       version: VERSION,
       apiTokens: {
-        ...(this.connections['lm-studio'].apiToken ? { 'lm-studio': this.connections['lm-studio'].apiToken } : {}),
+        ...(connections['lm-studio'].apiToken ? { 'lm-studio': connections['lm-studio'].apiToken } : {}),
       },
     };
     await this.storage.write(METADATA_FILE, metadata);
