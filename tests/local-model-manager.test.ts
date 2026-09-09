@@ -73,6 +73,23 @@ test('local model manager lists runtimes and classifies installed models', async
   assert.equal(models[0].compatibility.level, 'excellent');
 });
 
+test('installed model compatibility ignores download disk capacity', async () => {
+  const runtime = new FakeRuntime();
+  const manager = new LocalModelManager([runtime]);
+  const hardware = {
+    totalRamBytes: 8 * GIB,
+    availableRamBytes: 6 * GIB,
+    freeDiskBytes: 512 * 1024 ** 2,
+  };
+
+  const installed = await manager.listInstalled('fake', hardware);
+  assert.equal(installed[0].compatibility.level, 'excellent');
+
+  const installable = manager.evaluateModel({ sizeBytes: GIB }, hardware);
+  assert.equal(installable.level, 'blocked');
+  assert.match(installable.reasons[0], /disco insuficiente/);
+});
+
 test('local model manager recommends the strongest agent model that fits safely', () => {
   const manager = new LocalModelManager();
   const recommendation = manager.recommendModel([
