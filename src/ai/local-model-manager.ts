@@ -2,6 +2,7 @@ import {
   estimateQuantizedModelRam,
   evaluateLocalModelCompatibility,
   type LocalHardwareSnapshot,
+  type LocalModelCompatibility,
   type LocalModelCompatibilityResult,
   type LocalModelDescriptor,
   type LocalModelInstallProgress,
@@ -22,8 +23,29 @@ export type LocalModelInstallHandle = {
   progress: AsyncGenerator<LocalModelInstallProgress>;
 };
 
+export type LocalModelRecommendation = {
+  runtimeId: string;
+  modelId: string;
+  compatibility: LocalModelCompatibilityResult;
+  reason: string;
+};
+
+type RecommendationCandidate = Pick<LocalModelDescriptor, 'id' | 'runtimeId' | 'sizeBytes' | 'capabilities'>;
+
 function installId(runtimeId: string, modelId: string): string {
   return `${runtimeId}:${modelId}`;
+}
+
+function compatibilityRank(level: LocalModelCompatibility): number {
+  if (level === 'excellent') return 3;
+  if (level === 'compatible') return 2;
+  if (level === 'limit') return 1;
+  return 0;
+}
+
+function capabilityRank(capabilities: string[] | undefined): number {
+  const values = new Set(capabilities ?? []);
+  return (values.has('tools') ? 2 : 0) + (values.has('reasoning') ? 1 : 0);
 }
 
 export class LocalModelManager {
@@ -68,6 +90,35 @@ export class LocalModelManager {
     return evaluateLocalModelCompatibility(hardware, requirements);
   }
 
+  recommendModel(models: RecommendationCandidate[], hardware: LocalHardwareSnapshot): LocalModelRecommendation | undefined {
+    const ranked = models
+      .map((model) => ({ model, compatibility: this.evaluateModel(model, hardware) }))
+      .filter((entry) => entry.compatibility.level !== 'blocked')
+      .sort((left, right) => {
+        const compatibilityDifference = compatibilityRank(right.compatibility.level) - compatibilityRank(left.compatibility.level);
+        if (compatibilityDifference) return compatibilityDifference;
+        const capabilityDifference = capabilityRank(right.model.capabilities) - capabilityRank(left.model.capabilities);
+        if (capabilityDifference) return capabilityDifference;
+        const sizeDifference = (right.model.sizeBytes ?? 0) - (left.model.sizeBytes ?? 0);
+        if (sizeDifference) return sizeDifference;
+        return left.model.id.localeCompare(right.model.id);
+      });
+
+    const selected = ranked[0];
+    if (!selected) return undefined;
+    const reason = selected.compatibility.level === 'excellent'
+      ? 'Melhor equilíbrio entre recursos de agente e margem confortável de hardware.'
+      : selected.compatibility.level === 'compatible'
+        ? 'Melhor opção de agente que permanece compatível com o hardware detectado.'
+        : 'É a opção viável encontrada, mas o uso atual de memória deixa pouca margem.';
+    return {
+      runtimeId: selected.model.runtimeId,
+      modelId: selected.model.id,
+      compatibility: selected.compatibility,
+      reason,
+    };
+  }
+
   beginInstall(runtimeId: string, modelId: string): LocalModelInstallHandle {
     const runtime = this.requireRuntime(runtimeId);
     const normalizedModelId = modelId.trim();
@@ -95,6 +146,17 @@ export class LocalModelManager {
       cancel: () => controller.abort(),
       progress: progress(),
     };
+  }
+
+  async removeInstalled(runtimeId: string, modelId: string): Promise<void> {
+    const runtime = this.requireRuntime(runtimeId);
+    const normalizedModelId = modelId.trim();
+    if (!normalizedModelId) throw new Error('Modelo local inválido.');
+    if (this.isInstalling(runtimeId, normalizedModelId)) throw new Error('Cancele a instalação antes de remover este modelo.');
+    if (!runtime.remove) throw new Error(`${runtime.displayName} não oferece remoção de modelos pelo Auto CodeZ.`);
+    const installed = await runtime.listInstalled();
+    if (!installed.some((model) => model.id === normalizedModelId)) throw new Error('O modelo local não está instalado neste runtime.');
+    await runtime.remove(normalizedModelId);
   }
 
   cancelInstall(runtimeId: string, modelId: string): boolean {
