@@ -175,9 +175,13 @@ export class AutoCodezLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
 
     const descriptor: Omit<LocalModelDescriptor, 'installed' | 'runtimeId'> = {
       id: request.modelId,
-      name: request.modelId,
+      name: request.name?.trim() || request.modelId,
       sizeBytes: request.expectedBytes,
+      ...(request.parameterSize ? { parameterSize: request.parameterSize } : {}),
       ...(request.quantization ? { quantization: request.quantization } : {}),
+      ...(request.family ? { family: request.family } : {}),
+      ...(request.capabilities ? { capabilities: [...request.capabilities] } : {}),
+      ...(request.contextWindow ? { contextWindow: request.contextWindow } : {}),
     };
     const manifest: InstalledModelManifest = {
       descriptor,
