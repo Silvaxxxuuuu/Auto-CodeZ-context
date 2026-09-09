@@ -1,11 +1,23 @@
 import crypto from 'node:crypto';
-import type { AIModel, AIProviderConfig, Capability, ProviderId } from './types';
+import type { AIModel, AIProviderConfig, Capability, IntelligenceLevel, ProviderId } from './types';
 import { ProviderRegistry } from './provider-registry';
 import { selectDefaultModel } from './model-selection';
 
 const UNCONFIGURED_MODEL_IDS = new Set(['unconfigured', 'Unconfigured']);
 const DEFAULT_FALLBACK_CAPABILITIES: Capability[] = ['text', 'streaming', 'tools'];
 const REQUEST_DISCOVERY_BUDGET_MS = 750;
+
+function cloneModel(model: AIModel): AIModel {
+  return {
+    ...model,
+    capabilities: [...model.capabilities],
+    ...(model.reasoningLevels ? { reasoningLevels: [...model.reasoningLevels] } : {}),
+  };
+}
+
+function fallbackReasoningLevels(capabilities: Capability[]): IntelligenceLevel[] {
+  return capabilities.includes('reasoning') ? ['low', 'normal', 'high', 'maximum'] : ['normal'];
+}
 
 export class ModelResolver {
   private readonly cache = new Map<string, { models: AIModel[]; fetchedAt: number }>();
@@ -22,19 +34,20 @@ export class ModelResolver {
   async list(config: AIProviderConfig, forceRefresh = false): Promise<AIModel[]> {
     const key = this.cacheKey(config);
     const cached = this.cache.get(key);
-    if (!forceRefresh && cached && Date.now() - cached.fetchedAt < this.ttlMs) return [...cached.models];
+    if (!forceRefresh && cached && Date.now() - cached.fetchedAt < this.ttlMs) return cached.models.map(cloneModel);
     if (!forceRefresh) {
       const pending = this.inFlight.get(key);
-      if (pending) return [...await pending];
+      if (pending) return (await pending).map(cloneModel);
     }
 
     const task = this.registry.listModels(config)
       .then((models) => {
-        this.cache.set(key, { models: [...models], fetchedAt: Date.now() });
-        return [...models];
+        const stored = models.map(cloneModel);
+        this.cache.set(key, { models: stored, fetchedAt: Date.now() });
+        return stored.map(cloneModel);
       })
       .catch((error) => {
-        if (cached?.models.length) return [...cached.models];
+        if (cached?.models.length) return cached.models.map(cloneModel);
         throw error;
       })
       .finally(() => {
@@ -42,17 +55,17 @@ export class ModelResolver {
       });
 
     if (!forceRefresh) this.inFlight.set(key, task);
-    return [...await task];
+    return (await task).map(cloneModel);
   }
 
   async resolveForRequest(config: AIProviderConfig, modelId: string, discoveryBudgetMs = REQUEST_DISCOVERY_BUDGET_MS): Promise<AIModel> {
     if (!modelId.trim() || UNCONFIGURED_MODEL_IDS.has(modelId)) {
       const models = await this.list(config);
-      return this.find(models, modelId, config.id);
+      return cloneModel(this.find(models, modelId, config.id));
     }
 
     const cached = this.cache.get(this.cacheKey(config))?.models.find((model) => model.id === modelId);
-    if (cached) return { ...cached, capabilities: [...cached.capabilities], reasoningLevels: [...cached.reasoningLevels] };
+    if (cached) return cloneModel(cached);
 
     const discovery = this.list(config);
     if (discoveryBudgetMs <= 0) {
@@ -68,7 +81,7 @@ export class ModelResolver {
           timer = setTimeout(() => resolve(undefined), discoveryBudgetMs);
         }),
       ]);
-      if (result) return this.find(result, modelId, config.id);
+      if (result) return cloneModel(this.find(result, modelId, config.id));
     } catch {
       return this.fallbackForConfiguredModel(config, modelId);
     } finally {
@@ -104,7 +117,7 @@ export class ModelResolver {
   fallbackForConfiguredModel(config: AIProviderConfig, modelId: string): AIModel {
     if (!modelId.trim() || UNCONFIGURED_MODEL_IDS.has(modelId)) throw new Error('Nenhum modelo foi configurado para este chat.');
     const cached = this.cache.get(this.cacheKey(config))?.models.find((model) => model.id === modelId);
-    if (cached) return { ...cached, capabilities: [...cached.capabilities], reasoningLevels: [...cached.reasoningLevels] };
+    if (cached) return cloneModel(cached);
     const adapter = this.registry.get(config.id);
     const capabilities = adapter.fallbackCapabilities?.length ? [...adapter.fallbackCapabilities] : [...DEFAULT_FALLBACK_CAPABILITIES];
     return {
@@ -112,7 +125,7 @@ export class ModelResolver {
       name: modelId,
       providerId: config.id,
       capabilities,
-      reasoningLevels: ['normal'],
+      reasoningLevels: fallbackReasoningLevels(capabilities),
     };
   }
 }
