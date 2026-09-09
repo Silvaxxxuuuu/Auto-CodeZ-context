@@ -68,6 +68,12 @@ jobs:
           NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
         run: node scripts/visual-local-ai.cjs
 
+      - name: Verify unavailable local runtime recovery
+        env:
+          AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
+        run: node scripts/visual-local-runtime-unavailable.cjs
+
       - name: Verify secure local runtime settings
         env:
           AUTO_CODEZ_VISUAL_DIR: artifacts/visual
