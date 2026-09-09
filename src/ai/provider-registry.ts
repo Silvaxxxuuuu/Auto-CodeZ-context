@@ -1,4 +1,4 @@
-import type { AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent, ProviderId, ProviderSummary } from './types';
+import type { AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AISource, AIStreamEvent, ProviderId, ProviderSummary } from './types';
 import { createOpenAICompatibleProviderAdapters } from './providers/openai-compatible';
 import { createExpandedProviderAdapters } from './providers/provider-expansion';
 import { LMStudioProviderAdapter } from './providers/lm-studio';
@@ -6,8 +6,15 @@ import { OllamaAdapter } from './providers/ollama';
 import { collectRequestSources } from './source-collector';
 import { mergeAISources } from './source-normalization';
 
-function withCollectedSources(response: AIResponse, request: AIRequest): AIResponse {
-  const sources = mergeAISources(response.sources, collectRequestSources(request.messages));
+function attributeNativeSources(sources: AISource[] | undefined, providerId: ProviderId): AISource[] | undefined {
+  if (!sources?.length) return sources;
+  return sources.map((source) => source.origin === 'provider-native' && !source.providerId
+    ? { ...source, providerId }
+    : source);
+}
+
+function withCollectedSources(response: AIResponse, request: AIRequest, providerId: ProviderId): AIResponse {
+  const sources = mergeAISources(attributeNativeSources(response.sources, providerId), collectRequestSources(request.messages));
   return sources.length ? { ...response, sources } : response;
 }
 
@@ -18,13 +25,13 @@ function withSourceCollection(adapter: AIProviderAdapter): AIProviderAdapter {
     requiresApiKey: adapter.requiresApiKey,
     fallbackCapabilities: adapter.fallbackCapabilities,
     listModels: (config) => adapter.listModels(config),
-    send: async (config, request, signal) => withCollectedSources(await adapter.send(config, request, signal), request),
+    send: async (config, request, signal) => withCollectedSources(await adapter.send(config, request, signal), request, adapter.id),
   };
   if (adapter.stream) {
     wrapped.stream = async function* (config: AIProviderConfig, request: AIRequest, signal?: AbortSignal): AsyncIterable<AIStreamEvent> {
       for await (const event of adapter.stream!(config, request, signal)) {
         if (event.type === 'complete' && event.response) {
-          yield { ...event, response: withCollectedSources(event.response, request) };
+          yield { ...event, response: withCollectedSources(event.response, request, adapter.id) };
           continue;
         }
         yield event;
