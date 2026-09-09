@@ -11,7 +11,7 @@ const config: AIProviderConfig = {
   enabled: true,
 };
 
-function chat(model = 'test-model', projectId = 'project-test'): ChatRecord {
+function chat(model = 'test-model', projectId = 'project-test', content = 'Inspect the current implementation.'): ChatRecord {
   return {
     id: 'chat-test',
     title: 'Chat Test',
@@ -20,7 +20,7 @@ function chat(model = 'test-model', projectId = 'project-test'): ChatRecord {
     model,
     intelligence: 'normal',
     permissionLevel: 'ask',
-    messages: [{ role: 'user', content: 'Hello' }],
+    messages: [{ role: 'user', content }],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -64,7 +64,24 @@ test('send includes workspace context and tool definitions only when tools are s
   assert.match(request.messages[0].content, /Contexto do workspace atual/);
   assert.equal(request.messages[1].role, 'system');
   assert.match(request.messages[1].content, /src\/index\.ts contains the current implementation/);
-  assert.equal(request.messages[2].content, 'Hello');
+  assert.equal(request.messages[2].content, 'Inspect the current implementation.');
+});
+
+test('trivial greeting skips workspace context and tool schemas', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry);
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    tool('read_file', false, false),
+    tool('run_command', false, true),
+  ]);
+
+  await runtime.send(config, chat('test-model', 'project-test', 'Oi'), 'large workspace context that should not be attached');
+  const request = requests[0] as { messages: Array<{ role: string; content: string }>; tools?: unknown[]; toolsEnabled: boolean; projectContext?: string };
+  assert.equal(request.toolsEnabled, false);
+  assert.equal(request.tools, undefined);
+  assert.equal(request.projectContext, undefined);
+  assert.equal(request.messages.some((message) => message.content.includes('large workspace context')), false);
+  assert.equal(request.messages.at(-1)?.content, 'Oi');
 });
 
 test('send exposes protected file tools and run_command to a normal chat but excludes Git', async () => {
