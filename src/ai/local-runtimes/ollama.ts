@@ -76,12 +76,13 @@ export class OllamaLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
     if (!response.ok) throw new Error(`Ollama models request failed: ${response.status}`);
     if (!Array.isArray(data.models)) throw new Error('Ollama retornou uma lista de modelos inválida.');
 
-    return data.models.map((item) => {
+    const models: LocalModelDescriptor[] = [];
+    for (const item of data.models) {
       const record = asRecord(item) ?? {};
       const details = asRecord(record.details) ?? {};
       const id = modelIdFrom(item);
-      if (!id) return undefined;
-      return {
+      if (!id) continue;
+      models.push({
         id,
         name: id,
         runtimeId: this.id,
@@ -90,8 +91,9 @@ export class OllamaLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
         ...(typeof details.parameter_size === 'string' ? { parameterSize: details.parameter_size } : {}),
         ...(typeof details.quantization_level === 'string' ? { quantization: details.quantization_level } : {}),
         ...(typeof details.family === 'string' ? { family: details.family } : {}),
-      } satisfies LocalModelDescriptor;
-    }).filter((item): item is LocalModelDescriptor => item !== undefined);
+      });
+    }
+    return models;
   }
 
   async *install(modelId: string, signal?: AbortSignal): AsyncGenerator<LocalModelInstallProgress> {
