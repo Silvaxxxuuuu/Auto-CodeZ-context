@@ -4,14 +4,28 @@ import { collectLocalHardwareSnapshot } from './local-hardware';
 import { getLocalModelCatalogEntry, listLocalModelCatalog } from './local-model-catalog';
 import { LocalModelManager, type ManagedLocalModel } from './local-model-manager';
 import type { LocalModelInstallProgress } from './local-model-runtime';
+import {
+  getLocalRuntimeConnection,
+  LocalRuntimeSettingsStore,
+  type LocalRuntimeSettingsStorage,
+} from './local-runtime-settings';
 import { LMStudioLocalRuntimeAdapter } from './local-runtimes/lm-studio';
 import { OllamaLocalRuntimeAdapter } from './local-runtimes/ollama';
-import { requireIdentifier, requireObject } from '../core/input-validation';
+import { requireIdentifier, requireNonEmptyString, requireObject } from '../core/input-validation';
 
-const manager = new LocalModelManager([
-  new OllamaLocalRuntimeAdapter(),
-  new LMStudioLocalRuntimeAdapter({ apiToken: process.env.LM_API_TOKEN }),
-]);
+function createManager(): LocalModelManager {
+  const ollama = getLocalRuntimeConnection('ollama');
+  const lmStudio = getLocalRuntimeConnection('lm-studio');
+  return new LocalModelManager([
+    new OllamaLocalRuntimeAdapter(ollama.endpoint),
+    new LMStudioLocalRuntimeAdapter({ endpoint: lmStudio.endpoint, apiToken: lmStudio.apiToken }),
+  ]);
+}
+
+let manager = createManager();
+let runtimeSettingsStore: LocalRuntimeSettingsStore | undefined;
+let settingsUpdateInProgress = false;
+let activeRuntimeMutations = 0;
 
 type LocalAiInstallEvent = {
   type: 'progress' | 'complete' | 'cancelled' | 'error';
@@ -31,6 +45,22 @@ function hardwareProbePath(): string {
   const customOllamaModels = process.env.OLLAMA_MODELS?.trim();
   if (customOllamaModels) return path.resolve(customOllamaModels);
   return app.getPath('home');
+}
+
+function requireRuntimeSettings(): LocalRuntimeSettingsStore {
+  if (!runtimeSettingsStore) throw new Error('Configuração dos runtimes locais ainda não foi inicializada.');
+  return runtimeSettingsStore;
+}
+
+function ensureRuntimeMutationAllowed(): void {
+  if (settingsUpdateInProgress) throw new Error('Aguarde a atualização da configuração do runtime local.');
+}
+
+export async function initializeLocalAiRuntimeSettings(storage: LocalRuntimeSettingsStorage): Promise<void> {
+  const store = new LocalRuntimeSettingsStore(storage);
+  await store.init();
+  runtimeSettingsStore = store;
+  manager = createManager();
 }
 
 async function buildSnapshot() {
@@ -58,8 +88,35 @@ async function buildSnapshot() {
 }
 
 ipcMain.handle('local-ai:snapshot', async () => buildSnapshot());
+ipcMain.handle('local-ai:list-settings', async () => requireRuntimeSettings().list());
+
+ipcMain.handle('local-ai:save-settings', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Configuração do runtime local');
+  const runtimeId = requireIdentifier(value.runtimeId, 'Runtime local');
+  const endpoint = requireNonEmptyString(value.endpoint, 'Endpoint local');
+  if (value.apiToken !== undefined && typeof value.apiToken !== 'string') throw new Error('Token local inválido.');
+  if (value.clearToken !== undefined && typeof value.clearToken !== 'boolean') throw new Error('Opção de limpeza do token local inválida.');
+  if (settingsUpdateInProgress) throw new Error('A configuração do runtime local já está sendo atualizada.');
+  if (activeRuntimeMutations > 0) throw new Error('Aguarde a operação de modelo local terminar antes de alterar o runtime.');
+
+  settingsUpdateInProgress = true;
+  try {
+    const apiToken = typeof value.apiToken === 'string' && value.apiToken.trim() ? value.apiToken : undefined;
+    const saved = await requireRuntimeSettings().save({
+      runtimeId: runtimeId as 'ollama' | 'lm-studio',
+      endpoint,
+      ...(apiToken ? { apiToken } : {}),
+      ...(value.clearToken === true ? { clearToken: true } : {}),
+    });
+    manager = createManager();
+    return { saved, settings: requireRuntimeSettings().list(), snapshot: await buildSnapshot() };
+  } finally {
+    settingsUpdateInProgress = false;
+  }
+});
 
 ipcMain.handle('local-ai:install', async (_event, input: unknown) => {
+  ensureRuntimeMutationAllowed();
   const value = requireObject(input, 'Instalação de modelo local');
   const runtimeId = requireIdentifier(value.runtimeId, 'Runtime local');
   const modelId = requireIdentifier(value.modelId, 'Modelo local');
@@ -73,7 +130,9 @@ ipcMain.handle('local-ai:install', async (_event, input: unknown) => {
   const compatibility = manager.evaluateModel(model, hardware);
   if (compatibility.level === 'blocked') throw new Error(compatibility.reasons[0] || 'Este modelo foi bloqueado pelo verificador de hardware.');
 
+  ensureRuntimeMutationAllowed();
   const handle = manager.beginInstall(runtimeId, modelId);
+  activeRuntimeMutations += 1;
   void (async () => {
     try {
       for await (const progress of handle.progress) {
@@ -95,6 +154,8 @@ ipcMain.handle('local-ai:install', async (_event, input: unknown) => {
         modelId,
         error: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      activeRuntimeMutations = Math.max(0, activeRuntimeMutations - 1);
     }
   })();
 
@@ -109,11 +170,18 @@ ipcMain.handle('local-ai:cancel-install', async (_event, input: unknown) => {
 });
 
 ipcMain.handle('local-ai:remove', async (_event, input: unknown) => {
+  ensureRuntimeMutationAllowed();
   const value = requireObject(input, 'Remoção de modelo local');
   const runtimeId = requireIdentifier(value.runtimeId, 'Runtime local');
   const modelId = requireIdentifier(value.modelId, 'Modelo local');
   const runtime = await manager.getRuntimeInfo(runtimeId);
   if (!runtime.available) throw new Error(`${runtime.displayName} não está disponível neste computador.`);
-  await manager.removeInstalled(runtimeId, modelId);
+  ensureRuntimeMutationAllowed();
+  activeRuntimeMutations += 1;
+  try {
+    await manager.removeInstalled(runtimeId, modelId);
+  } finally {
+    activeRuntimeMutations = Math.max(0, activeRuntimeMutations - 1);
+  }
   return { removed: true };
 });
