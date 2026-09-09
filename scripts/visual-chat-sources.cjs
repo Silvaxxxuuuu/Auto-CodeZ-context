@@ -201,6 +201,19 @@ async function main() {
     const consoleErrors = [];
     second.page.on('pageerror', (error) => pageErrors.push(String(error)));
     second.page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+    const bridgePolicy = await second.page.evaluate(async () => {
+      const blocked = [];
+      for (const url of ['file:///C:/Users/User/.env', 'http://127.0.0.1:11434/api/tags', 'http://[::1]/']) {
+        try {
+          await window.autoCodez.openExternal(url);
+          blocked.push({ url, rejected: false });
+        } catch {
+          blocked.push({ url, rejected: true });
+        }
+      }
+      return blocked;
+    });
+    if (bridgePolicy.some((item) => !item.rejected)) throw new Error(`Bridge externo aceitou destino proibido: ${JSON.stringify(bridgePolicy)}.`);
     const chatItem = second.page.locator(`[data-chat="${chatId}"]`).first();
     await chatItem.waitFor({ state: 'visible', timeout: 15_000 });
     await chatItem.click();
@@ -217,7 +230,7 @@ async function main() {
     if (!pageText.includes('2 verificadas')) throw new Error(`Contador de fontes incorreto: ${pageText}`);
     if (pageErrors.length || consoleErrors.length) throw new Error(`Erros no renderer: page=${pageErrors.length}, console=${consoleErrors.length}.`);
     await second.page.screenshot({ path: path.join(outputDir, 'funcional-fontes-ia-local.png'), animations: 'disabled' });
-    await fs.writeFile(path.join(outputDir, 'chat-sources.json'), `${JSON.stringify({ chatId, titles, pageErrors, consoleErrors }, null, 2)}\n`, 'utf8');
+    await fs.writeFile(path.join(outputDir, 'chat-sources.json'), `${JSON.stringify({ chatId, titles, bridgePolicy, pageErrors, consoleErrors }, null, 2)}\n`, 'utf8');
   } finally {
     await closeSession(first).catch(() => {});
     await closeSession(second).catch(() => {});
