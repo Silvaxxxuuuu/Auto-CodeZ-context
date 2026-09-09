@@ -81,6 +81,10 @@ function runtimePlatform(): string {
   return process.platform;
 }
 
+function runtimeDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
@@ -173,7 +177,7 @@ export class ChatRuntime {
       }
     }
 
-    const systemMessages = [{ role: 'system' as const, content: `${AUTOCODEZ_SYSTEM_INSTRUCTIONS}\n\nRuntime OS: ${runtimePlatform()}.\nRuntime date: ${new Date().toISOString()}.` }];
+    const systemMessages = [{ role: 'system' as const, content: `${AUTOCODEZ_SYSTEM_INSTRUCTIONS}\n\nRuntime OS: ${runtimePlatform()}.\nRuntime date: ${runtimeDate()}.` }];
     if (webContext) systemMessages.push({ role: 'system' as const, content: webContext });
     if (projectContext) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
     const messages = [...systemMessages, ...chat.messages];
