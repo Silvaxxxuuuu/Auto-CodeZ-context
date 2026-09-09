@@ -1,6 +1,7 @@
 import type { AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AISource, AIStreamEvent, ProviderId, ProviderSummary } from './types';
 import { createOpenAICompatibleProviderAdapters } from './providers/openai-compatible';
 import { createExpandedProviderAdapters } from './providers/provider-expansion';
+import { AutoCodezLocalProviderAdapter } from './providers/auto-codez-local';
 import { LMStudioProviderAdapter } from './providers/lm-studio';
 import { OllamaAdapter } from './providers/ollama';
 import { collectRequestSources } from './source-collector';
@@ -47,6 +48,7 @@ export class ProviderRegistry {
   constructor() {
     for (const adapter of createOpenAICompatibleProviderAdapters()) this.register(adapter);
     for (const adapter of createExpandedProviderAdapters()) this.register(adapter);
+    this.register(new AutoCodezLocalProviderAdapter());
     this.register(new OllamaAdapter());
     this.register(new LMStudioProviderAdapter());
   }
