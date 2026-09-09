@@ -76,8 +76,8 @@ export async function downloadVerifiedFile(
       });
     }
   } catch (error) {
-    await handle.close().catch(() => undefined);
-    await fs.rm(temporary, { force: true }).catch(() => undefined);
+    await handle.close().catch((): undefined => undefined);
+    await fs.rm(temporary, { force: true }).catch((): undefined => undefined);
     throw error;
   }
   await handle.close();
