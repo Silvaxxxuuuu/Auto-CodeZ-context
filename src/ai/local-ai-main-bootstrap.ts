@@ -3,7 +3,7 @@ import path from 'node:path';
 import { LocalStorage } from '../core/storage';
 import { requireIdentifier, requireNonEmptyString, requireObject } from '../core/input-validation';
 import { collectLocalHardwareSnapshot } from './local-hardware';
-import { getLocalModelCatalogEntry, listLocalModelCatalog } from './local-model-catalog';
+import { getLocalModelCatalogEntry, listLocalModelCatalog, type LocalModelCatalogEntry } from './local-model-catalog';
 import { LocalModelManager, type ManagedLocalModel } from './local-model-manager';
 import type { LocalModelInstallProgress } from './local-model-runtime';
 import {
@@ -59,6 +59,27 @@ function ensureRuntimeMutationAllowed(): void {
   if (settingsUpdateInProgress) throw new Error('Aguarde a atualização da configuração do runtime local.');
 }
 
+function normalizedIdentity(value: string | undefined): string {
+  return (value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function catalogMatchesInstalled(catalog: LocalModelCatalogEntry, installed: ManagedLocalModel): boolean {
+  if (catalog.runtimeId !== installed.runtimeId) return false;
+  if (catalog.id === installed.id) return true;
+  if (catalog.runtimeId !== 'lm-studio') return false;
+
+  const catalogFamily = normalizedIdentity(catalog.family);
+  const installedFamily = normalizedIdentity(installed.family);
+  const catalogParameters = normalizedIdentity(catalog.parameterSize);
+  const installedParameters = normalizedIdentity(installed.parameterSize);
+  const catalogQuantization = normalizedIdentity(catalog.quantization);
+  const installedQuantization = normalizedIdentity(installed.quantization);
+  const familyMatches = Boolean(catalogFamily && installedFamily && catalogFamily === installedFamily);
+  const parametersMatch = Boolean(catalogParameters && installedParameters && catalogParameters === installedParameters);
+  const quantizationMatches = !catalogQuantization || !installedQuantization || catalogQuantization === installedQuantization;
+  return familyMatches && parametersMatch && quantizationMatches;
+}
+
 export async function initializeLocalAiRuntimeSettings(storage: LocalRuntimeSettingsStorage): Promise<void> {
   const store = new LocalRuntimeSettingsStore(storage);
   await store.init();
@@ -89,12 +110,17 @@ async function buildSnapshot() {
   }
   const catalogModels = listLocalModelCatalog();
   const recommendation = manager.recommendModel(catalogModels, hardware);
+  const runtimeRecommendations = new Map<string, string>();
+  for (const runtime of runtimes) {
+    const runtimeRecommendation = manager.recommendModel(catalogModels.filter((model) => model.runtimeId === runtime.id), hardware);
+    if (runtimeRecommendation) runtimeRecommendations.set(runtime.id, runtimeRecommendation.modelId);
+  }
   const catalog = catalogModels.map((model) => ({
     ...model,
     compatibility: manager.evaluateModel(model, hardware),
-    installed: installed.some((item) => item.runtimeId === model.runtimeId && item.id === model.id),
+    installed: installed.some((item) => catalogMatchesInstalled(model, item)),
     installing: manager.isInstalling(model.runtimeId, model.id),
-    recommended: recommendation?.runtimeId === model.runtimeId && recommendation.modelId === model.id,
+    recommended: runtimeRecommendations.get(model.runtimeId) === model.id,
   }));
   return { hardware, runtimes, installed, catalog, recommendation };
 }
@@ -148,7 +174,7 @@ ipcMain.handle('local-ai:install', async (_event, input: unknown) => {
   if (compatibility.level === 'blocked') throw new Error(compatibility.reasons[0] || 'Este modelo foi bloqueado pelo verificador de hardware.');
 
   ensureRuntimeMutationAllowed();
-  const handle = manager.beginInstall(runtimeId, modelId);
+  const handle = manager.beginInstall(runtimeId, modelId, model.install);
   activeRuntimeMutations += 1;
   void (async () => {
     try {
