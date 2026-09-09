@@ -26,10 +26,8 @@ function isPrivateIpv6(hostname: string): boolean {
   if (host === '::' || host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
   if (host.startsWith('fc') || host.startsWith('fd')) return true;
   if (/^fe[89ab]/.test(host)) return true;
-  if (host.startsWith('::ffff:')) {
-    const mapped = host.slice('::ffff:'.length);
-    return isPrivateIpv4(mapped);
-  }
+  if (host.startsWith('ff')) return true;
+  if (host.startsWith('::ffff:')) return true;
   return false;
 }
 
