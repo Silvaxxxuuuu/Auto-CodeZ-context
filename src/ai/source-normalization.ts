@@ -10,12 +10,31 @@ function boundedText(value: unknown, maximum: number): string | undefined {
   return normalized ? normalized.slice(0, maximum) : undefined;
 }
 
+function isPrivateHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (!host) return true;
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.lan')) return true;
+  if (host === '::' || host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!ipv4) return false;
+  const parts = ipv4.slice(1).map(Number);
+  if (parts.some((part) => part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || a >= 224;
+}
+
 function safePublicUrl(value: unknown): URL | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined;
   try {
     const url = new URL(value.trim());
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
-    if (url.username || url.password) return undefined;
+    if (url.username || url.password || isPrivateHostname(url.hostname)) return undefined;
     url.hash = '';
     return url;
   } catch {
