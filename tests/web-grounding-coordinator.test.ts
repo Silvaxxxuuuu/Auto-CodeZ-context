@@ -20,6 +20,32 @@ test('freshness coordinator does not browse for timeless requests', async () => 
   assert.equal(searches, 0);
 });
 
+test('freshness coordinator does not treat generic current workspace wording as public-web freshness', () => {
+  const runtime = new WebRetrievalRuntime({ searchAdapter: { id: 'fixture', displayName: 'Fixture', async search() { return []; } } });
+  const coordinator = new WebGroundingCoordinator({ runtime, now: () => Date.UTC(2026, 8, 8) });
+  assert.deepEqual(
+    coordinator.classify([user('Corrija a implementação atual deste arquivo e mantenha o comportamento existente.')]),
+    { required: false, userMessage: 'Corrija a implementação atual deste arquivo e mantenha o comportamento existente.' },
+  );
+  assert.deepEqual(
+    coordinator.classify([user('Revise o código atual do provider e melhore os testes.')]),
+    { required: false, userMessage: 'Revise o código atual do provider e melhore os testes.' },
+  );
+});
+
+test('freshness coordinator grounds a mutable external entity when explicitly requested as current', () => {
+  const runtime = new WebRetrievalRuntime({ searchAdapter: { id: 'fixture', displayName: 'Fixture', async search() { return []; } } });
+  const coordinator = new WebGroundingCoordinator({ runtime, now: () => Date.UTC(2026, 8, 8) });
+  assert.deepEqual(
+    coordinator.classify([user('Quem é o atual presidente de Exemplo?')]),
+    { required: true, reason: 'current-facts', userMessage: 'Quem é o atual presidente de Exemplo?' },
+  );
+  assert.deepEqual(
+    coordinator.classify([user('Qual é o salário mínimo atual?')]),
+    { required: true, reason: 'current-facts', userMessage: 'Qual é o salário mínimo atual?' },
+  );
+});
+
 test('freshness coordinator automatically grounds current weather with dated sources', async () => {
   let searches = 0;
   let fetches = 0;
