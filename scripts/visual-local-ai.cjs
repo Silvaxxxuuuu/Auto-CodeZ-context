@@ -114,6 +114,19 @@ async function startFakeOllama() {
         }, 120);
         return;
       }
+      if (req.method === 'DELETE' && req.url === '/api/delete') {
+        const body = await readJson(req);
+        const model = String(body.model || '');
+        if (!installedModels.has(model)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'model is not installed in visual fixture' }));
+          return;
+        }
+        installedModels.delete(model);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ deleted: true }));
+        return;
+      }
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'not found' }));
     } catch (error) {
@@ -173,6 +186,40 @@ async function updateManifest(result) {
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 }
 
+async function verifyRecommendationMatchesSnapshot() {
+  const snapshot = await page.evaluate(() => window.autoCodezLocalAi.snapshot());
+  const bodyText = (await page.locator('.settings-body').innerText()).replace(/\s+/g, ' ');
+  if (snapshot.recommendation) {
+    if (!bodyText.includes('Recomendado para este computador')) throw new Error(`Recomendação automática não foi exibida: ${bodyText}`);
+    const recommended = snapshot.catalog.find((model) => model.runtimeId === snapshot.recommendation.runtimeId && model.id === snapshot.recommendation.modelId);
+    if (!recommended || !bodyText.includes(recommended.name)) throw new Error(`Modelo recomendado não corresponde ao snapshot: ${JSON.stringify(snapshot.recommendation)}`);
+  } else if (!bodyText.includes('Sem opção segura')) {
+    throw new Error(`Ausência de recomendação não foi explicada na interface: ${bodyText}`);
+  }
+}
+
+async function verifyInstallAndRemoval() {
+  const install = page.locator('[data-local-ai-action="install"][data-model-id="qwen3:1.7b"]');
+  await install.waitFor({ state: 'visible', timeout: 10_000 });
+  if (await install.isDisabled()) throw new Error('Qwen 3 1.7B foi bloqueado inesperadamente no runner visual.');
+  await install.click();
+
+  const catalogRow = page.locator('[data-local-ai-model="ollama:qwen3:1.7b"]');
+  await catalogRow.getByText('Instalado', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+  const installedRow = page.locator('[data-local-ai-installed-model="ollama:qwen3:1.7b"]');
+  await installedRow.waitFor({ state: 'visible', timeout: 15_000 });
+
+  await installedRow.locator('[data-local-ai-action="remove"]').click();
+  const confirmedRow = page.locator('[data-local-ai-installed-model="ollama:qwen3:1.7b"]');
+  await confirmedRow.getByText('Confirmar remoção', { exact: true }).waitFor({ state: 'visible', timeout: 10_000 });
+  await confirmedRow.locator('[data-local-ai-action="confirm-remove"]').click();
+  await installedRow.waitFor({ state: 'detached', timeout: 15_000 });
+
+  const installAgain = page.locator('[data-local-ai-action="install"][data-model-id="qwen3:1.7b"]');
+  await installAgain.waitFor({ state: 'visible', timeout: 15_000 });
+  if (!installedModels.has('qwen3:8b') || installedModels.has('qwen3:1.7b')) throw new Error(`Fixture não refletiu remoção corretamente: ${JSON.stringify([...installedModels])}`);
+}
+
 async function verifyLocalAiPanel() {
   await page.locator('#ac-app-settings').click();
   await page.locator('.settings-overlay').waitFor({ state: 'visible' });
@@ -190,17 +237,11 @@ async function verifyLocalAiPanel() {
   const bodyText = (await page.locator('.settings-body').innerText()).replace(/\s+/g, ' ');
   if (!bodyText.includes('Conectado')) throw new Error(`Status conectado ausente: ${bodyText}`);
   if (!bodyText.includes('qwen3:8b') || !bodyText.includes('llava:latest')) throw new Error(`Inventário local não foi exibido: ${bodyText}`);
-  if (!bodyText.includes('Qwen 3 1.7B') || !bodyText.includes('Modelos recomendados')) throw new Error(`Catálogo recomendado não foi exibido: ${bodyText}`);
+  if (!bodyText.includes('Qwen 3 1.7B') || !bodyText.includes('Catálogo local')) throw new Error(`Catálogo local não foi exibido: ${bodyText}`);
   if (!bodyText.includes('Memória RAM') || !bodyText.includes('Armazenamento livre')) throw new Error(`Diagnóstico de hardware incompleto: ${bodyText}`);
 
-  const install = page.locator('[data-local-ai-action="install"][data-model-id="qwen3:1.7b"]');
-  await install.waitFor({ state: 'visible', timeout: 10_000 });
-  if (await install.isDisabled()) throw new Error('Qwen 3 1.7B foi bloqueado inesperadamente no runner visual.');
-  await install.click();
-  await page.locator('[data-local-ai-model="ollama:qwen3:1.7b"]').getByText('Instalado', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
-
-  const installedText = (await page.locator('.settings-body').innerText()).replace(/\s+/g, ' ');
-  if (!installedText.includes('qwen3:1.7b')) throw new Error(`Instalação não atualizou o inventário: ${installedText}`);
+  await verifyRecommendationMatchesSnapshot();
+  await verifyInstallAndRemoval();
   await page.locator('[data-settings-close]').click();
 }
 
