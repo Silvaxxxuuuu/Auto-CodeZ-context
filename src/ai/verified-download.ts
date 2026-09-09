@@ -61,15 +61,16 @@ export async function downloadVerifiedFile(
   let completedBytes = 0;
   try {
     const reader = response.body.getReader();
-    while (true) {
+    let finished = false;
+    while (!finished) {
       if (options.signal?.aborted) throw abortError();
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value?.byteLength) continue;
-      completedBytes += value.byteLength;
+      const result = await reader.read();
+      finished = result.done;
+      if (finished || !result.value?.byteLength) continue;
+      completedBytes += result.value.byteLength;
       if (completedBytes > maximumBytes) throw new Error('O download excedeu o limite de tamanho permitido.');
-      hash.update(value);
-      await handle.write(value);
+      hash.update(result.value);
+      await handle.write(result.value);
       options.onProgress?.({
         completedBytes,
         ...(totalBytes ? { totalBytes, percent: Math.min(100, completedBytes / totalBytes * 100) } : {}),
