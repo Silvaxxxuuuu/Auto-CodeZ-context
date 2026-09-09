@@ -7,7 +7,10 @@ import type {
   AIStreamEvent,
   Capability,
 } from '../types';
-import { getLocalRuntimeConnection } from '../local-runtime-settings';
+import {
+  getLocalRuntimeConnection,
+  waitForLocalRuntimeSettingsInitialization,
+} from '../local-runtime-settings';
 import { LMStudioLocalRuntimeAdapter } from '../local-runtimes/lm-studio';
 import { OpenAICompatibleAdapter } from './openai-compatible';
 
@@ -51,6 +54,7 @@ export class LMStudioProviderAdapter implements AIProviderAdapter {
   }
 
   async listModels(config: AIProviderConfig): Promise<AIModel[]> {
+    await waitForLocalRuntimeSettingsInitialization();
     const runtime = new LMStudioLocalRuntimeAdapter({
       endpoint: this.serverRoot(config),
       apiToken: this.apiToken(),
@@ -67,10 +71,12 @@ export class LMStudioProviderAdapter implements AIProviderAdapter {
   }
 
   async send(config: AIProviderConfig, request: AIRequest, signal?: AbortSignal): Promise<AIResponse> {
+    await waitForLocalRuntimeSettingsInitialization();
     return this.transport.send(this.transportConfig(config), { ...request, providerId: this.id }, signal);
   }
 
   async *stream(config: AIProviderConfig, request: AIRequest, signal?: AbortSignal): AsyncGenerator<AIStreamEvent> {
+    await waitForLocalRuntimeSettingsInitialization();
     yield* this.transport.stream(this.transportConfig(config), { ...request, providerId: this.id }, signal);
   }
 
