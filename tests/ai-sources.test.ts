@@ -51,6 +51,9 @@ function registerFixture(registry: ProviderRegistry, responseSources = false): v
 test('source normalization keeps only bounded public HTTP(S) metadata and deduplicates URLs', () => {
   assert.equal(normalizeAISource({ title: 'Local', url: 'file:///tmp/secret', origin: 'autocodez-web' }), undefined);
   assert.equal(normalizeAISource({ title: 'Credencial', url: 'https://user:pass@example.com/docs', origin: 'autocodez-web' }), undefined);
+  assert.equal(normalizeAISource({ title: 'Loopback', url: 'http://127.0.0.1:11434/api/tags', origin: 'provider-native' }), undefined);
+  assert.equal(normalizeAISource({ title: 'LAN', url: 'https://192.168.1.10/docs', origin: 'provider-native' }), undefined);
+  assert.equal(normalizeAISource({ title: 'Metadata', url: 'http://metadata.google.internal/computeMetadata/v1', origin: 'provider-native' }), undefined);
   const sources = mergeAISources(
     [{ title: 'Docs', url: 'https://example.com/docs#one', origin: 'autocodez-web', citation: 1 }],
     [{ title: 'Documentação oficial completa', url: 'https://example.com/docs#two', origin: 'provider-native', snippet: 'Atualizada.' }],
