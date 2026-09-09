@@ -41,13 +41,16 @@ async function buildSnapshot() {
       // Runtime availability and model inventory are reported separately.
     }
   }
-  const catalog = listLocalModelCatalog().map((model) => ({
+  const catalogModels = listLocalModelCatalog();
+  const recommendation = manager.recommendModel(catalogModels, hardware);
+  const catalog = catalogModels.map((model) => ({
     ...model,
     compatibility: manager.evaluateModel(model, hardware),
     installed: installed.some((item) => item.runtimeId === model.runtimeId && item.id === model.id),
     installing: manager.isInstalling(model.runtimeId, model.id),
+    recommended: recommendation?.runtimeId === model.runtimeId && recommendation.modelId === model.id,
   }));
-  return { hardware, runtimes, installed, catalog };
+  return { hardware, runtimes, installed, catalog, recommendation };
 }
 
 ipcMain.handle('local-ai:snapshot', async () => buildSnapshot());
@@ -99,4 +102,14 @@ ipcMain.handle('local-ai:cancel-install', async (_event, input: unknown) => {
   const runtimeId = requireIdentifier(value.runtimeId, 'Runtime local');
   const modelId = requireIdentifier(value.modelId, 'Modelo local');
   return { cancelled: manager.cancelInstall(runtimeId, modelId) };
+});
+
+ipcMain.handle('local-ai:remove', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Remoção de modelo local');
+  const runtimeId = requireIdentifier(value.runtimeId, 'Runtime local');
+  const modelId = requireIdentifier(value.modelId, 'Modelo local');
+  const runtime = await manager.getRuntimeInfo(runtimeId);
+  if (!runtime.available) throw new Error(`${runtime.displayName} não está disponível neste computador.`);
+  await manager.removeInstalled(runtimeId, modelId);
+  return { removed: true };
 });
