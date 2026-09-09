@@ -20,15 +20,17 @@ function safePublicUrl(value: unknown): URL | undefined {
   }
 }
 
-function sourceOrigin(value: unknown): AISourceOrigin {
-  return value === 'provider-native' ? 'provider-native' : 'autocodez-web';
+function sourceOrigin(value: unknown): AISourceOrigin | undefined {
+  if (value === 'autocodez-web' || value === 'provider-native') return value;
+  return undefined;
 }
 
 export function normalizeAISource(value: unknown): AISource | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const candidate = value as Partial<AISource>;
   const url = safePublicUrl(candidate.url);
-  if (!url) return undefined;
+  const origin = sourceOrigin(candidate.origin);
+  if (!url || !origin) return undefined;
   const title = boundedText(candidate.title, MAX_TITLE_LENGTH) || url.hostname;
   const snippet = boundedText(candidate.snippet, MAX_SNIPPET_LENGTH);
   const providerId = boundedText(candidate.providerId, MAX_PROVIDER_LENGTH);
@@ -42,7 +44,7 @@ export function normalizeAISource(value: unknown): AISource | undefined {
   return {
     title,
     url: url.toString(),
-    origin: sourceOrigin(candidate.origin),
+    origin,
     ...(citation === undefined ? {} : { citation }),
     ...(snippet ? { snippet } : {}),
     ...(retrievedAt === undefined ? {} : { retrievedAt }),
