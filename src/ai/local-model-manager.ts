@@ -60,9 +60,10 @@ export class LocalModelManager {
   }
 
   evaluateModel(model: Pick<LocalModelDescriptor, 'sizeBytes'>, hardware: LocalHardwareSnapshot): LocalModelCompatibilityResult {
+    const estimatedRamBytes = estimateQuantizedModelRam(model.sizeBytes);
     const requirements: LocalModelRequirements = {
       ...(model.sizeBytes ? { downloadBytes: model.sizeBytes } : {}),
-      ...(estimateQuantizedModelRam(model.sizeBytes) ? { estimatedRamBytes: estimateQuantizedModelRam(model.sizeBytes) } : {}),
+      ...(estimatedRamBytes ? { estimatedRamBytes } : {}),
     };
     return evaluateLocalModelCompatibility(hardware, requirements);
   }
@@ -77,13 +78,13 @@ export class LocalModelManager {
     const controller = new AbortController();
     this.activeInstalls.set(id, controller);
     const source = runtime.install(normalizedModelId, controller.signal);
-    const manager = this;
+    const cleanup = () => this.activeInstalls.delete(id);
 
     async function* progress(): AsyncGenerator<LocalModelInstallProgress> {
       try {
         for await (const item of source) yield item;
       } finally {
-        manager.activeInstalls.delete(id);
+        cleanup();
       }
     }
 
