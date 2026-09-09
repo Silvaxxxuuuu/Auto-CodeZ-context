@@ -187,11 +187,11 @@ async function verifyLmStudioChatSelection() {
     return state.providers.find((item) => item.id === 'lm-studio') || null;
   });
   if (!provider || provider.requiresApiKey !== false || provider.apiKeyConfigured !== false) {
-    throw new Error(`LM Studio keyless não foi exposto corretamente: ${JSON.stringify(provider)}`);
+    throw new Error(`LM Studio keyless não foi exposto corretamente no backend: ${JSON.stringify(provider)}`);
   }
 
   const created = await page.evaluate(() => window.autoCodez.createChat({ intelligence: 'normal', permissionLevel: 'safe' }));
-  if (!created?.id) throw new Error('Não foi possível criar um chat para testar LM Studio.');
+  if (!created?.id) throw new Error('Não foi possível criar um chat para testar backend LM Studio.');
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
@@ -205,17 +205,22 @@ async function verifyLmStudioChatSelection() {
 
   const aiSelect = page.locator('#chat-available-ai');
   await aiSelect.waitFor({ state: 'visible', timeout: 10_000 });
-  const option = aiSelect.locator('option[value="provider:lm-studio"]');
-  if (await option.count() !== 1) throw new Error('LM Studio não apareceu em IAs disponíveis do chat.');
-  await aiSelect.selectOption('provider:lm-studio');
+  await page.waitForFunction(() => Boolean(document.querySelector('#chat-available-ai option[value="local:unified"]')));
+  if (await aiSelect.locator('option[value="provider:lm-studio"]').count()) throw new Error('LM Studio vazou como IA separada no seletor unificado.');
+  await aiSelect.selectOption('local:unified');
 
   const modelSelect = page.locator('#chat-model');
-  await modelSelect.locator('option[value="granite-local"]').waitFor({ state: 'attached', timeout: 15_000 });
-  if (await modelSelect.locator('option[value="embedding-local"]').count()) {
+  const granite = modelSelect.locator('option').filter({ hasText: 'Granite Local' });
+  await granite.waitFor({ state: 'attached', timeout: 15_000 });
+  if (await modelSelect.locator('option').filter({ hasText: 'Embedding Local' }).count()) {
     throw new Error('Embedding do LM Studio apareceu como modelo de chat.');
   }
-  await modelSelect.selectOption('granite-local');
-  await page.locator('#save-available-ai-settings').click();
+  const graniteChoice = await granite.getAttribute('value');
+  if (!graniteChoice) throw new Error('Granite Local unificado ficou sem identificador.');
+  await modelSelect.selectOption(graniteChoice);
+  const save = page.locator('#save-available-ai-settings');
+  await page.waitForFunction(() => !document.querySelector('#save-available-ai-settings')?.hasAttribute('disabled'));
+  await save.click();
 
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
   await page.locator(`.chat-item.selected[data-chat="${created.id}"]`).first().waitFor({ state: 'visible', timeout: 15_000 });
@@ -230,7 +235,7 @@ async function verifyLmStudioChatSelection() {
     return state.chats.find((chat) => chat.id === chatId) || null;
   }, created.id);
   if (!persisted || persisted.providerId !== 'lm-studio' || persisted.model !== 'granite-local' || persisted.apiKeyId) {
-    throw new Error(`LM Studio não persistiu corretamente no chat: ${JSON.stringify(persisted)}`);
+    throw new Error(`Backend LM Studio não persistiu corretamente: ${JSON.stringify(persisted)}`);
   }
 
   const response = await page.evaluate(async (chatId) => window.autoCodez.streamChat({
