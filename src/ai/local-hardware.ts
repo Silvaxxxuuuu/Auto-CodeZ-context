@@ -1,4 +1,5 @@
 import os from 'node:os';
+import path from 'node:path';
 import fs from 'node:fs/promises';
 import type { LocalHardwareSnapshot } from './local-model-runtime';
 
@@ -15,10 +16,27 @@ function statValue(value: number | bigint): number {
   return typeof value === 'bigint' ? Number(value) : value;
 }
 
+async function existingProbePath(probePath: string): Promise<string | undefined> {
+  let candidate = path.resolve(probePath);
+  while (true) {
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isDirectory()) return candidate;
+    } catch {
+      // A future storage directory may not exist yet; probe its existing parent volume.
+    }
+    const parent = path.dirname(candidate);
+    if (parent === candidate) return undefined;
+    candidate = parent;
+  }
+}
+
 async function readFreeDiskBytes(probePath?: string): Promise<number | undefined> {
   if (!probePath?.trim()) return undefined;
   try {
-    const stat = await fs.statfs(probePath) as StatFsLike;
+    const existing = await existingProbePath(probePath);
+    if (!existing) return undefined;
+    const stat = await fs.statfs(existing) as StatFsLike;
     return finiteNonNegative(statValue(stat.bavail) * statValue(stat.bsize));
   } catch {
     return undefined;
