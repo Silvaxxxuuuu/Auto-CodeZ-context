@@ -57,6 +57,7 @@ const activeConnections: Record<LocalRuntimeId, LocalRuntimeConnection> = {
     ...(process.env.LM_API_TOKEN?.trim() ? { apiToken: process.env.LM_API_TOKEN.trim() } : {}),
   },
 };
+let initializationPromise: Promise<void> | undefined;
 
 function requireRuntimeId(value: string): LocalRuntimeId {
   if (value === 'ollama' || value === 'lm-studio') return value;
@@ -112,6 +113,14 @@ function publishConnections(connections: Record<LocalRuntimeId, LocalRuntimeConn
 
 export function getLocalRuntimeConnection(runtimeId: LocalRuntimeId): LocalRuntimeConnection {
   return cloneConnection(activeConnections[runtimeId]);
+}
+
+export function registerLocalRuntimeSettingsInitialization(promise: Promise<void>): void {
+  initializationPromise = promise;
+}
+
+export async function waitForLocalRuntimeSettingsInitialization(): Promise<void> {
+  if (initializationPromise) await initializationPromise;
 }
 
 export class LocalRuntimeSettingsStore {
