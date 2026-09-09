@@ -69,21 +69,55 @@ test('web_search runs in read-only mode and emits real activity', async () => {
   assert.equal(events.some((event) => event.startsWith('success:Pesquisa Web concluída:')), true);
 });
 
-test('web_search blocks secret-like outbound queries before adapter execution', async () => {
+test('web_search rejects private outbound content before network execution or activity logging', async () => {
   let calls = 0;
-  const { tools } = createTools({
+  const { tools, events } = createTools({
     id: 'fixture',
     displayName: 'Fixture',
     async search() { calls += 1; return []; },
   });
+  const secret = 'super-secret-token-value-123456789';
   const result = await tools.execute('chat-1', 'project-not-needed', 'safe', {
     id: 'web-secret',
     name: 'web_search',
-    input: { query: 'api_key=super-secret-token-value-123456789' },
+    input: { query: `api_key=${secret}` },
   });
   assert.equal(result.ok, false);
   assert.match(result.error || '', /credencial ou segredo/);
   assert.equal(calls, 0);
+  assert.equal(events.some((event) => event.includes(secret)), false);
+  assert.equal(events.some((event) => event.startsWith('running:Pesquisando na web:')), false);
+
+  const localPath = 'C:\\Users\\Example\\Desktop\\PrivateProject\\src\\main.ts';
+  const pathResult = await tools.execute('chat-1', 'project-not-needed', 'safe', {
+    id: 'web-path',
+    name: 'web_search',
+    input: { query: `pesquise o erro de ${localPath}` },
+  });
+  assert.equal(pathResult.ok, false);
+  assert.match(pathResult.error || '', /caminho local/);
+  assert.equal(calls, 0);
+  assert.equal(events.some((event) => event.includes('PrivateProject')), false);
+});
+
+test('web_fetch rejects credential-bearing URLs before network execution or activity logging', async () => {
+  let transportCalls = 0;
+  const transport: WebHttpTransport = async () => {
+    transportCalls += 1;
+    return { status: 200, headers: { 'content-type': 'text/plain' }, body: Buffer.from('unexpected') };
+  };
+  const { tools, events } = createTools({ id: 'fixture', displayName: 'Fixture', async search() { return []; } }, transport);
+  const token = 'ghp_abcdefghijklmnopqrstuvwxyz123456';
+  const result = await tools.execute('chat-private-url', 'project-not-needed', 'read-only', {
+    id: 'fetch-private-url',
+    name: 'web_fetch',
+    input: { url: `https://docs.example/private?token=${token}` },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error || '', /credencial ou segredo/);
+  assert.equal(transportCalls, 0);
+  assert.equal(events.some((event) => event.includes(token)), false);
+  assert.equal(events.some((event) => event.startsWith('running:Abrindo fonte Web:')), false);
 });
 
 test('web_fetch returns bounded untrusted source content and activity', async () => {
