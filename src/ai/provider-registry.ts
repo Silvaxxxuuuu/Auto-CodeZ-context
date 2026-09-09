@@ -1,8 +1,38 @@
-import type { AIModel, AIProviderAdapter, AIProviderConfig, ProviderId, ProviderSummary } from './types';
+import type { AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent, ProviderId, ProviderSummary } from './types';
 import { createOpenAICompatibleProviderAdapters } from './providers/openai-compatible';
 import { createExpandedProviderAdapters } from './providers/provider-expansion';
 import { LMStudioProviderAdapter } from './providers/lm-studio';
 import { OllamaAdapter } from './providers/ollama';
+import { collectRequestSources } from './source-collector';
+import { mergeAISources } from './source-normalization';
+
+function withCollectedSources(response: AIResponse, request: AIRequest): AIResponse {
+  const sources = mergeAISources(response.sources, collectRequestSources(request.messages));
+  return sources.length ? { ...response, sources } : response;
+}
+
+function withSourceCollection(adapter: AIProviderAdapter): AIProviderAdapter {
+  const wrapped: AIProviderAdapter = {
+    id: adapter.id,
+    displayName: adapter.displayName,
+    requiresApiKey: adapter.requiresApiKey,
+    fallbackCapabilities: adapter.fallbackCapabilities,
+    listModels: (config) => adapter.listModels(config),
+    send: async (config, request, signal) => withCollectedSources(await adapter.send(config, request, signal), request),
+  };
+  if (adapter.stream) {
+    wrapped.stream = async function* (config: AIProviderConfig, request: AIRequest, signal?: AbortSignal): AsyncIterable<AIStreamEvent> {
+      for await (const event of adapter.stream!(config, request, signal)) {
+        if (event.type === 'complete' && event.response) {
+          yield { ...event, response: withCollectedSources(event.response, request) };
+          continue;
+        }
+        yield event;
+      }
+    };
+  }
+  return wrapped;
+}
 
 export class ProviderRegistry {
   private readonly adapters = new Map<ProviderId, AIProviderAdapter>();
@@ -15,7 +45,7 @@ export class ProviderRegistry {
   }
 
   register(adapter: AIProviderAdapter): void {
-    this.adapters.set(adapter.id, adapter);
+    this.adapters.set(adapter.id, withSourceCollection(adapter));
   }
 
   get(providerId: ProviderId): AIProviderAdapter {
