@@ -2,6 +2,9 @@ import type { AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIRespons
 import { getAutoCodezLocalService } from '../auto-codez-local-service';
 import { OpenAICompatibleAdapter } from './openai-compatible';
 
+const LOCAL_REQUEST_TIMEOUT_MS = 45_000;
+const LOCAL_STREAM_IDLE_TIMEOUT_MS = 30_000;
+
 function capabilities(values: string[] | undefined): Capability[] {
   const allowed = new Set<Capability>(['text', 'vision', 'reasoning', 'tools', 'streaming']);
   const result: Capability[] = ['text', 'streaming'];
@@ -9,6 +12,16 @@ function capabilities(values: string[] | undefined): Capability[] {
     if (allowed.has(value as Capability) && !result.includes(value as Capability)) result.push(value as Capability);
   }
   return result;
+}
+
+function localRequestExtras(request: AIRequest): Record<string, unknown> {
+  const deeperReasoning = request.intelligence === 'high' || request.intelligence === 'maximum';
+  return {
+    chat_template_kwargs: { enable_thinking: deeperReasoning },
+    max_tokens: deeperReasoning ? 4096 : 2048,
+    temperature: deeperReasoning ? 0.6 : 0.7,
+    top_p: deeperReasoning ? 0.95 : 0.8,
+  };
 }
 
 export class AutoCodezLocalProviderAdapter implements AIProviderAdapter {
@@ -41,6 +54,9 @@ export class AutoCodezLocalProviderAdapter implements AIProviderAdapter {
       displayName: this.displayName,
       baseUrl: `${endpoint}/v1`,
       toolsByDefault: true,
+      requestTimeoutMs: LOCAL_REQUEST_TIMEOUT_MS,
+      streamIdleTimeoutMs: LOCAL_STREAM_IDLE_TIMEOUT_MS,
+      requestBodyExtras: localRequestExtras,
     });
     const localConfig: AIProviderConfig = {
       ...config,
@@ -60,7 +76,15 @@ export class AutoCodezLocalProviderAdapter implements AIProviderAdapter {
   }
 
   async *stream(config: AIProviderConfig, request: AIRequest, signal?: AbortSignal): AsyncIterable<AIStreamEvent> {
+    yield {
+      type: 'activity',
+      activity: { type: 'action', message: `Carregando ${request.model} no Auto CodeZ Local.`, status: 'running' },
+    };
     const { adapter, localConfig } = await this.transport(config, request, signal);
+    yield {
+      type: 'activity',
+      activity: { type: 'action', message: 'Modelo local pronto. Gerando resposta.', status: 'success' },
+    };
     if (!adapter.stream) {
       const response = await adapter.send(localConfig, { ...request, providerId: this.id }, signal);
       yield { type: 'complete', response };
