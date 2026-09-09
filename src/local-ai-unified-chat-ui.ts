@@ -59,6 +59,7 @@ let lastAcceptableChoiceId = '';
 let installInFlightKey = '';
 let renderScheduled = false;
 let snapshotInFlight: Promise<void> | undefined;
+let observedAiSelect: HTMLSelectElement | null = null;
 
 function appApi(): AppBridge {
   return window.autoCodez as unknown as AppBridge;
@@ -292,8 +293,16 @@ function scheduleEnhancement(): void {
   window.setTimeout(() => {
     renderScheduled = false;
     installStyles();
+    const select = aiSelect();
+    if (!select) {
+      observedAiSelect = null;
+      return;
+    }
+    const isNewSelect = observedAiSelect !== select;
+    const hadUnifiedOption = [...select.options].some((option) => option.value === LOCAL_OPTION_VALUE);
+    observedAiSelect = select;
     const localSelected = ensureUnifiedLocalOption();
-    if (localSelected) void renderUnifiedLocal();
+    if (localSelected && (isNewSelect || !hadUnifiedOption)) void renderUnifiedLocal();
   }, 0);
 }
 
