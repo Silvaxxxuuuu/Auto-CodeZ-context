@@ -15,6 +15,7 @@ const GIB = 1024 ** 3;
 class FakeRuntime implements LocalModelRuntimeAdapter {
   readonly id = 'fake';
   readonly displayName = 'Fake Runtime';
+  readonly supportsInstallCancellation = true;
   aborted = false;
   removed: string[] = [];
 
@@ -57,11 +58,45 @@ class FakeRuntime implements LocalModelRuntimeAdapter {
   }
 }
 
+class ReadOnlyRuntime implements LocalModelRuntimeAdapter {
+  readonly id = 'read-only';
+  readonly displayName = 'Read Only Runtime';
+
+  async getInfo(): Promise<LocalModelRuntimeInfo> {
+    return { id: this.id, displayName: this.displayName, available: true };
+  }
+
+  async listInstalled(): Promise<LocalModelDescriptor[]> {
+    return [];
+  }
+}
+
+class NonCancellableRuntime implements LocalModelRuntimeAdapter {
+  readonly id = 'managed-no-cancel';
+  readonly displayName = 'Managed No Cancel Runtime';
+  receivedSignal: AbortSignal | undefined;
+
+  async getInfo(): Promise<LocalModelRuntimeInfo> {
+    return { id: this.id, displayName: this.displayName, available: true };
+  }
+
+  async listInstalled(): Promise<LocalModelDescriptor[]> {
+    return [];
+  }
+
+  async *install(modelId: string, signal?: AbortSignal): AsyncGenerator<LocalModelInstallProgress> {
+    this.receivedSignal = signal;
+    yield { runtimeId: this.id, modelId, status: 'success', percent: 100, done: true };
+  }
+}
+
 test('local model manager lists runtimes and classifies installed models', async () => {
   const runtime = new FakeRuntime();
   const manager = new LocalModelManager([runtime]);
   assert.deepEqual(manager.runtimeIds(), ['fake']);
-  assert.equal((await manager.getRuntimeInfo('fake')).available, true);
+  const info = await manager.getRuntimeInfo('fake');
+  assert.equal(info.available, true);
+  assert.deepEqual(info.operations, { install: true, cancelInstall: true, remove: true });
 
   const models = await manager.listInstalled('fake', {
     totalRamBytes: 16 * GIB,
@@ -168,16 +203,44 @@ test('local model manager rejects duplicate installs and supports cancellation',
   const runtime = new FakeRuntime();
   const manager = new LocalModelManager([runtime]);
   const handle = manager.beginInstall('fake', 'tiny:latest');
+  assert.equal(handle.canCancel, true);
   assert.equal(manager.isInstalling('fake', 'tiny:latest'), true);
   assert.throws(() => manager.beginInstall('fake', 'tiny:latest'), /já está sendo instalado/);
 
   const iterator = handle.progress[Symbol.asyncIterator]();
   const first = await iterator.next();
   assert.equal(first.value?.percent, 25);
-  assert.equal(manager.cancelInstall('fake', 'tiny:latest'), true);
+  assert.equal(handle.cancel(), true);
   await assert.rejects(() => iterator.next());
   assert.equal(runtime.aborted, true);
   assert.equal(manager.isInstalling('fake', 'tiny:latest'), false);
+});
+
+test('local model manager accepts inventory-only runtimes without inventing model operations', async () => {
+  const runtime = new ReadOnlyRuntime();
+  const manager = new LocalModelManager([runtime]);
+  const info = await manager.getRuntimeInfo(runtime.id);
+
+  assert.deepEqual(info.operations, { install: false, cancelInstall: false, remove: false });
+  assert.throws(() => manager.beginInstall(runtime.id, 'model'), /não oferece instalação/);
+  assert.equal(manager.cancelInstall(runtime.id, 'model'), false);
+  await assert.rejects(() => manager.removeInstalled(runtime.id, 'model'), /não oferece remoção/);
+});
+
+test('local model manager does not expose cancellation when a runtime cannot cancel installs', async () => {
+  const runtime = new NonCancellableRuntime();
+  const manager = new LocalModelManager([runtime]);
+  const info = await manager.getRuntimeInfo(runtime.id);
+  assert.deepEqual(info.operations, { install: true, cancelInstall: false, remove: false });
+
+  const handle = manager.beginInstall(runtime.id, 'model');
+  assert.equal(handle.canCancel, false);
+  assert.equal(handle.cancel(), false);
+  const events = [];
+  for await (const event of handle.progress) events.push(event);
+  assert.equal(events.at(-1)?.done, true);
+  assert.equal(runtime.receivedSignal, undefined);
+  assert.equal(manager.isInstalling(runtime.id, 'model'), false);
 });
 
 test('local model manager removes only models confirmed as installed', async () => {
