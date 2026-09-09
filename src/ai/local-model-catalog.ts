@@ -1,4 +1,4 @@
-import type { LocalModelDescriptor } from './local-model-runtime';
+import type { LocalModelDescriptor, LocalModelInstallRequest } from './local-model-runtime';
 
 const MB = 1024 ** 2;
 const GB = 1024 ** 3;
@@ -7,14 +7,55 @@ export type LocalModelCatalogEntry = LocalModelDescriptor & {
   installed: false;
   description: string;
   recommendedFor: string[];
-  source: 'ollama-library' | 'lmstudio-community';
-  install?: {
-    source: string;
-    quantization?: string;
-  };
+  source: 'autocodez-curated' | 'ollama-library' | 'lmstudio-community';
+  install?: Omit<LocalModelInstallRequest, 'modelId'>;
 };
 
 const catalog: LocalModelCatalogEntry[] = [
+  {
+    id: 'qwen3-0.6b-q4-0',
+    name: 'Qwen 3 0.6B · Q4_0',
+    runtimeId: 'auto-codez-local',
+    installed: false,
+    sizeBytes: 428_970_080,
+    parameterSize: '0.6B',
+    quantization: 'Q4_0',
+    family: 'qwen3',
+    capabilities: ['tools', 'reasoning'],
+    contextWindow: 40_000,
+    description: 'Modelo ultraleve verificado para o runtime próprio do Auto CodeZ.',
+    recommendedFor: ['chat rápido', 'tarefas leves', 'hardware limitado'],
+    source: 'autocodez-curated',
+    install: {
+      source: 'https://huggingface.co/ggml-org/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_0.gguf?download=true',
+      fileName: 'Qwen3-0.6B-Q4_0.gguf',
+      sha256: 'da2572f16c06133561ce56accaa822216f2391ef4d37fba427801cd6736417d4',
+      expectedBytes: 428_970_080,
+      quantization: 'Q4_0',
+    },
+  },
+  {
+    id: 'qwen3-1.7b-q4-k-m-autocodez',
+    name: 'Qwen 3 1.7B · Q4_K_M',
+    runtimeId: 'auto-codez-local',
+    installed: false,
+    sizeBytes: 1_282_439_264,
+    parameterSize: '1.7B',
+    quantization: 'Q4_K_M',
+    family: 'qwen3',
+    capabilities: ['tools', 'reasoning'],
+    contextWindow: 40_000,
+    description: 'Modelo compacto verificado para código leve, chat e agentes locais no Auto CodeZ.',
+    recommendedFor: ['chat', 'código leve', 'agente local'],
+    source: 'autocodez-curated',
+    install: {
+      source: 'https://huggingface.co/ggml-org/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf?download=true',
+      fileName: 'Qwen3-1.7B-Q4_K_M.gguf',
+      sha256: 'd2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5',
+      expectedBytes: 1_282_439_264,
+      quantization: 'Q4_K_M',
+    },
+  },
   {
     id: 'qwen3:0.6b',
     name: 'Qwen 3 0.6B',
@@ -184,7 +225,12 @@ export function listLocalModelCatalog(runtimeId?: string): LocalModelCatalogEntr
       ...model,
       capabilities: [...(model.capabilities ?? [])],
       recommendedFor: [...model.recommendedFor],
-      ...(model.install ? { install: { ...model.install } } : {}),
+      ...(model.install ? {
+        install: {
+          ...model.install,
+          ...(model.install.capabilities ? { capabilities: [...model.install.capabilities] } : {}),
+        },
+      } : {}),
     }));
 }
 
