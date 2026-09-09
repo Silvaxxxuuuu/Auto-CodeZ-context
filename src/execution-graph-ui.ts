@@ -2,17 +2,14 @@ import { buildExecutionGraph, type ExecutionGraphNode } from './execution-graph'
 import type { ExecutionReport } from './execution-report';
 
 const STYLE_ID = 'auto-codez-execution-graph';
-const HISTORY_HOST_CLASS = 'execution-graph-history-host';
 const MAX_VISIBLE_NODES = 18;
 
 type ExecutionGraphBridge = {
   getExecutionReport?: (input: { chatId: string; runId: string }) => Promise<ExecutionReport | null>;
-  listExecutionReports?: (chatId?: string) => Promise<ExecutionReport[]>;
 };
 
 const bridge = (window as unknown as { autoCodez?: ExecutionGraphBridge }).autoCodez;
 const requestTokens = new Map<string, number>();
-let historyRequestToken = 0;
 let observedChatId = '';
 
 function installStyle(): void {
@@ -20,7 +17,6 @@ function installStyle(): void {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    .execution-graph-history-host{width:min(860px,calc(100% - 56px));margin:0 auto 10px}
     .execution-graph{margin-top:8px;border:1px solid rgba(255,255,255,.055);border-radius:9px;background:rgba(9,12,17,.42);overflow:hidden}
     .execution-graph-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.045)}
     .execution-graph-title{font-size:10px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:#8993a1}
@@ -44,7 +40,7 @@ function installStyle(): void {
     .execution-graph-meta{margin-top:2px;font-size:9px;line-height:1.35;color:#687382;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .execution-graph-time{padding-top:1px;font:9px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#5f6976;white-space:nowrap}
     .execution-graph-more{padding:5px 0 1px 20px;font-size:9px;color:#687382}
-    @media(max-width:720px){.execution-graph-history-host{width:calc(100% - 24px)}.execution-graph-time{display:none}.execution-graph-node{grid-template-columns:12px minmax(0,1fr)}}
+    @media(max-width:720px){.execution-graph-time{display:none}.execution-graph-node{grid-template-columns:12px minmax(0,1fr)}}
   `;
   document.head.appendChild(style);
 }
@@ -108,27 +104,6 @@ function ensureDetails(runId: string): HTMLElement | null {
   return details;
 }
 
-function historyHost(): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`.${HISTORY_HOST_CLASS}`);
-}
-
-function removeHistoryHost(): void {
-  historyHost()?.remove();
-}
-
-function ensureHistoryHost(): HTMLElement | null {
-  const existing = historyHost();
-  if (existing) return existing;
-  const root = document.querySelector<HTMLElement>('.chat-area');
-  const composer = root?.querySelector<HTMLElement>('.composer-wrap');
-  if (!root || !composer) return null;
-  const host = document.createElement('section');
-  host.className = HISTORY_HOST_CLASS;
-  host.setAttribute('aria-label', 'Execution Graph da execução mais recente');
-  root.insertBefore(host, composer);
-  return host;
-}
-
 function renderGraph(runId: string, report: ExecutionReport): void {
   const details = ensureDetails(runId);
   if (!details) return;
@@ -139,19 +114,6 @@ function renderGraph(runId: string, report: ExecutionReport): void {
     details.appendChild(container);
   }
   if (!renderGraphContainer(container, report)) container.remove();
-}
-
-function renderHistoryGraph(report: ExecutionReport): void {
-  const host = ensureHistoryHost();
-  if (!host) return;
-  host.dataset.runId = report.runId;
-  let container = host.querySelector<HTMLElement>(':scope > .execution-graph');
-  if (!container) {
-    container = document.createElement('section');
-    container.className = 'execution-graph';
-    host.appendChild(container);
-  }
-  if (!renderGraphContainer(container, report)) removeHistoryHost();
 }
 
 async function refreshRun(runId: string): Promise<void> {
@@ -165,37 +127,8 @@ async function refreshRun(runId: string): Promise<void> {
     if (requestTokens.get(runId) !== token || selectedChatId() !== chatId) return;
     if (!report || report.chatId !== chatId || report.runId !== runId) return;
     renderGraph(runId, report);
-    if (historyHost()?.dataset.runId === runId) removeHistoryHost();
   } catch {
     if (requestTokens.get(runId) !== token) return;
-  }
-}
-
-async function refreshHistoryGraph(): Promise<void> {
-  if (!bridge?.listExecutionReports) return;
-  const chatId = selectedChatId();
-  const token = ++historyRequestToken;
-  if (!chatId) {
-    removeHistoryHost();
-    return;
-  }
-  try {
-    const reports = await bridge.listExecutionReports(chatId);
-    if (token !== historyRequestToken || selectedChatId() !== chatId) return;
-    const report = reports.find((item) => item?.chatId === chatId && typeof item.runId === 'string' && item.runId.length > 0);
-    if (!report) {
-      removeHistoryHost();
-      return;
-    }
-    const liveRun = document.querySelector<HTMLElement>(`.execution-run[data-run-id="${CSS.escape(report.runId)}"]`);
-    if (liveRun) {
-      removeHistoryHost();
-      void refreshRun(report.runId);
-      return;
-    }
-    renderHistoryGraph(report);
-  } catch {
-    if (token === historyRequestToken && selectedChatId() === chatId) removeHistoryHost();
   }
 }
 
@@ -206,38 +139,29 @@ function refreshVisibleRuns(): void {
   });
 }
 
-function refreshAllGraphs(): void {
-  refreshVisibleRuns();
-  void refreshHistoryGraph();
-}
-
 function syncSelectedChat(): void {
   const nextChatId = selectedChatId();
   if (nextChatId === observedChatId) return;
   observedChatId = nextChatId;
-  historyRequestToken += 1;
   requestTokens.clear();
-  removeHistoryHost();
-  void refreshHistoryGraph();
 }
 
 function initialize(): void {
   installStyle();
   observedChatId = selectedChatId();
+  document.querySelectorAll('.execution-graph-history-host').forEach((node) => node.remove());
   window.addEventListener('auto-codez-execution-run-rendered', (event) => {
     const runId = (event as CustomEvent<{ runId?: string }>).detail?.runId;
-    if (!runId) return;
-    if (historyHost()?.dataset.runId === runId) removeHistoryHost();
-    void refreshRun(runId);
+    if (runId) void refreshRun(runId);
   });
-  window.addEventListener('auto-codez-execution-refresh', refreshAllGraphs);
-  window.addEventListener('auto-codez-chat-refresh', refreshAllGraphs);
+  window.addEventListener('auto-codez-execution-refresh', refreshVisibleRuns);
+  window.addEventListener('auto-codez-chat-refresh', refreshVisibleRuns);
   const nav = document.querySelector<HTMLElement>('#nav-panel');
   if (nav) {
     const observer = new MutationObserver(syncSelectedChat);
     observer.observe(nav, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'data-chat'] });
   }
-  refreshAllGraphs();
+  refreshVisibleRuns();
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
