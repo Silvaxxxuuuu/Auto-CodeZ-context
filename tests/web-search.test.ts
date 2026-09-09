@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseDuckDuckGoHtml } from '../src/web/search/duckduckgo-html';
+import { parseDuckDuckGoHtml, parseDuckDuckGoLite } from '../src/web/search/duckduckgo-html';
 import { assertSafeWebUrlText, normalizeWebSearchQuery } from '../src/web/web-query-policy';
 
 const fixture = `
@@ -15,7 +15,15 @@ const fixture = `
 </div>
 </body></html>`;
 
-test('DuckDuckGo fallback parser returns normalized direct sources and snippets', () => {
+const liteFixture = `
+<html><body><table>
+<tr><td><a class="result-link" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fdocs.example%2Flatest">Documentação &amp; atual</a></td></tr>
+<tr><td class="result-snippet">Referência atualizada da API.</td></tr>
+<tr><td><a class="result-link" href="https://release.example/v2">Release <b>2</b></a></td></tr>
+<tr><td class="result-snippet">Notas da versão atual.</td></tr>
+</table></body></html>`;
+
+test('DuckDuckGo HTML parser returns normalized direct sources and snippets', () => {
   const results = parseDuckDuckGoHtml(fixture, 5);
   assert.equal(results.length, 2);
   assert.deepEqual(results[0], {
@@ -30,16 +38,18 @@ test('DuckDuckGo fallback parser returns normalized direct sources and snippets'
   });
 });
 
+test('DuckDuckGo Lite parser provides a second bounded search route', () => {
+  const results = parseDuckDuckGoLite(liteFixture, 5);
+  assert.deepEqual(results, [
+    { title: 'Documentação & atual', url: 'https://docs.example/latest', snippet: 'Referência atualizada da API.' },
+    { title: 'Release 2', url: 'https://release.example/v2', snippet: 'Notas da versão atual.' },
+  ]);
+});
+
 test('web query policy normalizes ordinary public research searches', () => {
   assert.equal(normalizeWebSearchQuery('  previsão   do tempo hoje   amanhã  '), 'previsão do tempo hoje amanhã');
-  assert.equal(
-    normalizeWebSearchQuery('Electron Forge latest Vite plugin documentation'),
-    'Electron Forge latest Vite plugin documentation',
-  );
-  assert.equal(
-    normalizeWebSearchQuery('TypeScript schema validation libraries available 2026'),
-    'TypeScript schema validation libraries available 2026',
-  );
+  assert.equal(normalizeWebSearchQuery('Electron Forge latest Vite plugin documentation'), 'Electron Forge latest Vite plugin documentation');
+  assert.equal(normalizeWebSearchQuery('TypeScript schema validation libraries available 2026'), 'TypeScript schema validation libraries available 2026');
 });
 
 test('web query policy blocks likely secrets and raw code payloads', () => {
@@ -52,18 +62,9 @@ test('web query policy blocks likely secrets and raw code payloads', () => {
 });
 
 test('web query policy blocks local filesystem paths instead of leaking them to search', () => {
-  assert.throws(
-    () => normalizeWebSearchQuery('pesquise erro C:\\Users\\Gabriel\\Desktop\\Projeto\\src\\main.ts Electron'),
-    /caminho local/,
-  );
-  assert.throws(
-    () => normalizeWebSearchQuery('search this error from /home/user/private-project/src/main.ts'),
-    /caminho local/,
-  );
-  assert.throws(
-    () => normalizeWebSearchQuery('look up file:///Users/example/private/index.ts'),
-    /caminho local/,
-  );
+  assert.throws(() => normalizeWebSearchQuery('pesquise erro C:\\Users\\Gabriel\\Desktop\\Projeto\\src\\main.ts Electron'), /caminho local/);
+  assert.throws(() => normalizeWebSearchQuery('search this error from /home/user/private-project/src/main.ts'), /caminho local/);
+  assert.throws(() => normalizeWebSearchQuery('look up file:///Users/example/private/index.ts'), /caminho local/);
 });
 
 test('web query policy enforces bounded outbound input', () => {
