@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { AutoCodezLocalEngineManager, type AutoCodezLocalEngineOptions } from '../auto-codez-local-engine';
@@ -24,6 +25,16 @@ type InstalledModelManifest = {
 
 function safeKey(modelId: string): string {
   return crypto.createHash('sha256').update(modelId).digest('hex').slice(0, 24);
+}
+
+async function hashFile(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = createReadStream(filePath);
+    stream.on('error', reject);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
 }
 
 function requireInstallRequest(model: string | LocalModelInstallRequest): LocalModelInstallRequest & {
@@ -90,6 +101,7 @@ export class AutoCodezLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
   readonly supportsInstallCancellation = true;
   readonly engine: AutoCodezLocalEngineManager;
   private readonly modelFetcher?: typeof fetch;
+  private readonly verifiedModels = new Set<string>();
 
   constructor(readonly rootDir: string, options: AutoCodezLocalRuntimeOptions = {}) {
     this.engine = new AutoCodezLocalEngineManager(rootDir, options);
@@ -121,7 +133,7 @@ export class AutoCodezLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
       try {
         const raw = await fs.readFile(path.join(this.modelsDir(), file), 'utf8');
         const manifest = JSON.parse(raw) as InstalledModelManifest;
-        if (!manifest?.descriptor?.id || !manifest.fileName || !manifest.sha256) continue;
+        if (!manifest?.descriptor?.id || !manifest.fileName || !/^[a-f0-9]{64}$/.test(manifest.sha256)) continue;
         const modelPath = path.join(this.modelsDir(), manifest.fileName);
         const stat = await fs.stat(modelPath);
         if (!stat.isFile()) continue;
@@ -143,10 +155,17 @@ export class AutoCodezLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
     try {
       const raw = await fs.readFile(this.manifestPath(modelId), 'utf8');
       const manifest = JSON.parse(raw) as InstalledModelManifest;
-      if (manifest.descriptor.id !== modelId) return undefined;
+      if (manifest.descriptor.id !== modelId || !/^[a-f0-9]{64}$/.test(manifest.sha256)) return undefined;
       const candidate = path.join(this.modelsDir(), manifest.fileName);
       const stat = await fs.stat(candidate);
-      return stat.isFile() ? candidate : undefined;
+      if (!stat.isFile()) return undefined;
+      if (manifest.descriptor.sizeBytes && stat.size !== manifest.descriptor.sizeBytes) return undefined;
+      if (!this.verifiedModels.has(modelId)) {
+        const actualSha = await hashFile(candidate);
+        if (actualSha !== manifest.sha256) return undefined;
+        this.verifiedModels.add(modelId);
+      }
+      return candidate;
     } catch {
       return undefined;
     }
@@ -191,6 +210,7 @@ export class AutoCodezLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
     };
     await fs.mkdir(this.modelsDir(), { recursive: true });
     await fs.writeFile(this.manifestPath(request.modelId), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    this.verifiedModels.add(request.modelId);
     yield {
       runtimeId: this.id,
       modelId: request.modelId,
@@ -204,6 +224,7 @@ export class AutoCodezLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
   }
 
   async remove(modelId: string): Promise<void> {
+    this.verifiedModels.delete(modelId);
     try {
       const raw = await fs.readFile(this.manifestPath(modelId), 'utf8');
       const manifest = JSON.parse(raw) as InstalledModelManifest;
