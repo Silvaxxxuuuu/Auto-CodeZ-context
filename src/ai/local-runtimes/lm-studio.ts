@@ -1,6 +1,7 @@
 import type {
   LocalModelDescriptor,
   LocalModelInstallProgress,
+  LocalModelInstallRequest,
   LocalModelRuntimeAdapter,
   LocalModelRuntimeInfo,
 } from '../local-model-runtime';
@@ -24,6 +25,15 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function normalizeEndpoint(value?: string): string {
   return (value?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, '');
+}
+
+function normalizeInstallRequest(value: string | LocalModelInstallRequest): LocalModelInstallRequest {
+  if (typeof value === 'string') return { modelId: value.trim() };
+  return {
+    modelId: value.modelId.trim(),
+    ...(value.source?.trim() ? { source: value.source.trim() } : {}),
+    ...(value.quantization?.trim() ? { quantization: value.quantization.trim() } : {}),
+  };
 }
 
 function finitePositive(value: unknown): number | undefined {
@@ -127,14 +137,14 @@ export class LMStudioLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
     return models;
   }
 
-  async *install(modelId: string): AsyncGenerator<LocalModelInstallProgress> {
-    const model = modelId.trim();
-    if (!model) throw new Error('Modelo local inválido.');
+  async *install(value: string | LocalModelInstallRequest): AsyncGenerator<LocalModelInstallProgress> {
+    const request = normalizeInstallRequest(value);
+    if (!request.modelId) throw new Error('Modelo local inválido.');
 
-    const initial = await this.requestDownload(model);
+    const initial = await this.requestDownload(request);
     const initialStatus = this.requireStatus(initial);
     if (initialStatus === 'failed') throw new Error(errorMessage(initial, 'LM Studio falhou ao iniciar o download.'));
-    yield this.progress(model, initial, initialStatus);
+    yield this.progress(request.modelId, initial, initialStatus);
     if (initialStatus === 'completed' || initialStatus === 'already_downloaded') return;
 
     const jobId = typeof initial.job_id === 'string' ? initial.job_id.trim() : '';
@@ -145,7 +155,7 @@ export class LMStudioLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
       const current = await this.requestDownloadStatus(jobId);
       const status = this.requireStatus(current);
       if (status === 'failed') throw new Error(errorMessage(current, 'LM Studio informou falha durante o download.'));
-      yield this.progress(model, current, status);
+      yield this.progress(request.modelId, current, status);
       if (status === 'completed' || status === 'already_downloaded') return;
     }
   }
@@ -157,11 +167,15 @@ export class LMStudioLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
     };
   }
 
-  private async requestDownload(model: string): Promise<Record<string, unknown>> {
+  private async requestDownload(request: LocalModelInstallRequest): Promise<Record<string, unknown>> {
+    const model = request.source || request.modelId;
     const response = await fetchWithTimeout(`${this.endpoint}/api/v1/models/download`, {
       method: 'POST',
       headers: this.headers(true),
-      body: JSON.stringify({ model }),
+      body: JSON.stringify({
+        model,
+        ...(request.quantization ? { quantization: request.quantization } : {}),
+      }),
     }, REQUEST_TIMEOUT_MS);
     const data = await response.json().catch(() => ({})) as Record<string, unknown>;
     if (!response.ok) throw new Error(errorMessage(data, `LM Studio download request failed: ${response.status}`));
