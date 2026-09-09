@@ -59,8 +59,8 @@ test('ChatRuntime turns provider pre-tool text into contextual live activity tie
   }]);
 
   await runtime.send(config, chat(), 'src/config.ts');
-  assert.match(systemPrompt, /short, live activity summary/i);
-  assert.match(systemPrompt, /specific action and target/i);
+  assert.match(systemPrompt, /short, dynamically generated live activity summary/i);
+  assert.match(systemPrompt, /exact action you are taking now and the current context/i);
   const dynamic = events.find((event) => event.type === 'thought' && event.toolCallId === 'read-config-1');
   assert.deepEqual(dynamic, {
     type: 'thought',
