@@ -68,14 +68,19 @@ async function startFakeOllama() {
   ollamaServer = http.createServer(async (req, res) => {
     try {
       if (req.method === 'GET' && req.url === '/api/tags') {
-        const models = installedOllamaModel ? [{ name: installedOllamaModel, model: installedOllamaModel, size: 523 * 1024 ** 2, details: { parameter_size: '0.6B', quantization_level: 'Q4_K_M', family: 'qwen3' } }] : [];
+        const models = installedOllamaModel ? [{ name: installedOllamaModel, model: installedOllamaModel, size: 815 * 1024 ** 2, details: { parameter_size: '1B', quantization_level: 'Q4_K_M', family: 'gemma3' } }] : [];
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ models }));
         return;
       }
+      if (req.method === 'POST' && req.url === '/api/show') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ capabilities: ['completion'], model_info: {} }));
+        return;
+      }
       if (req.method === 'POST' && req.url === '/api/pull') {
         const body = await readJson(req);
-        if (body.model !== 'qwen3:0.6b') throw new Error(`Modelo inesperado: ${String(body.model)}`);
+        if (body.model !== 'gemma3:1b') throw new Error(`Modelo inesperado: ${String(body.model)}`);
         res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
         res.write(`${JSON.stringify({ status: 'pulling manifest' })}\n`);
         res.write(`${JSON.stringify({ status: 'downloading', total: 100, completed: 45 })}\n`);
@@ -179,13 +184,14 @@ async function verifyLocalChatInstallFlow() {
   await page.waitForFunction(() => Boolean(document.querySelector('#chat-available-ai option[value="local:unified"]')));
   if (await ai.locator('option[value="provider:ollama"]').count()) throw new Error('Ollama voltou a aparecer como IA separada.');
   if (await ai.locator('option[value="provider:lm-studio"]').count()) throw new Error('LM Studio voltou a aparecer como IA separada.');
+  if (await ai.locator('option[value="provider:auto-codez-local"]').count()) throw new Error('Auto CodeZ Local vazou como provider separado em vez da opção unificada.');
   await ai.selectOption('local:unified');
 
   const model = page.locator('#chat-model');
-  const qwen = model.locator('option').filter({ hasText: 'Qwen 3 0.6B' });
-  await qwen.waitFor({ state: 'attached', timeout: 15_000 });
-  const logicalModelId = await qwen.getAttribute('value');
-  if (!logicalModelId) throw new Error('Modelo Qwen 3 0.6B unificado ficou sem identificador.');
+  const gemma = model.locator('option').filter({ hasText: 'Gemma 3 1B' });
+  await gemma.waitFor({ state: 'attached', timeout: 15_000 });
+  const logicalModelId = await gemma.getAttribute('value');
+  if (!logicalModelId) throw new Error('Modelo Gemma 3 1B unificado ficou sem identificador.');
   await model.selectOption(logicalModelId);
 
   const save = page.locator('#save-available-ai-settings');
@@ -198,7 +204,7 @@ async function verifyLocalChatInstallFlow() {
     return button instanceof HTMLButtonElement && !button.disabled;
   }, null, { timeout: 20_000 });
   if (await page.locator(`[data-unified-local-install="${logicalModelId}"]`).count()) throw new Error('Botão de instalar permaneceu após instalação concluída.');
-  if (installedOllamaModel !== 'qwen3:0.6b') throw new Error(`Backend não instalou o modelo esperado: ${installedOllamaModel}`);
+  if (installedOllamaModel !== 'gemma3:1b') throw new Error(`Backend não instalou o modelo esperado: ${installedOllamaModel}`);
   await page.screenshot({ path: path.join(outputDir, 'funcional-modelo-local-no-chat.png'), animations: 'disabled' });
 }
 
