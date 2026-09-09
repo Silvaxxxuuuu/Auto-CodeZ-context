@@ -197,11 +197,12 @@ async function verifyChatCanSelectOllama() {
   await aiSelect.selectOption('provider:ollama');
   const modelSelect = page.locator('#chat-model');
   await modelSelect.locator('option[value="qwen3:8b"]').waitFor({ state: 'attached', timeout: 15_000 });
-  const optionTexts = await modelSelect.locator('option').allTextContents();
   const snapshot = await page.evaluate(() => window.autoCodezLocalAi.snapshot());
   if (snapshot.recommendation?.runtimeId === 'ollama') {
-    const recommended = snapshot.catalog.find((model) => model.runtimeId === 'ollama' && model.id === snapshot.recommendation.modelId);
-    if (recommended && !optionTexts.some((text) => text.includes(recommended.name) && text.includes('recomendado'))) throw new Error(`Recomendação não apareceu no seletor: ${JSON.stringify(optionTexts)}`);
+    const recommendedOption = modelSelect.locator(`option[value="${snapshot.recommendation.modelId}"]`);
+    if (await recommendedOption.count() !== 1 || !(await recommendedOption.textContent())?.toLowerCase().includes('recomendado')) {
+      throw new Error(`Recomendação não apareceu no seletor para ${snapshot.recommendation.modelId}.`);
+    }
   }
 
   await modelSelect.selectOption('qwen3:8b');
