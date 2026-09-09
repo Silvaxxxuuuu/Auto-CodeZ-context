@@ -1,3 +1,4 @@
+import { validatePluginContributionPermissions } from './plugin-policy';
 import {
   PLUGIN_API_VERSION,
   type PluginContribution,
@@ -128,5 +129,6 @@ export function validatePluginManifest(input: unknown): PluginManifest {
   if (homepage) manifest.homepage = homepage;
   if (main) manifest.main = main;
 
+  validatePluginContributionPermissions(manifest);
   return manifest;
 }
