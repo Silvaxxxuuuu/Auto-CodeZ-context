@@ -80,6 +80,12 @@ jobs:
           NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
         run: node scripts/visual-lm-studio-chat.cjs
 
+      - name: Verify reported user regressions
+        env:
+          AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
+        run: node scripts/visual-user-regressions.cjs
+
       - name: Upload visual screenshots
         if: always()
         uses: actions/upload-artifact@v4
