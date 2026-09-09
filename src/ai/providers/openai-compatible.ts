@@ -63,7 +63,8 @@ function baseUrl(config: AIProviderConfig, descriptor: OpenAICompatibleProviderD
 }
 
 function authorizationHeaders(config: AIProviderConfig): Record<string, string> {
-  return { Authorization: `Bearer ${config.apiKey}` };
+  const apiKey = config.apiKey.trim();
+  return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
 }
 
 function contentText(value: unknown): string {
