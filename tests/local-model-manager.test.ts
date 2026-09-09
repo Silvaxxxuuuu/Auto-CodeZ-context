@@ -89,6 +89,52 @@ test('local model manager recommends the strongest agent model that fits safely'
   assert.match(recommendation?.reason ?? '', /agente/);
 });
 
+test('local model manager prefers a safe tool-capable model over an excellent chat-only model', () => {
+  const manager = new LocalModelManager();
+  const recommendation = manager.recommendModel([
+    { id: 'agent:5b', runtimeId: 'ollama', sizeBytes: 5 * GIB, capabilities: ['tools', 'reasoning'] },
+    { id: 'chat:1b', runtimeId: 'ollama', sizeBytes: GIB, capabilities: [] },
+  ], {
+    totalRamBytes: 12 * GIB,
+    availableRamBytes: 10 * GIB,
+    freeDiskBytes: 50 * GIB,
+  });
+
+  assert.equal(recommendation?.modelId, 'agent:5b');
+  assert.equal(recommendation?.compatibility.level, 'compatible');
+  assert.match(recommendation?.reason ?? '', /agente/);
+});
+
+test('local model manager does not prefer a limit-state agent over a safe chat model', () => {
+  const manager = new LocalModelManager();
+  const recommendation = manager.recommendModel([
+    { id: 'agent:3b', runtimeId: 'ollama', sizeBytes: 3 * GIB, capabilities: ['tools', 'reasoning'] },
+    { id: 'chat:1b', runtimeId: 'ollama', sizeBytes: GIB, capabilities: [] },
+  ], {
+    totalRamBytes: 8 * GIB,
+    availableRamBytes: 4 * GIB,
+    freeDiskBytes: 50 * GIB,
+  });
+
+  assert.equal(recommendation?.modelId, 'chat:1b');
+  assert.equal(recommendation?.compatibility.level, 'excellent');
+  assert.match(recommendation?.reason ?? '', /sem suporte de tools/);
+});
+
+test('local model manager describes a non-agent fallback accurately', () => {
+  const manager = new LocalModelManager();
+  const recommendation = manager.recommendModel([
+    { id: 'chat:1b', runtimeId: 'ollama', sizeBytes: GIB, capabilities: ['vision'] },
+  ], {
+    totalRamBytes: 8 * GIB,
+    availableRamBytes: 6 * GIB,
+    freeDiskBytes: 50 * GIB,
+  });
+
+  assert.equal(recommendation?.modelId, 'chat:1b');
+  assert.match(recommendation?.reason ?? '', /sem suporte de tools/);
+});
+
 test('local model manager returns no recommendation when every catalog model is blocked', () => {
   const manager = new LocalModelManager();
   const recommendation = manager.recommendModel([
