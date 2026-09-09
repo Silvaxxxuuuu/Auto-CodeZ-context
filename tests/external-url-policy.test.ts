@@ -28,12 +28,16 @@ test('external URL policy blocks local, private and metadata-style hosts', () =>
   }
 });
 
-test('external URL policy blocks private and link-local IPv6 literals', () => {
+test('external URL policy blocks private, mapped, link-local and multicast IPv6 literals', () => {
   assert.equal(isPrivateExternalHostname('::1'), true);
   assert.equal(isPrivateExternalHostname('fc00::1'), true);
   assert.equal(isPrivateExternalHostname('fd12:3456::1'), true);
   assert.equal(isPrivateExternalHostname('fe80::1'), true);
+  assert.equal(isPrivateExternalHostname('::ffff:7f00:1'), true);
+  assert.equal(isPrivateExternalHostname('ff02::1'), true);
   assert.throws(() => requirePublicExternalUrl('http://[::1]/'), /rede privada/);
   assert.throws(() => requirePublicExternalUrl('http://[fd12:3456::1]/'), /rede privada/);
   assert.throws(() => requirePublicExternalUrl('http://[fe80::1]/'), /rede privada/);
+  assert.throws(() => requirePublicExternalUrl('http://[::ffff:127.0.0.1]/'), /rede privada/);
+  assert.throws(() => requirePublicExternalUrl('http://[ff02::1]/'), /rede privada/);
 });
