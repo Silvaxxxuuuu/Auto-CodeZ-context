@@ -56,12 +56,19 @@ export type LocalModelRuntimeInfo = {
   endpoint?: string;
 };
 
+export type LocalModelRuntimeOperations = {
+  install: boolean;
+  cancelInstall: boolean;
+  remove: boolean;
+};
+
 export interface LocalModelRuntimeAdapter {
   readonly id: string;
   readonly displayName: string;
+  readonly supportsInstallCancellation?: boolean;
   getInfo(): Promise<LocalModelRuntimeInfo>;
   listInstalled(): Promise<LocalModelDescriptor[]>;
-  install(modelId: string, signal?: AbortSignal): AsyncGenerator<LocalModelInstallProgress>;
+  install?(modelId: string, signal?: AbortSignal): AsyncGenerator<LocalModelInstallProgress>;
   remove?(modelId: string): Promise<void>;
 }
 
