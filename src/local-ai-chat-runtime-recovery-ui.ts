@@ -1,7 +1,6 @@
 const ROOT_SELECTOR = '#chat-local-model-state';
 const AI_SELECTOR = '#chat-available-ai';
 const MODEL_SELECTOR = '#chat-model';
-const RECOVERY_MARKER = 'data-local-runtime-recovery';
 
 function runtimeCopy(providerId: string): { title: string; detail: string } {
   if (providerId === 'lm-studio') {
@@ -29,18 +28,17 @@ function enhanceUnavailableRuntime(): void {
   if (!root || !ai || !model) return;
   if (!ai.value.startsWith('provider:')) return;
   if (!/não está respondendo/i.test(root.textContent || '')) return;
-  if (root.hasAttribute(RECOVERY_MARKER)) return;
+  if (root.querySelector('[data-local-runtime-recovery]')) return;
 
   const providerId = ai.value.slice('provider:'.length);
   const copy = runtimeCopy(providerId);
   const hasModel = Boolean(model.value);
-  root.setAttribute(RECOVERY_MARKER, 'true');
   root.innerHTML = `
-    <div class="chat-local-notice warning">
+    <div class="chat-local-notice warning" data-local-runtime-recovery>
       <strong>${copy.title}</strong>
       <span>${copy.detail}</span>
       <div class="chat-local-actions">
-        <button class="chat-local-button" type="button" data-local-runtime-retry> Tentar novamente </button>
+        <button class="chat-local-button" type="button" data-local-runtime-retry>Tentar novamente</button>
       </div>
     </div>
     ${hasModel ? `<div class="chat-local-install"><div class="chat-local-install-copy"><strong>${model.selectedOptions[0]?.textContent || 'Modelo selecionado'}</strong><span>O download será liberado assim que o runtime responder.</span></div><button class="chat-local-button primary" type="button" disabled>Instalar modelo</button></div>` : ''}
