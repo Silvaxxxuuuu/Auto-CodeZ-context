@@ -14,6 +14,9 @@ export interface OpenAICompatibleProviderDescriptor {
   toolsByDefault: boolean;
   reasoningStyle?: ReasoningStyle;
   reasoningModelPattern?: RegExp;
+  requestTimeoutMs?: number;
+  streamIdleTimeoutMs?: number;
+  requestBodyExtras?: (request: AIRequest, stream: boolean) => Record<string, unknown>;
 }
 
 export const OPENAI_COMPATIBLE_PROVIDERS: readonly OpenAICompatibleProviderDescriptor[] = [
@@ -229,6 +232,7 @@ export class OpenAICompatibleAdapter implements AIProviderAdapter {
       if (this.descriptor.reasoningStyle === 'effort') body.reasoning_effort = effort;
       if (this.descriptor.reasoningStyle === 'object') body.reasoning = { effort };
     }
+    Object.assign(body, this.descriptor.requestBodyExtras?.(request, stream) ?? {});
     return body;
   }
 
@@ -238,7 +242,7 @@ export class OpenAICompatibleAdapter implements AIProviderAdapter {
       headers: { ...authorizationHeaders(config), 'Content-Type': 'application/json' },
       body: JSON.stringify(this.requestBody(request, false)),
       signal,
-    }, REQUEST_TIMEOUT_MS);
+    }, this.descriptor.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
     const data = await response.json().catch(() => ({})) as Record<string, unknown>;
     if (!response.ok) {
       throw createProviderRequestError(this.displayName, 'send', response.status, errorMessage(data, `${this.displayName} request failed: ${response.status}`));
@@ -261,7 +265,7 @@ export class OpenAICompatibleAdapter implements AIProviderAdapter {
       headers: { ...authorizationHeaders(config), 'Content-Type': 'application/json' },
       body: JSON.stringify(this.requestBody(request, true)),
       signal,
-    }, REQUEST_TIMEOUT_MS);
+    }, this.descriptor.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw createProviderRequestError(this.displayName, 'stream', response.status, errorMessage(data, `${this.displayName} streaming request failed: ${response.status}`));
@@ -273,7 +277,7 @@ export class OpenAICompatibleAdapter implements AIProviderAdapter {
     const pendingCalls = new Map<number, { id: string; name: string; arguments: string }>();
     yield { type: 'start' };
 
-    for await (const raw of parseSSE(response)) {
+    for await (const raw of parseSSE(response, this.descriptor.streamIdleTimeoutMs)) {
       const chunk = asRecord(raw) ?? {};
       if (chunk.error) throw new Error(errorMessage(chunk, `${this.displayName} retornou um erro durante o streaming.`));
       const nextUsage = usageFrom(chunk.usage);
