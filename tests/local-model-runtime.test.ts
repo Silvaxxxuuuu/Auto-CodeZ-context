@@ -101,3 +101,15 @@ test('Ollama pull exposes real byte progress and requires terminal success', asy
     assert.equal(events.at(-1)?.done, true);
   });
 });
+
+test('Ollama removal uses the native delete endpoint with the exact model id', async () => {
+  const adapter = new OllamaLocalRuntimeAdapter();
+  await withMockedFetch(async (input, init) => {
+    assert.equal(String(input), 'http://127.0.0.1:11434/api/delete');
+    assert.equal(init?.method, 'DELETE');
+    assert.deepEqual(JSON.parse(String(init?.body)), { model: 'qwen3:4b' });
+    return jsonResponse({});
+  }, async () => {
+    await adapter.remove('qwen3:4b');
+  });
+});
