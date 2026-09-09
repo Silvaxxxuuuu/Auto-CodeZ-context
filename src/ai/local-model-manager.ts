@@ -6,6 +6,7 @@ import {
   type LocalModelCompatibilityResult,
   type LocalModelDescriptor,
   type LocalModelInstallProgress,
+  type LocalModelInstallRequest,
   type LocalModelRequirements,
   type LocalModelRuntimeAdapter,
   type LocalModelRuntimeInfo,
@@ -180,7 +181,7 @@ export class LocalModelManager {
     };
   }
 
-  beginInstall(runtimeId: string, modelId: string): LocalModelInstallHandle {
+  beginInstall(runtimeId: string, modelId: string, request?: Omit<LocalModelInstallRequest, 'modelId'>): LocalModelInstallHandle {
     const runtime = this.requireRuntime(runtimeId);
     const install = runtime.install;
     if (!install) throw new Error(`${runtime.displayName} não oferece instalação de modelos pelo Auto CodeZ.`);
@@ -193,12 +194,16 @@ export class LocalModelManager {
     const controller = new AbortController();
     const cancellable = runtime.supportsInstallCancellation === true;
     this.activeInstalls.set(id, { controller, cancellable });
-    const source = install.call(runtime, normalizedModelId, cancellable ? controller.signal : undefined);
+    const source = install.call(runtime, {
+      modelId: normalizedModelId,
+      ...(request?.source ? { source: request.source } : {}),
+      ...(request?.quantization ? { quantization: request.quantization } : {}),
+    }, cancellable ? controller.signal : undefined);
     const cleanup = () => this.activeInstalls.delete(id);
 
     async function* progress(): AsyncGenerator<LocalModelInstallProgress> {
       try {
-        for await (const item of source) yield item;
+        for await (const item of source) yield { ...item, runtimeId, modelId: normalizedModelId };
       } finally {
         cleanup();
       }
