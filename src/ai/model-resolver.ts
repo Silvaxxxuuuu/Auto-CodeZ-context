@@ -56,7 +56,7 @@ export class ModelResolver {
 
     const discovery = this.list(config);
     if (discoveryBudgetMs <= 0) {
-      void discovery.catch(() => undefined);
+      void discovery.catch((): undefined => undefined);
       return this.fallbackForConfiguredModel(config, modelId);
     }
 
@@ -75,7 +75,7 @@ export class ModelResolver {
       if (timer) clearTimeout(timer);
     }
 
-    void discovery.catch(() => undefined);
+    void discovery.catch((): undefined => undefined);
     return this.fallbackForConfiguredModel(config, modelId);
   }
 
