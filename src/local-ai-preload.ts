@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { requireIdentifier, requireObject } from './core/input-validation';
+import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return await ipcRenderer.invoke(channel, ...args) as T;
@@ -13,8 +13,25 @@ function requireModelOperation(input: unknown, label: string): { runtimeId: stri
   };
 }
 
+function requireRuntimeSettings(input: unknown): { runtimeId: string; endpoint: string; apiToken?: string; clearToken?: boolean } {
+  const value = requireObject(input, 'Configuração do runtime local');
+  const runtimeId = requireIdentifier(value.runtimeId, 'Runtime local');
+  const endpoint = requireNonEmptyString(value.endpoint, 'Endpoint local');
+  if (value.apiToken !== undefined && typeof value.apiToken !== 'string') throw new Error('Token local inválido.');
+  if (value.clearToken !== undefined && typeof value.clearToken !== 'boolean') throw new Error('Opção de limpeza do token local inválida.');
+  const apiToken = typeof value.apiToken === 'string' && value.apiToken.trim() ? value.apiToken : undefined;
+  return {
+    runtimeId,
+    endpoint,
+    ...(apiToken ? { apiToken } : {}),
+    ...(value.clearToken === true ? { clearToken: true } : {}),
+  };
+}
+
 contextBridge.exposeInMainWorld('autoCodezLocalAi', {
   snapshot: () => invoke('local-ai:snapshot'),
+  listSettings: () => invoke('local-ai:list-settings'),
+  saveSettings: (input: { runtimeId: string; endpoint: string; apiToken?: string; clearToken?: boolean }) => invoke('local-ai:save-settings', requireRuntimeSettings(input)),
   install: (input: { runtimeId: string; modelId: string }) => invoke('local-ai:install', requireModelOperation(input, 'Instalação de modelo local')),
   cancelInstall: (input: { runtimeId: string; modelId: string }) => invoke('local-ai:cancel-install', requireModelOperation(input, 'Cancelamento de instalação local')),
   remove: (input: { runtimeId: string; modelId: string }) => invoke('local-ai:remove', requireModelOperation(input, 'Remoção de modelo local')),
