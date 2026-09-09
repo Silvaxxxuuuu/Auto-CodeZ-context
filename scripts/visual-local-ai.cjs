@@ -18,6 +18,7 @@ let page;
 let exitState;
 let stderr = '';
 let ollamaServer;
+let lmStudioServer;
 const installedModels = new Set(['qwen3:8b', 'llava:latest']);
 
 function errorText(error) {
@@ -140,6 +141,43 @@ async function startFakeOllama() {
   });
 }
 
+async function startFakeLmStudio() {
+  lmStudioServer = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/api/v1/models') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        models: [
+          {
+            type: 'llm',
+            key: 'granite-local',
+            display_name: 'Granite Local',
+            architecture: 'granite',
+            quantization: { name: 'Q4_K_M', bits_per_weight: 4 },
+            size_bytes: Math.round(1.8 * 1024 ** 3),
+            params_string: '3B',
+            max_context_length: 32768,
+            capabilities: { vision: false, trained_for_tool_use: true },
+          },
+          {
+            type: 'embedding',
+            key: 'embedding-local',
+            display_name: 'Embedding Local',
+            size_bytes: Math.round(0.3 * 1024 ** 3),
+            max_context_length: 8192,
+          },
+        ],
+      }));
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not found' }));
+  });
+  await new Promise((resolve, reject) => {
+    lmStudioServer.once('error', reject);
+    lmStudioServer.listen(1234, '127.0.0.1', resolve);
+  });
+}
+
 async function startElectron() {
   if (!electronExecutable) throw new Error('AUTO_CODEZ_ELECTRON_EXECUTABLE não foi definido.');
   const port = await reservePort();
@@ -198,6 +236,30 @@ async function verifyRecommendationMatchesSnapshot() {
   }
 }
 
+async function verifyLmStudioRuntime() {
+  const snapshot = await page.evaluate(() => window.autoCodezLocalAi.snapshot());
+  const runtime = snapshot.runtimes.find((item) => item.id === 'lm-studio');
+  if (!runtime?.available) throw new Error(`LM Studio não foi detectado no snapshot: ${JSON.stringify(runtime)}`);
+  if (runtime.operations.install !== true || runtime.operations.cancelInstall !== false || runtime.operations.remove !== false) {
+    throw new Error(`Capacidades do LM Studio foram inventadas ou perdidas: ${JSON.stringify(runtime.operations)}`);
+  }
+  const runtimeRow = page.locator('[data-local-ai-runtime="lm-studio"]');
+  await runtimeRow.waitFor({ state: 'visible', timeout: 10_000 });
+  if (!(await runtimeRow.innerText()).includes('Conectado')) throw new Error('Status conectado do LM Studio não foi exibido.');
+
+  const installedRow = page.locator('[data-local-ai-installed-model="lm-studio:granite-local"]');
+  await installedRow.waitFor({ state: 'visible', timeout: 10_000 });
+  const installedText = (await installedRow.innerText()).replace(/\s+/g, ' ');
+  if (!installedText.includes('LM Studio') || !installedText.includes('Remoção externa')) {
+    throw new Error(`Origem/limite do modelo LM Studio não ficou explícito: ${installedText}`);
+  }
+  if (await installedRow.locator('[data-local-ai-action="remove"]').count()) {
+    throw new Error('A UI exibiu remoção nativa para um runtime que não a oferece.');
+  }
+  const bodyText = (await page.locator('.settings-body').innerText()).replace(/\s+/g, ' ');
+  if (bodyText.includes('Embedding Local')) throw new Error('Modelo de embedding do LM Studio vazou para o inventário de LLMs.');
+}
+
 async function verifyInstallAndRemoval() {
   const install = page.locator('[data-local-ai-action="install"][data-model-id="qwen3:1.7b"]');
   await install.waitFor({ state: 'visible', timeout: 10_000 });
@@ -235,12 +297,14 @@ async function verifyLocalAiPanel() {
   if (!provider || provider.requiresApiKey !== false) throw new Error(`Ollama keyless não foi exposto corretamente: ${JSON.stringify(provider)}`);
 
   const bodyText = (await page.locator('.settings-body').innerText()).replace(/\s+/g, ' ');
-  if (!bodyText.includes('Conectado')) throw new Error(`Status conectado ausente: ${bodyText}`);
-  if (!bodyText.includes('qwen3:8b') || !bodyText.includes('llava:latest')) throw new Error(`Inventário local não foi exibido: ${bodyText}`);
+  if (!bodyText.includes('Runtimes locais') || !bodyText.includes('Ollama') || !bodyText.includes('LM Studio')) throw new Error(`Runtimes locais não foram apresentados corretamente: ${bodyText}`);
+  if (!bodyText.includes('qwen3:8b') || !bodyText.includes('llava:latest')) throw new Error(`Inventário Ollama não foi exibido: ${bodyText}`);
   if (!bodyText.includes('Qwen 3 1.7B') || !bodyText.includes('Catálogo local')) throw new Error(`Catálogo local não foi exibido: ${bodyText}`);
   if (!bodyText.includes('Memória RAM') || !bodyText.includes('Armazenamento livre')) throw new Error(`Diagnóstico de hardware incompleto: ${bodyText}`);
 
+  await verifyLmStudioRuntime();
   await verifyRecommendationMatchesSnapshot();
+  await page.screenshot({ path: path.join(outputDir, 'funcional-ia-local-runtimes.png'), animations: 'disabled', fullPage: true });
   await verifyInstallAndRemoval();
   await page.locator('[data-settings-close]').click();
 }
@@ -311,12 +375,14 @@ async function cleanup() {
     else appProcess.kill('SIGKILL');
   }
   if (ollamaServer) await new Promise((resolve) => ollamaServer.close(() => resolve())).catch(() => {});
+  if (lmStudioServer) await new Promise((resolve) => lmStudioServer.close(() => resolve())).catch(() => {});
   if (stateRoot) await fs.rm(stateRoot, { recursive: true, force: true }).catch(() => {});
 }
 
 (async () => {
   try {
     await startFakeOllama();
+    await startFakeLmStudio();
     await createStateRoot();
     await startElectron();
     await runTest();
