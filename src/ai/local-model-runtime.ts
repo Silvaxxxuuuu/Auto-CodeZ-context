@@ -45,6 +45,11 @@ export type LocalModelInstallRequest = {
   fileName?: string;
   sha256?: string;
   expectedBytes?: number;
+  name?: string;
+  parameterSize?: string;
+  family?: string;
+  capabilities?: string[];
+  contextWindow?: number;
 };
 
 export type LocalModelInstallProgress = {
