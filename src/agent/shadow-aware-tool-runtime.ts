@@ -2,6 +2,7 @@ import type { AIToolCall, AIToolDefinition, AIToolResult, PermissionLevel, ToolN
 import { ExecutionChangeBudgetRuntime } from '../execution-change-budget';
 import { ExecutionPlanner } from '../execution-planner';
 import type { ExecutionShadowWorkspaceRuntime } from '../execution-shadow-workspace';
+import { assertSafeWebUrlText, normalizeWebSearchQuery } from '../web/web-query-policy';
 import { WebRetrievalRuntime } from '../web/web-retrieval-runtime';
 import { ActivityRuntime } from './activity-runtime';
 import { runWithExecutionWorkspaceContext } from './execution-workspace-context';
@@ -150,7 +151,7 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
       if (runId && this.webChangeBudget) this.webChangeBudget.assertAllowed(chatId, runId, { toolName: call.name });
 
       if (call.name === 'web_search') {
-        const query = requiredString(call.input, 'query');
+        const query = normalizeWebSearchQuery(requiredString(call.input, 'query'));
         const limit = searchLimit(call.input);
         this.webActivity.emit({
           type: 'tool',
@@ -190,7 +191,7 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
         return { toolCallId: call.id, ok: true, output };
       }
 
-      const url = requiredString(call.input, 'url');
+      const url = assertSafeWebUrlText(requiredString(call.input, 'url'));
       this.webActivity.emit({
         type: 'tool',
         message: `Abrindo fonte Web: ${safeActivityText(url)}`,
