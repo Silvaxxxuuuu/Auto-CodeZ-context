@@ -176,20 +176,29 @@ async function verifyLocalChatInstallFlow() {
 
   const ai = page.locator('#chat-available-ai');
   await ai.waitFor({ state: 'visible' });
-  await ai.selectOption('provider:ollama');
+  await page.waitForFunction(() => Boolean(document.querySelector('#chat-available-ai option[value="local:unified"]')));
+  if (await ai.locator('option[value="provider:ollama"]').count()) throw new Error('Ollama voltou a aparecer como IA separada.');
+  if (await ai.locator('option[value="provider:lm-studio"]').count()) throw new Error('LM Studio voltou a aparecer como IA separada.');
+  await ai.selectOption('local:unified');
+
   const model = page.locator('#chat-model');
-  await model.locator('option[value="qwen3:0.6b"]').waitFor({ state: 'attached', timeout: 15_000 });
-  await model.selectOption('qwen3:0.6b');
+  const qwen = model.locator('option').filter({ hasText: 'Qwen 3 0.6B' });
+  await qwen.waitFor({ state: 'attached', timeout: 15_000 });
+  const logicalModelId = await qwen.getAttribute('value');
+  if (!logicalModelId) throw new Error('Modelo Qwen 3 0.6B unificado ficou sem identificador.');
+  await model.selectOption(logicalModelId);
+
   const save = page.locator('#save-available-ai-settings');
   if (!(await save.isDisabled())) throw new Error('Salvar deveria permanecer bloqueado antes da instalação.');
-  const install = page.locator('[data-local-model-install="ollama:qwen3:0.6b"]');
+  const install = page.locator(`[data-unified-local-install="${logicalModelId}"]`);
   await install.waitFor({ state: 'visible', timeout: 10_000 });
   await install.click();
   await page.waitForFunction(() => {
     const button = document.querySelector('#save-available-ai-settings');
     return button instanceof HTMLButtonElement && !button.disabled;
   }, null, { timeout: 20_000 });
-  if (await page.locator('[data-local-model-install="ollama:qwen3:0.6b"]').count()) throw new Error('Botão de instalar permaneceu após instalação concluída.');
+  if (await page.locator(`[data-unified-local-install="${logicalModelId}"]`).count()) throw new Error('Botão de instalar permaneceu após instalação concluída.');
+  if (installedOllamaModel !== 'qwen3:0.6b') throw new Error(`Backend não instalou o modelo esperado: ${installedOllamaModel}`);
   await page.screenshot({ path: path.join(outputDir, 'funcional-modelo-local-no-chat.png'), animations: 'disabled' });
 }
 
