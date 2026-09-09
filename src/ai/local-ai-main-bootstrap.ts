@@ -1,5 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
+import { LocalStorage } from '../core/storage';
+import { requireIdentifier, requireNonEmptyString, requireObject } from '../core/input-validation';
 import { collectLocalHardwareSnapshot } from './local-hardware';
 import { getLocalModelCatalogEntry, listLocalModelCatalog } from './local-model-catalog';
 import { LocalModelManager, type ManagedLocalModel } from './local-model-manager';
@@ -7,11 +9,12 @@ import type { LocalModelInstallProgress } from './local-model-runtime';
 import {
   getLocalRuntimeConnection,
   LocalRuntimeSettingsStore,
+  registerLocalRuntimeSettingsInitialization,
+  waitForLocalRuntimeSettingsInitialization,
   type LocalRuntimeSettingsStorage,
 } from './local-runtime-settings';
 import { LMStudioLocalRuntimeAdapter } from './local-runtimes/lm-studio';
 import { OllamaLocalRuntimeAdapter } from './local-runtimes/ollama';
-import { requireIdentifier, requireNonEmptyString, requireObject } from '../core/input-validation';
 
 function createManager(): LocalModelManager {
   const ollama = getLocalRuntimeConnection('ollama');
@@ -63,7 +66,16 @@ export async function initializeLocalAiRuntimeSettings(storage: LocalRuntimeSett
   manager = createManager();
 }
 
+const runtimeSettingsStorage = new LocalStorage();
+const runtimeSettingsInitialization = app.whenReady().then(async () => {
+  await runtimeSettingsStorage.init();
+  await initializeLocalAiRuntimeSettings(runtimeSettingsStorage);
+});
+registerLocalRuntimeSettingsInitialization(runtimeSettingsInitialization);
+void runtimeSettingsInitialization.catch(() => undefined);
+
 async function buildSnapshot() {
+  await waitForLocalRuntimeSettingsInitialization();
   const hardware = await collectLocalHardwareSnapshot(hardwareProbePath());
   const runtimes = await manager.getRuntimeInfos();
   const installed: ManagedLocalModel[] = [];
@@ -88,9 +100,13 @@ async function buildSnapshot() {
 }
 
 ipcMain.handle('local-ai:snapshot', async () => buildSnapshot());
-ipcMain.handle('local-ai:list-settings', async () => requireRuntimeSettings().list());
+ipcMain.handle('local-ai:list-settings', async () => {
+  await waitForLocalRuntimeSettingsInitialization();
+  return requireRuntimeSettings().list();
+});
 
 ipcMain.handle('local-ai:save-settings', async (_event, input: unknown) => {
+  await waitForLocalRuntimeSettingsInitialization();
   const value = requireObject(input, 'Configuração do runtime local');
   const runtimeId = requireIdentifier(value.runtimeId, 'Runtime local');
   const endpoint = requireNonEmptyString(value.endpoint, 'Endpoint local');
@@ -116,6 +132,7 @@ ipcMain.handle('local-ai:save-settings', async (_event, input: unknown) => {
 });
 
 ipcMain.handle('local-ai:install', async (_event, input: unknown) => {
+  await waitForLocalRuntimeSettingsInitialization();
   ensureRuntimeMutationAllowed();
   const value = requireObject(input, 'Instalação de modelo local');
   const runtimeId = requireIdentifier(value.runtimeId, 'Runtime local');
@@ -163,6 +180,7 @@ ipcMain.handle('local-ai:install', async (_event, input: unknown) => {
 });
 
 ipcMain.handle('local-ai:cancel-install', async (_event, input: unknown) => {
+  await waitForLocalRuntimeSettingsInitialization();
   const value = requireObject(input, 'Cancelamento de instalação local');
   const runtimeId = requireIdentifier(value.runtimeId, 'Runtime local');
   const modelId = requireIdentifier(value.modelId, 'Modelo local');
@@ -170,6 +188,7 @@ ipcMain.handle('local-ai:cancel-install', async (_event, input: unknown) => {
 });
 
 ipcMain.handle('local-ai:remove', async (_event, input: unknown) => {
+  await waitForLocalRuntimeSettingsInitialization();
   ensureRuntimeMutationAllowed();
   const value = requireObject(input, 'Remoção de modelo local');
   const runtimeId = requireIdentifier(value.runtimeId, 'Runtime local');
