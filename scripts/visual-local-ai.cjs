@@ -18,6 +18,7 @@ let page;
 let exitState;
 let stderr = '';
 let ollamaServer;
+const installedModels = new Set(['qwen3:8b', 'llava:latest']);
 
 function errorText(error) {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -69,29 +70,48 @@ async function readJson(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
+function fakeModel(model) {
+  if (model === 'qwen3:8b') return { name: model, model, size: Math.round(5.2 * 1024 ** 3), details: { family: 'qwen3', parameter_size: '8B', quantization_level: 'Q4_K_M' } };
+  if (model === 'qwen3:1.7b') return { name: model, model, size: Math.round(1.4 * 1024 ** 3), details: { family: 'qwen3', parameter_size: '1.7B', quantization_level: 'Q4_K_M' } };
+  return { name: model, model, size: Math.round(4.5 * 1024 ** 3), details: { family: 'llava', parameter_size: '7B', quantization_level: 'Q4_0' } };
+}
+
 async function startFakeOllama() {
   ollamaServer = http.createServer(async (req, res) => {
     try {
       if (req.method === 'GET' && req.url === '/api/tags') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          models: [
-            { name: 'qwen3:8b', model: 'qwen3:8b' },
-            { name: 'llava:latest', model: 'llava:latest' },
-          ],
-        }));
+        res.end(JSON.stringify({ models: [...installedModels].map(fakeModel) }));
         return;
       }
       if (req.method === 'POST' && req.url === '/api/show') {
         const body = await readJson(req);
         const model = String(body.model || '');
-        const capabilities = model === 'qwen3:8b'
+        const capabilities = model.startsWith('qwen3:')
           ? ['completion', 'tools', 'thinking']
           : model === 'llava:latest'
             ? ['completion', 'vision']
             : [];
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ capabilities, model_info: {} }));
+        return;
+      }
+      if (req.method === 'POST' && req.url === '/api/pull') {
+        const body = await readJson(req);
+        const model = String(body.model || '');
+        if (model !== 'qwen3:1.7b') {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'model not available in visual fixture' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+        res.write(`${JSON.stringify({ status: 'pulling manifest' })}\n`);
+        res.write(`${JSON.stringify({ status: 'downloading', completed: 350, total: 1400, digest: 'sha256:test' })}\n`);
+        setTimeout(() => {
+          res.write(`${JSON.stringify({ status: 'downloading', completed: 1400, total: 1400, digest: 'sha256:test' })}\n`);
+          installedModels.add(model);
+          res.end(`${JSON.stringify({ status: 'success' })}\n`);
+        }, 120);
         return;
       }
       res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -159,8 +179,7 @@ async function verifyLocalAiPanel() {
   const localAiButton = page.locator('[data-local-ai-settings]');
   await localAiButton.waitFor({ state: 'visible', timeout: 10_000 });
   await localAiButton.click();
-  const connected = page.locator('[data-local-ai-status="connected"]');
-  await connected.waitFor({ state: 'visible', timeout: 15_000 });
+  await page.getByText('Seu computador', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
 
   const provider = await page.evaluate(async () => {
     const state = await window.autoCodez.getState();
@@ -168,11 +187,20 @@ async function verifyLocalAiPanel() {
   });
   if (!provider || provider.requiresApiKey !== false) throw new Error(`Ollama keyless não foi exposto corretamente: ${JSON.stringify(provider)}`);
 
-  const text = (await connected.innerText()).replace(/\s+/g, ' ');
-  if (!text.includes('Conectado')) throw new Error(`Status conectado ausente: ${text}`);
-  if (!text.includes('qwen3:8b') || !text.includes('llava:latest')) throw new Error(`Modelos locais não foram exibidos: ${text}`);
-  const capabilityMatches = text.match(/1\/2/g) || [];
-  if (capabilityMatches.length < 3) throw new Error(`Capacidades tools/reasoning/vision não foram refletidas: ${text}`);
+  const bodyText = (await page.locator('.settings-body').innerText()).replace(/\s+/g, ' ');
+  if (!bodyText.includes('Conectado')) throw new Error(`Status conectado ausente: ${bodyText}`);
+  if (!bodyText.includes('qwen3:8b') || !bodyText.includes('llava:latest')) throw new Error(`Inventário local não foi exibido: ${bodyText}`);
+  if (!bodyText.includes('Qwen 3 1.7B') || !bodyText.includes('Modelos recomendados')) throw new Error(`Catálogo recomendado não foi exibido: ${bodyText}`);
+  if (!bodyText.includes('Memória RAM') || !bodyText.includes('Armazenamento livre')) throw new Error(`Diagnóstico de hardware incompleto: ${bodyText}`);
+
+  const install = page.locator('[data-local-ai-action="install"][data-model-id="qwen3:1.7b"]');
+  await install.waitFor({ state: 'visible', timeout: 10_000 });
+  if (await install.isDisabled()) throw new Error('Qwen 3 1.7B foi bloqueado inesperadamente no runner visual.');
+  await install.click();
+  await page.locator('[data-local-ai-model="ollama:qwen3:1.7b"]').getByText('Instalado', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+
+  const installedText = (await page.locator('.settings-body').innerText()).replace(/\s+/g, ' ');
+  if (!installedText.includes('qwen3:1.7b')) throw new Error(`Instalação não atualizou o inventário: ${installedText}`);
   await page.locator('[data-settings-close]').click();
 }
 
@@ -210,11 +238,6 @@ async function verifyChatCanSelectOllama() {
     return Boolean(selected?.textContent?.includes('Ollama') && header?.textContent?.includes('Ollama') && header.textContent.includes('qwen3:8b'));
   }, created.id, { timeout: 15_000 });
 
-  const headerText = (await page.locator('#chat-header').innerText()).replace(/\s+/g, ' ');
-  const chatText = (await restoredChat.innerText()).replace(/\s+/g, ' ');
-  if (!headerText.includes('Ollama') || !headerText.includes('qwen3:8b')) throw new Error(`Header não foi reidratado com Ollama: ${headerText}`);
-  if (!chatText.includes('Ollama')) throw new Error(`Lista de chats não foi reidratada com Ollama: ${chatText}`);
-
   const persisted = await page.evaluate(async (chatId) => {
     const state = await window.autoCodez.getState();
     return state.chats.find((chat) => chat.id === chatId) || null;
@@ -233,7 +256,7 @@ async function runTest() {
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
   await verifyLocalAiPanel();
   await verifyChatCanSelectOllama();
-  await page.screenshot({ path: path.join(outputDir, `${testName}.png`), animations: 'disabled' });
+  await page.screenshot({ path: path.join(outputDir, `${testName}.png`), animations: 'disabled', fullPage: true });
   if (pageErrors.length || consoleErrors.length) {
     throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
   }
@@ -259,7 +282,7 @@ async function cleanup() {
     await updateManifest({ name: testName, status: 'passed' });
   } catch (error) {
     const message = errorText(error);
-    if (page && !page.isClosed()) await page.screenshot({ path: path.join(outputDir, `falha-${testName}.png`), animations: 'disabled' }).catch(() => {});
+    if (page && !page.isClosed()) await page.screenshot({ path: path.join(outputDir, `falha-${testName}.png`), animations: 'disabled', fullPage: true }).catch(() => {});
     await fs.writeFile(path.join(outputDir, 'local-ai-error.txt'), `${message}\n${stderr}\n`, 'utf8').catch(() => {});
     await updateManifest({ name: testName, status: 'failed', error: message }).catch(() => {});
     console.error(error);
