@@ -38,6 +38,21 @@ test('plugin manifest validation fails closed for incompatible API, traversal an
   assert.throws(() => validatePluginManifest(manifest({ permissions: ['system:everything'] })), /permissions/i);
 });
 
+test('plugin contributions require the explicit permission that authorizes the host capability', () => {
+  assert.throws(
+    () => validatePluginManifest(manifest({ contributions: ['tool'], permissions: [] })),
+    /ai:tool/i,
+  );
+  assert.throws(
+    () => validatePluginManifest(manifest({ contributions: ['provider'], permissions: ['ui:contribute'] })),
+    /ai:provider/i,
+  );
+  assert.throws(
+    () => validatePluginManifest(manifest({ contributions: ['right-sidebar'], permissions: ['ai:tool'] })),
+    /ui:contribute/i,
+  );
+});
+
 test('registry owns lifecycle and exposes contributions only from enabled plugins', () => {
   const registry = new PluginRegistry();
   const registered = registry.register(manifest(), 100);
