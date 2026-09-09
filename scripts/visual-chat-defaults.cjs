@@ -132,6 +132,41 @@ async function assertHealthy() {
   }
 }
 
+async function assertCardHeadingLayout() {
+  const metrics = await page.locator('.settings-body').evaluate((body) => {
+    const headings = Array.from(body.querySelectorAll('.local-ai-card-heading')).map((heading) => {
+      const copy = heading.querySelector(':scope > div:first-child');
+      const title = copy?.querySelector('strong');
+      const description = copy?.querySelector(':scope > span');
+      if (!(heading instanceof HTMLElement) || !(copy instanceof HTMLElement) || !(title instanceof HTMLElement) || !(description instanceof HTMLElement)) {
+        return { valid: false, reason: 'estrutura incompleta' };
+      }
+      const headingStyle = getComputedStyle(heading);
+      const copyStyle = getComputedStyle(copy);
+      const titleRect = title.getBoundingClientRect();
+      const descriptionRect = description.getBoundingClientRect();
+      return {
+        valid: headingStyle.display === 'flex'
+          && copyStyle.display === 'flex'
+          && copyStyle.flexDirection === 'column'
+          && descriptionRect.top >= titleRect.bottom + 2,
+        reason: `heading=${headingStyle.display} copy=${copyStyle.display}/${copyStyle.flexDirection} gap=${(descriptionRect.top - titleRect.bottom).toFixed(2)}`,
+      };
+    });
+    const cards = Array.from(body.querySelectorAll(':scope > .settings-card'))
+      .filter((card) => card instanceof HTMLElement)
+      .map((card) => card.getBoundingClientRect());
+    const cardGaps = cards.slice(1).map((rect, index) => rect.top - cards[index].bottom);
+    return { headings, cardGaps };
+  });
+
+  const invalid = metrics.headings.find((item) => !item.valid);
+  if (invalid) throw new Error(`Hierarquia de cabeçalho de Configurações inválida: ${invalid.reason}.`);
+  if (metrics.cardGaps.some((gap) => gap < 8)) {
+    throw new Error(`Cartões de Configurações sem separação suficiente: ${metrics.cardGaps.map((gap) => gap.toFixed(2)).join(', ')}.`);
+  }
+}
+
 async function openSettingsSection(id, title) {
   const overlay = page.locator('.settings-overlay');
   if (!(await overlay.count())) {
@@ -150,6 +185,7 @@ async function runScenario() {
   await assertHealthy();
 
   await openSettingsSection('ai', 'IA e modelos');
+  await assertCardHeadingLayout();
   const intelligenceDefault = page.locator('[data-settings-control="default-intelligence"]');
   await intelligenceDefault.waitFor({ state: 'visible', timeout: 15_000 });
   if ((await intelligenceDefault.inputValue()) !== 'normal') throw new Error('Raciocínio padrão inicial deveria ser normal.');
@@ -160,6 +196,7 @@ async function runScenario() {
   }
 
   await openSettingsSection('execution', 'Execução');
+  await assertCardHeadingLayout();
   const permissionDefault = page.locator('[data-settings-control="default-permission"]');
   await permissionDefault.waitFor({ state: 'visible', timeout: 15_000 });
   if ((await permissionDefault.inputValue()) !== 'safe') throw new Error('Autonomia padrão inicial deveria ser safe.');
@@ -190,11 +227,13 @@ async function runScenario() {
   await page.locator('.intelligence-current').filter({ hasText: 'Máximo' }).waitFor({ state: 'visible', timeout: 15_000 });
 
   await openSettingsSection('ai', 'IA e modelos');
+  await assertCardHeadingLayout();
   const activeIntelligence = page.locator('[data-settings-control="chat-intelligence"]');
   await activeIntelligence.waitFor({ state: 'visible', timeout: 15_000 });
   if ((await activeIntelligence.inputValue()) !== 'maximum') throw new Error('IA e modelos não refletiu o raciocínio herdado pelo novo chat.');
 
   await openSettingsSection('execution', 'Execução');
+  await assertCardHeadingLayout();
   const activePermission = page.locator('[data-settings-control="chat-permission"]');
   await activePermission.waitFor({ state: 'visible', timeout: 15_000 });
   if ((await activePermission.inputValue()) !== 'ask') throw new Error('Execução não refletiu a autonomia herdada pelo novo chat.');
