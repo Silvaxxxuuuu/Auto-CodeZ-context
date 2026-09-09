@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -20,6 +21,7 @@ type EngineManifest = {
   release: string;
   asset: string;
   sha256: string;
+  executableSha256: string;
 };
 
 export type AutoCodezLocalEngineOptions = {
@@ -28,6 +30,10 @@ export type AutoCodezLocalEngineOptions = {
   fetcher?: typeof fetch;
   extractArchive?: (archivePath: string, destination: string) => Promise<void>;
 };
+
+function sha256(bytes: Uint8Array): string {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
 
 async function defaultExtractArchive(archivePath: string, destination: string): Promise<void> {
   await fs.mkdir(destination, { recursive: true });
@@ -70,15 +76,18 @@ export class AutoCodezLocalEngineManager {
   async isInstalled(): Promise<boolean> {
     if (!this.isSupported()) return false;
     try {
-      const [manifestRaw, executable] = await Promise.all([
+      const [manifestRaw, executable, executableBytes] = await Promise.all([
         fs.readFile(this.manifestPath(), 'utf8'),
         fs.stat(this.executablePath()),
+        fs.readFile(this.executablePath()),
       ]);
       const manifest = JSON.parse(manifestRaw) as EngineManifest;
       return executable.isFile()
         && manifest.release === AUTO_CODEZ_LOCAL_ENGINE_RELEASE
         && manifest.asset === AUTO_CODEZ_LOCAL_ENGINE_ASSET.fileName
-        && manifest.sha256 === AUTO_CODEZ_LOCAL_ENGINE_ASSET.sha256;
+        && manifest.sha256 === AUTO_CODEZ_LOCAL_ENGINE_ASSET.sha256
+        && /^[a-f0-9]{64}$/.test(manifest.executableSha256)
+        && sha256(executableBytes) === manifest.executableSha256;
     } catch {
       return false;
     }
@@ -109,10 +118,12 @@ export class AutoCodezLocalEngineManager {
       const executablePath = path.join(stagingDir, 'llama-server.exe');
       const executable = await fs.stat(executablePath).catch((): undefined => undefined);
       if (!executable?.isFile()) throw new Error('O pacote verificado do llama.cpp não contém llama-server.exe.');
+      const executableBytes = await fs.readFile(executablePath);
       const manifest: EngineManifest = {
         release: AUTO_CODEZ_LOCAL_ENGINE_RELEASE,
         asset: AUTO_CODEZ_LOCAL_ENGINE_ASSET.fileName,
         sha256: AUTO_CODEZ_LOCAL_ENGINE_ASSET.sha256,
+        executableSha256: sha256(executableBytes),
       };
       await fs.writeFile(path.join(stagingDir, 'engine.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
       await fs.rm(this.engineDir(), { recursive: true, force: true });
