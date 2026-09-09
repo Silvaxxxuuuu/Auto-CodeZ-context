@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { AutoCodezLocalRuntimeAdapter } from './local-runtimes/auto-codez-local';
 
 const START_TIMEOUT_MS = 90_000;
@@ -8,7 +8,7 @@ const HEALTH_RETRY_MS = 300;
 type ActiveServer = {
   modelId: string;
   endpoint: string;
-  process: ChildProcessWithoutNullStreams;
+  process: ChildProcess;
 };
 
 async function reservePort(): Promise<number> {
@@ -85,8 +85,8 @@ export class AutoCodezLocalService {
     const active: ActiveServer = { modelId, endpoint, process: child };
     this.active = active;
     let stderr = '';
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk) => {
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk) => {
       stderr = `${stderr}${String(chunk)}`.slice(-16_384);
     });
 
