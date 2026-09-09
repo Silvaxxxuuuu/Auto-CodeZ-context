@@ -107,7 +107,7 @@ export class AutoCodezLocalEngineManager {
       }, { signal, fetcher: this.fetcher, onProgress });
       await this.extractArchive(archivePath, stagingDir);
       const executablePath = path.join(stagingDir, 'llama-server.exe');
-      const executable = await fs.stat(executablePath).catch(() => undefined);
+      const executable = await fs.stat(executablePath).catch((): undefined => undefined);
       if (!executable?.isFile()) throw new Error('O pacote verificado do llama.cpp não contém llama-server.exe.');
       const manifest: EngineManifest = {
         release: AUTO_CODEZ_LOCAL_ENGINE_RELEASE,
@@ -120,10 +120,10 @@ export class AutoCodezLocalEngineManager {
       await fs.rename(stagingDir, this.engineDir());
       return this.executablePath();
     } catch (error) {
-      await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
+      await fs.rm(stagingDir, { recursive: true, force: true }).catch((): undefined => undefined);
       throw error;
     } finally {
-      await fs.rm(archivePath, { force: true }).catch(() => undefined);
+      await fs.rm(archivePath, { force: true }).catch((): undefined => undefined);
     }
   }
 }
