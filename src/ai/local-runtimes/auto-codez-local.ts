@@ -101,7 +101,6 @@ export class AutoCodezLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
   readonly supportsInstallCancellation = true;
   readonly engine: AutoCodezLocalEngineManager;
   private readonly modelFetcher?: typeof fetch;
-  private readonly verifiedModels = new Set<string>();
 
   constructor(readonly rootDir: string, options: AutoCodezLocalRuntimeOptions = {}) {
     this.engine = new AutoCodezLocalEngineManager(rootDir, options);
@@ -160,11 +159,8 @@ export class AutoCodezLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
       const stat = await fs.stat(candidate);
       if (!stat.isFile()) return undefined;
       if (manifest.descriptor.sizeBytes && stat.size !== manifest.descriptor.sizeBytes) return undefined;
-      if (!this.verifiedModels.has(modelId)) {
-        const actualSha = await hashFile(candidate);
-        if (actualSha !== manifest.sha256) return undefined;
-        this.verifiedModels.add(modelId);
-      }
+      const actualSha = await hashFile(candidate);
+      if (actualSha !== manifest.sha256) return undefined;
       return candidate;
     } catch {
       return undefined;
@@ -210,7 +206,6 @@ export class AutoCodezLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
     };
     await fs.mkdir(this.modelsDir(), { recursive: true });
     await fs.writeFile(this.manifestPath(request.modelId), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-    this.verifiedModels.add(request.modelId);
     yield {
       runtimeId: this.id,
       modelId: request.modelId,
@@ -224,7 +219,6 @@ export class AutoCodezLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
   }
 
   async remove(modelId: string): Promise<void> {
-    this.verifiedModels.delete(modelId);
     try {
       const raw = await fs.readFile(this.manifestPath(modelId), 'utf8');
       const manifest = JSON.parse(raw) as InstalledModelManifest;
