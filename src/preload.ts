@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import { requirePublicExternalUrl } from './core/external-url-policy';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import { normalizeOptionalExecutionAllowedPaths } from './execution-path-scope-request';
 
@@ -234,5 +235,5 @@ contextBridge.exposeInMainWorld('autoCodez', {
     const value = requireObject(input, 'Dados do arquivo');
     return invoke('projects:write-file', { filePath: requireNonEmptyString(value.filePath, 'Arquivo'), content: typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo de arquivo é inválido.'); })() });
   },
-  openExternal: (url: string) => invoke('app:open-external', requireNonEmptyString(url, 'URL externa')),
+  openExternal: (url: string) => invoke('app:open-external', requirePublicExternalUrl(url)),
 });
