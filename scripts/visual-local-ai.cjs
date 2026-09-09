@@ -21,9 +21,7 @@ let ollamaServer;
 let lmStudioServer;
 const installedModels = new Set(['qwen3:8b', 'llava:latest']);
 
-function errorText(error) {
-  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-}
+function errorText(error) { return error instanceof Error ? `${error.name}: ${error.message}` : String(error); }
 
 async function reservePort() {
   return new Promise((resolve, reject) => {
@@ -33,11 +31,7 @@ async function reservePort() {
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
       const port = address && typeof address === 'object' ? address.port : 0;
-      server.close((error) => {
-        if (error) reject(error);
-        else if (!port) reject(new Error('Não foi possível reservar porta CDP.'));
-        else resolve(port);
-      });
+      server.close((error) => error ? reject(error) : port ? resolve(port) : reject(new Error('Não foi possível reservar porta CDP.')));
     });
   });
 }
@@ -51,12 +45,7 @@ async function createStateRoot() {
 }
 
 function environment() {
-  const env = {
-    ...process.env,
-    AUTO_CODEZ_VISUAL_TEST: '1',
-    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
-    HOME: stateRoot,
-  };
+  const env = { ...process.env, AUTO_CODEZ_VISUAL_TEST: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true', HOME: stateRoot };
   if (process.platform === 'win32') {
     env.USERPROFILE = stateRoot;
     env.APPDATA = path.join(stateRoot, 'AppData', 'Roaming');
@@ -73,7 +62,6 @@ async function readJson(req) {
 
 function fakeModel(model) {
   if (model === 'qwen3:8b') return { name: model, model, size: Math.round(5.2 * 1024 ** 3), details: { family: 'qwen3', parameter_size: '8B', quantization_level: 'Q4_K_M' } };
-  if (model === 'qwen3:1.7b') return { name: model, model, size: Math.round(1.4 * 1024 ** 3), details: { family: 'qwen3', parameter_size: '1.7B', quantization_level: 'Q4_K_M' } };
   return { name: model, model, size: Math.round(4.5 * 1024 ** 3), details: { family: 'llava', parameter_size: '7B', quantization_level: 'Q4_0' } };
 }
 
@@ -88,44 +76,9 @@ async function startFakeOllama() {
       if (req.method === 'POST' && req.url === '/api/show') {
         const body = await readJson(req);
         const model = String(body.model || '');
-        const capabilities = model.startsWith('qwen3:')
-          ? ['completion', 'tools', 'thinking']
-          : model === 'llava:latest'
-            ? ['completion', 'vision']
-            : [];
+        const capabilities = model.startsWith('qwen3:') ? ['completion', 'tools', 'thinking'] : model === 'llava:latest' ? ['completion', 'vision'] : [];
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ capabilities, model_info: {} }));
-        return;
-      }
-      if (req.method === 'POST' && req.url === '/api/pull') {
-        const body = await readJson(req);
-        const model = String(body.model || '');
-        if (model !== 'qwen3:1.7b') {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'model not available in visual fixture' }));
-          return;
-        }
-        res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
-        res.write(`${JSON.stringify({ status: 'pulling manifest' })}\n`);
-        res.write(`${JSON.stringify({ status: 'downloading', completed: 350, total: 1400, digest: 'sha256:test' })}\n`);
-        setTimeout(() => {
-          res.write(`${JSON.stringify({ status: 'downloading', completed: 1400, total: 1400, digest: 'sha256:test' })}\n`);
-          installedModels.add(model);
-          res.end(`${JSON.stringify({ status: 'success' })}\n`);
-        }, 120);
-        return;
-      }
-      if (req.method === 'DELETE' && req.url === '/api/delete') {
-        const body = await readJson(req);
-        const model = String(body.model || '');
-        if (!installedModels.has(model)) {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'model is not installed in visual fixture' }));
-          return;
-        }
-        installedModels.delete(model);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ deleted: true }));
         return;
       }
       res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -145,28 +98,10 @@ async function startFakeLmStudio() {
   lmStudioServer = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/api/v1/models') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        models: [
-          {
-            type: 'llm',
-            key: 'granite-local',
-            display_name: 'Granite Local',
-            architecture: 'granite',
-            quantization: { name: 'Q4_K_M', bits_per_weight: 4 },
-            size_bytes: Math.round(1.8 * 1024 ** 3),
-            params_string: '3B',
-            max_context_length: 32768,
-            capabilities: { vision: false, trained_for_tool_use: true },
-          },
-          {
-            type: 'embedding',
-            key: 'embedding-local',
-            display_name: 'Embedding Local',
-            size_bytes: Math.round(0.3 * 1024 ** 3),
-            max_context_length: 8192,
-          },
-        ],
-      }));
+      res.end(JSON.stringify({ models: [
+        { type: 'llm', key: 'granite-local', display_name: 'Granite Local', architecture: 'granite', quantization: { name: 'Q4_K_M', bits_per_weight: 4 }, size_bytes: Math.round(1.8 * 1024 ** 3), params_string: '3B', max_context_length: 32768, capabilities: { vision: false, trained_for_tool_use: true } },
+        { type: 'embedding', key: 'embedding-local', display_name: 'Embedding Local', size_bytes: Math.round(0.3 * 1024 ** 3), max_context_length: 8192 },
+      ] }));
       return;
     }
     res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -181,20 +116,12 @@ async function startFakeLmStudio() {
 async function startElectron() {
   if (!electronExecutable) throw new Error('AUTO_CODEZ_ELECTRON_EXECUTABLE não foi definido.');
   const port = await reservePort();
-  appProcess = spawn(electronExecutable, [
-    `--remote-debugging-port=${port}`,
-    '--remote-debugging-address=127.0.0.1',
-    '--no-first-run',
-  ], {
-    cwd: root,
-    env: environment(),
-    windowsHide: true,
-    stdio: ['ignore', 'ignore', 'pipe'],
+  appProcess = spawn(electronExecutable, [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--no-first-run'], {
+    cwd: root, env: environment(), windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'],
   });
   appProcess.stderr?.setEncoding('utf8');
   appProcess.stderr?.on('data', (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-256 * 1024); });
   appProcess.once('exit', (code, signal) => { exitState = { code, signal }; });
-
   const endpoint = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 60_000;
   let lastError;
@@ -224,65 +151,7 @@ async function updateManifest(result) {
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 }
 
-async function verifyRecommendationMatchesSnapshot() {
-  const snapshot = await page.evaluate(() => window.autoCodezLocalAi.snapshot());
-  const bodyText = (await page.locator('.settings-body').innerText()).replace(/\s+/g, ' ');
-  if (snapshot.recommendation) {
-    if (!bodyText.includes('Recomendado para este computador')) throw new Error(`Recomendação automática não foi exibida: ${bodyText}`);
-    const recommended = snapshot.catalog.find((model) => model.runtimeId === snapshot.recommendation.runtimeId && model.id === snapshot.recommendation.modelId);
-    if (!recommended || !bodyText.includes(recommended.name)) throw new Error(`Modelo recomendado não corresponde ao snapshot: ${JSON.stringify(snapshot.recommendation)}`);
-  } else if (!bodyText.includes('Sem opção segura')) {
-    throw new Error(`Ausência de recomendação não foi explicada na interface: ${bodyText}`);
-  }
-}
-
-async function verifyLmStudioRuntime() {
-  const snapshot = await page.evaluate(() => window.autoCodezLocalAi.snapshot());
-  const runtime = snapshot.runtimes.find((item) => item.id === 'lm-studio');
-  if (!runtime?.available) throw new Error(`LM Studio não foi detectado no snapshot: ${JSON.stringify(runtime)}`);
-  if (runtime.operations.install !== true || runtime.operations.cancelInstall !== false || runtime.operations.remove !== false) {
-    throw new Error(`Capacidades do LM Studio foram inventadas ou perdidas: ${JSON.stringify(runtime.operations)}`);
-  }
-  const runtimeRow = page.locator('[data-local-ai-runtime="lm-studio"]');
-  await runtimeRow.waitFor({ state: 'visible', timeout: 10_000 });
-  if (!(await runtimeRow.innerText()).includes('Conectado')) throw new Error('Status conectado do LM Studio não foi exibido.');
-
-  const installedRow = page.locator('[data-local-ai-installed-model="lm-studio:granite-local"]');
-  await installedRow.waitFor({ state: 'visible', timeout: 10_000 });
-  const installedText = (await installedRow.innerText()).replace(/\s+/g, ' ');
-  if (!installedText.includes('LM Studio') || !installedText.includes('Remoção externa')) {
-    throw new Error(`Origem/limite do modelo LM Studio não ficou explícito: ${installedText}`);
-  }
-  if (await installedRow.locator('[data-local-ai-action="remove"]').count()) {
-    throw new Error('A UI exibiu remoção nativa para um runtime que não a oferece.');
-  }
-  const bodyText = (await page.locator('.settings-body').innerText()).replace(/\s+/g, ' ');
-  if (bodyText.includes('Embedding Local')) throw new Error('Modelo de embedding do LM Studio vazou para o inventário de LLMs.');
-}
-
-async function verifyInstallAndRemoval() {
-  const install = page.locator('[data-local-ai-action="install"][data-model-id="qwen3:1.7b"]');
-  await install.waitFor({ state: 'visible', timeout: 10_000 });
-  if (await install.isDisabled()) throw new Error('Qwen 3 1.7B foi bloqueado inesperadamente no runner visual.');
-  await install.click();
-
-  const catalogRow = page.locator('[data-local-ai-model="ollama:qwen3:1.7b"]');
-  await catalogRow.getByText('Instalado', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
-  const installedRow = page.locator('[data-local-ai-installed-model="ollama:qwen3:1.7b"]');
-  await installedRow.waitFor({ state: 'visible', timeout: 15_000 });
-
-  await installedRow.locator('[data-local-ai-action="remove"]').click();
-  const confirmedRow = page.locator('[data-local-ai-installed-model="ollama:qwen3:1.7b"]');
-  await confirmedRow.getByText('Confirmar remoção', { exact: true }).waitFor({ state: 'visible', timeout: 10_000 });
-  await confirmedRow.locator('[data-local-ai-action="confirm-remove"]').click();
-  await installedRow.waitFor({ state: 'detached', timeout: 15_000 });
-
-  const installAgain = page.locator('[data-local-ai-action="install"][data-model-id="qwen3:1.7b"]');
-  await installAgain.waitFor({ state: 'visible', timeout: 15_000 });
-  if (!installedModels.has('qwen3:8b') || installedModels.has('qwen3:1.7b')) throw new Error(`Fixture não refletiu remoção corretamente: ${JSON.stringify([...installedModels])}`);
-}
-
-async function verifyLocalAiPanel() {
+async function verifyLocalAiDiagnostics() {
   await page.locator('#ac-app-settings').click();
   await page.locator('.settings-overlay').waitFor({ state: 'visible' });
   const localAiButton = page.locator('[data-local-ai-settings]');
@@ -290,66 +159,64 @@ async function verifyLocalAiPanel() {
   await localAiButton.click();
   await page.getByText('Seu computador', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
 
-  const provider = await page.evaluate(async () => {
-    const state = await window.autoCodez.getState();
-    return state.providers.find((item) => item.id === 'ollama') || null;
-  });
-  if (!provider || provider.requiresApiKey !== false) throw new Error(`Ollama keyless não foi exposto corretamente: ${JSON.stringify(provider)}`);
+  const snapshot = await page.evaluate(() => window.autoCodezLocalAi.snapshot());
+  const ollama = snapshot.runtimes.find((item) => item.id === 'ollama');
+  const lmStudio = snapshot.runtimes.find((item) => item.id === 'lm-studio');
+  if (!ollama?.available || !lmStudio?.available) throw new Error(`Runtimes locais não conectaram: ${JSON.stringify(snapshot.runtimes)}`);
+  if (lmStudio.operations.install !== true || lmStudio.operations.cancelInstall !== false || lmStudio.operations.remove !== false) throw new Error(`Capacidades LM Studio incorretas: ${JSON.stringify(lmStudio.operations)}`);
 
   const bodyText = (await page.locator('.settings-body').innerText()).replace(/\s+/g, ' ');
-  if (!bodyText.includes('Runtimes locais') || !bodyText.includes('Ollama') || !bodyText.includes('LM Studio')) throw new Error(`Runtimes locais não foram apresentados corretamente: ${bodyText}`);
-  if (!bodyText.includes('qwen3:8b') || !bodyText.includes('llava:latest')) throw new Error(`Inventário Ollama não foi exibido: ${bodyText}`);
-  if (!bodyText.includes('Qwen 3 1.7B') || !bodyText.includes('Catálogo local')) throw new Error(`Catálogo local não foi exibido: ${bodyText}`);
-  if (!bodyText.includes('Memória RAM') || !bodyText.includes('Armazenamento livre')) throw new Error(`Diagnóstico de hardware incompleto: ${bodyText}`);
+  for (const expected of ['Diagnóstico', 'Runtimes locais', 'Ollama', 'LM Studio', 'Modelos no computador', 'qwen3:8b', 'llava:latest', 'Granite Local', 'Memória RAM', 'Armazenamento livre', 'configurações de um chat']) {
+    if (!bodyText.toLowerCase().includes(expected.toLowerCase())) throw new Error(`IA Local não exibiu ${expected}: ${bodyText}`);
+  }
+  if (bodyText.includes('Catálogo local') || page.locator('[data-local-ai-action="install"]').count() && await page.locator('[data-local-ai-action="install"]').count()) {
+    throw new Error('Settings voltou a ser o fluxo principal de instalação de modelos locais.');
+  }
+  if (bodyText.includes('Embedding Local')) throw new Error('Embedding do LM Studio vazou para o inventário de LLMs.');
 
-  await verifyLmStudioRuntime();
-  await verifyRecommendationMatchesSnapshot();
+  const lmInstalled = page.locator('[data-local-ai-installed-model="lm-studio:granite-local"]');
+  await lmInstalled.waitFor({ state: 'visible', timeout: 10_000 });
+  if (!(await lmInstalled.innerText()).includes('Remoção externa')) throw new Error('Limite de remoção do LM Studio não ficou explícito.');
   await page.screenshot({ path: path.join(outputDir, 'funcional-ia-local-runtimes.png'), animations: 'disabled', fullPage: true });
-  await verifyInstallAndRemoval();
   await page.locator('[data-settings-close]').click();
 }
 
 async function verifyChatCanSelectOllama() {
   const created = await page.evaluate(() => window.autoCodez.createChat({ intelligence: 'normal', permissionLevel: 'safe' }));
   if (!created?.id) throw new Error('Não foi possível criar um chat para testar Ollama.');
-
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
   const chatItem = page.locator(`[data-chat="${created.id}"]`).first();
   await chatItem.waitFor({ state: 'visible', timeout: 15_000 });
   await chatItem.click();
-
-  const settingsButton = page.locator(`[data-chat-settings="${created.id}"]`).first();
-  await settingsButton.waitFor({ state: 'attached', timeout: 10_000 });
-  await settingsButton.click({ force: true });
+  await page.locator(`[data-chat-settings="${created.id}"]`).first().click({ force: true });
 
   const aiSelect = page.locator('#chat-available-ai');
   await aiSelect.waitFor({ state: 'visible', timeout: 10_000 });
-  const ollamaOption = aiSelect.locator('option[value="provider:ollama"]');
-  if (await ollamaOption.count() !== 1) throw new Error('Ollama não apareceu em IAs disponíveis do chat.');
+  if (await aiSelect.locator('option[value="provider:ollama"]').count() !== 1) throw new Error('Ollama não apareceu nas IAs do chat.');
   await aiSelect.selectOption('provider:ollama');
-
   const modelSelect = page.locator('#chat-model');
   await modelSelect.locator('option[value="qwen3:8b"]').waitFor({ state: 'attached', timeout: 15_000 });
-  await modelSelect.selectOption('qwen3:8b');
-  await page.locator('#save-available-ai-settings').click();
+  const optionTexts = await modelSelect.locator('option').allTextContents();
+  const snapshot = await page.evaluate(() => window.autoCodezLocalAi.snapshot());
+  if (snapshot.recommendation?.runtimeId === 'ollama') {
+    const recommended = snapshot.catalog.find((model) => model.runtimeId === 'ollama' && model.id === snapshot.recommendation.modelId);
+    if (recommended && !optionTexts.some((text) => text.includes(recommended.name) && text.includes('recomendado'))) throw new Error(`Recomendação não apareceu no seletor: ${JSON.stringify(optionTexts)}`);
+  }
 
+  await modelSelect.selectOption('qwen3:8b');
+  const save = page.locator('#save-available-ai-settings');
+  if (await save.isDisabled()) throw new Error('Modelo Ollama já instalado deveria liberar Salvar.');
+  await page.screenshot({ path: path.join(outputDir, 'funcional-ia-local-no-chat.png'), animations: 'disabled' });
+  await save.click();
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
-  const restoredChat = page.locator(`.chat-item.selected[data-chat="${created.id}"]`).first();
-  await restoredChat.waitFor({ state: 'visible', timeout: 15_000 });
   await page.waitForFunction((chatId) => {
     const selected = document.querySelector(`.chat-item.selected[data-chat="${CSS.escape(chatId)}"]`);
     const header = document.querySelector('#chat-header');
     return Boolean(selected?.textContent?.includes('Ollama') && header?.textContent?.includes('Ollama') && header.textContent.includes('qwen3:8b'));
   }, created.id, { timeout: 15_000 });
-
-  const persisted = await page.evaluate(async (chatId) => {
-    const state = await window.autoCodez.getState();
-    return state.chats.find((chat) => chat.id === chatId) || null;
-  }, created.id);
-  if (!persisted || persisted.providerId !== 'ollama' || persisted.model !== 'qwen3:8b' || persisted.apiKeyId) {
-    throw new Error(`Ollama não persistiu corretamente no chat: ${JSON.stringify(persisted)}`);
-  }
+  const persisted = await page.evaluate(async (chatId) => (await window.autoCodez.getState()).chats.find((chat) => chat.id === chatId) || null, created.id);
+  if (!persisted || persisted.providerId !== 'ollama' || persisted.model !== 'qwen3:8b' || persisted.apiKeyId) throw new Error(`Ollama não persistiu no chat: ${JSON.stringify(persisted)}`);
 }
 
 async function runTest() {
@@ -359,12 +226,10 @@ async function runTest() {
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
-  await verifyLocalAiPanel();
+  await verifyLocalAiDiagnostics();
   await verifyChatCanSelectOllama();
   await page.screenshot({ path: path.join(outputDir, `${testName}.png`), animations: 'disabled', fullPage: true });
-  if (pageErrors.length || consoleErrors.length) {
-    throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
-  }
+  if (pageErrors.length || consoleErrors.length) throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
 }
 
 async function cleanup() {
