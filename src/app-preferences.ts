@@ -1,11 +1,17 @@
 export type InterfaceDensity = 'comfortable' | 'compact';
 export type EditorFontFamily = 'system' | 'cascadia' | 'consolas';
 export type EditorTabSize = 2 | 4;
+export type ChatDefaultIntelligence = 'low' | 'normal' | 'high' | 'maximum';
+export type ChatDefaultPermission = 'read-only' | 'safe' | 'ask' | 'unrestricted';
 
 export interface AppPreferences {
   general: {
     animations: boolean;
     density: InterfaceDensity;
+  };
+  chatDefaults: {
+    intelligence: ChatDefaultIntelligence;
+    permissionLevel: ChatDefaultPermission;
   };
   editor: {
     fontSize: number;
@@ -34,6 +40,10 @@ function defaults(): AppPreferences {
       animations: true,
       density: 'comfortable',
     },
+    chatDefaults: {
+      intelligence: 'normal',
+      permissionLevel: 'safe',
+    },
     editor: {
       fontSize: 12,
       fontFamily: 'consolas',
@@ -55,11 +65,24 @@ function objectValue(value: unknown): Record<string, unknown> {
 function sanitize(value: unknown, fallback = defaults()): AppPreferences {
   const root = objectValue(value);
   const general = objectValue(root.general);
+  const chatDefaults = objectValue(root.chatDefaults);
   const editor = objectValue(root.editor);
   const profile = objectValue(root.profile);
   const density = general.density === 'compact' || general.density === 'comfortable'
     ? general.density
     : fallback.general.density;
+  const intelligence = chatDefaults.intelligence === 'low'
+    || chatDefaults.intelligence === 'normal'
+    || chatDefaults.intelligence === 'high'
+    || chatDefaults.intelligence === 'maximum'
+    ? chatDefaults.intelligence
+    : fallback.chatDefaults.intelligence;
+  const permissionLevel = chatDefaults.permissionLevel === 'read-only'
+    || chatDefaults.permissionLevel === 'safe'
+    || chatDefaults.permissionLevel === 'ask'
+    || chatDefaults.permissionLevel === 'unrestricted'
+    ? chatDefaults.permissionLevel
+    : fallback.chatDefaults.permissionLevel;
   const fontFamily = editor.fontFamily === 'system' || editor.fontFamily === 'cascadia' || editor.fontFamily === 'consolas'
     ? editor.fontFamily
     : fallback.editor.fontFamily;
@@ -78,6 +101,10 @@ function sanitize(value: unknown, fallback = defaults()): AppPreferences {
     general: {
       animations: typeof general.animations === 'boolean' ? general.animations : fallback.general.animations,
       density,
+    },
+    chatDefaults: {
+      intelligence,
+      permissionLevel,
     },
     editor: {
       fontSize,
@@ -123,6 +150,7 @@ export function updateAppPreferences(update: Partial<AppPreferences>): AppPrefer
     ...current,
     ...update,
     general: { ...current.general, ...update.general },
+    chatDefaults: { ...current.chatDefaults, ...update.chatDefaults },
     editor: { ...current.editor, ...update.editor },
     profile: { ...current.profile, ...update.profile },
   }, current);
