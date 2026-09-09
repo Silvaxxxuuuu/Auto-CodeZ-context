@@ -88,7 +88,7 @@ test('registry rejects duplicate identity, isolates returned objects and support
 
 test('registry keeps plugin failures explicit and clears them on a deliberate state transition', () => {
   const registry = new PluginRegistry();
-  registry.register(manifest({ permissions: [] }), 10);
+  registry.register(manifest({ contributions: [], permissions: [] }), 10);
   const failed = registry.fail('example.plugin', 'Activation crashed', 20);
   assert.equal(failed.state, 'failed');
   assert.equal(failed.failureReason, 'Activation crashed');
