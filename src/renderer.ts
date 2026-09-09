@@ -1,4 +1,5 @@
 import './index.css';
+import { getAppPreferences } from './app-preferences';
 
 type ProviderSummary = { id: string; displayName: string; configured: boolean; selectedModel?: string; model?: string; apiKeyConfigured: boolean };
 type Model = { id: string; name: string; providerId: string; capabilities: string[]; reasoningLevels?: string[] };
@@ -333,8 +334,9 @@ async function openChatSettings(chat: Chat): Promise<void> {
 
 async function newChat(projectId?: string): Promise<void> {
   try {
-    activeChat = await window.autoCodez.createChat({ intelligence: 'normal', permissionLevel: 'safe', projectId });
-    composerIntelligence = 'normal';
+    const defaults = getAppPreferences().chatDefaults;
+    activeChat = await window.autoCodez.createChat({ intelligence: defaults.intelligence, permissionLevel: defaults.permissionLevel, projectId });
+    composerIntelligence = defaults.intelligence;
     pendingApprovals = [];
     streamingActivity = [];
     lastError = '';
