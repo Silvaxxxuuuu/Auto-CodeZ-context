@@ -137,7 +137,6 @@ function createTerminal(sessionId: string): SessionView {
   host.className = 'terminal-session-host';
   host.dataset.terminalHost = sessionId;
   body.insertBefore(host, placeholder);
-
   const terminal = new Terminal({
     allowProposedApi: false,
     convertEol: false,
@@ -148,59 +147,36 @@ function createTerminal(sessionId: string): SessionView {
     lineHeight: 1.18,
     scrollback: 10_000,
     tabStopWidth: 4,
-    theme: {
-      background: '#080a0e',
-      foreground: '#d5dbe4',
-      cursor: '#dce2ea',
-      cursorAccent: '#080a0e',
-      selectionBackground: '#33415599',
-    },
+    theme: { background: '#080a0e', foreground: '#d5dbe4', cursor: '#dce2ea', cursorAccent: '#080a0e', selectionBackground: '#33415599' },
   });
   const fit = new FitAddon();
   terminal.loadAddon(fit);
   terminal.open(host);
-
   terminal.attachCustomKeyEventHandler((event) => {
     if (event.type !== 'keydown') return true;
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return true;
     const key = event.key.toLowerCase();
-    if (key === 'a') {
-      terminal.selectAll();
-      return false;
-    }
+    if (key === 'a') { terminal.selectAll(); return false; }
     if (key === 'c') {
-      if (terminal.hasSelection()) {
-        void navigator.clipboard.writeText(terminal.getSelection()).catch(() => {
-          status.textContent = 'Não foi possível copiar o texto selecionado.';
-        });
-      } else if (activeSessionId === sessionId) {
-        void interruptActiveSession();
-      }
+      if (terminal.hasSelection()) void navigator.clipboard.writeText(terminal.getSelection()).catch(() => { status.textContent = 'Não foi possível copiar o texto selecionado.'; });
+      else if (activeSessionId === sessionId) void interruptActiveSession();
       return false;
     }
     return true;
   });
-
   terminal.onData((data) => {
     if (activeSessionId !== sessionId) return;
     const session = sessions.find((item) => item.id === sessionId);
     if (!session || session.status !== 'running' || !session.interactive) return;
-    void terminalApi.writeInput({ sessionId, data }).then(updateSession).catch((error) => {
-      status.textContent = error instanceof Error ? error.message : 'Não foi possível enviar dados ao terminal.';
-    });
+    void terminalApi.writeInput({ sessionId, data }).then(updateSession).catch((error) => { status.textContent = error instanceof Error ? error.message : 'Não foi possível enviar dados ao terminal.'; });
   });
-
   terminal.onResize(({ cols, rows }) => {
     const session = sessions.find((item) => item.id === sessionId);
-    if (!session || session.status !== 'running' || !session.interactive) return;
-    if (session.cols === cols && session.rows === rows) return;
+    if (!session || session.status !== 'running' || !session.interactive || (session.cols === cols && session.rows === rows)) return;
     session.cols = cols;
     session.rows = rows;
-    void terminalApi.resize({ sessionId, cols, rows }).then(updateSession).catch((error) => {
-      status.textContent = error instanceof Error ? error.message : 'Não foi possível redimensionar o terminal.';
-    });
+    void terminalApi.resize({ sessionId, cols, rows }).then(updateSession).catch((error) => { status.textContent = error instanceof Error ? error.message : 'Não foi possível redimensionar o terminal.'; });
   });
-
   const view = { host, terminal, fit };
   views.set(sessionId, view);
   const snapshot = outputBuffers.get(sessionId) || '';
@@ -208,9 +184,7 @@ function createTerminal(sessionId: string): SessionView {
   return view;
 }
 
-function ensureView(sessionId: string): SessionView {
-  return views.get(sessionId) || createTerminal(sessionId);
-}
+function ensureView(sessionId: string): SessionView { return views.get(sessionId) || createTerminal(sessionId); }
 
 function activateView(): void {
   for (const [sessionId, view] of views) view.host.classList.toggle('active', sessionId === activeSessionId);
@@ -220,21 +194,12 @@ function activateView(): void {
   view.host.classList.add('active');
 }
 
-function render(): void {
-  renderTabs();
-  renderStatus();
-  activateView();
-  scheduleFit();
-}
+function render(): void { renderTabs(); renderStatus(); activateView(); scheduleFit(); }
 
 async function refreshSessions(): Promise<void> {
   sessions = await terminalApi.listSessions();
-  if (!activeSessionId || !sessions.some((session) => session.id === activeSessionId)) {
-    activeSessionId = sessions.find((session) => session.status === 'running')?.id || sessions[0]?.id || '';
-  }
-  await Promise.all(sessions.map(async (session) => {
-    if (!outputBuffers.has(session.id)) outputBuffers.set(session.id, await terminalApi.getOutput(session.id));
-  }));
+  if (!activeSessionId || !sessions.some((session) => session.id === activeSessionId)) activeSessionId = sessions.find((session) => session.status === 'running')?.id || sessions[0]?.id || '';
+  await Promise.all(sessions.map(async (session) => { if (!outputBuffers.has(session.id)) outputBuffers.set(session.id, await terminalApi.getOutput(session.id)); }));
   render();
 }
 
@@ -251,20 +216,26 @@ async function openSession(shell: TerminalShell): Promise<void> {
   }
 }
 
+function switchToShell(shell: TerminalShell): void {
+  const existing = sessions.find((session) => session.shell === shell && session.status === 'running')
+    || sessions.find((session) => session.shell === shell);
+  if (!existing) {
+    void openSession(shell);
+    return;
+  }
+  activeSessionId = existing.id;
+  render();
+  views.get(existing.id)?.terminal.focus();
+}
+
 async function interruptActiveSession(): Promise<void> {
   const session = activeSession();
   if (!session || session.status !== 'running' || !session.interactive || interruptPending) return;
   interruptPending = true;
   renderStatus();
-  try {
-    updateSession(await terminalApi.writeInput({ sessionId: session.id, data: '\x03' }));
-  } catch (error) {
-    status.textContent = error instanceof Error ? error.message : 'Não foi possível interromper o comando.';
-  } finally {
-    interruptPending = false;
-    renderStatus();
-    views.get(session.id)?.terminal.focus();
-  }
+  try { updateSession(await terminalApi.writeInput({ sessionId: session.id, data: '\x03' })); }
+  catch (error) { status.textContent = error instanceof Error ? error.message : 'Não foi possível interromper o comando.'; }
+  finally { interruptPending = false; renderStatus(); views.get(session.id)?.terminal.focus(); }
 }
 
 async function clearActiveSession(): Promise<void> {
@@ -277,9 +248,7 @@ async function clearActiveSession(): Promise<void> {
     try {
       const clearCommand = session.shell === 'powershell' ? 'Clear-Host\r' : 'cls\r';
       updateSession(await terminalApi.writeInput({ sessionId: session.id, data: clearCommand }));
-    } catch (error) {
-      status.textContent = error instanceof Error ? error.message : 'Não foi possível limpar o terminal.';
-    }
+    } catch (error) { status.textContent = error instanceof Error ? error.message : 'Não foi possível limpar o terminal.'; }
   }
   view.terminal.focus();
 }
@@ -291,9 +260,7 @@ function scheduleFit(): void {
     fitFrame = 0;
     const view = views.get(activeSessionId);
     if (!view || !view.host.classList.contains('active')) return;
-    try {
-      view.fit.fit();
-    } catch {}
+    try { view.fit.fit(); } catch {}
   });
 }
 
@@ -307,32 +274,18 @@ function setOpen(value: boolean): void {
     if (!activeSession() && !openingDefaultSession) {
       openingDefaultSession = true;
       shellSelect.value = 'powershell';
-      try {
-        await openSession('powershell');
-      } finally {
-        openingDefaultSession = false;
-      }
+      try { await openSession('powershell'); } finally { openingDefaultSession = false; }
     }
     scheduleFit();
     views.get(activeSessionId)?.terminal.focus();
   });
 }
 
-function maxPanelHeight(): number {
-  return Math.max(MIN_PANEL_HEIGHT, Math.floor(chatArea.getBoundingClientRect().height - MIN_CHAT_REMAINDER));
-}
-
-function setPanelHeight(height: number): void {
-  const nextHeight = Math.min(maxPanelHeight(), Math.max(MIN_PANEL_HEIGHT, height));
-  panel.style.height = `${Math.round(nextHeight)}px`;
-  scheduleFit();
-}
-
+function maxPanelHeight(): number { return Math.max(MIN_PANEL_HEIGHT, Math.floor(chatArea.getBoundingClientRect().height - MIN_CHAT_REMAINDER)); }
+function setPanelHeight(height: number): void { panel.style.height = `${Math.round(Math.min(maxPanelHeight(), Math.max(MIN_PANEL_HEIGHT, height)))}px`; scheduleFit(); }
 function finishPanelResize(): void {
   if (resizePointerId === null) return;
-  try {
-    resizeHandle.releasePointerCapture(resizePointerId);
-  } catch {}
+  try { resizeHandle.releasePointerCapture(resizePointerId); } catch {}
   resizePointerId = null;
   panel.classList.remove('resizing');
   window.localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(Math.round(panel.getBoundingClientRect().height)));
@@ -348,20 +301,14 @@ resizeHandle.addEventListener('pointerdown', (event) => {
   resizeHandle.setPointerCapture(event.pointerId);
   event.preventDefault();
 });
-resizeHandle.addEventListener('pointermove', (event) => {
-  if (resizePointerId !== event.pointerId) return;
-  setPanelHeight(resizeStartHeight + resizeStartY - event.clientY);
-});
+resizeHandle.addEventListener('pointermove', (event) => { if (resizePointerId === event.pointerId) setPanelHeight(resizeStartHeight + resizeStartY - event.clientY); });
 resizeHandle.addEventListener('pointerup', finishPanelResize);
 resizeHandle.addEventListener('pointercancel', finishPanelResize);
-resizeHandle.addEventListener('dblclick', () => {
-  setPanelHeight(DEFAULT_PANEL_HEIGHT);
-  window.localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(DEFAULT_PANEL_HEIGHT));
-});
+resizeHandle.addEventListener('dblclick', () => { setPanelHeight(DEFAULT_PANEL_HEIGHT); window.localStorage.setItem(PANEL_HEIGHT_STORAGE_KEY, String(DEFAULT_PANEL_HEIGHT)); });
 
 button.addEventListener('click', () => setOpen(!open));
 closeButton.addEventListener('click', () => setOpen(false));
-shellSelect.addEventListener('change', () => void openSession(shellSelect.value as TerminalShell));
+shellSelect.addEventListener('change', () => switchToShell(shellSelect.value as TerminalShell));
 newButton.addEventListener('click', () => void openSession(shellSelect.value as TerminalShell));
 killButton.addEventListener('click', () => void interruptActiveSession());
 clearButton.addEventListener('click', () => void clearActiveSession());
@@ -380,9 +327,7 @@ const unsubscribeTerminal = terminalApi.onEvent((event) => {
     const view = views.get(event.event.sessionId);
     if (view) {
       const wasNearBottom = view.terminal.buffer.active.viewportY >= view.terminal.buffer.active.baseY - 1;
-      view.terminal.write(event.event.text, () => {
-        if (wasNearBottom) view.terminal.scrollToBottom();
-      });
+      view.terminal.write(event.event.text, () => { if (wasNearBottom) view.terminal.scrollToBottom(); });
     }
     return;
   }
@@ -393,9 +338,7 @@ const unsubscribeTerminal = terminalApi.onEvent((event) => {
 
 const resizeObserver = new ResizeObserver(() => scheduleFit());
 resizeObserver.observe(body);
-window.addEventListener('resize', () => {
-  if (open) setPanelHeight(panel.getBoundingClientRect().height);
-});
+window.addEventListener('resize', () => { if (open) setPanelHeight(panel.getBoundingClientRect().height); });
 window.addEventListener('beforeunload', () => {
   unsubscribeTerminal();
   resizeObserver.disconnect();
