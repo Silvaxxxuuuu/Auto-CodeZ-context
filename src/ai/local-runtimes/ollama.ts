@@ -55,6 +55,7 @@ async function* parseNdjson(response: Response): AsyncGenerator<Record<string, u
 export class OllamaLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
   readonly id = 'ollama';
   readonly displayName = 'Ollama';
+  readonly supportsInstallCancellation = true;
   private readonly endpoint: string;
 
   constructor(endpoint?: string) {
