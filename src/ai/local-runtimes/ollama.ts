@@ -1,6 +1,7 @@
 import type {
   LocalModelDescriptor,
   LocalModelInstallProgress,
+  LocalModelInstallRequest,
   LocalModelRuntimeAdapter,
   LocalModelRuntimeInfo,
 } from '../local-model-runtime';
@@ -22,6 +23,10 @@ function modelIdFrom(value: unknown): string {
   const record = asRecord(value);
   const id = typeof record?.model === 'string' ? record.model : typeof record?.name === 'string' ? record.name : '';
   return id.trim();
+}
+
+function installTarget(value: string | LocalModelInstallRequest): string {
+  return (typeof value === 'string' ? value : value.source || value.modelId).trim();
 }
 
 async function* parseNdjson(response: Response): AsyncGenerator<Record<string, unknown>> {
@@ -97,8 +102,8 @@ export class OllamaLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
     return models;
   }
 
-  async *install(modelId: string, signal?: AbortSignal): AsyncGenerator<LocalModelInstallProgress> {
-    const model = modelId.trim();
+  async *install(request: string | LocalModelInstallRequest, signal?: AbortSignal): AsyncGenerator<LocalModelInstallProgress> {
+    const model = installTarget(request);
     if (!model) throw new Error('Modelo local inválido.');
     const response = await fetchWithTimeout(`${this.endpoint}/api/pull`, {
       method: 'POST',
