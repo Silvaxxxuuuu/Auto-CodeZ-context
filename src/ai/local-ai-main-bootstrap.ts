@@ -72,7 +72,7 @@ const runtimeSettingsInitialization = app.whenReady().then(async () => {
   await initializeLocalAiRuntimeSettings(runtimeSettingsStorage);
 });
 registerLocalRuntimeSettingsInitialization(runtimeSettingsInitialization);
-void runtimeSettingsInitialization.catch(() => undefined);
+void runtimeSettingsInitialization.catch((): undefined => undefined);
 
 async function buildSnapshot() {
   await waitForLocalRuntimeSettingsInitialization();
