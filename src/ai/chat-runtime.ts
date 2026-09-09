@@ -1,4 +1,4 @@
-import type { AIModel, AIProviderConfig, AIResponse, AIStreamEvent, AIToolDefinition, ChatRecord } from './types';
+import type { AIProviderConfig, AIResponse, AIStreamEvent, AIToolDefinition, ChatRecord } from './types';
 import { ActivityRuntime } from '../agent/activity-runtime';
 import { CapabilityResolver } from './capability-resolver';
 import { IntelligenceRuntime } from './intelligence-runtime';
@@ -73,6 +73,7 @@ Important distinction:
 `.trim();
 
 const SYSTEM_CHAT_TOOL_NAMES = new Set(['plan_execution', 'complete_plan_step', 'read_file', 'read_symbol', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'web_search', 'web_fetch', 'run_command']);
+const LIGHTWEIGHT_TURN_PATTERN = /^(?:oi+|ol[aá]+|opa+|e(?:\s|-)a[ií]|hello|hi|hey|bom dia|boa tarde|boa noite|valeu|obrigad[oa]|thanks?|thank you)[!.?\s]*$/i;
 
 function runtimePlatform(): string {
   if (process.platform === 'win32') return 'Windows';
@@ -87,6 +88,13 @@ function runtimeDate(): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+function isLightweightConversationTurn(chat: ChatRecord): boolean {
+  const lastUser = [...chat.messages].reverse().find((message) => message.role === 'user');
+  if (!lastUser) return false;
+  const content = lastUser.content.trim();
+  return content.length <= 80 && LIGHTWEIGHT_TURN_PATTERN.test(content);
 }
 
 async function nextWithAbortSignal<T>(signal: AbortSignal | undefined, next: () => Promise<IteratorResult<T>>): Promise<IteratorResult<T>> {
@@ -139,19 +147,12 @@ export class ChatRuntime {
 
   private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal) {
     const adapter = this.registry.get(config.id);
-    let model: AIModel;
-    try {
-      signal?.throwIfAborted();
-      const availableModels = await runWithAbortSignal(signal, () => this.models.list(config));
-      signal?.throwIfAborted();
-      model = this.models.find(availableModels, chat.model, config.id);
-    } catch (error) {
-      if (isAbortError(error)) throw error;
-      model = this.models.fallbackForConfiguredModel(config, chat.model);
-      this.activity.emit({ type: 'action', message: `${adapter.displayName}: descoberta de modelos indisponível; usando o modelo já configurado (${model.id}).`, status: 'pending' });
-    }
+    signal?.throwIfAborted();
+    const model = await runWithAbortSignal(signal, () => this.models.resolveForRequest(config, chat.model));
+    signal?.throwIfAborted();
     if (!this.capabilities.supports(model, 'text')) throw new Error('O modelo selecionado não suporta texto.');
     const resolution = this.intelligence.resolve(model, chat.intelligence);
+    const lightweightTurn = isLightweightConversationTurn(chat);
 
     let webContext: string | undefined;
     const groundingDecision = this.webGrounding.classify(chat.messages);
@@ -179,13 +180,25 @@ export class ChatRuntime {
 
     const systemMessages = [{ role: 'system' as const, content: `${AUTOCODEZ_SYSTEM_INSTRUCTIONS}\n\nRuntime OS: ${runtimePlatform()}.\nRuntime date: ${runtimeDate()}.` }];
     if (webContext) systemMessages.push({ role: 'system' as const, content: webContext });
-    if (projectContext) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
+    if (projectContext && !lightweightTurn) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
     const messages = [...systemMessages, ...chat.messages];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
     if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
     const tools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => SYSTEM_CHAT_TOOL_NAMES.has(tool.name));
-    const toolsEnabled = this.capabilities.supports(model, 'tools') && tools.length > 0;
-    return { adapter, request: { providerId: config.id, model: model.id, messages, intelligence: resolution.effective, projectContext, toolsEnabled, tools: toolsEnabled ? tools.map((tool) => ({ ...tool })) : undefined }, resolution };
+    const toolsEnabled = !lightweightTurn && this.capabilities.supports(model, 'tools') && tools.length > 0;
+    return {
+      adapter,
+      request: {
+        providerId: config.id,
+        model: model.id,
+        messages,
+        intelligence: resolution.effective,
+        projectContext: lightweightTurn ? undefined : projectContext,
+        toolsEnabled,
+        tools: toolsEnabled ? tools.map((tool) => ({ ...tool })) : undefined,
+      },
+      resolution,
+    };
   }
 
   private beginProviderRequest(config: AIProviderConfig, request: Parameters<ProviderRequestJournal['begin']>[0]) {
@@ -196,8 +209,6 @@ export class ChatRuntime {
     try {
       signal?.throwIfAborted();
       const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal);
-      this.activity.start('action', `Enviando mensagem para ${adapter.displayName}`);
-      if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
       const journal = await this.beginProviderRequest(config, request);
       if (journal.cachedResponse) {
@@ -210,7 +221,6 @@ export class ChatRuntime {
         await this.requestJournal.complete(journal.requestId, response);
         const dynamicActivity = activityEventForResponse(response);
         if (dynamicActivity?.activity) this.activity.emit(dynamicActivity.activity);
-        this.activity.success('complete', 'Resposta recebida.');
         return responseForAgent(response);
       } catch (error) {
         if (isAbortError(error)) {
@@ -234,8 +244,6 @@ export class ChatRuntime {
     try {
       signal?.throwIfAborted();
       const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal);
-      this.activity.start('action', `Transmitindo resposta de ${adapter.displayName}`);
-      if (projectContext) this.activity.emit({ type: 'action', message: 'Contexto do workspace anexado à solicitação.', status: 'success' });
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
       const journal = await this.beginProviderRequest(config, request);
       if (journal.cachedResponse) {
@@ -286,13 +294,16 @@ export class ChatRuntime {
           const sanitizedResponse = responseForAgent(response);
           yield { type: 'complete', response: sanitizedResponse, usage: sanitizedResponse.usage };
         }
-        this.activity.success('complete', 'Resposta recebida.');
       } catch (error) {
         if (isAbortError(error)) {
           if (!completed) await this.requestJournal.fail(journal.requestId, 'Solicitação cancelada pelo usuário.');
           throw error;
         }
-        if (!completed) { const normalized = normalizeProviderError(adapter.displayName, 'stream', error); await this.requestJournal.fail(journal.requestId, normalized.message); throw normalized; }
+        if (!completed) {
+          const normalized = normalizeProviderError(adapter.displayName, 'stream', error);
+          await this.requestJournal.fail(journal.requestId, normalized.message);
+          throw normalized;
+        }
         throw error;
       }
     } catch (error) {
