@@ -9,12 +9,18 @@ type ProfileBridge = {
   getState: () => Promise<ProfileState>;
   listApiKeys?: () => Promise<unknown[]>;
 };
+type LocalProfileSnapshot = {
+  hardware: { totalRamBytes: number; architecture?: string; cpuModel?: string; gpuName?: string };
+  runtimes: Array<{ id: string; displayName: string; available: boolean }>;
+  installed: Array<{ id: string; runtimeId: string }>;
+};
 type LocalAiProfileBridge = {
-  snapshot?: () => Promise<{
-    hardware: { totalRamBytes: number; architecture?: string; cpuModel?: string; gpuName?: string };
-    runtimes: Array<{ id: string; displayName: string; available: boolean }>;
-    installed: Array<{ id: string; runtimeId: string }>;
-  }>;
+  snapshot?: () => Promise<LocalProfileSnapshot>;
+};
+type ProfileData = {
+  state: ProfileState;
+  keys: unknown[];
+  local?: LocalProfileSnapshot;
 };
 
 const bridge = (window as unknown as { autoCodez?: ProfileBridge }).autoCodez;
@@ -51,13 +57,13 @@ function stat(iconName: string, value: string, label: string): string {
   return `<div class="profile-method-row"><div class="profile-method-icon">${icon(iconName)}</div><div><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div></div>`;
 }
 
-async function loadProfileData() {
-  const [state, keys, local] = await Promise.all([
-    bridge?.getState?.() ?? Promise.resolve({ providers: [], chats: [], projects: [] }),
-    bridge?.listApiKeys?.().catch((): unknown[] => []) ?? Promise.resolve([] as unknown[]),
-    localBridge?.snapshot?.().catch(() => undefined) ?? Promise.resolve(undefined),
-  ]);
-  return { state, keys, local };
+async function loadProfileData(): Promise<ProfileData> {
+  const fallbackState: ProfileState = { providers: [], chats: [], projects: [] };
+  const statePromise = bridge?.getState?.() ?? Promise.resolve(fallbackState);
+  const keysPromise = bridge?.listApiKeys?.().catch((): unknown[] => []) ?? Promise.resolve<unknown[]>([]);
+  const localPromise = localBridge?.snapshot?.().catch((): LocalProfileSnapshot | undefined => undefined) ?? Promise.resolve<LocalProfileSnapshot | undefined>(undefined);
+  const [state, keys, local] = await Promise.all([statePromise, keysPromise, localPromise]);
+  return { state, keys, ...(local ? { local } : {}) };
 }
 
 async function renderProfile(): Promise<void> {
@@ -79,7 +85,7 @@ async function renderProfile(): Promise<void> {
   const data = await loadProfileData();
   if (!overlay.isConnected) return;
   const platform = navigator.platform || 'Desktop';
-  const localRuntime = data.local?.runtimes.find((runtime) => runtime.id === 'ollama');
+  const localRuntime = data.local?.runtimes.find((runtime: LocalProfileSnapshot['runtimes'][number]) => runtime.id === 'ollama');
   const configuredCloudProviders = data.state.providers.filter((provider) => provider.requiresApiKey !== false && provider.configured).length;
   const localModelCount = data.local?.installed.length ?? 0;
   const providerCount = configuredCloudProviders + (localRuntime?.available ? 1 : 0);
