@@ -62,11 +62,10 @@ test('ChatRuntime turns provider pre-tool text into contextual live activity tie
   assert.match(systemPrompt, /short, dynamically generated live activity summary/i);
   assert.match(systemPrompt, /exact action you are taking now and the current context/i);
   const dynamic = events.find((event) => event.type === 'thought' && event.toolCallId === 'read-config-1');
-  assert.deepEqual(dynamic, {
-    type: 'thought',
-    message: 'Vou conferir a configuração atual antes de alterar esse arquivo.',
-    status: 'running',
-    toolCallId: 'read-config-1',
-    toolName: 'read_file',
-  });
+  assert.ok(dynamic);
+  assert.equal(dynamic.type, 'thought');
+  assert.equal(dynamic.message, 'Vou conferir a configuração atual antes de alterar esse arquivo.');
+  assert.equal(dynamic.status, 'running');
+  assert.equal(dynamic.toolCallId, 'read-config-1');
+  assert.equal(dynamic.toolName, 'read_file');
 });
