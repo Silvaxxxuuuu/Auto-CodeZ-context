@@ -62,41 +62,80 @@ function environment() {
   return env;
 }
 
+async function readJson(req) {
+  let raw = '';
+  for await (const chunk of req) raw += chunk;
+  return raw ? JSON.parse(raw) : {};
+}
+
 async function startFakeLmStudio() {
-  server = http.createServer((req, res) => {
-    if (req.method === 'GET' && req.url === '/api/v1/models') {
-      if (req.headers.authorization) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'unexpected authorization header' }));
+  server = http.createServer(async (req, res) => {
+    try {
+      if (req.method === 'GET' && req.url === '/api/v1/models') {
+        if (req.headers.authorization) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'unexpected authorization header' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          models: [
+            {
+              type: 'llm',
+              key: 'granite-local',
+              display_name: 'Granite Local',
+              architecture: 'granite',
+              quantization: { name: 'Q4_K_M', bits_per_weight: 4 },
+              size_bytes: Math.round(1.8 * 1024 ** 3),
+              params_string: '3B',
+              max_context_length: 32768,
+              capabilities: { vision: false, trained_for_tool_use: true },
+            },
+            {
+              type: 'embedding',
+              key: 'embedding-local',
+              display_name: 'Embedding Local',
+              size_bytes: Math.round(0.3 * 1024 ** 3),
+              max_context_length: 8192,
+            },
+          ],
+        }));
         return;
       }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        models: [
-          {
-            type: 'llm',
-            key: 'granite-local',
-            display_name: 'Granite Local',
-            architecture: 'granite',
-            quantization: { name: 'Q4_K_M', bits_per_weight: 4 },
-            size_bytes: Math.round(1.8 * 1024 ** 3),
-            params_string: '3B',
-            max_context_length: 32768,
-            capabilities: { vision: false, trained_for_tool_use: true },
-          },
-          {
-            type: 'embedding',
-            key: 'embedding-local',
-            display_name: 'Embedding Local',
-            size_bytes: Math.round(0.3 * 1024 ** 3),
-            max_context_length: 8192,
-          },
-        ],
-      }));
-      return;
+
+      if (req.method === 'POST' && req.url === '/v1/chat/completions') {
+        if (req.headers.authorization) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'unexpected authorization header' }));
+          return;
+        }
+        const body = await readJson(req);
+        if (body.model !== 'granite-local') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `unexpected model: ${String(body.model)}` }));
+          return;
+        }
+        if (body.stream === true) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'LOCAL_OK' }, finish_reason: 'stop' }] })}\n\n`);
+          res.write(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 } })}\n\n`);
+          res.end('data: [DONE]\n\n');
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          choices: [{ message: { content: 'LOCAL_OK' } }],
+          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+        }));
+        return;
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not found' }));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: errorText(error) }));
     }
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'not found' }));
   });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
@@ -193,6 +232,29 @@ async function verifyLmStudioChatSelection() {
   if (!persisted || persisted.providerId !== 'lm-studio' || persisted.model !== 'granite-local' || persisted.apiKeyId) {
     throw new Error(`LM Studio não persistiu corretamente no chat: ${JSON.stringify(persisted)}`);
   }
+
+  const response = await page.evaluate(async (chatId) => window.autoCodez.streamChat({
+    chatId,
+    content: 'Responda apenas LOCAL_OK',
+  }), created.id);
+  if (response.pendingApprovalIds.length) throw new Error(`LM Studio solicitou aprovação inesperada: ${JSON.stringify(response.pendingApprovalIds)}`);
+  const assistant = [...response.chat.messages].reverse().find((message) => message.role === 'assistant');
+  if (assistant?.content !== 'LOCAL_OK') throw new Error(`Resposta LM Studio incorreta: ${JSON.stringify(assistant)}`);
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
+  const restoredChat = page.locator(`[data-chat="${created.id}"]`).first();
+  await restoredChat.waitFor({ state: 'visible', timeout: 15_000 });
+  await restoredChat.click();
+  await page.locator('#messages .message.assistant').filter({ hasText: 'LOCAL_OK' }).waitFor({ state: 'visible', timeout: 15_000 });
+
+  const rehydrated = await page.evaluate(async (chatId) => {
+    const state = await window.autoCodez.getState();
+    return state.chats.find((chat) => chat.id === chatId) || null;
+  }, created.id);
+  if (!rehydrated?.messages.some((message) => message.role === 'assistant' && message.content === 'LOCAL_OK')) {
+    throw new Error(`Resposta local não persistiu após reload: ${JSON.stringify(rehydrated?.messages)}`);
+  }
 }
 
 async function cleanup() {
@@ -223,7 +285,7 @@ async function cleanup() {
     if (pageErrors.length || consoleErrors.length) {
       throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
     }
-    await fs.writeFile(path.join(outputDir, 'lm-studio-chat.json'), `${JSON.stringify({ status: 'passed', pageErrors, consoleErrors }, null, 2)}\n`, 'utf8');
+    await fs.writeFile(path.join(outputDir, 'lm-studio-chat.json'), `${JSON.stringify({ status: 'passed', inference: 'LOCAL_OK', pageErrors, consoleErrors }, null, 2)}\n`, 'utf8');
   } catch (error) {
     const message = errorText(error);
     if (page && !page.isClosed()) await page.screenshot({ path: path.join(outputDir, 'falha-lm-studio-chat.png'), animations: 'disabled', fullPage: true }).catch(() => {});
