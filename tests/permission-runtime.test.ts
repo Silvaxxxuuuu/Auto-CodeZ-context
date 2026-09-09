@@ -6,12 +6,14 @@ const safeWrites = ['write_file', 'create_file', 'replace_range', 'replace_text'
 const sensitiveWrites = ['delete_file', 'rename_file', 'run_command'] as const;
 const allWrites = [...safeWrites, ...sensitiveWrites] as const;
 
-test('read tools are always allowed', () => {
+test('read tools are always allowed, including public Web research', () => {
   const runtime = new PermissionRuntime();
   for (const level of ['read-only', 'safe', 'ask', 'unrestricted'] as const) {
     assert.equal(runtime.decide(level, 'read_file'), 'allow');
     assert.equal(runtime.decide(level, 'read_symbol'), 'allow');
     assert.equal(runtime.decide(level, 'search_files'), 'allow');
+    assert.equal(runtime.decide(level, 'web_search'), 'allow');
+    assert.equal(runtime.decide(level, 'web_fetch'), 'allow');
   }
 });
 
@@ -57,5 +59,7 @@ test('isWriteTool matches the permission write policy', () => {
   assert.equal(runtime.isWriteTool('read_file'), false);
   assert.equal(runtime.isWriteTool('read_symbol'), false);
   assert.equal(runtime.isWriteTool('search_files'), false);
+  assert.equal(runtime.isWriteTool('web_search'), false);
+  assert.equal(runtime.isWriteTool('web_fetch'), false);
   for (const tool of allWrites) assert.equal(runtime.isWriteTool(tool), true);
 });
