@@ -25,12 +25,12 @@ const config: ForgeConfig = {
     new VitePlugin({
       build: [
         {
-          entry: 'src/main-entry.ts',
+          entry: 'src/bootstrap/main.ts',
           config: 'vite.main.config.ts',
           target: 'main',
         },
         {
-          entry: 'src/preload-entry.ts',
+          entry: 'src/bootstrap/preload.ts',
           config: 'vite.preload.config.ts',
           target: 'preload',
         },
