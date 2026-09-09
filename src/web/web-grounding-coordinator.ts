@@ -2,7 +2,7 @@ import type { AIMessage } from '../ai/types';
 import { WebRetrievalRuntime } from './web-retrieval-runtime';
 import type { WebFetchedDocument, WebSearchResult } from './web-types';
 
-export type WebFreshnessReason = 'relative-time' | 'current-facts' | 'live-data' | 'recent-software';
+export type WebFreshnessReason = 'relative-time' | 'current-facts' | 'live-data' | 'recent-software' | 'explicit-research' | 'technical-research';
 
 export type WebGroundingDecision = {
   required: boolean;
@@ -45,6 +45,9 @@ const CURRENT_QUALIFIER = /\b(atual|atuais|atualmente|mais recente|mais recentes
 const MUTABLE_EXTERNAL_ENTITY = /\b(presidente|governador|prefeito|primeiro[- ]ministro|ministro|ceo|diretor(?:a)? executivo|l[ií]der|campe[aã]o|ranking|classifica[cç][aã]o|lei|legisla[cç][aã]o|regulamento|regra|taxa de juros|juros|infla[cç][aã]o|sal[aá]rio m[ií]nimo|c[aâ]mbio|cotação|pre[cç]o|status|disponibilidade|agenda|hor[aá]rio|calend[aá]rio|president|governor|mayor|prime minister|minister|chief executive|leader|champion|rankings?|law|legislation|regulation|interest rate|inflation|minimum wage|exchange rate|price|status|availability|schedule|calendar)\b/i;
 const RELATIVE_EXTERNAL_TOPIC = /\b(evento|eventos|lan[cç]amento|estreia|jogo|partida|campeonato|elei[cç][aã]o|elei[cç][oõ]es|vota[cç][aã]o|show|festival|prazo|inscri[cç][aã]o|funcionamento|aberto|fechado|event|launch|premiere|game|match|championship|election|vote|concert|festival|deadline|registration|open|closed)\b/i;
 const CURRENT_EVENT_INTENT = /\b(o que aconteceu|o que est[aá] acontecendo|aconteceu|acontecendo|what happened|what is happening|what's happening|happening now)\b/i;
+const EXPLICIT_RESEARCH_INTENT = /\b(pesquise|pesquisar|pesquisa na web|procure na web|buscar na web|busque na web|consulte a web|consultar a web|verifique online|verifique na web|verifique a documenta[cç][aã]o|consulte a documenta[cç][aã]o|investigue online|search the web|search online|look up|browse the web|browse online|research online|check online|check the docs|check documentation)\b/i;
+const TECHNICAL_SUBJECT = /\b(ferramenta|ferramentas|biblioteca|bibliotecas|framework|frameworks|api|apis|pacote|pacotes|plugin|plugins|sdk|sdks|servi[cç]o|servi[cç]os|tool|tools|library|libraries|frameworks?|apis?|packages?|plugins?|sdks?|services?)\b/i;
+const TECHNICAL_DISCOVERY_INTENT = /\b(qual|quais|melhor|melhores|alternativa|alternativas|existe|existem|dispon[ií]vel|dispon[ií]veis|recomenda|recomende|recomendaria|devo usar|poderia usar|serve|servem|which|what tools|best|alternatives?|available|recommend|should i use|could use|suitable)\b/i;
 
 function latestUserMessage(messages: AIMessage[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -59,6 +62,8 @@ function freshnessReason(message: string): WebFreshnessReason | undefined {
   if (RECENT_SOFTWARE.test(message)) return 'recent-software';
   if (CURRENT_QUALIFIER.test(message) && MUTABLE_EXTERNAL_ENTITY.test(message)) return 'current-facts';
   if (RELATIVE_TIME.test(message) && (MUTABLE_EXTERNAL_ENTITY.test(message) || RELATIVE_EXTERNAL_TOPIC.test(message) || CURRENT_EVENT_INTENT.test(message))) return 'relative-time';
+  if (EXPLICIT_RESEARCH_INTENT.test(message)) return 'explicit-research';
+  if (TECHNICAL_SUBJECT.test(message) && TECHNICAL_DISCOVERY_INTENT.test(message)) return 'technical-research';
   return undefined;
 }
 
@@ -125,7 +130,7 @@ export class WebGroundingCoordinator {
     if (cached && now - cached.retrievedAt <= this.cacheTtlMs) return { ...cached, sources: cached.sources.map((source) => ({ ...source })), cached: true };
 
     const searchResults = await this.runtime.search(query, { limit: this.searchLimit, signal });
-    if (!searchResults.length) throw new Error('A pesquisa necessária para obter informações atuais não retornou fontes.');
+    if (!searchResults.length) throw new Error('A pesquisa Web necessária não retornou fontes.');
     const fetched = await Promise.all(searchResults.slice(0, this.fetchLimit).map(async (source): Promise<WebFetchedDocument | undefined> => {
       try { return await this.runtime.fetch(source.url, signal); } catch { return undefined; }
     }));
