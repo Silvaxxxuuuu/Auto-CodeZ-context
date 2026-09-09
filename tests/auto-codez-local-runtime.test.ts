@@ -8,6 +8,7 @@ import {
   AUTO_CODEZ_LOCAL_ENGINE_ASSET,
   AUTO_CODEZ_LOCAL_ENGINE_RELEASE,
 } from '../src/ai/auto-codez-local-engine';
+import type { LocalModelInstallProgress } from '../src/ai/local-model-runtime';
 import { AutoCodezLocalRuntimeAdapter } from '../src/ai/local-runtimes/auto-codez-local';
 
 async function withTempDir(run: (root: string) => Promise<void>): Promise<void> {
@@ -31,7 +32,8 @@ async function seedEngine(root: string): Promise<void> {
 }
 
 function fakeFetch(bytes: Uint8Array): typeof fetch {
-  return async () => new Response(bytes, {
+  const body = new TextDecoder().decode(bytes);
+  return async () => new Response(body, {
     status: 200,
     headers: { 'content-length': String(bytes.byteLength) },
   });
@@ -52,7 +54,7 @@ test('Auto CodeZ Local installs verified GGUF metadata and removes it idempotent
     assert.equal(info.available, true);
     assert.equal(info.id, 'auto-codez-local');
 
-    const progress = [];
+    const progress: LocalModelInstallProgress[] = [];
     for await (const event of runtime.install({
       modelId: 'qwen-test',
       source: 'https://example.test/qwen-test.gguf',
