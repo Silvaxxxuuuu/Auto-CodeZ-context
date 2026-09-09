@@ -15,6 +15,7 @@ const criticalEnhancements: Enhancement[] = [
   { name: 'local-ai-runtime-settings-ui', load: () => import('./local-ai-runtime-settings-ui') },
   { name: 'initial-chat-ui', load: () => import('./initial-chat-ui') },
   { name: 'profile-ui', load: () => import('./profile-ui') },
+  { name: 'local-ai-unified-chat-ui', load: () => import('./local-ai-unified-chat-ui') },
   { name: 'chat-api-key-settings-ui', load: () => import('./chat-api-key-settings-ui') },
   { name: 'local-ai-chat-runtime-recovery-ui', load: () => import('./local-ai-chat-runtime-recovery-ui') },
   { name: 'api-key-flow-polish', load: () => import('./api-key-flow-polish') },
