@@ -2,8 +2,9 @@ import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { AutoCodezLocalRuntimeAdapter } from './local-runtimes/auto-codez-local';
 
-const START_TIMEOUT_MS = 90_000;
+const START_TIMEOUT_MS = 45_000;
 const HEALTH_RETRY_MS = 300;
+const MANAGED_CONTEXT_SIZE = 16_384;
 
 type ActiveServer = {
   modelId: string;
@@ -75,7 +76,7 @@ export class AutoCodezLocalService {
       '--host', '127.0.0.1',
       '--port', String(port),
       '--jinja',
-      '--ctx-size', '32768',
+      '--ctx-size', String(MANAGED_CONTEXT_SIZE),
     ], {
       windowsHide: true,
       shell: false,
@@ -103,7 +104,7 @@ export class AutoCodezLocalService {
         }
         await new Promise((resolve) => setTimeout(resolve, HEALTH_RETRY_MS));
       }
-      throw new Error('O modelo local demorou demais para ficar pronto.');
+      throw new Error(`O modelo local não ficou pronto em ${Math.round(START_TIMEOUT_MS / 1000)} segundos. Tente novamente ou selecione um modelo menor.`);
     } catch (error) {
       await this.stop();
       throw error;
