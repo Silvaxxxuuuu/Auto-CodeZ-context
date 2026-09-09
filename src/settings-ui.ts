@@ -54,7 +54,7 @@ const sectionMeta: Record<SectionId, { eyebrow: string; title: string; descripti
   ai: {
     eyebrow: 'INTELIGÊNCIA',
     title: 'IA e modelos',
-    description: 'Escolhas que mudam diretamente como o Auto CodeZ responde e trabalha no chat ativo.',
+    description: 'Escolhas que mudam diretamente como o Auto CodeZ responde e como novos chats começam.',
   },
   execution: {
     eyebrow: 'AGENTE',
@@ -72,6 +72,19 @@ const sectionMeta: Record<SectionId, { eyebrow: string; title: string; descripti
     description: 'Somente preferências visuais que alteram a experiência do aplicativo inteiro.',
   },
 };
+
+const intelligenceOptions: Array<[string, string]> = [
+  ['low', 'Baixo'],
+  ['normal', 'Normal'],
+  ['high', 'Alto'],
+  ['maximum', 'Máximo'],
+];
+const permissionOptions: Array<[string, string]> = [
+  ['read-only', 'Somente leitura'],
+  ['safe', 'Seguro'],
+  ['ask', 'Perguntar quando necessário'],
+  ['unrestricted', 'Amplo acesso'],
+];
 
 let activeSection: SectionId = 'ai';
 let renderToken = 0;
@@ -104,8 +117,18 @@ function selectedChatId(): string {
   return document.querySelector<HTMLElement>('.chat-item.selected[data-chat]')?.dataset.chat || '';
 }
 
-function renderShell(meta: { eyebrow: string; title: string; description: string }, card: string, footnote = ''): string {
-  return `<header class="settings-section-header"><div class="settings-eyebrow">${meta.eyebrow}</div><h2>${meta.title}</h2><p>${meta.description}</p></header>${card}${footnote ? `<div class="settings-footnote">${footnote}</div>` : ''}`;
+function renderShell(meta: { eyebrow: string; title: string; description: string }, cards: string, footnote = ''): string {
+  return `<header class="settings-section-header"><div class="settings-eyebrow">${meta.eyebrow}</div><h2>${meta.title}</h2><p>${meta.description}</p></header>${cards}${footnote ? `<div class="settings-footnote">${footnote}</div>` : ''}`;
+}
+
+function defaultIntelligenceCard(): string {
+  const preferences = getAppPreferences();
+  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Novos chats</strong><span>Este padrão só é aplicado na criação. Cada conversa continua podendo ser ajustada depois.</span></div>${badge('Padrão real')}</div>${row('Raciocínio inicial', 'Define o nível de raciocínio usado quando um novo chat é criado.', selectControl('default-intelligence', preferences.chatDefaults.intelligence, intelligenceOptions))}</section>`;
+}
+
+function defaultPermissionCard(): string {
+  const preferences = getAppPreferences();
+  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Novos chats</strong><span>Escolha a autonomia inicial sem transformar a permissão em uma regra global permanente.</span></div>${badge('Padrão real')}</div>${row('Autonomia inicial', 'Define o nível de acesso com que um novo chat começa.', selectControl('default-permission', preferences.chatDefaults.permissionLevel, permissionOptions))}</section>`;
 }
 
 async function currentChat(): Promise<{ state: State; chat?: Chat }> {
@@ -124,40 +147,42 @@ async function renderSection(id: SectionId): Promise<void> {
   if (id === 'ai') {
     const { state, chat } = await currentChat();
     if (token !== renderToken) return;
+    const defaults = defaultIntelligenceCard();
     if (!chat) {
-      const card = `<section class="settings-card">${[
+      const current = `<section class="settings-card">${[
         row('Chat ativo', 'Abra ou crie um chat para configurar a IA usada naquela conversa.', actionButton('Ir para Chats', 'open-chats')),
         row('Providers', 'Cadastre chaves cloud ou use um runtime local compatível.', actionButton('Gerenciar providers', 'open-api-keys')),
       ].join('')}</section>`;
-      body.innerHTML = renderShell(meta, card, 'As escolhas de IA pertencem ao chat. O Auto CodeZ não inventa um modelo global escondido.');
+      body.innerHTML = renderShell(meta, defaults + current, 'O padrão só define o ponto de partida. O modelo e o provider continuam pertencendo a cada conversa.');
       return;
     }
     const provider = state.providers.find((item) => item.id === chat.providerId);
-    const card = `<section class="settings-card">${[
+    const current = `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Chat ativo</strong><span>Alterações nesta área afetam somente a conversa selecionada.</span></div>${badge('Por conversa', 'good')}</div>${[
       row('Provider atual', 'Serviço que receberá a próxima mensagem deste chat.', badge(provider?.displayName || chat.providerId, 'good')),
       row('Modelo atual', 'Modelo persistido no chat e usado na próxima requisição.', badge(chat.model)),
-      row('Raciocínio', 'Define quanto esforço o runtime pode solicitar quando o modelo suporta níveis de raciocínio.', selectControl('chat-intelligence', chat.intelligence, [['low', 'Baixo'], ['normal', 'Normal'], ['high', 'Alto'], ['maximum', 'Máximo']])),
+      row('Raciocínio', 'Define quanto esforço o runtime pode solicitar quando o modelo suporta níveis de raciocínio.', selectControl('chat-intelligence', chat.intelligence, intelligenceOptions)),
       row('Credenciais e modelos', 'Troque provider, chave e catálogo de modelos em um fluxo dedicado.', actionButton('Gerenciar providers', 'open-api-keys')),
     ].join('')}</section>`;
-    body.innerHTML = renderShell(meta, card, provider?.requiresApiKey === false ? 'Este chat usa um provider que não exige API key.' : 'Credenciais ficam fora do renderer e não são exibidas em texto aberto.');
+    body.innerHTML = renderShell(meta, defaults + current, provider?.requiresApiKey === false ? 'Este chat usa um provider que não exige API key.' : 'Credenciais ficam fora do renderer e não são exibidas em texto aberto.');
     return;
   }
 
   if (id === 'execution') {
     const { chat } = await currentChat();
     if (token !== renderToken) return;
+    const defaults = defaultPermissionCard();
     if (!chat) {
-      const card = `<section class="settings-card">${row('Chat ativo', 'A autonomia é configurada por conversa para evitar permissões globais acidentais.', actionButton('Ir para Chats', 'open-chats'))}</section>`;
-      body.innerHTML = renderShell(meta, card);
+      const current = `<section class="settings-card">${row('Chat ativo', 'Abra uma conversa para alterar a autonomia dela sem afetar outras conversas.', actionButton('Ir para Chats', 'open-chats'))}</section>`;
+      body.innerHTML = renderShell(meta, defaults + current, 'Mesmo o padrão “Amplo acesso” nunca remove aprovações obrigatórias ou barreiras críticas do runtime.');
       return;
     }
-    const card = `<section class="settings-card">${[
-      row('Autonomia do agente', 'Controla quais ferramentas o agente pode tentar usar neste chat.', selectControl('chat-permission', chat.permissionLevel, [['read-only', 'Somente leitura'], ['safe', 'Seguro'], ['ask', 'Perguntar quando necessário'], ['unrestricted', 'Amplo acesso']])),
+    const current = `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Chat ativo</strong><span>Autonomia e proteções aplicadas à conversa selecionada.</span></div>${badge('Por conversa', 'good')}</div>${[
+      row('Autonomia do agente', 'Controla quais ferramentas o agente pode tentar usar neste chat.', selectControl('chat-permission', chat.permissionLevel, permissionOptions)),
       row('Comandos do sistema', 'run_command continua exigindo aprovação explícita antes de iniciar um processo.', badge('Aprovação obrigatória', 'good')),
-      row('Escopo de arquivos', 'Allowed Paths limita leitura, contexto e ferramentas ao escopo autorizado da tarefa.', badge('Protegido', 'good')),
-      row('Alterações', 'Shadow workspace, checkpoints e revisão evitam publicar mudanças sem rastreabilidade.', badge('Protegidas', 'good')),
+      row('Allowed Paths', 'Limita leitura, contexto e ferramentas ao escopo autorizado da tarefa.', badge('Protegido', 'good')),
+      row('Shadow workspace', 'Alterações ficam isoladas, rastreáveis e revisáveis antes da publicação.', badge('Protegido', 'good')),
     ].join('')}</section>`;
-    body.innerHTML = renderShell(meta, card, '“Amplo acesso” não desativa as barreiras críticas do runtime.');
+    body.innerHTML = renderShell(meta, defaults + current, '“Amplo acesso” não desativa as barreiras críticas do runtime.');
     return;
   }
 
@@ -276,6 +301,24 @@ document.addEventListener('change', (event) => {
     const density = target.value === 'compact' ? 'compact' : 'comfortable';
     updateAppPreferences({ general: { ...current.general, density } });
     void renderSection('interface');
+    return;
+  }
+  if (control === 'default-intelligence' && target instanceof HTMLSelectElement) {
+    const intelligence = (['low', 'normal', 'high', 'maximum'] as const).includes(target.value as IntelligenceLevel)
+      ? target.value as IntelligenceLevel
+      : 'normal';
+    const current = getAppPreferences();
+    updateAppPreferences({ chatDefaults: { ...current.chatDefaults, intelligence } });
+    void renderSection('ai');
+    return;
+  }
+  if (control === 'default-permission' && target instanceof HTMLSelectElement) {
+    const permissionLevel = (['read-only', 'safe', 'ask', 'unrestricted'] as const).includes(target.value as PermissionLevel)
+      ? target.value as PermissionLevel
+      : 'safe';
+    const current = getAppPreferences();
+    updateAppPreferences({ chatDefaults: { ...current.chatDefaults, permissionLevel } });
+    void renderSection('execution');
     return;
   }
   if (control === 'chat-intelligence' && target instanceof HTMLSelectElement) {
