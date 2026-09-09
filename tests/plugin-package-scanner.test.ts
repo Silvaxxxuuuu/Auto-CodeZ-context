@@ -33,7 +33,7 @@ async function writePlugin(root: string, directory: string, manifest: Record<str
 
 test('plugin package scanner discovers valid packages without executing them', async () => {
   await withTempRoot(async (root) => {
-    await writePlugin(root, 'safe.plugin', { contributions: ['command'], permissions: [] });
+    await writePlugin(root, 'safe.plugin', { contributions: ['command'], permissions: ['ui:contribute'] });
     const result = await scanPluginPackages(root);
     assert.equal(result.failures.length, 0);
     assert.equal(result.packages.length, 1);
