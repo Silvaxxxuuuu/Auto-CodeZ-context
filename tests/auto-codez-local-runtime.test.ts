@@ -22,12 +22,14 @@ async function withTempDir(run: (root: string) => Promise<void>): Promise<void> 
 
 async function seedEngine(root: string): Promise<void> {
   const engineDir = path.join(root, 'engine', AUTO_CODEZ_LOCAL_ENGINE_RELEASE);
+  const executable = 'test-engine';
   await fs.mkdir(engineDir, { recursive: true });
-  await fs.writeFile(path.join(engineDir, 'llama-server.exe'), 'test-engine');
+  await fs.writeFile(path.join(engineDir, 'llama-server.exe'), executable);
   await fs.writeFile(path.join(engineDir, 'engine.json'), `${JSON.stringify({
     release: AUTO_CODEZ_LOCAL_ENGINE_RELEASE,
     asset: AUTO_CODEZ_LOCAL_ENGINE_ASSET.fileName,
     sha256: AUTO_CODEZ_LOCAL_ENGINE_ASSET.sha256,
+    executableSha256: crypto.createHash('sha256').update(executable).digest('hex'),
   })}\n`, 'utf8');
 }
 
@@ -53,6 +55,7 @@ test('Auto CodeZ Local installs verified GGUF metadata and removes it idempotent
     const info = await runtime.getInfo();
     assert.equal(info.available, true);
     assert.equal(info.id, 'auto-codez-local');
+    assert.equal(await runtime.engine.isInstalled(), true);
 
     const progress: LocalModelInstallProgress[] = [];
     for await (const event of runtime.install({
@@ -87,9 +90,25 @@ test('Auto CodeZ Local installs verified GGUF metadata and removes it idempotent
     });
     assert.ok(await runtime.modelPath('qwen-test'));
 
+    const freshRuntime = new AutoCodezLocalRuntimeAdapter(root, { platform: 'win32', arch: 'x64' });
+    assert.ok(await freshRuntime.modelPath('qwen-test'));
+    const modelPath = path.join(root, 'models', 'qwen-test.gguf');
+    await fs.writeFile(modelPath, 'tampered-gguf-fixture');
+    assert.equal(await freshRuntime.modelPath('qwen-test'), undefined);
+
     await runtime.remove('qwen-test');
     await runtime.remove('qwen-test');
     assert.deepEqual(await runtime.listInstalled(), []);
+  });
+});
+
+test('Auto CodeZ Local rejects a modified llama-server executable', async () => {
+  await withTempDir(async (root) => {
+    await seedEngine(root);
+    const runtime = new AutoCodezLocalRuntimeAdapter(root, { platform: 'win32', arch: 'x64' });
+    assert.equal(await runtime.engine.isInstalled(), true);
+    await fs.writeFile(runtime.engine.executablePath(), 'modified-engine');
+    assert.equal(await runtime.engine.isInstalled(), false);
   });
 });
 
