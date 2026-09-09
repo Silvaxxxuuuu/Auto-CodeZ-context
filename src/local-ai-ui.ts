@@ -18,6 +18,7 @@ type ManagedModel = {
   runtimeId: string;
   installed: boolean;
   installing?: boolean;
+  recommended?: boolean;
   sizeBytes?: number;
   parameterSize?: string;
   quantization?: string;
@@ -28,11 +29,18 @@ type ManagedModel = {
   recommendedFor?: string[];
   compatibility: Compatibility;
 };
+type ModelRecommendation = {
+  runtimeId: string;
+  modelId: string;
+  compatibility: Compatibility;
+  reason: string;
+};
 type LocalAiSnapshot = {
   hardware: HardwareSnapshot;
   runtimes: RuntimeInfo[];
   installed: ManagedModel[];
   catalog: ManagedModel[];
+  recommendation?: ModelRecommendation;
 };
 type InstallProgress = { status: string; completedBytes?: number; totalBytes?: number; percent?: number; done: boolean };
 type InstallEvent = {
@@ -49,12 +57,14 @@ type LocalModelBridge = {
   snapshot: () => Promise<LocalAiSnapshot>;
   install: (input: { runtimeId: string; modelId: string }) => Promise<{ started: boolean }>;
   cancelInstall: (input: { runtimeId: string; modelId: string }) => Promise<{ cancelled: boolean }>;
+  remove: (input: { runtimeId: string; modelId: string }) => Promise<{ removed: boolean }>;
   onInstallEvent: (listener: (event: InstallEvent) => void) => () => void;
 };
 
 const bridge = (window as unknown as { autoCodez?: LocalAiBridge }).autoCodez;
 const localBridge = (window as unknown as { autoCodezLocalAi?: LocalModelBridge }).autoCodezLocalAi;
 const installProgress = new Map<string, InstallEvent>();
+const pendingRemoval = new Set<string>();
 let renderToken = 0;
 
 function installKey(runtimeId: string, modelId: string): string {
@@ -116,13 +126,23 @@ function installControl(model: ManagedModel, runtimeAvailable: boolean): string 
   return actionButton('Instalar', 'install', model.runtimeId, model.id, !runtimeAvailable);
 }
 
-function installDescription(model: ManagedModel): string {
+function removalControl(model: ManagedModel): string {
+  const key = installKey(model.runtimeId, model.id);
+  if (!pendingRemoval.has(key)) return actionButton('Remover', 'remove', model.runtimeId, model.id);
+  return `${badge('Confirmar remoção', 'locked')} ${actionButton('Manter', 'cancel-remove', model.runtimeId, model.id)} ${actionButton('Remover agora', 'confirm-remove', model.runtimeId, model.id)}`;
+}
+
+function installDescription(model: ManagedModel, snapshot: LocalAiSnapshot): string {
   const reason = model.compatibility.reasons[0] || 'Compatibilidade calculada localmente.';
   const estimate = model.compatibility.requirements.estimatedRamBytes
     ? ` RAM estimada: ${formatBytes(model.compatibility.requirements.estimatedRamBytes)}.`
     : '';
   const uses = model.recommendedFor?.length ? ` Ideal para ${model.recommendedFor.join(', ')}.` : '';
-  return `${model.description || reason}${uses} ${reason}${estimate}`.trim();
+  const alternative = model.compatibility.level === 'blocked' && snapshot.recommendation
+    ? snapshot.catalog.find((candidate) => candidate.runtimeId === snapshot.recommendation?.runtimeId && candidate.id === snapshot.recommendation.modelId)
+    : undefined;
+  const alternativeText = alternative ? ` Alternativa indicada para este computador: ${alternative.name}.` : '';
+  return `${model.description || reason}${uses} ${reason}${estimate}${alternativeText}`.trim();
 }
 
 function installLocalAiNavigation(): void {
@@ -157,6 +177,17 @@ function renderHardware(snapshot: LocalAiSnapshot): string {
   return `<section class="settings-card local-ai-hardware-card"><div class="local-ai-card-heading"><div><strong>Seu computador</strong><span>O Auto CodeZ usa estes dados para impedir downloads claramente incompatíveis.</span></div>${badge('Análise local', 'good')}</div>${rows.join('')}</section>`;
 }
 
+function renderRecommendation(snapshot: LocalAiSnapshot, runtimeAvailable: boolean): string {
+  const recommendation = snapshot.recommendation;
+  if (!recommendation) {
+    return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Recomendação automática</strong><span>Nenhum modelo do catálogo atual cabe com segurança no hardware detectado.</span></div>${badge('Sem opção segura', 'locked')}</div></section>`;
+  }
+  const model = snapshot.catalog.find((candidate) => candidate.runtimeId === recommendation.runtimeId && candidate.id === recommendation.modelId);
+  if (!model) return '';
+  const control = model.installed ? badge('Já instalado', 'good') : installControl(model, runtimeAvailable);
+  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Recomendado para este computador</strong><span>${escapeHtml(recommendation.reason)}</span></div>${badge(compatibilityLabel(recommendation.compatibility.level), compatibilityTone(recommendation.compatibility.level))}</div>${row(model.name, `${model.parameterSize || 'Modelo local'} · ${formatBytes(model.sizeBytes)}${model.capabilities?.includes('tools') ? ' · tools' : ''}${model.capabilities?.includes('reasoning') ? ' · raciocínio' : ''}`, control)}</section>`;
+}
+
 function renderInstalled(snapshot: LocalAiSnapshot): string {
   if (!snapshot.installed.length) {
     return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Modelos no computador</strong><span>Nenhum modelo de texto instalado foi encontrado no runtime ativo.</span></div>${badge('0')}</div></section>`;
@@ -164,19 +195,20 @@ function renderInstalled(snapshot: LocalAiSnapshot): string {
   const rows = snapshot.installed.map((model) => row(
     model.name || model.id,
     `${model.parameterSize || 'Tamanho de parâmetros não informado'}${model.quantization ? ` · ${model.quantization}` : ''}${model.sizeBytes ? ` · ${formatBytes(model.sizeBytes)}` : ''}`,
-    `${badge(compatibilityLabel(model.compatibility.level), compatibilityTone(model.compatibility.level))} ${badge('Pronto', 'good')}`,
+    `<div class="local-ai-model-actions">${badge(compatibilityLabel(model.compatibility.level), compatibilityTone(model.compatibility.level))}${badge('Pronto', 'good')}${removalControl(model)}</div>`,
+    ` data-local-ai-installed-model="${escapeHtml(installKey(model.runtimeId, model.id))}"`,
   ));
-  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Modelos no computador</strong><span>Inventário lido diretamente do runtime local.</span></div>${badge(String(snapshot.installed.length), 'good')}</div>${rows.join('')}</section>`;
+  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Modelos no computador</strong><span>Inventário lido diretamente do runtime local. A remoção só acontece após confirmação explícita.</span></div>${badge(String(snapshot.installed.length), 'good')}</div>${rows.join('')}</section>`;
 }
 
 function renderCatalog(snapshot: LocalAiSnapshot, runtimeAvailable: boolean): string {
   const rows = snapshot.catalog.map((model) => row(
     `${model.name}${model.parameterSize ? ` · ${model.parameterSize}` : ''}`,
-    installDescription(model),
-    `<div class="local-ai-model-actions">${badge(formatBytes(model.sizeBytes))}${badge(compatibilityLabel(model.compatibility.level), compatibilityTone(model.compatibility.level))}${installControl(model, runtimeAvailable)}</div>`,
+    installDescription(model, snapshot),
+    `<div class="local-ai-model-actions">${model.recommended ? badge('Recomendado', 'good') : ''}${badge(formatBytes(model.sizeBytes))}${badge(compatibilityLabel(model.compatibility.level), compatibilityTone(model.compatibility.level))}${installControl(model, runtimeAvailable)}</div>`,
     ` data-local-ai-model="${escapeHtml(installKey(model.runtimeId, model.id))}"`,
   ));
-  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Modelos recomendados</strong><span>Catálogo versionado pelo Auto CodeZ para instalação controlada.</span></div>${badge(String(snapshot.catalog.length))}</div>${rows.join('')}</section>`;
+  return `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Catálogo local</strong><span>Modelos versionados pelo Auto CodeZ, avaliados antes do download e instalados pelo runtime local.</span></div>${badge(String(snapshot.catalog.length))}</div>${rows.join('')}</section>`;
 }
 
 async function renderLocalAi(): Promise<void> {
@@ -196,13 +228,14 @@ async function renderLocalAi(): Promise<void> {
     const ollamaRuntime = snapshot.runtimes.find((runtime) => runtime.id === 'ollama');
     const runtimeAvailable = Boolean(ollamaProvider?.requiresApiKey === false && ollamaRuntime?.available);
     const runtimeCard = `<section class="settings-card">${[
-      row('Ollama', runtimeAvailable ? 'Runtime local detectado e pronto para listar, instalar e executar modelos.' : 'O runtime não respondeu. Os modelos continuam visíveis, mas a instalação fica desativada.', badge(runtimeAvailable ? 'Conectado' : 'Não detectado', runtimeAvailable ? 'good' : 'locked')),
+      row('Ollama', runtimeAvailable ? 'Runtime local detectado e pronto para listar, instalar, remover e executar modelos.' : 'O runtime não respondeu. O catálogo continua visível, mas alterações ficam desativadas.', badge(runtimeAvailable ? 'Conectado' : 'Não detectado', runtimeAvailable ? 'good' : 'locked')),
       row('Endpoint', 'Conexão permanece restrita ao processo principal do Auto CodeZ.', badge(ollamaRuntime?.endpoint || 'http://127.0.0.1:11434')),
       row('Atualizar diagnóstico', 'Refaz a leitura de hardware, runtime e inventário sem reiniciar o aplicativo.', actionButton('Verificar novamente', 'retry')),
     ].join('')}</section>`;
-    body.innerHTML = '<header class="settings-section-header"><div class="settings-eyebrow">LOCAL</div><h2>IA Local</h2><p>Escolha modelos que rodam no seu computador, com análise de hardware antes da instalação.</p></header>'
+    body.innerHTML = '<header class="settings-section-header"><div class="settings-eyebrow">LOCAL</div><h2>IA Local</h2><p>Modelos locais com compatibilidade calculada antes do download e gerenciamento direto no Auto CodeZ.</p></header>'
       + renderHardware(snapshot)
       + runtimeCard
+      + renderRecommendation(snapshot, runtimeAvailable)
       + renderInstalled(snapshot)
       + renderCatalog(snapshot, runtimeAvailable)
       + '<div class="settings-footnote">Bloqueios usam RAM e armazenamento detectados localmente. GPU/VRAM só entram no cálculo quando puderem ser identificadas com confiança. O Auto CodeZ não inventa VRAM ausente.</div>';
@@ -246,29 +279,57 @@ document.addEventListener('click', (event) => {
     void renderLocalAi();
     return;
   }
-  if ((action === 'install' || action === 'cancel') && actionTarget && localBridge) {
-    const runtimeId = actionTarget.dataset.runtimeId;
-    const modelId = actionTarget.dataset.modelId;
-    if (!runtimeId || !modelId) return;
+  if (!actionTarget || !localBridge) return;
+  const runtimeId = actionTarget.dataset.runtimeId;
+  const modelId = actionTarget.dataset.modelId;
+  if (!runtimeId || !modelId) return;
+  const key = installKey(runtimeId, modelId);
+
+  if (action === 'remove') {
+    pendingRemoval.add(key);
+    void renderLocalAi();
+    return;
+  }
+  if (action === 'cancel-remove') {
+    pendingRemoval.delete(key);
+    void renderLocalAi();
+    return;
+  }
+  if (action === 'confirm-remove') {
     actionTarget.setAttribute('disabled', '');
-    if (action === 'install') {
-      installProgress.set(installKey(runtimeId, modelId), { type: 'progress', runtimeId, modelId, progress: { status: 'Iniciando…', done: false } });
-      void localBridge.install({ runtimeId, modelId })
-        .then(() => renderLocalAi())
-        .catch((error) => {
-          installProgress.set(installKey(runtimeId, modelId), { type: 'error', runtimeId, modelId, error: error instanceof Error ? error.message : String(error) });
-          window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível instalar o modelo.' }));
-          void renderLocalAi();
-        });
-      return;
-    }
-    void localBridge.cancelInstall({ runtimeId, modelId })
-      .then(() => renderLocalAi())
+    void localBridge.remove({ runtimeId, modelId })
+      .then(() => {
+        pendingRemoval.delete(key);
+        installProgress.delete(key);
+        return renderLocalAi();
+      })
       .catch((error) => {
-        window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível cancelar a instalação.' }));
+        pendingRemoval.delete(key);
+        window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível remover o modelo.' }));
         void renderLocalAi();
       });
+    return;
   }
+  if (action !== 'install' && action !== 'cancel') return;
+
+  actionTarget.setAttribute('disabled', '');
+  if (action === 'install') {
+    installProgress.set(key, { type: 'progress', runtimeId, modelId, progress: { status: 'Iniciando…', done: false } });
+    void localBridge.install({ runtimeId, modelId })
+      .then(() => renderLocalAi())
+      .catch((error) => {
+        installProgress.set(key, { type: 'error', runtimeId, modelId, error: error instanceof Error ? error.message : String(error) });
+        window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível instalar o modelo.' }));
+        void renderLocalAi();
+      });
+    return;
+  }
+  void localBridge.cancelInstall({ runtimeId, modelId })
+    .then(() => renderLocalAi())
+    .catch((error) => {
+      window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível cancelar a instalação.' }));
+      void renderLocalAi();
+    });
 }, true);
 
 const observer = new MutationObserver(() => installLocalAiNavigation());
