@@ -46,18 +46,30 @@ export function providerErrorKind(error: unknown): ProviderErrorKind | undefined
   return error instanceof ProviderRequestError ? error.kind : undefined;
 }
 
+function conciseDetail(error: ProviderRequestError): string {
+  const detail = error.message.trim().replace(/\s+/g, ' ');
+  if (!detail) return '';
+  const bounded = detail.length > 220 ? `${detail.slice(0, 217)}...` : detail;
+  return bounded;
+}
+
+function httpSuffix(error: ProviderRequestError): string {
+  return error.status > 0 ? ` (HTTP ${error.status})` : '';
+}
+
 export function formatProviderError(error: unknown): string {
   if (!(error instanceof ProviderRequestError)) return error instanceof Error ? error.message : String(error);
   const prefix = `${error.provider}:`;
+  const detail = conciseDetail(error);
   switch (error.kind) {
     case 'authentication': return `${prefix} a API key foi recusada. Abra Configurações de IA para verificar ou trocar a chave.`;
     case 'billing': return `${prefix} não há créditos ou faturamento disponível para esta solicitação. Sua API key continua salva. Abra Configurações de IA para usar outra chave.`;
     case 'quota': return `${prefix} a cota disponível para este modelo foi atingida. Sua API key continua salva. Tente outro modelo ou outra chave em Configurações de IA.`;
-    case 'rate_limit': return `${prefix} o limite de requisições foi atingido. Aguarde e tente novamente.`;
-    case 'server': return `${prefix} o serviço apresentou um erro temporário. Tente novamente.`;
-    case 'network': return `${prefix} não foi possível alcançar o serviço. Verifique a conexão e tente novamente.`;
-    case 'invalid_request': return `${prefix} a solicitação foi recusada. ${error.message}`;
-    default: return `${prefix} ${error.message}`;
+    case 'rate_limit': return `${prefix} o limite de requisições foi atingido${httpSuffix(error)}. Aguarde e tente novamente.`;
+    case 'server': return `${prefix} o serviço respondeu com uma falha temporária${httpSuffix(error)}.${detail ? ` ${detail}` : ''}`;
+    case 'network': return `${prefix} não foi possível concluir a conexão com o serviço.${detail ? ` ${detail}` : ' Verifique a conexão e tente novamente.'}`;
+    case 'invalid_request': return `${prefix} a solicitação foi recusada${httpSuffix(error)}. ${detail || 'O provider não aceitou o formato enviado.'}`;
+    default: return `${prefix} ${detail || 'Falha desconhecida do provider.'}`;
   }
 }
 
