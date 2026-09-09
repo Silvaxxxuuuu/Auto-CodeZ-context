@@ -17,7 +17,8 @@ export class AutoCodezLocalProviderAdapter implements AIProviderAdapter {
   readonly requiresApiKey = false;
   readonly fallbackCapabilities: Capability[] = ['text', 'streaming', 'tools'];
 
-  async listModels(_config: AIProviderConfig): Promise<AIModel[]> {
+  async listModels(config: AIProviderConfig): Promise<AIModel[]> {
+    void config;
     const service = getAutoCodezLocalService();
     if (!service) return [];
     const models = await service.listInstalled();
