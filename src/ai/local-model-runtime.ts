@@ -38,6 +38,12 @@ export type LocalModelDescriptor = {
   contextWindow?: number;
 };
 
+export type LocalModelInstallRequest = {
+  modelId: string;
+  source?: string;
+  quantization?: string;
+};
+
 export type LocalModelInstallProgress = {
   runtimeId: string;
   modelId: string;
@@ -68,7 +74,7 @@ export interface LocalModelRuntimeAdapter {
   readonly supportsInstallCancellation?: boolean;
   getInfo(): Promise<LocalModelRuntimeInfo>;
   listInstalled(): Promise<LocalModelDescriptor[]>;
-  install?(modelId: string, signal?: AbortSignal): AsyncGenerator<LocalModelInstallProgress>;
+  install?(model: string | LocalModelInstallRequest, signal?: AbortSignal): AsyncGenerator<LocalModelInstallProgress>;
   remove?(modelId: string): Promise<void>;
 }
 
