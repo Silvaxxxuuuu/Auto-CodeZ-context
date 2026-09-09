@@ -1,16 +1,10 @@
 import './chat-sources-ui.css';
-
-type Source = {
-  title: string;
-  url: string;
-  origin: 'autocodez-web' | 'provider-native';
-  citation?: number;
-  searchProvider?: string;
-};
+import { normalizeAISource } from './ai/source-normalization';
+import type { AISource } from './ai/types';
 
 type StoredMessage = {
   role: 'user' | 'assistant' | 'system' | 'tool';
-  sources?: Source[];
+  sources?: AISource[];
 };
 
 type StoredChat = {
@@ -32,38 +26,20 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
 }
 
-function safeSource(value: Source): Source | undefined {
-  try {
-    const url = new URL(value.url);
-    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return undefined;
-    url.hash = '';
-    const title = typeof value.title === 'string' ? value.title.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
-    if (!title) return undefined;
-    return {
-      title,
-      url: url.toString(),
-      origin: value.origin === 'provider-native' ? 'provider-native' : 'autocodez-web',
-      ...(Number.isInteger(value.citation) && Number(value.citation) > 0 ? { citation: Number(value.citation) } : {}),
-      ...(typeof value.searchProvider === 'string' && value.searchProvider.trim() ? { searchProvider: value.searchProvider.trim().slice(0, 120) } : {}),
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-function sourceLabel(source: Source): string {
+function sourceLabel(source: AISource): string {
   if (source.origin === 'provider-native') return 'Fonte do provider';
   return source.searchProvider || 'Web Auto CodeZ';
 }
 
-function renderSources(sources: Source[]): string {
+function renderSources(sources: AISource[]): string {
   const safe = sources.flatMap((source) => {
-    const normalized = safeSource(source);
+    const normalized = normalizeAISource(source);
     return normalized ? [normalized] : [];
   });
   if (!safe.length) return '';
   const unique = [...new Map(safe.map((source) => [source.url, source])).values()];
-  return `<div class="message-sources" data-auto-codez-sources="${escapeHtml(unique.map((source) => source.url).join('|'))}">
+  const marker = encodeURIComponent(unique.map((source) => source.url).join('|'));
+  return `<div class="message-sources" data-auto-codez-sources="${marker}">
     <div class="message-sources-head"><span>Fontes</span><span class="message-sources-count">${unique.length} verificada${unique.length === 1 ? '' : 's'}</span></div>
     <div class="message-sources-list">${unique.map((source, index) => {
       const hostname = new URL(source.url).hostname.replace(/^www\./, '');
@@ -129,8 +105,9 @@ if (messagesRoot) {
     if (!encodedUrl) return;
     event.preventDefault();
     try {
-      const url = decodeURIComponent(encodedUrl);
-      void bridge.openExternal(url).catch((error: unknown) => {
+      const source = normalizeAISource({ title: 'Fonte', url: decodeURIComponent(encodedUrl), origin: 'autocodez-web' });
+      if (!source) return;
+      void bridge.openExternal(source.url).catch((error: unknown) => {
         window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível abrir a fonte.' }));
       });
     } catch {
