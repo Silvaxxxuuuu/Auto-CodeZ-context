@@ -66,6 +66,7 @@ test('provider registry adds Auto CodeZ sources to streaming completion events',
       title: 'Provider release notes',
       url: 'https://provider.example/releases',
       origin: 'provider-native',
+      providerId: config.id,
     },
     {
       title: 'Package docs',
