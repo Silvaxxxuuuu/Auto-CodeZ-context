@@ -4,6 +4,8 @@ import { ActivityRuntime } from '../src/agent/activity-runtime';
 import { PermissionRuntime } from '../src/agent/permission-runtime';
 import { ShadowAwareToolRuntime } from '../src/agent/shadow-aware-tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
+import { ExecutionChangeBudgetRuntime } from '../src/execution-change-budget';
+import { ExecutionPlanner } from '../src/execution-planner';
 import { WebRetrievalRuntime } from '../src/web/web-retrieval-runtime';
 import type { WebHttpTransport } from '../src/web/web-http-client';
 import type { WebHostResolver } from '../src/web/web-network-policy';
@@ -19,11 +21,17 @@ function createTools(searchAdapter: WebSearchAdapter, transport?: WebHttpTranspo
   return { tools, events };
 }
 
-test('shared agent tool catalog exposes provider-independent web tools', () => {
+test('shared agent tool catalog exposes provider-independent proactive web tools', () => {
   const { tools } = createTools({ id: 'fixture', displayName: 'Fixture', async search() { return []; } });
-  const names = tools.listDefinitions().map((definition) => definition.name);
-  assert.equal(names.includes('web_search'), true);
-  assert.equal(names.includes('web_fetch'), true);
+  const definitions = tools.listDefinitions();
+  const search = definitions.find((definition) => definition.name === 'web_search');
+  const fetch = definitions.find((definition) => definition.name === 'web_fetch');
+  assert.ok(search);
+  assert.ok(fetch);
+  assert.match(search.description, /documentation, libraries, frameworks, APIs, package versions, tools/i);
+  assert.match(search.description, /not limited to news or weather/i);
+  assert.equal(search.requiresWriteAccess, false);
+  assert.equal(search.requiresApproval, false);
 });
 
 test('web_search runs in read-only mode and emits real activity', async () => {
@@ -31,22 +39,34 @@ test('web_search runs in read-only mode and emits real activity', async () => {
     id: 'fixture',
     displayName: 'Fixture Search',
     async search(query) {
-      assert.equal(query, 'previsão hoje amanhã');
-      return [{ title: 'Meteorologia', url: 'https://weather.example/current', snippet: 'Dados atualizados.' }];
+      assert.equal(query, 'latest Electron Forge Vite plugin documentation');
+      return [{ title: 'Electron Forge docs', url: 'https://docs.example/forge', snippet: 'Current Vite plugin documentation.' }];
     },
   };
   const { tools, events } = createTools(adapter);
   const result = await tools.execute('chat-1', 'project-not-needed', 'read-only', {
     id: 'web-1',
     name: 'web_search',
-    input: { query: 'previsão hoje amanhã', limit: 4 },
+    input: { query: 'latest Electron Forge Vite plugin documentation', limit: 4 },
   }, 'run-1');
   assert.equal(result.ok, true);
-  const output = JSON.parse(result.output || '{}') as { sources?: Array<{ url: string }>; untrustedExternalData?: boolean };
-  assert.equal(output.sources?.[0]?.url, 'https://weather.example/current');
-  assert.equal(output.untrustedExternalData, true);
+  const output = JSON.parse(result.output || '{}') as {
+    type?: string;
+    query?: string;
+    searchProvider?: string;
+    sourceCount?: number;
+    security?: string;
+    sources?: Array<{ id: number; url: string }>;
+  };
+  assert.equal(output.type, 'web_search_results');
+  assert.equal(output.query, 'latest Electron Forge Vite plugin documentation');
+  assert.equal(output.searchProvider, 'Fixture Search');
+  assert.equal(output.sourceCount, 1);
+  assert.equal(output.sources?.[0]?.id, 1);
+  assert.equal(output.sources?.[0]?.url, 'https://docs.example/forge');
+  assert.match(output.security || '', /untrusted data/i);
   assert.equal(events.some((event) => event.startsWith('running:Pesquisando na web:')), true);
-  assert.equal(events.some((event) => event.startsWith('success:Busca web concluída:')), true);
+  assert.equal(events.some((event) => event.startsWith('success:Pesquisa Web concluída:')), true);
 });
 
 test('web_search blocks secret-like outbound queries before adapter execution', async () => {
@@ -67,10 +87,11 @@ test('web_search blocks secret-like outbound queries before adapter execution', 
 });
 
 test('web_fetch returns bounded untrusted source content and activity', async () => {
+  const largeText = `Versão 9.1 publicada hoje. ${'A'.repeat(30_000)}`;
   const transport: WebHttpTransport = async () => ({
     status: 200,
     headers: { 'content-type': 'text/html' },
-    body: Buffer.from('<html><head><title>Docs atuais</title></head><body><p>Versão 9.1 publicada hoje.</p></body></html>'),
+    body: Buffer.from(`<html><head><title>Docs atuais</title></head><body><p>${largeText}</p></body></html>`),
   });
   const { tools, events } = createTools({ id: 'fixture', displayName: 'Fixture', async search() { return []; } }, transport);
   const result = await tools.execute('chat-2', 'project-not-needed', 'read-only', {
@@ -79,11 +100,63 @@ test('web_fetch returns bounded untrusted source content and activity', async ()
     input: { url: 'https://docs.example/latest' },
   }, 'run-2');
   assert.equal(result.ok, true);
-  const output = JSON.parse(result.output || '{}') as { source?: { title?: string; retrievedAt?: number }; content?: string; untrustedExternalData?: boolean };
+  const output = JSON.parse(result.output || '{}') as {
+    type?: string;
+    source?: { title?: string; retrievedAt?: number; url?: string };
+    text?: string;
+    truncated?: boolean;
+    security?: string;
+  };
+  assert.equal(output.type, 'web_document');
   assert.equal(output.source?.title, 'Docs atuais');
   assert.equal(output.source?.retrievedAt, 42);
-  assert.match(output.content || '', /Versão 9\.1/);
-  assert.equal(output.untrustedExternalData, true);
-  assert.equal(events.some((event) => event.includes('Abrindo fonte web: docs.example')), true);
-  assert.equal(events.some((event) => event.includes('Fonte web carregada: Docs atuais')), true);
+  assert.equal(output.source?.url, 'https://docs.example/latest');
+  assert.match(output.text || '', /Versão 9\.1/);
+  assert.equal(output.text?.length, 24_000);
+  assert.equal(output.truncated, true);
+  assert.match(output.security || '', /untrusted data/i);
+  assert.equal(events.some((event) => event.includes('Abrindo fonte Web: https://docs.example/latest')), true);
+  assert.equal(events.some((event) => event.includes('Fonte Web carregada: Docs atuais')), true);
+});
+
+test('successful proactive web research counts toward Change Budget and becomes plan evidence', async () => {
+  const { tools } = createTools({
+    id: 'fixture',
+    displayName: 'Fixture',
+    async search() {
+      return [{ title: 'Official package docs', url: 'https://docs.example/package', snippet: 'Supported tools and APIs.' }];
+    },
+  });
+  const planner = new ExecutionPlanner({ now: () => 100, createId: (() => {
+    let id = 0;
+    return () => `plan-id-${++id}`;
+  })() });
+  const budget = new ExecutionChangeBudgetRuntime(() => 100);
+  tools.configureExecutionPlanner(planner);
+  tools.configureExecutionChangeBudget(budget);
+  budget.configure('chat-plan', 'run-plan', { maxToolCalls: 1 });
+  const plan = planner.create('chat-plan', 'run-plan', 'Escolher uma ferramenta atual para o projeto.', ['Pesquisar documentação e ferramentas disponíveis']);
+  planner.startStep('chat-plan', 'run-plan', plan.steps[0].id);
+
+  const result = await tools.execute('chat-plan', 'project-not-needed', 'read-only', {
+    id: 'web-research',
+    name: 'web_search',
+    input: { query: 'official package documentation supported tools APIs latest' },
+  }, 'run-plan');
+
+  assert.equal(result.ok, true);
+  assert.equal(budget.getUsage('chat-plan', 'run-plan').toolCalls, 1);
+  const updated = planner.get('chat-plan', 'run-plan');
+  assert.equal(updated?.steps[0].evidence.length, 1);
+  assert.equal(updated?.steps[0].evidence[0].type, 'tool');
+  assert.equal(updated?.steps[0].evidence[0].summary, 'web_search concluído');
+  assert.match(updated?.steps[0].evidence[0].reference || '', /official package documentation/);
+
+  const blocked = await tools.execute('chat-plan', 'project-not-needed', 'read-only', {
+    id: 'web-research-2',
+    name: 'web_search',
+    input: { query: 'another current package query' },
+  }, 'run-plan');
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error || '', /Change Budget excedido/);
 });
