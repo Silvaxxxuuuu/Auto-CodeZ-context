@@ -169,11 +169,11 @@ async function verifyTerminalSessions() {
 
 async function verifyLocalChatInstallFlow() {
   await page.locator('#terminal-close').click().catch(() => {});
-  const created = await page.evaluate(() => window.autoCodez.createChat({ intelligence: 'normal', permissionLevel: 'safe' }));
-  const chat = page.locator(`[data-chat="${created.id}"]`).first();
-  await chat.waitFor({ state: 'visible', timeout: 15_000 });
-  await chat.click();
-  await page.locator(`[data-chat-settings="${created.id}"]`).click({ force: true });
+  await page.locator('[data-action="new-chat"]').click();
+  const settings = page.locator('#chat-header [data-chat-settings]').first();
+  await settings.waitFor({ state: 'visible', timeout: 15_000 });
+  await settings.click();
+
   const ai = page.locator('#chat-available-ai');
   await ai.waitFor({ state: 'visible' });
   await ai.selectOption('provider:ollama');
