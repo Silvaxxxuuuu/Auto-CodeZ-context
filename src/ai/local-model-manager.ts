@@ -32,6 +32,11 @@ export type LocalModelRecommendation = {
 
 type RecommendationCandidate = Pick<LocalModelDescriptor, 'id' | 'runtimeId' | 'sizeBytes' | 'capabilities'>;
 
+type RankedRecommendationCandidate = {
+  model: RecommendationCandidate;
+  compatibility: LocalModelCompatibilityResult;
+};
+
 function installId(runtimeId: string, modelId: string): string {
   return `${runtimeId}:${modelId}`;
 }
@@ -46,6 +51,26 @@ function compatibilityRank(level: LocalModelCompatibility): number {
 function capabilityRank(capabilities: string[] | undefined): number {
   const values = new Set(capabilities ?? []);
   return (values.has('tools') ? 2 : 0) + (values.has('reasoning') ? 1 : 0);
+}
+
+function supportsAgentTools(model: RecommendationCandidate): boolean {
+  return model.capabilities?.includes('tools') === true;
+}
+
+function isSafeRecommendation(entry: RankedRecommendationCandidate): boolean {
+  return entry.compatibility.level === 'excellent' || entry.compatibility.level === 'compatible';
+}
+
+function sortRecommendationCandidates(entries: RankedRecommendationCandidate[]): RankedRecommendationCandidate[] {
+  return entries.sort((left, right) => {
+    const compatibilityDifference = compatibilityRank(right.compatibility.level) - compatibilityRank(left.compatibility.level);
+    if (compatibilityDifference) return compatibilityDifference;
+    const capabilityDifference = capabilityRank(right.model.capabilities) - capabilityRank(left.model.capabilities);
+    if (capabilityDifference) return capabilityDifference;
+    const sizeDifference = (right.model.sizeBytes ?? 0) - (left.model.sizeBytes ?? 0);
+    if (sizeDifference) return sizeDifference;
+    return left.model.id.localeCompare(right.model.id);
+  });
 }
 
 export class LocalModelManager {
@@ -91,26 +116,31 @@ export class LocalModelManager {
   }
 
   recommendModel(models: RecommendationCandidate[], hardware: LocalHardwareSnapshot): LocalModelRecommendation | undefined {
-    const ranked = models
-      .map((model) => ({ model, compatibility: this.evaluateModel(model, hardware) }))
-      .filter((entry) => entry.compatibility.level !== 'blocked')
-      .sort((left, right) => {
-        const compatibilityDifference = compatibilityRank(right.compatibility.level) - compatibilityRank(left.compatibility.level);
-        if (compatibilityDifference) return compatibilityDifference;
-        const capabilityDifference = capabilityRank(right.model.capabilities) - capabilityRank(left.model.capabilities);
-        if (capabilityDifference) return capabilityDifference;
-        const sizeDifference = (right.model.sizeBytes ?? 0) - (left.model.sizeBytes ?? 0);
-        if (sizeDifference) return sizeDifference;
-        return left.model.id.localeCompare(right.model.id);
-      });
+    const viable = models
+      .map((model): RankedRecommendationCandidate => ({ model, compatibility: this.evaluateModel(model, hardware) }))
+      .filter((entry) => entry.compatibility.level !== 'blocked');
 
-    const selected = ranked[0];
+    const safe = viable.filter(isSafeRecommendation);
+    const safeAgentModels = safe.filter((entry) => supportsAgentTools(entry.model));
+    const pool = safeAgentModels.length > 0
+      ? safeAgentModels
+      : safe.length > 0
+        ? safe
+        : viable;
+    const selected = sortRecommendationCandidates(pool)[0];
     if (!selected) return undefined;
-    const reason = selected.compatibility.level === 'excellent'
-      ? 'Melhor equilíbrio entre recursos de agente e margem confortável de hardware.'
-      : selected.compatibility.level === 'compatible'
-        ? 'Melhor opção de agente que permanece compatível com o hardware detectado.'
-        : 'É a opção viável encontrada, mas o uso atual de memória deixa pouca margem.';
+
+    const agentReady = supportsAgentTools(selected.model);
+    const reason = selected.compatibility.level === 'limit'
+      ? agentReady
+        ? 'É a única opção de agente viável encontrada, mas o uso atual de memória deixa pouca margem.'
+        : 'É a única opção local viável encontrada, mas o uso atual de memória deixa pouca margem e ela não oferece tools para o agente.'
+      : agentReady
+        ? selected.compatibility.level === 'excellent'
+          ? 'Melhor equilíbrio entre recursos de agente e margem confortável de hardware.'
+          : 'Melhor opção de agente que permanece compatível com o hardware detectado.'
+        : 'Melhor opção local segura disponível neste catálogo, mas sem suporte de tools para o agente.';
+
     return {
       runtimeId: selected.model.runtimeId,
       modelId: selected.model.id,
