@@ -62,11 +62,11 @@ jobs:
           NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
         run: npm run test:visual
 
-      - name: Verify local AI settings
+      - name: Verify unified local AI
         env:
           AUTO_CODEZ_VISUAL_DIR: artifacts/visual
           NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
-        run: node scripts/visual-local-ai.cjs
+        run: node scripts/visual-local-ai-unified.cjs
 
       - name: Verify unavailable local runtime recovery
         env:
