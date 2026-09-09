@@ -16,7 +16,8 @@ async function withTempDir(run: (root: string) => Promise<void>): Promise<void> 
 }
 
 function fakeFetch(bytes: Uint8Array): typeof fetch {
-  return async () => new Response(bytes, {
+  const body = new TextDecoder().decode(bytes);
+  return async () => new Response(body, {
     status: 200,
     headers: { 'content-length': String(bytes.byteLength) },
   });
