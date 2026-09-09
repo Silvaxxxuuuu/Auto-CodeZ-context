@@ -30,6 +30,10 @@ export type LocalModelRecommendation = {
   reason: string;
 };
 
+export type LocalModelEvaluationOptions = {
+  includeDownload?: boolean;
+};
+
 type RecommendationCandidate = Pick<LocalModelDescriptor, 'id' | 'runtimeId' | 'sizeBytes' | 'capabilities'>;
 
 type RankedRecommendationCandidate = {
@@ -102,14 +106,19 @@ export class LocalModelManager {
     const models = await this.requireRuntime(runtimeId).listInstalled();
     return models.map((model) => ({
       ...model,
-      compatibility: this.evaluateModel(model, hardware),
+      compatibility: this.evaluateModel(model, hardware, { includeDownload: false }),
     }));
   }
 
-  evaluateModel(model: Pick<LocalModelDescriptor, 'sizeBytes'>, hardware: LocalHardwareSnapshot): LocalModelCompatibilityResult {
+  evaluateModel(
+    model: Pick<LocalModelDescriptor, 'sizeBytes'>,
+    hardware: LocalHardwareSnapshot,
+    options: LocalModelEvaluationOptions = {},
+  ): LocalModelCompatibilityResult {
     const estimatedRamBytes = estimateQuantizedModelRam(model.sizeBytes);
+    const includeDownload = options.includeDownload !== false;
     const requirements: LocalModelRequirements = {
-      ...(model.sizeBytes ? { downloadBytes: model.sizeBytes } : {}),
+      ...(includeDownload && model.sizeBytes ? { downloadBytes: model.sizeBytes } : {}),
       ...(estimatedRamBytes ? { estimatedRamBytes } : {}),
     };
     return evaluateLocalModelCompatibility(hardware, requirements);
