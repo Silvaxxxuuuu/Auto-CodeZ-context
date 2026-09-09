@@ -25,12 +25,12 @@ const config: ForgeConfig = {
     new VitePlugin({
       build: [
         {
-          entry: 'src/main.ts',
+          entry: 'src/main-entry.ts',
           config: 'vite.main.config.ts',
           target: 'main',
         },
         {
-          entry: 'src/preload.ts',
+          entry: 'src/preload-entry.ts',
           config: 'vite.preload.config.ts',
           target: 'preload',
         },
@@ -42,7 +42,7 @@ const config: ForgeConfig = {
         },
       ],
     }),
-    new AutoUnpackNativesPlugin({}),
+    new AutoUnpackNativesPlugin(),
     new FusesPlugin({
       version: FuseVersion.V1,
       [FuseV1Options.RunAsNode]: false,
