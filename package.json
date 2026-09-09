@@ -13,7 +13,7 @@
     "lint": "eslint --ext .ts,.tsx .",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "test": "node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node --test .test-dist/tests/*.test.js",
-    "test:visual": "node scripts/visual-product.cjs && node scripts/visual-chat-defaults.cjs && node scripts/visual-provider-catalog.cjs"
+    "test:visual": "node scripts/visual-product.cjs && node scripts/visual-chat-defaults.cjs && node scripts/visual-provider-catalog.cjs && node scripts/visual-chat-sources.cjs"
   },
   "keywords": [
     "ai",
