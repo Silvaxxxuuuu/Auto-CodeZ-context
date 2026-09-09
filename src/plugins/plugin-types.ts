@@ -38,6 +38,7 @@ export type PluginLifecycleState = 'registered' | 'enabled' | 'disabled' | 'fail
 export interface RegisteredPlugin {
   manifest: PluginManifest;
   state: PluginLifecycleState;
+  grantedPermissions: PluginPermission[];
   registeredAt: number;
   updatedAt: number;
   failureReason?: string;
@@ -47,3 +48,10 @@ export interface PluginContributionOwner {
   pluginId: string;
   contribution: PluginContribution;
 }
+
+export type PersistedPluginState = {
+  id: string;
+  version: string;
+  enabled: boolean;
+  grantedPermissions: PluginPermission[];
+};
