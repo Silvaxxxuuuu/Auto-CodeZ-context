@@ -39,9 +39,12 @@ export type WebGroundingCoordinatorOptions = {
 type CacheEntry = Omit<WebGroundingResult, 'cached'>;
 
 const RELATIVE_TIME = /\b(hoje|amanh[ãa]|depois de amanh[ãa]|agora|neste momento|esta semana|este m[eê]s|today|tomorrow|right now|this week|this month)\b/i;
-const CURRENT_FACTS = /\b(atual|atuais|atualizado|atualizada|mais recente|mais recentes|[uú]ltim[oa]s?|recentemente|current|latest|newest|recent|updated)\b/i;
 const LIVE_DATA = /\b(previs[aã]o(?: do tempo)?|tempo agora|clima|temperatura|not[ií]cias|placar|resultado(?:s)? ao vivo|cota[cç][aã]o|pre[cç]o(?:s)? agora|mercado agora|tr[aâ]nsito|voo|voos|outage|status page|weather|forecast|news|live score|stock price|exchange rate|traffic|flight status)\b/i;
-const RECENT_SOFTWARE = /\b(vers[aã]o (?:atual|mais recente)|documenta[cç][aã]o (?:atual|mais recente)|release mais recente|latest version|latest release|current version|current docs|latest docs)\b/i;
+const RECENT_SOFTWARE = /\b(vers[aã]o (?:atual|mais recente|mais nova)|(?:[uú]ltima|nova) vers[aã]o|documenta[cç][aã]o (?:atual|mais recente)|release (?:mais recente|atual)|latest version|latest release|current version|newest version|current docs|latest docs)\b/i;
+const CURRENT_QUALIFIER = /\b(atual|atuais|atualmente|mais recente|mais recentes|[uú]ltim[oa]s?|recentemente|current|currently|latest|newest|recent|updated)\b/i;
+const MUTABLE_EXTERNAL_ENTITY = /\b(presidente|governador|prefeito|primeiro[- ]ministro|ministro|ceo|diretor(?:a)? executivo|l[ií]der|campe[aã]o|ranking|classifica[cç][aã]o|lei|legisla[cç][aã]o|regulamento|regra|taxa de juros|juros|infla[cç][aã]o|sal[aá]rio m[ií]nimo|c[aâ]mbio|cotação|pre[cç]o|status|disponibilidade|agenda|hor[aá]rio|calend[aá]rio|president|governor|mayor|prime minister|minister|chief executive|leader|champion|rankings?|law|legislation|regulation|interest rate|inflation|minimum wage|exchange rate|price|status|availability|schedule|calendar)\b/i;
+const RELATIVE_EXTERNAL_TOPIC = /\b(evento|eventos|lan[cç]amento|estreia|jogo|partida|campeonato|elei[cç][aã]o|elei[cç][oõ]es|vota[cç][aã]o|show|festival|prazo|inscri[cç][aã]o|funcionamento|aberto|fechado|event|launch|premiere|game|match|championship|election|vote|concert|festival|deadline|registration|open|closed)\b/i;
+const CURRENT_EVENT_INTENT = /\b(o que aconteceu|o que est[aá] acontecendo|aconteceu|acontecendo|what happened|what is happening|what's happening|happening now)\b/i;
 
 function latestUserMessage(messages: AIMessage[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -53,9 +56,9 @@ function latestUserMessage(messages: AIMessage[]): string | undefined {
 
 function freshnessReason(message: string): WebFreshnessReason | undefined {
   if (LIVE_DATA.test(message)) return 'live-data';
-  if (RELATIVE_TIME.test(message)) return 'relative-time';
   if (RECENT_SOFTWARE.test(message)) return 'recent-software';
-  if (CURRENT_FACTS.test(message)) return 'current-facts';
+  if (CURRENT_QUALIFIER.test(message) && MUTABLE_EXTERNAL_ENTITY.test(message)) return 'current-facts';
+  if (RELATIVE_TIME.test(message) && (MUTABLE_EXTERNAL_ENTITY.test(message) || RELATIVE_EXTERNAL_TOPIC.test(message) || CURRENT_EVENT_INTENT.test(message))) return 'relative-time';
   return undefined;
 }
 
