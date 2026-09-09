@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { LocalStorage } from '../core/storage';
 import { requireIdentifier, requireNonEmptyString, requireObject } from '../core/input-validation';
+import { configureAutoCodezLocalService } from './auto-codez-local-service';
 import { collectLocalHardwareSnapshot } from './local-hardware';
 import { getLocalModelCatalogEntry, listLocalModelCatalog, type LocalModelCatalogEntry } from './local-model-catalog';
 import { LocalModelManager, type ManagedLocalModel } from './local-model-manager';
@@ -16,10 +17,17 @@ import {
 import { LMStudioLocalRuntimeAdapter } from './local-runtimes/lm-studio';
 import { OllamaLocalRuntimeAdapter } from './local-runtimes/ollama';
 
+const autoCodezLocalRoot = path.join(app.getPath('userData'), 'local-ai');
+const autoCodezLocalService = configureAutoCodezLocalService(autoCodezLocalRoot);
+app.on('before-quit', () => {
+  void autoCodezLocalService.stop();
+});
+
 function createManager(): LocalModelManager {
   const ollama = getLocalRuntimeConnection('ollama');
   const lmStudio = getLocalRuntimeConnection('lm-studio');
   return new LocalModelManager([
+    autoCodezLocalService.runtime,
     new OllamaLocalRuntimeAdapter(ollama.endpoint),
     new LMStudioLocalRuntimeAdapter({ endpoint: lmStudio.endpoint, apiToken: lmStudio.apiToken }),
   ]);
@@ -47,7 +55,7 @@ function broadcastInstallEvent(event: LocalAiInstallEvent): void {
 function hardwareProbePath(): string {
   const customOllamaModels = process.env.OLLAMA_MODELS?.trim();
   if (customOllamaModels) return path.resolve(customOllamaModels);
-  return app.getPath('home');
+  return autoCodezLocalRoot;
 }
 
 function requireRuntimeSettings(): LocalRuntimeSettingsStore {
@@ -174,7 +182,14 @@ ipcMain.handle('local-ai:install', async (_event, input: unknown) => {
   if (compatibility.level === 'blocked') throw new Error(compatibility.reasons[0] || 'Este modelo foi bloqueado pelo verificador de hardware.');
 
   ensureRuntimeMutationAllowed();
-  const handle = manager.beginInstall(runtimeId, modelId, model.install);
+  const handle = manager.beginInstall(runtimeId, modelId, {
+    ...(model.install ?? {}),
+    name: model.name,
+    parameterSize: model.parameterSize,
+    family: model.family,
+    capabilities: [...(model.capabilities ?? [])],
+    contextWindow: model.contextWindow,
+  });
   activeRuntimeMutations += 1;
   void (async () => {
     try {
