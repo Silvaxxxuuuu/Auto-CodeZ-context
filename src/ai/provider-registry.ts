@@ -1,6 +1,7 @@
 import type { AIModel, AIProviderAdapter, AIProviderConfig, ProviderId, ProviderSummary } from './types';
 import { createOpenAICompatibleProviderAdapters } from './providers/openai-compatible';
 import { createExpandedProviderAdapters } from './providers/provider-expansion';
+import { LMStudioProviderAdapter } from './providers/lm-studio';
 import { OllamaAdapter } from './providers/ollama';
 
 export class ProviderRegistry {
@@ -10,6 +11,7 @@ export class ProviderRegistry {
     for (const adapter of createOpenAICompatibleProviderAdapters()) this.register(adapter);
     for (const adapter of createExpandedProviderAdapters()) this.register(adapter);
     this.register(new OllamaAdapter());
+    this.register(new LMStudioProviderAdapter());
   }
 
   register(adapter: AIProviderAdapter): void {
