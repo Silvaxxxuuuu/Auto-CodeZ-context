@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { collectLocalHardwareSnapshot } from './local-hardware';
 import { getLocalModelCatalogEntry, listLocalModelCatalog } from './local-model-catalog';
-import { LocalModelManager } from './local-model-manager';
+import { LocalModelManager, type ManagedLocalModel } from './local-model-manager';
 import type { LocalModelInstallProgress } from './local-model-runtime';
 import { OllamaLocalRuntimeAdapter } from './local-runtimes/ollama';
 import { requireIdentifier, requireObject } from '../core/input-validation';
@@ -32,7 +32,7 @@ function hardwareProbePath(): string {
 async function buildSnapshot() {
   const hardware = await collectLocalHardwareSnapshot(hardwareProbePath());
   const runtimes = await manager.getRuntimeInfos();
-  const installed = [];
+  const installed: ManagedLocalModel[] = [];
   for (const runtime of runtimes) {
     if (!runtime.available) continue;
     try {
