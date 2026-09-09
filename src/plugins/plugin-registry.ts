@@ -23,7 +23,18 @@ function clonePlugin(plugin: RegisteredPlugin): RegisteredPlugin {
   return {
     ...plugin,
     manifest: cloneManifest(plugin.manifest),
+    grantedPermissions: [...plugin.grantedPermissions],
   };
+}
+
+function uniqueRequestedPermissions(manifest: PluginManifest, permissions: PluginPermission[]): PluginPermission[] {
+  const requested = new Set(manifest.permissions);
+  const output: PluginPermission[] = [];
+  for (const permission of permissions) {
+    if (!requested.has(permission)) throw new Error(`Plugin '${manifest.id}' não solicitou a permissão '${permission}'.`);
+    if (!output.includes(permission)) output.push(permission);
+  }
+  return output;
 }
 
 export class PluginRegistry {
@@ -37,6 +48,7 @@ export class PluginRegistry {
     const plugin: RegisteredPlugin = {
       manifest,
       state: 'registered',
+      grantedPermissions: [],
       registeredAt: now,
       updatedAt: now,
     };
@@ -48,7 +60,28 @@ export class PluginRegistry {
     return this.plugins.delete(pluginId);
   }
 
+  grantPermissions(pluginId: string, permissions: PluginPermission[], now = Date.now()): RegisteredPlugin {
+    const plugin = this.require(pluginId);
+    plugin.grantedPermissions = uniqueRequestedPermissions(plugin.manifest, permissions);
+    plugin.updatedAt = now;
+    if (plugin.state === 'enabled' && !this.hasAllRequiredPermissions(plugin)) plugin.state = 'disabled';
+    return clonePlugin(plugin);
+  }
+
+  revokePermission(pluginId: string, permission: PluginPermission, now = Date.now()): RegisteredPlugin {
+    const plugin = this.require(pluginId);
+    plugin.grantedPermissions = plugin.grantedPermissions.filter((item) => item !== permission);
+    plugin.updatedAt = now;
+    if (plugin.state === 'enabled') plugin.state = 'disabled';
+    return clonePlugin(plugin);
+  }
+
   enable(pluginId: string, now = Date.now()): RegisteredPlugin {
+    const plugin = this.require(pluginId);
+    const missing = plugin.manifest.permissions.filter((permission) => !plugin.grantedPermissions.includes(permission));
+    if (missing.length) {
+      throw new Error(`Plugin '${plugin.manifest.id}' ainda não recebeu as permissões solicitadas: ${missing.join(', ')}.`);
+    }
     return this.transition(pluginId, 'enabled', now);
   }
 
@@ -89,7 +122,15 @@ export class PluginRegistry {
 
   hasPermission(pluginId: string, permission: PluginPermission): boolean {
     const plugin = this.plugins.get(pluginId);
-    return Boolean(plugin?.state === 'enabled' && plugin.manifest.permissions.includes(permission));
+    return Boolean(
+      plugin?.state === 'enabled'
+      && plugin.manifest.permissions.includes(permission)
+      && plugin.grantedPermissions.includes(permission),
+    );
+  }
+
+  private hasAllRequiredPermissions(plugin: RegisteredPlugin): boolean {
+    return plugin.manifest.permissions.every((permission) => plugin.grantedPermissions.includes(permission));
   }
 
   private transition(pluginId: string, state: Exclude<PluginLifecycleState, 'failed' | 'registered'>, now: number): RegisteredPlugin {
