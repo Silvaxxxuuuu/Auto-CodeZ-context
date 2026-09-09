@@ -77,6 +77,48 @@ test('ChatRuntime injects current Web context even when selected model has no to
   assert.equal(activityMessages.some((message) => message.startsWith('success:Grounding Web concluído:')), true);
 });
 
+test('ChatRuntime grounds explicit technical research for a text-only model that cannot call tools', async () => {
+  const registry = new ProviderRegistry();
+  const requests: Array<{ messages: Array<{ role: string; content: string }>; toolsEnabled: boolean }> = [];
+  let searchQuery = '';
+  registry.register({
+    id: config.id,
+    displayName: config.displayName,
+    requiresApiKey: false,
+    async listModels() { return [{ id: 'text-only', name: 'Text Only', providerId: config.id, capabilities: ['text'] }]; },
+    async send(_config, request) {
+      requests.push(request as typeof requests[number]);
+      return { content: 'A documentação oficial lista Alpha e Beta [1].', model: request.model, providerId: config.id };
+    },
+  });
+  const searchAdapter: WebSearchAdapter = {
+    id: 'fixture-docs',
+    displayName: 'Fixture Docs',
+    async search(query) {
+      searchQuery = query;
+      return [{ title: 'SDK oficial', url: 'https://docs.example/sdk', snippet: 'Ferramentas disponíveis: Alpha e Beta.' }];
+    },
+  };
+  const coordinator = new WebGroundingCoordinator({
+    runtime: new WebRetrievalRuntime({ searchAdapter }),
+    now: () => Date.UTC(2026, 8, 8, 12),
+    fetchLimit: 0,
+  });
+  const chat = currentChat();
+  chat.messages = [{ role: 'user', content: 'Pesquise na web quais ferramentas o SDK oferece para TypeScript e me recomende a melhor opção.' }];
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [], undefined, coordinator);
+
+  const response = await runtime.send(config, chat);
+  assert.equal(response.content, 'A documentação oficial lista Alpha e Beta [1].');
+  assert.match(searchQuery, /quais ferramentas o SDK oferece/i);
+  assert.equal(requests[0].toolsEnabled, false);
+  const webMessage = requests[0].messages.find((message) => message.role === 'system' && message.content.startsWith('Contexto Web atual recuperado pelo Auto CodeZ'));
+  assert.ok(webMessage);
+  assert.match(webMessage.content, /SDK oficial/);
+  assert.match(webMessage.content, /Ferramentas disponíveis: Alpha e Beta/);
+  assert.match(webMessage.content, /https:\/\/docs\.example\/sdk/);
+});
+
 test('ChatRuntime refreshes provider request fingerprint when fresh grounding expires', async () => {
   let now = 1_000;
   let searches = 0;
