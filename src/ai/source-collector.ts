@@ -17,6 +17,9 @@ type FetchToolPayload = {
 
 function groundingSources(content: string): AISource[] {
   if (!content.startsWith(WEB_CONTEXT_PREFIX)) return [];
+  const retrievedText = /^Recuperado em:\s*(.+)$/m.exec(content)?.[1]?.trim();
+  const retrievedValue = retrievedText ? Date.parse(retrievedText) : Number.NaN;
+  const retrievedAt = Number.isFinite(retrievedValue) ? retrievedValue : undefined;
   const sources: AISource[] = [];
   const blocks = content.split(/\n(?=\[\d+\]\s)/g);
   for (const block of blocks) {
@@ -30,6 +33,7 @@ function groundingSources(content: string): AISource[] {
       origin: 'autocodez-web',
       citation: Number(heading[1]),
       ...(snippet ? { snippet: snippet.trim() } : {}),
+      ...(retrievedAt === undefined ? {} : { retrievedAt }),
     });
   }
   return sources;
@@ -66,11 +70,22 @@ function toolSources(message: AIMessage): AISource[] {
   return [];
 }
 
+function latestUserIndex(messages: AIMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === 'user') return index;
+  }
+  return messages.length;
+}
+
 export function collectRequestSources(messages: AIMessage[]): AISource[] {
-  const groups = messages.flatMap((message) => [
-    ...(message.role === 'system' ? groundingSources(message.content) : []),
-    ...toolSources(message),
-    ...(message.sources ?? []),
-  ]);
-  return mergeAISources(groups);
+  const turnStart = latestUserIndex(messages);
+  const groups: AISource[][] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role === 'system') groups.push(groundingSources(message.content));
+    if (index < turnStart) continue;
+    groups.push(toolSources(message));
+    if (message.sources?.length) groups.push(message.sources);
+  }
+  return mergeAISources(...groups);
 }
