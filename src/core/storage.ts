@@ -21,6 +21,8 @@ const SENSITIVE_JSON_FILES = new Set([
   'execution-change-budget.json',
   'execution-path-scopes.json',
   'execution-shadow-workspaces.json',
+  'plugins.json',
+  'plugin-settings.json',
 ]);
 
 function isMissingFile(error: unknown): boolean {
