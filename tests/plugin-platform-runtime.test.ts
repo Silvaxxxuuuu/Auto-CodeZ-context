@@ -22,7 +22,7 @@ function enabledRegistry(permissions: Array<'network:localhost' | 'network:fetch
     id: 'test.plugin',
     name: 'Test Plugin',
     version: '1.0.0',
-    contributions: ['tool'],
+    contributions: permissions.includes('ai:tool') ? ['tool'] : [],
     permissions,
   });
   registry.grantPermissions('test.plugin', permissions);
