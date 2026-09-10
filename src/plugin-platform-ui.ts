@@ -153,7 +153,7 @@ async function syncSandboxes(): Promise<void> {
   for (const plugin of snapshot.plugins) {
     if (plugin.state !== 'enabled') continue;
     if (!plugin.hasMain) {
-      if (plugin.health.state !== 'healthy') await bridge.markHealthy(plugin.id, 'Plugin declarativo ativo.').catch(() => undefined);
+      if (plugin.health.state !== 'healthy') await bridge.markHealthy(plugin.id, 'Plugin declarativo ativo.').catch((): undefined => undefined);
       continue;
     }
     if (activeSandboxIds.has(plugin.id)) continue;
@@ -162,7 +162,7 @@ async function syncSandboxes(): Promise<void> {
       await sandboxes.activate(plugin.id, source);
       activeSandboxIds.add(plugin.id);
     } catch (error) {
-      await bridge.markFailed(plugin.id, error instanceof Error ? error.message : String(error)).catch(() => undefined);
+      await bridge.markFailed(plugin.id, error instanceof Error ? error.message : String(error)).catch((): undefined => undefined);
     }
   }
   snapshot = await bridge.snapshot();
@@ -205,7 +205,7 @@ async function handleSandboxCall(call: SandboxCall): Promise<void> {
     const value = await sandboxes.call(call.pluginId, call.method, call.input);
     await bridge.respondSandboxCall({ id: call.id, value });
   } catch (error) {
-    await bridge.respondSandboxCall({ id: call.id, error: (error instanceof Error ? error.message : String(error)).slice(0, 2048) }).catch(() => undefined);
+    await bridge.respondSandboxCall({ id: call.id, error: (error instanceof Error ? error.message : String(error)).slice(0, 2048) }).catch((): undefined => undefined);
   }
 }
 
