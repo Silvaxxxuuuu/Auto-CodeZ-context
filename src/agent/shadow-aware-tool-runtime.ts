@@ -2,9 +2,11 @@ import type { AIToolCall, AIToolDefinition, AIToolResult, PermissionLevel, ToolN
 import { ExecutionChangeBudgetRuntime } from '../execution-change-budget';
 import { ExecutionPlanner } from '../execution-planner';
 import type { ExecutionShadowWorkspaceRuntime } from '../execution-shadow-workspace';
+import { pluginToolCatalog } from '../plugins/plugin-tool-catalog';
 import { assertSafeWebUrlText, normalizeWebSearchQuery } from '../web/web-query-policy';
 import { WebRetrievalRuntime } from '../web/web-retrieval-runtime';
 import { ActivityRuntime } from './activity-runtime';
+import { ApprovalRuntime } from './approval-runtime';
 import { runWithExecutionWorkspaceContext } from './execution-workspace-context';
 import { ToolRuntime } from './tool-runtime';
 
@@ -51,6 +53,31 @@ const webToolDefinitions: AIToolDefinition[] = [
   },
 ];
 
+const pluginGatewayDefinitions: AIToolDefinition[] = [
+  {
+    name: 'plugin_list_tools',
+    description: 'List the currently enabled Auto CodeZ plugin tools, including their exact host-generated names, descriptions, JSON schemas and risk levels. Use this when a requested action may be supported by an installed plugin such as Roblox Studio, Blender, game engines, media, databases or other connected software.',
+    parameters: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    requiresWriteAccess: false,
+    requiresApproval: false,
+  },
+  {
+    name: 'plugin_call',
+    description: 'Invoke one tool returned by plugin_list_tools. Pass the exact host-generated tool name and a JSON object serialized into the arguments string. Auto CodeZ revalidates the arguments, plugin grants and risk policy before dispatching to the isolated plugin sandbox. Write or sensitive plugin actions require approval unless the chat is unrestricted.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tool: { type: 'string', description: 'Exact host-generated plugin tool name returned by plugin_list_tools.' },
+        arguments: { type: 'string', description: 'JSON object containing the arguments required by that plugin tool schema.' },
+      },
+      required: ['tool', 'arguments'],
+      additionalProperties: false,
+    },
+    requiresWriteAccess: false,
+    requiresApproval: false,
+  },
+];
+
 function requiredString(input: Record<string, unknown>, key: string): string {
   const value = input[key];
   if (typeof value !== 'string' || !value.trim()) throw new Error(`Parâmetro '${key}' inválido.`);
@@ -73,16 +100,34 @@ function isWebTool(name: ToolName): name is 'web_search' | 'web_fetch' {
   return name === 'web_search' || name === 'web_fetch';
 }
 
+function isPluginGatewayTool(name: ToolName): name is 'plugin_list_tools' | 'plugin_call' {
+  return name === 'plugin_list_tools' || name === 'plugin_call';
+}
+
+function pluginArguments(value: string): Record<string, unknown> {
+  if (value.length > 128 * 1024) throw new Error('Argumentos da tool do plugin excedem 128 KB.');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch {
+    throw new Error('Argumentos da tool do plugin não são JSON válido.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Argumentos da tool do plugin precisam formar um objeto JSON.');
+  return parsed as Record<string, unknown>;
+}
+
 export class ShadowAwareToolRuntime extends ToolRuntime {
   private shadowWorkspaces?: ExecutionShadowWorkspaceRuntime;
   private webRuntime = new WebRetrievalRuntime();
   private readonly webActivity: ActivityRuntime;
+  private readonly pluginApprovals: ApprovalRuntime;
   private webPlanner?: ExecutionPlanner;
   private webChangeBudget?: ExecutionChangeBudgetRuntime;
 
   constructor(...args: ConstructorParameters<typeof ToolRuntime>) {
     super(...args);
     this.webActivity = args[2] ?? new ActivityRuntime();
+    this.pluginApprovals = args[3] ?? new ApprovalRuntime();
   }
 
   configureShadowWorkspace(runtime: ExecutionShadowWorkspaceRuntime): void {
@@ -104,10 +149,11 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
   }
 
   override listDefinitions(): AIToolDefinition[] {
-    const base = super.listDefinitions().filter((definition) => !isWebTool(definition.name));
+    const base = super.listDefinitions().filter((definition) => !isWebTool(definition.name) && !isPluginGatewayTool(definition.name));
     return [
       ...base,
       ...webToolDefinitions.map((definition) => ({ ...definition, parameters: { ...definition.parameters } })),
+      ...pluginGatewayDefinitions.map((definition) => ({ ...definition, parameters: structuredClone(definition.parameters) })),
     ];
   }
 
@@ -119,6 +165,7 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
     runId?: string,
   ): Promise<AIToolResult> {
     if (isWebTool(call.name)) return this.executeWeb(chatId, call, runId);
+    if (isPluginGatewayTool(call.name)) return this.executePluginGateway(chatId, projectId, permission, call, runId);
     if (!runId?.trim()) return super.execute(chatId, projectId, permission, call, runId);
     const blocked = this.blockedByActiveShadow(chatId, runId, call);
     if (blocked) return Promise.resolve(blocked);
@@ -130,6 +177,7 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
 
   override approve(approvalId: string): Promise<AIToolResult> {
     const approval = this.listApprovals().find((item) => item.id === approvalId);
+    if (approval?.toolCall.name === 'plugin_call' && approval.chatId) return this.approvePluginCall(approvalId, approval);
     if (!approval?.chatId || !approval.runId) return super.approve(approvalId);
     const blocked = this.blockedByActiveShadow(approval.chatId, approval.runId, approval.toolCall);
     if (blocked) return Promise.resolve(blocked);
@@ -137,6 +185,103 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
       { chatId: approval.chatId, runId: approval.runId, projectId: approval.projectId },
       () => super.approve(approvalId),
     );
+  }
+
+  private async executePluginGateway(chatId: string, projectId: string, permission: PermissionLevel, call: AIToolCall, runId?: string): Promise<AIToolResult> {
+    try {
+      if (call.name === 'plugin_list_tools') {
+        const tools = pluginToolCatalog.list().map((tool) => ({
+          name: tool.name,
+          pluginId: tool.pluginId,
+          id: tool.toolId,
+          description: tool.description,
+          parameters: tool.parameters,
+          risk: tool.risk,
+        }));
+        return { toolCallId: call.id, ok: true, output: JSON.stringify({ type: 'plugin_tools', count: tools.length, tools }) };
+      }
+
+      const pending = this.listApprovals({ chatId, runId });
+      if (pending.length) return { toolCallId: call.id, ok: false, error: 'Tool de plugin adiada porque outra operação ainda aguarda aprovação.' };
+      const requestedName = requiredString(call.input, 'tool') as ToolName;
+      const descriptor = pluginToolCatalog.get(requestedName);
+      if (!descriptor) return { toolCallId: call.id, ok: false, error: `Tool de plugin não encontrada ou desativada: ${requestedName}.` };
+      const input = pluginArguments(requiredString(call.input, 'arguments'));
+      if (descriptor.risk !== 'read') {
+        if (permission === 'read-only') return { toolCallId: call.id, ok: false, error: 'Esta tool de plugin altera estado e está bloqueada no modo somente leitura.' };
+        if (permission !== 'unrestricted') {
+          const approval = this.pluginApprovals.request({
+            projectId,
+            chatId,
+            ...(runId ? { runId } : {}),
+            permissionLevel: permission,
+            toolCall: { ...call, input: { tool: requestedName, arguments: JSON.stringify(input) } },
+          });
+          this.webActivity.emit({
+            type: 'action',
+            message: `Aguardando aprovação para ${safeActivityText(descriptor.description, 110)}.`,
+            status: 'pending',
+            toolCallId: call.id,
+            toolName: call.name,
+            chatId,
+            runId,
+          });
+          return { toolCallId: call.id, ok: false, pendingApproval: true, approvalId: approval.id, error: 'Ação do plugin aguarda aprovação do usuário.' };
+        }
+      }
+      return await this.runPluginTool(chatId, projectId, permission, call, descriptor.name, input, runId);
+    } catch (error) {
+      return { toolCallId: call.id, ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  private async approvePluginCall(approvalId: string, approval: ReturnType<ApprovalRuntime['get']> extends infer T ? Exclude<T, undefined> : never): Promise<AIToolResult> {
+    const claimed = this.pluginApprovals.claim(approvalId);
+    try {
+      const requestedName = requiredString(claimed.toolCall.input, 'tool') as ToolName;
+      const descriptor = pluginToolCatalog.get(requestedName);
+      if (!descriptor) {
+        this.pluginApprovals.resolve(approvalId);
+        return { toolCallId: claimed.toolCall.id, ok: false, error: 'A tool do plugin foi removida ou o plugin foi desativado antes da aprovação.' };
+      }
+      const input = pluginArguments(requiredString(claimed.toolCall.input, 'arguments'));
+      const result = await this.runPluginTool(claimed.chatId!, claimed.projectId, claimed.permissionLevel, claimed.toolCall, descriptor.name, input, claimed.runId);
+      this.pluginApprovals.resolve(approvalId);
+      return result;
+    } catch (error) {
+      this.pluginApprovals.release(approvalId);
+      return { toolCallId: claimed.toolCall.id, ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  private async runPluginTool(chatId: string, projectId: string, permission: PermissionLevel, call: AIToolCall, toolName: ToolName, input: Record<string, unknown>, runId?: string): Promise<AIToolResult> {
+    const descriptor = pluginToolCatalog.get(toolName);
+    if (!descriptor) return { toolCallId: call.id, ok: false, error: 'Tool do plugin não está mais disponível.' };
+    try {
+      if (runId && this.webChangeBudget) this.webChangeBudget.assertAllowed(chatId, runId, { toolName: call.name });
+      this.webActivity.emit({
+        type: 'tool',
+        message: safeActivityText(descriptor.description, 150),
+        status: 'running',
+        toolCallId: call.id,
+        toolName: call.name,
+        chatId,
+        runId,
+      });
+      const result = await pluginToolCatalog.execute(toolName, input, { chatId, projectId, ...(runId ? { runId } : {}), permission });
+      const normalized = { ...result, toolCallId: call.id };
+      if (!normalized.ok) {
+        this.webActivity.emit({ type: 'tool', message: `Falha na tool do plugin: ${safeActivityText(normalized.error || 'erro desconhecido')}`, status: 'failed', toolCallId: call.id, toolName: call.name, chatId, runId, error: normalized.error });
+        return normalized;
+      }
+      this.recordExternalSuccess(chatId, runId, call, `${descriptor.pluginId}:${descriptor.toolId}`);
+      this.webActivity.emit({ type: 'action', message: `Plugin concluiu: ${safeActivityText(descriptor.description, 110)}.`, status: 'success', toolCallId: call.id, toolName: call.name, chatId, runId });
+      return normalized;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.webActivity.emit({ type: 'tool', message: `Falha na tool do plugin: ${safeActivityText(message)}`, status: 'failed', toolCallId: call.id, toolName: call.name, chatId, runId, error: message });
+      return { toolCallId: call.id, ok: false, error: message };
+    }
   }
 
   private async executeWeb(chatId: string, call: AIToolCall, runId?: string): Promise<AIToolResult> {
@@ -178,7 +323,7 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
             ...(source.snippet ? { snippet: source.snippet } : {}),
           })),
         });
-        this.recordWebSuccess(chatId, runId, call, query);
+        this.recordExternalSuccess(chatId, runId, call, query);
         this.webActivity.emit({
           type: 'action',
           message: `Pesquisa Web concluída: ${sources.length} fonte${sources.length === 1 ? '' : 's'}.`,
@@ -215,7 +360,7 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
         text,
         truncated: document.text.length > text.length,
       });
-      this.recordWebSuccess(chatId, runId, call, document.url);
+      this.recordExternalSuccess(chatId, runId, call, document.url);
       this.webActivity.emit({
         type: 'action',
         message: `Fonte Web carregada: ${safeActivityText(document.title || document.url, 100)}.`,
@@ -242,7 +387,7 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
     }
   }
 
-  private recordWebSuccess(chatId: string, runId: string | undefined, call: AIToolCall, reference: string): void {
+  private recordExternalSuccess(chatId: string, runId: string | undefined, call: AIToolCall, reference: string): void {
     if (!runId) return;
     if (this.webChangeBudget) this.webChangeBudget.record(chatId, runId, { toolName: call.name });
     if (!this.webPlanner) return;
