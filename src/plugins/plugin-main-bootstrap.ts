@@ -4,10 +4,13 @@ import { LocalStorage } from '../core/storage';
 import { PluginService } from './plugin-service';
 import { PluginSettingsStore } from './plugin-settings-store';
 import { PluginStateStore } from './plugin-state-store';
+import { PluginSandboxCallRouter } from './plugin-sandbox-call-router';
+import { pluginToolCatalog } from './plugin-tool-catalog';
 import type { PluginCapabilityRequest, PluginCapabilityResponse } from './plugin-capability-broker';
 import type { PluginPermission } from './plugin-types';
 
 let servicePromise: Promise<PluginService> | undefined;
+const sandboxCalls = new PluginSandboxCallRouter();
 
 function requirePluginId(value: unknown): string {
   if (typeof value !== 'string' || !/^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/.test(value)) {
@@ -48,6 +51,10 @@ async function createPluginService(): Promise<PluginService> {
   const broker = service.getBroker();
   broker.getActivityRuntime().subscribe((activity) => broadcast('plugins:activity', activity));
   broker.getJobRuntime().subscribe((job) => broadcast('plugins:job', job));
+  pluginToolCatalog.configureExecutor(async (pluginId, toolId, input, context) => {
+    if (!service.hasPermission(pluginId, 'ai:tool')) throw new Error(`Plugin '${pluginId}' perdeu a permissão ai:tool.`);
+    return sandboxCalls.call(pluginId, toolId, { input, context });
+  });
   return service;
 }
 
@@ -86,6 +93,9 @@ ipcMain.handle('plugins:failed', async (_event, pluginId: unknown, reason: unkno
   if (typeof reason !== 'string' || !reason.trim()) throw new Error('Motivo de falha inválido.');
   return (await pluginService()).markFailed(requirePluginId(pluginId), reason);
 });
+ipcMain.handle('plugins:sandbox-call-result', async (event, result: unknown) => sandboxCalls.resolve(event, result));
+
+app.on('before-quit', () => sandboxCalls.cancelAll('Auto CodeZ está encerrando.'));
 
 void pluginService().catch((error) => {
   console.error('Plugin Platform initialization failed:', error);
