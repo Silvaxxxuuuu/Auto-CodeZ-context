@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { BrowserWindow, type IpcMainInvokeEvent } from 'electron';
+import type { IpcMainInvokeEvent, WebContents } from 'electron';
 
 export type PluginSandboxCall = {
   id: string;
@@ -26,11 +26,26 @@ function assertSize(value: unknown, limit: number, label: string): void {
 
 export class PluginSandboxCallRouter {
   private readonly pending = new Map<string, PendingCall>();
+  private target?: WebContents;
+
+  bind(target: WebContents): void {
+    if (target.isDestroyed()) throw new Error('Renderer de plugins indisponível.');
+    if (this.target && !this.target.isDestroyed() && this.target.id !== target.id) {
+      throw new Error('Plugin Platform já está vinculada a outro renderer ativo.');
+    }
+    if (this.target?.id === target.id) return;
+    this.target = target;
+    target.once('destroyed', () => {
+      if (this.target?.id !== target.id) return;
+      this.target = undefined;
+      this.cancelAll('Renderer da Plugin Platform foi encerrado.');
+    });
+  }
 
   async call(pluginId: string, method: string, input?: unknown): Promise<unknown> {
     assertSize(input, MAX_INPUT_BYTES, 'Entrada da tool de plugin');
-    const target = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed() && !window.webContents.isDestroyed());
-    if (!target) throw new Error('Janela do Auto CodeZ indisponível para executar a tool do plugin.');
+    const target = this.target;
+    if (!target || target.isDestroyed()) throw new Error('Renderer da Plugin Platform não está registrado.');
     const id = crypto.randomUUID();
     const payload: PluginSandboxCall = { id, pluginId, method, ...(input !== undefined ? { input } : {}) };
     return new Promise<unknown>((resolve, reject) => {
@@ -38,8 +53,8 @@ export class PluginSandboxCallRouter {
         this.pending.delete(id);
         reject(new Error('Tool do plugin excedeu o tempo limite no sandbox.'));
       }, CALL_TIMEOUT_MS);
-      this.pending.set(id, { webContentsId: target.webContents.id, resolve, reject, timer });
-      target.webContents.send('plugins:sandbox-call', payload);
+      this.pending.set(id, { webContentsId: target.id, resolve, reject, timer });
+      target.send('plugins:sandbox-call', payload);
     });
   }
 
