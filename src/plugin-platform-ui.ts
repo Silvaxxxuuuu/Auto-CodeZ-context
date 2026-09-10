@@ -20,6 +20,7 @@ type PluginSummary = {
 type PluginSnapshot = { plugins: PluginSummary[]; failures: Array<{ directory: string; reason: string }> };
 type PluginActivity = { pluginId: string; message: string; status: string; updatedAt: number };
 type PluginJob = { id: string; pluginId: string; label: string; state: string; progress?: number; activity?: string; error?: string; updatedAt: number };
+type SandboxCall = { id: string; pluginId: string; method: string; input?: unknown };
 
 type PluginBridge = {
   snapshot(): Promise<PluginSnapshot>;
@@ -34,6 +35,8 @@ type PluginBridge = {
   invoke(pluginId: string, request: { id: string; method: string; input?: unknown }): Promise<{ id: string; ok: boolean; value?: unknown; error?: string }>;
   markHealthy(pluginId: string, message?: string): Promise<PluginSummary>;
   markFailed(pluginId: string, reason: string): Promise<PluginSummary>;
+  respondSandboxCall(result: { id: string; value?: unknown; error?: string }): Promise<boolean>;
+  onSandboxCall(listener: (call: SandboxCall) => void): () => void;
   onActivity(listener: (activity: PluginActivity) => void): () => void;
   onJob(listener: (job: PluginJob) => void): () => void;
 };
@@ -69,7 +72,7 @@ const sandboxes = bridge ? new PluginSandboxManager(bridge) : undefined;
 let snapshot: PluginSnapshot = { plugins: [], failures: [] };
 let loading = false;
 let rendering = false;
-let activeSandboxIds = new Set<string>();
+const activeSandboxIds = new Set<string>();
 const activities = new Map<string, PluginActivity>();
 const jobs = new Map<string, PluginJob>();
 
@@ -195,6 +198,17 @@ async function act(action: () => Promise<unknown>): Promise<void> {
   }
 }
 
+async function handleSandboxCall(call: SandboxCall): Promise<void> {
+  if (!bridge || !sandboxes || !call?.id || !call.pluginId || !call.method) return;
+  try {
+    if (!sandboxes.has(call.pluginId)) throw new Error(`Plugin '${call.pluginId}' não está ativo no sandbox.`);
+    const value = await sandboxes.call(call.pluginId, call.method, call.input);
+    await bridge.respondSandboxCall({ id: call.id, value });
+  } catch (error) {
+    await bridge.respondSandboxCall({ id: call.id, error: (error instanceof Error ? error.message : String(error)).slice(0, 2048) }).catch(() => undefined);
+  }
+}
+
 function installStyles(): void {
   if (document.querySelector('#plugin-platform-styles')) return;
   const style = document.createElement('style');
@@ -210,6 +224,7 @@ installStyles();
 if (bridge) {
   bridge.onActivity((activity) => { activities.set(activity.pluginId, activity); render(); });
   bridge.onJob((job) => { jobs.set(job.id, job); render(); });
+  bridge.onSandboxCall((call) => { void handleSandboxCall(call); });
 
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
