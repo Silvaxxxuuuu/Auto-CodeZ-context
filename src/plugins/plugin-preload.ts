@@ -13,6 +13,12 @@ contextBridge.exposeInMainWorld('autoCodezPlugins', {
   invoke: (pluginId: string, request: { id: string; method: string; input?: unknown }) => ipcRenderer.invoke('plugins:invoke', pluginId, request),
   markHealthy: (pluginId: string, message?: string) => ipcRenderer.invoke('plugins:healthy', pluginId, message),
   markFailed: (pluginId: string, reason: string) => ipcRenderer.invoke('plugins:failed', pluginId, reason),
+  respondSandboxCall: (result: { id: string; value?: unknown; error?: string }) => ipcRenderer.invoke('plugins:sandbox-call-result', result),
+  onSandboxCall: (listener: (call: unknown) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, call: unknown) => listener(call);
+    ipcRenderer.on('plugins:sandbox-call', wrapped);
+    return () => ipcRenderer.removeListener('plugins:sandbox-call', wrapped);
+  },
   onActivity: (listener: (activity: unknown) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, activity: unknown) => listener(activity);
     ipcRenderer.on('plugins:activity', wrapped);
