@@ -13,6 +13,7 @@ const CONTRIBUTIONS = new Set<PluginContribution>([
   'provider',
   'tool',
   'theme',
+  'settings',
 ]);
 
 const PERMISSIONS = new Set<PluginPermission>([
@@ -22,7 +23,9 @@ const PERMISSIONS = new Set<PluginPermission>([
   'git:read',
   'git:write',
   'network:fetch',
+  'network:localhost',
   'secrets:use',
+  'background:run',
   'ai:provider',
   'ai:tool',
   'ui:contribute',
