@@ -19,6 +19,8 @@ type SandboxInstance = {
   pluginId: string;
   ready: Promise<void>;
   calls: Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: number }>;
+  resolveReady?: () => void;
+  rejectReady?: (error: Error) => void;
 };
 
 const MAX_SOURCE_CHARS = 2 * 1024 * 1024;
@@ -42,7 +44,7 @@ const SANDBOX_DOCUMENT = `<!doctype html>
 let registration = null;
 let sequence = 0;
 const pending = new Map();
-const send = (payload) => postMessage({ channel: '${'autocodez-plugin'}', ...payload });
+const send = (payload) => postMessage({ channel: 'autocodez-plugin', ...payload });
 const request = (method, input) => new Promise((resolve, reject) => {
   const id = 'req-' + (++sequence) + '-' + Math.random().toString(36).slice(2);
   pending.set(id, { resolve, reject });
@@ -64,6 +66,14 @@ const api = Object.freeze({
     publish: (message, status = 'running') => request('activity.publish', { message, status }),
     clear: () => request('activity.clear'),
   }),
+  jobs: Object.freeze({
+    begin: (label) => request('jobs.begin', { label }),
+    update: (jobId, update) => request('jobs.update', { jobId, ...update }),
+    complete: (jobId, activity) => request('jobs.complete', { jobId, activity }),
+    fail: (jobId, error) => request('jobs.fail', { jobId, error }),
+    cancel: (jobId) => request('jobs.cancel', { jobId }),
+  }),
+  tools: Object.freeze({ register: (tools) => request('tools.register', { tools }) }),
   bridge: Object.freeze({ request: (input) => request('bridge.request', input) }),
   web: Object.freeze({
     search: (query, limit) => request('web.search', { query, limit }),
@@ -83,7 +93,7 @@ Object.defineProperty(globalThis, 'autoCodez', {
 });
 onmessage = async (event) => {
   const data = event.data;
-  if (!data || data.channel !== '${'autocodez-plugin'}') return;
+  if (!data || data.channel !== 'autocodez-plugin') return;
   if (data.type === 'response') {
     const item = pending.get(data.id);
     if (!item) return;
@@ -168,11 +178,11 @@ export class PluginSandboxManager {
     await loaded;
     if (!iframe.contentWindow) throw new Error('Sandbox do plugin não foi inicializado.');
     this.byWindow.set(iframe.contentWindow, instance);
-    (instance as SandboxInstance & { resolveReady?: () => void; rejectReady?: (error: Error) => void; activationTimer?: number }).resolveReady = () => {
+    instance.resolveReady = () => {
       window.clearTimeout(timeout);
       resolveReady();
     };
-    (instance as SandboxInstance & { rejectReady?: (error: Error) => void; activationTimer?: number }).rejectReady = (error) => {
+    instance.rejectReady = (error) => {
       window.clearTimeout(timeout);
       rejectReady(error);
     };
@@ -202,6 +212,10 @@ export class PluginSandboxManager {
     });
   }
 
+  has(pluginId: string): boolean {
+    return this.instances.has(pluginId);
+  }
+
   private ensureListener(): void {
     if (this.listening) return;
     this.listening = true;
@@ -220,15 +234,13 @@ export class PluginSandboxManager {
       return;
     }
     if (data.type === 'ready') {
-      const extended = instance as SandboxInstance & { resolveReady?: () => void };
-      extended.resolveReady?.();
+      instance.resolveReady?.();
       await this.bridge.markHealthy(instance.pluginId, 'Plugin ativo em sandbox isolado.');
       return;
     }
     if (data.type === 'failed') {
       const error = new Error((data.error || 'Plugin falhou durante a ativação.').slice(0, 2048));
-      const extended = instance as SandboxInstance & { rejectReady?: (error: Error) => void };
-      extended.rejectReady?.(error);
+      instance.rejectReady?.(error);
       await this.bridge.markFailed(instance.pluginId, error.message);
       this.destroy(instance.pluginId);
       return;
