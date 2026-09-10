@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -30,7 +30,7 @@ test('plugin installer copies a validated package into managed storage', async (
 
     assert.equal(installed.manifest.id, 'installer.test');
     assert.equal(installed.manifest.version, '1.0.0');
-    assert.equal(installed.rootPath, await (await import('node:fs/promises')).realpath(path.join(managed, 'installer.test')));
+    assert.equal(installed.rootPath, await realpath(path.join(managed, 'installer.test')));
     assert.equal(await readFile(path.join(managed, 'installer.test', 'index.js'), 'utf8'), 'autoCodez.register({});\n');
   } finally {
     await rm(temp, { recursive: true, force: true });
@@ -52,12 +52,12 @@ test('plugin installer atomically replaces an existing version and uninstall is 
 
     assert.equal(updated.manifest.version, '2.0.0');
     assert.equal(await readFile(path.join(managed, 'installer.test', 'index.js'), 'utf8'), 'const version = 2;\n');
-    const managedEntries = await (await import('node:fs/promises')).readdir(managed);
+    const managedEntries = await readdir(managed);
     assert.deepEqual(managedEntries, ['installer.test']);
 
     await installer.uninstall('installer.test');
     await installer.uninstall('installer.test');
-    const remaining = await (await import('node:fs/promises')).readdir(managed);
+    const remaining = await readdir(managed);
     assert.deepEqual(remaining, []);
   } finally {
     await rm(temp, { recursive: true, force: true });
@@ -81,7 +81,7 @@ test('plugin installer rejects an entry point that escapes the source package', 
       permissions: [],
     }), 'utf8');
     const installer = new PluginPackageInstaller(managed);
-    await assert.rejects(() => installer.install(source), /Entry point|pasta do pacote/);
+    await assert.rejects(() => installer.install(source), /Campo 'main'|Entry point|pasta do pacote/);
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
