@@ -51,15 +51,14 @@ export class PluginService {
   constructor(
     private readonly pluginsRoot: string,
     private readonly stateStore: PluginStateStore,
-    settingsStore?: PluginSettingsStore,
+    private readonly settingsStore?: PluginSettingsStore,
   ) {
     if (settingsStore) this.broker = new PluginCapabilityBroker(this.registry, settingsStore);
   }
 
   async init(): Promise<PluginDiscoverySnapshot> {
     if (this.initialized) return this.snapshot();
-    const settings = this.requireSettingsOptional();
-    if (settings) await settings.init();
+    if (this.settingsStore) await this.settingsStore.init();
     const scan = await scanPluginPackages(this.pluginsRoot);
     this.failures = scan.failures.map((failure) => ({ ...failure }));
     for (const discovered of scan.packages) {
@@ -199,12 +198,6 @@ export class PluginService {
   private requireEnabled(pluginId: string): void {
     this.requireInitialized();
     if (this.registry.get(pluginId)?.state !== 'enabled') throw new Error(`Plugin '${pluginId}' não está habilitado.`);
-  }
-
-  private requireSettingsOptional(): PluginSettingsStore | undefined {
-    const broker = this.broker;
-    if (!broker) return undefined;
-    return (broker as unknown as { settings?: PluginSettingsStore }).settings;
   }
 
   private requireInitialized(): void {
