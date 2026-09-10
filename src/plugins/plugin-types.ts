@@ -6,7 +6,8 @@ export type PluginContribution =
   | 'command'
   | 'provider'
   | 'tool'
-  | 'theme';
+  | 'theme'
+  | 'settings';
 
 export type PluginPermission =
   | 'workspace:read'
@@ -15,7 +16,9 @@ export type PluginPermission =
   | 'git:read'
   | 'git:write'
   | 'network:fetch'
+  | 'network:localhost'
   | 'secrets:use'
+  | 'background:run'
   | 'ai:provider'
   | 'ai:tool'
   | 'ui:contribute';
@@ -54,4 +57,27 @@ export type PersistedPluginState = {
   version: string;
   enabled: boolean;
   grantedPermissions: PluginPermission[];
+};
+
+export type PluginHealthState = 'inactive' | 'starting' | 'healthy' | 'degraded' | 'failed';
+
+export type PluginHealth = {
+  pluginId: string;
+  state: PluginHealthState;
+  message?: string;
+  updatedAt: number;
+};
+
+export type PluginJobState = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type PluginJobSnapshot = {
+  id: string;
+  pluginId: string;
+  label: string;
+  state: PluginJobState;
+  progress?: number;
+  activity?: string;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
 };
