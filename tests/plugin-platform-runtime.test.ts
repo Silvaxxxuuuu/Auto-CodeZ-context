@@ -22,7 +22,7 @@ function enabledRegistry(permissions: Array<'network:localhost' | 'network:fetch
     id: 'test.plugin',
     name: 'Test Plugin',
     version: '1.0.0',
-    contributions: [],
+    contributions: ['tool'],
     permissions,
   });
   registry.grantPermissions('test.plugin', permissions);
@@ -189,7 +189,7 @@ test('tool catalog validates arguments before invoking the sandbox executor', as
     },
   }]);
 
-  const rejected = await pluginToolCatalog.execute(definition.name, { extra: true }, {
+  const rejected = await pluginToolCatalog.execute(definition.name, { target: 'workspace', extra: true }, {
     chatId: 'chat-a',
     projectId: 'project-a',
     permission: 'unrestricted',
