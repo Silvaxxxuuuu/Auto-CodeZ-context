@@ -3,6 +3,7 @@ import { PluginActivityRuntime, type PluginActivityStatus } from './plugin-activ
 import { PluginJobRuntime } from './plugin-job-runtime';
 import { PluginLocalBridgeRuntime, type PluginBridgeRequest } from './plugin-local-bridge';
 import { PluginSettingsStore } from './plugin-settings-store';
+import { pluginToolCatalog, type PluginToolRegistration } from './plugin-tool-catalog';
 import type { PluginPermission } from './plugin-types';
 import { WebRetrievalRuntime } from '../web/web-retrieval-runtime';
 
@@ -46,6 +47,12 @@ function requireString(value: unknown, field: string, maxLength = 2048): string 
 function assertSerializableSize(value: unknown, maxBytes: number, label: string): void {
   const serialized = JSON.stringify(value);
   if (serialized === undefined || Buffer.byteLength(serialized, 'utf8') > maxBytes) throw new Error(`${label} excede o limite permitido.`);
+}
+
+function requireToolRegistrations(input: unknown): PluginToolRegistration[] {
+  const value = requireRecord(input);
+  if (!Array.isArray(value.tools)) throw new Error('Lista de tools do plugin inválida.');
+  return value.tools as PluginToolRegistration[];
 }
 
 export class PluginCapabilityBroker {
@@ -104,6 +111,7 @@ export class PluginCapabilityBroker {
   cancelPluginWork(pluginId: string): void {
     this.jobs.cancelPlugin(pluginId);
     this.activities.clear(pluginId);
+    pluginToolCatalog.clear(pluginId);
   }
 
   private registerBuiltins(): void {
@@ -130,6 +138,11 @@ export class PluginCapabilityBroker {
       return this.activities.publish(pluginId, requireString(value.message, 'Mensagem', 512), status as PluginActivityStatus);
     });
     this.register('activity.clear', undefined, async (pluginId) => ({ cleared: this.activities.clear(pluginId) }));
+    this.register('tools.register', 'ai:tool', async (pluginId, input) => {
+      const plugin = this.registry.get(pluginId);
+      if (!plugin?.manifest.contributions.includes('tool')) throw new Error(`Plugin '${pluginId}' não declarou contribuição de tool.`);
+      return pluginToolCatalog.register(pluginId, requireToolRegistrations(input));
+    });
     this.register('bridge.request', 'network:localhost', async (_pluginId, input) => {
       const value = requireRecord(input);
       return this.localBridge.request(value as unknown as PluginBridgeRequest);
