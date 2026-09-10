@@ -47,7 +47,7 @@ async function readManifest(manifestPath: string): Promise<PluginManifest> {
   return validatePluginManifest(parsed);
 }
 
-async function inspectPackage(directory: string): Promise<DiscoveredPluginPackage> {
+export async function inspectPluginPackage(directory: string): Promise<DiscoveredPluginPackage> {
   const rootPath = await fs.realpath(directory);
   const rootStat = await fs.stat(rootPath);
   if (!rootStat.isDirectory()) throw new Error('Pacote de plugin não é um diretório.');
@@ -80,7 +80,7 @@ export async function scanPluginPackages(pluginsRoot: string): Promise<PluginPac
   for (const entry of entries) {
     const directory = path.join(rootPath, entry.name);
     try {
-      const discovered = await inspectPackage(directory);
+      const discovered = await inspectPluginPackage(directory);
       if (seenIds.has(discovered.manifest.id)) throw new Error(`Plugin '${discovered.manifest.id}' está duplicado.`);
       seenIds.add(discovered.manifest.id);
       packages.push(discovered);
