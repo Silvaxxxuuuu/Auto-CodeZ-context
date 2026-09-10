@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { ApprovalRuntime } from '../src/agent/approval-runtime';
 import { ShadowAwareToolRuntime } from '../src/agent/shadow-aware-tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 import { pluginToolCatalog } from '../src/plugins/plugin-tool-catalog';
@@ -16,7 +17,8 @@ async function fixture() {
     createdAt: 1,
     updatedAt: 1,
   }]);
-  const tools = new ShadowAwareToolRuntime(workspace);
+  const approvals = new ApprovalRuntime();
+  const tools = new ShadowAwareToolRuntime(workspace, undefined, undefined, approvals);
   return {
     tools,
     cleanup: async () => {
@@ -105,7 +107,7 @@ test('write-risk plugin tool is blocked in read-only and requires approval in sa
       input: { tool: name, arguments: JSON.stringify({ target: 'scene' }) },
     }, 'run-a');
     assert.equal(blocked.ok, false);
-    assert.match(blocked.error ?? '', /read-only/);
+    assert.match(blocked.error ?? '', /somente leitura/i);
     assert.equal(executions, 0);
 
     const pending = await fx.tools.execute('chat-a', 'project-a', 'safe', {
@@ -147,7 +149,7 @@ test('approved plugin action fails closed when its tool disappears before approv
     pluginToolCatalog.clear('test.plugin');
     const approved = await fx.tools.approve(pending.approvalId as string);
     assert.equal(approved.ok, false);
-    assert.match(approved.error ?? '', /não está mais disponível/);
+    assert.match(approved.error ?? '', /removida|desativado/i);
     assert.equal(executions, 0);
   } finally {
     await fx.cleanup();
@@ -171,12 +173,14 @@ test('plugin_list_tools returns bounded metadata without invoking any plugin', a
     }, 'run-a');
 
     assert.equal(result.ok, true);
-    const listed = JSON.parse(result.output ?? '[]') as Array<Record<string, unknown>>;
-    assert.equal(listed.length, 1);
-    assert.equal(listed[0].name, name);
-    assert.equal(listed[0].pluginId, 'test.plugin');
-    assert.equal(listed[0].id, 'external_action');
-    assert.equal(listed[0].risk, 'read');
+    const envelope = JSON.parse(result.output ?? '{}') as { type?: string; count?: number; tools?: Array<Record<string, unknown>> };
+    assert.equal(envelope.type, 'plugin_tools');
+    assert.equal(envelope.count, 1);
+    assert.equal(envelope.tools?.length, 1);
+    assert.equal(envelope.tools?.[0].name, name);
+    assert.equal(envelope.tools?.[0].pluginId, 'test.plugin');
+    assert.equal(envelope.tools?.[0].id, 'external_action');
+    assert.equal(envelope.tools?.[0].risk, 'read');
     assert.equal(executions, 0);
   } finally {
     await fx.cleanup();
