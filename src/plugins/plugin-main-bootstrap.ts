@@ -63,6 +63,10 @@ function pluginService(): Promise<PluginService> {
   return servicePromise;
 }
 
+ipcMain.handle('plugins:renderer-ready', (event) => {
+  sandboxCalls.bind(event.sender);
+  return true;
+});
 ipcMain.handle('plugins:snapshot', async () => (await pluginService()).snapshot());
 ipcMain.handle('plugins:refresh', async () => (await pluginService()).refresh());
 ipcMain.handle('plugins:install-folder', async () => {
