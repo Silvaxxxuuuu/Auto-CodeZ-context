@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { inspectPluginPackage, type DiscoveredPluginPackage } from './plugin-package-scanner';
@@ -47,7 +48,7 @@ async function copyPackage(sourceRoot: string, destinationRoot: string): Promise
     const destination = path.join(destinationRoot, file.relative);
     if (!isInside(destinationRoot, destination)) throw new Error('Caminho de pacote inválido.');
     await fs.mkdir(path.dirname(destination), { recursive: true });
-    await fs.copyFile(file.source, destination, fs.constants.COPYFILE_EXCL);
+    await fs.copyFile(file.source, destination, constants.COPYFILE_EXCL);
   }
 }
 
