@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import { scanPluginPackages, type DiscoveredPluginPackage, type PluginPackageFailure } from './plugin-package-scanner';
+import { PluginPackageInstaller } from './plugin-package-installer';
 import { PluginRegistry } from './plugin-registry';
 import { PluginStateStore } from './plugin-state-store';
 import { PluginSettingsStore } from './plugin-settings-store';
@@ -45,6 +46,7 @@ export class PluginService {
   private readonly packages = new Map<string, DiscoveredPluginPackage>();
   private readonly health = new Map<string, PluginHealth>();
   private readonly broker?: PluginCapabilityBroker;
+  private readonly installer: PluginPackageInstaller;
   private failures: PluginPackageFailure[] = [];
   private initialized = false;
 
@@ -53,28 +55,44 @@ export class PluginService {
     private readonly stateStore: PluginStateStore,
     private readonly settingsStore?: PluginSettingsStore,
   ) {
+    this.installer = new PluginPackageInstaller(pluginsRoot);
     if (settingsStore) this.broker = new PluginCapabilityBroker(this.registry, settingsStore);
   }
 
   async init(): Promise<PluginDiscoverySnapshot> {
     if (this.initialized) return this.snapshot();
     if (this.settingsStore) await this.settingsStore.init();
-    const scan = await scanPluginPackages(this.pluginsRoot);
-    this.failures = scan.failures.map((failure) => ({ ...failure }));
-    for (const discovered of scan.packages) {
-      try {
-        this.registry.register(discovered.manifest);
-        this.packages.set(discovered.manifest.id, discovered);
-        this.health.set(discovered.manifest.id, inactiveHealth(discovered.manifest.id));
-      } catch (error) {
-        this.failures.push({
-          directory: discovered.rootPath,
-          reason: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-    await this.stateStore.restore(this.registry);
+    await this.discover();
     this.initialized = true;
+    return this.snapshot();
+  }
+
+  async refresh(): Promise<PluginDiscoverySnapshot> {
+    this.requireInitialized();
+    this.broker?.getJobRuntime().list().forEach((job) => this.broker?.cancelPluginWork(job.pluginId));
+    for (const plugin of this.registry.list()) this.registry.unregister(plugin.manifest.id);
+    this.packages.clear();
+    this.health.clear();
+    await this.discover();
+    return this.snapshot();
+  }
+
+  async install(sourceDirectory: string): Promise<PluginDiscoverySnapshot> {
+    this.requireInitialized();
+    await this.installer.install(sourceDirectory);
+    return this.refresh();
+  }
+
+  async uninstall(pluginId: string): Promise<PluginDiscoverySnapshot> {
+    this.requireInitialized();
+    this.broker?.cancelPluginWork(pluginId);
+    const existing = this.registry.get(pluginId);
+    if (existing) this.registry.unregister(pluginId);
+    this.packages.delete(pluginId);
+    this.health.delete(pluginId);
+    await this.installer.uninstall(pluginId);
+    if (this.settingsStore) await this.settingsStore.clear(pluginId);
+    await this.stateStore.save(this.registry);
     return this.snapshot();
   }
 
@@ -163,6 +181,24 @@ export class PluginService {
     this.requireInitialized();
     if (!this.broker) throw new Error('Capability Broker não foi configurado.');
     return this.broker;
+  }
+
+  private async discover(): Promise<void> {
+    const scan = await scanPluginPackages(this.pluginsRoot);
+    this.failures = scan.failures.map((failure) => ({ ...failure }));
+    for (const discovered of scan.packages) {
+      try {
+        this.registry.register(discovered.manifest);
+        this.packages.set(discovered.manifest.id, discovered);
+        this.health.set(discovered.manifest.id, inactiveHealth(discovered.manifest.id));
+      } catch (error) {
+        this.failures.push({
+          directory: discovered.rootPath,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    await this.stateStore.restore(this.registry);
   }
 
   private summarize(plugin: RegisteredPlugin): PluginSummary {
