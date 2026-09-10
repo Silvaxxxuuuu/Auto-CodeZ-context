@@ -100,7 +100,7 @@ export class PluginPackageInstaller {
     const managedRoot = await fs.realpath(this.pluginsRoot);
     const destination = path.join(managedRoot, pluginId);
     if (!isInside(managedRoot, destination)) throw new Error('Destino de plugin inválido.');
-    const stat = await fs.lstat(destination).catch(() => undefined);
+    const stat = await fs.lstat(destination).catch((): undefined => undefined);
     if (!stat) return;
     if (stat.isSymbolicLink()) throw new Error('Pacote gerenciado resolve para link simbólico inesperado.');
     await fs.rm(destination, { recursive: true, force: true });
