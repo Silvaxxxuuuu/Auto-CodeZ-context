@@ -30,3 +30,5 @@ contextBridge.exposeInMainWorld('autoCodezPlugins', {
     return () => ipcRenderer.removeListener('plugins:job', wrapped);
   },
 });
+
+void ipcRenderer.invoke('plugins:renderer-ready').catch((): undefined => undefined);
