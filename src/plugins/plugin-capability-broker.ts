@@ -44,6 +44,12 @@ function requireString(value: unknown, field: string, maxLength = 2048): string 
   return normalized;
 }
 
+function optionalNumber(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${field} inválido.`);
+  return value;
+}
+
 function assertSerializableSize(value: unknown, maxBytes: number, label: string): void {
   const serialized = JSON.stringify(value);
   if (serialized === undefined || Buffer.byteLength(serialized, 'utf8') > maxBytes) throw new Error(`${label} excede o limite permitido.`);
@@ -138,6 +144,29 @@ export class PluginCapabilityBroker {
       return this.activities.publish(pluginId, requireString(value.message, 'Mensagem', 512), status as PluginActivityStatus);
     });
     this.register('activity.clear', undefined, async (pluginId) => ({ cleared: this.activities.clear(pluginId) }));
+    this.register('jobs.begin', 'background:run', async (pluginId, input) => {
+      const value = requireRecord(input);
+      return this.jobs.open(pluginId, requireString(value.label, 'Nome do job', 160));
+    });
+    this.register('jobs.update', 'background:run', async (pluginId, input) => {
+      const value = requireRecord(input);
+      return this.jobs.update(pluginId, requireString(value.jobId, 'Job', 128), {
+        ...(value.progress !== undefined ? { progress: optionalNumber(value.progress, 'Progresso') } : {}),
+        ...(value.activity !== undefined ? { activity: requireString(value.activity, 'Atividade', 512) } : {}),
+      });
+    });
+    this.register('jobs.complete', 'background:run', async (pluginId, input) => {
+      const value = requireRecord(input);
+      return this.jobs.complete(pluginId, requireString(value.jobId, 'Job', 128), value.activity === undefined ? undefined : requireString(value.activity, 'Atividade', 512));
+    });
+    this.register('jobs.fail', 'background:run', async (pluginId, input) => {
+      const value = requireRecord(input);
+      return this.jobs.fail(pluginId, requireString(value.jobId, 'Job', 128), requireString(value.error, 'Erro', 2048));
+    });
+    this.register('jobs.cancel', 'background:run', async (pluginId, input) => {
+      const value = requireRecord(input);
+      return { cancelled: this.jobs.cancel(pluginId, requireString(value.jobId, 'Job', 128)) };
+    });
     this.register('tools.register', 'ai:tool', async (pluginId, input) => {
       const plugin = this.registry.get(pluginId);
       if (!plugin?.manifest.contributions.includes('tool')) throw new Error(`Plugin '${pluginId}' não declarou contribuição de tool.`);
