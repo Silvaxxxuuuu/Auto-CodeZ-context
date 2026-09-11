@@ -40,43 +40,121 @@ const MAX_TOOLS_PER_PLUGIN = 32;
 const MAX_DESCRIPTION_LENGTH = 1024;
 const MAX_SCHEMA_BYTES = 32 * 1024;
 const MAX_INPUT_BYTES = 128 * 1024;
+const MAX_SCHEMA_DEPTH = 8;
+const MAX_PROPERTIES_PER_OBJECT = 64;
+const SUPPORTED_TYPES = new Set(['object', 'string', 'number', 'integer', 'boolean', 'array']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function validateEnum(schema: Record<string, unknown>, path: string): void {
+  if (schema.enum === undefined) return;
+  if (!Array.isArray(schema.enum) || !schema.enum.length || schema.enum.length > 128) throw new Error(`Enum inválido em '${path}'.`);
+  const seen = new Set<string>();
+  for (const item of schema.enum) {
+    if (item !== null && !['string', 'number', 'boolean'].includes(typeof item)) throw new Error(`Enum usa valor não suportado em '${path}'.`);
+    const key = JSON.stringify(item);
+    if (seen.has(key)) throw new Error(`Enum duplicado em '${path}'.`);
+    seen.add(key);
+  }
+}
+
+function validateSchemaNode(schema: unknown, path: string, depth: number): void {
+  if (!isRecord(schema)) throw new Error(`Schema inválido em '${path}'.`);
+  if (depth > MAX_SCHEMA_DEPTH) throw new Error('Schema de tool do plugin excede a profundidade máxima.');
+  if (typeof schema.type !== 'string' || !SUPPORTED_TYPES.has(schema.type)) throw new Error(`Tipo de schema não suportado em '${path}'.`);
+  validateEnum(schema, path);
+
+  if (schema.type === 'object') {
+    if (schema.additionalProperties !== false) throw new Error(`Objeto em '${path}' deve usar additionalProperties=false.`);
+    if (!isRecord(schema.properties)) throw new Error(`Objeto em '${path}' precisa declarar properties.`);
+    const properties = Object.entries(schema.properties);
+    if (properties.length > MAX_PROPERTIES_PER_OBJECT) throw new Error(`Objeto em '${path}' possui propriedades demais.`);
+    const required = schema.required === undefined ? [] : schema.required;
+    if (!Array.isArray(required) || !required.every((item) => typeof item === 'string')) throw new Error(`required inválido em '${path}'.`);
+    const requiredSet = new Set(required as string[]);
+    if (requiredSet.size !== required.length) throw new Error(`required contém duplicatas em '${path}'.`);
+    for (const key of requiredSet) if (!(key in schema.properties)) throw new Error(`required referencia '${key}' sem property em '${path}'.`);
+    for (const [key, child] of properties) {
+      if (!key || key.length > 128) throw new Error(`Nome de propriedade inválido em '${path}'.`);
+      validateSchemaNode(child, `${path}.${key}`, depth + 1);
+    }
+    return;
+  }
+
+  if (schema.type === 'array') {
+    validateSchemaNode(schema.items, `${path}[]`, depth + 1);
+    if (schema.maxItems !== undefined && (typeof schema.maxItems !== 'number' || !Number.isInteger(schema.maxItems) || schema.maxItems < 0 || schema.maxItems > 1024)) {
+      throw new Error(`maxItems inválido em '${path}'.`);
+    }
+    return;
+  }
+
+  if (schema.maxLength !== undefined && (schema.type !== 'string' || typeof schema.maxLength !== 'number' || !Number.isInteger(schema.maxLength) || schema.maxLength < 0 || schema.maxLength > 131072)) {
+    throw new Error(`maxLength inválido em '${path}'.`);
+  }
+}
 
 function validateSchema(parameters: Record<string, unknown>): Record<string, unknown> {
-  if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters) || parameters.type !== 'object') {
-    throw new Error('Schema de tool do plugin precisa ser um objeto JSON Schema.');
-  }
   const serialized = JSON.stringify(parameters);
-  if (Buffer.byteLength(serialized, 'utf8') > MAX_SCHEMA_BYTES) throw new Error('Schema de tool do plugin excede 32 KB.');
+  if (serialized === undefined || Buffer.byteLength(serialized, 'utf8') > MAX_SCHEMA_BYTES) throw new Error('Schema de tool do plugin excede 32 KB.');
   const parsed = JSON.parse(serialized) as Record<string, unknown>;
-  if (parsed.additionalProperties !== false) throw new Error('Schema de tool do plugin deve usar additionalProperties=false.');
-  if (parsed.properties !== undefined && (!parsed.properties || typeof parsed.properties !== 'object' || Array.isArray(parsed.properties))) {
-    throw new Error('properties da tool do plugin é inválido.');
-  }
-  if (parsed.required !== undefined && (!Array.isArray(parsed.required) || parsed.required.some((item) => typeof item !== 'string'))) {
-    throw new Error('required da tool do plugin é inválido.');
-  }
+  if (parsed.type !== 'object') throw new Error('Schema de tool do plugin precisa ser um objeto JSON Schema.');
+  validateSchemaNode(parsed, '$', 0);
   return parsed;
 }
 
-function validateInput(schema: Record<string, unknown>, input: Record<string, unknown>): void {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Entrada da tool do plugin inválida.');
+function typeMatches(type: string, value: unknown): boolean {
+  if (type === 'object') return isRecord(value);
+  if (type === 'array') return Array.isArray(value);
+  if (type === 'string') return typeof value === 'string';
+  if (type === 'boolean') return typeof value === 'boolean';
+  if (type === 'number') return typeof value === 'number' && Number.isFinite(value);
+  if (type === 'integer') return typeof value === 'number' && Number.isSafeInteger(value);
+  return false;
+}
+
+function validateInputNode(schema: Record<string, unknown>, value: unknown, path: string, depth: number): void {
+  if (depth > MAX_SCHEMA_DEPTH) throw new Error('Entrada da tool excede a profundidade permitida.');
+  const type = schema.type as string;
+  if (!typeMatches(type, value)) throw new Error(`Valor inválido para '${path}': esperado ${type}.`);
+  if (Array.isArray(schema.enum) && !schema.enum.some((item) => Object.is(item, value))) throw new Error(`Valor de '${path}' não pertence ao enum permitido.`);
+
+  if (type === 'object') {
+    const objectValue = value as Record<string, unknown>;
+    const properties = schema.properties as Record<string, Record<string, unknown>>;
+    const required = Array.isArray(schema.required) ? schema.required as string[] : [];
+    for (const key of required) if (!Object.prototype.hasOwnProperty.call(objectValue, key)) throw new Error(`Parâmetro obrigatório ausente: '${path}.${key}'.`);
+    for (const [key, item] of Object.entries(objectValue)) {
+      const child = properties[key];
+      if (!child) throw new Error(`Parâmetro não permitido: '${path}.${key}'.`);
+      validateInputNode(child, item, `${path}.${key}`, depth + 1);
+    }
+    return;
+  }
+
+  if (type === 'array') {
+    const items = value as unknown[];
+    const maxItems = typeof schema.maxItems === 'number' ? schema.maxItems : 1024;
+    if (items.length > maxItems) throw new Error(`Lista '${path}' excede o limite de ${maxItems} item(ns).`);
+    const child = schema.items as Record<string, unknown>;
+    items.forEach((item, index) => validateInputNode(child, item, `${path}[${index}]`, depth + 1));
+    return;
+  }
+
+  if (type === 'string' && typeof schema.maxLength === 'number' && (value as string).length > schema.maxLength) {
+    throw new Error(`Texto '${path}' excede o limite de ${schema.maxLength} caractere(s).`);
+  }
+}
+
+function validateInput(schema: Record<string, unknown>, input: Record<string, unknown>): Record<string, unknown> {
+  if (!isRecord(input)) throw new Error('Entrada da tool do plugin inválida.');
   const serialized = JSON.stringify(input);
-  if (Buffer.byteLength(serialized, 'utf8') > MAX_INPUT_BYTES) throw new Error('Entrada da tool do plugin excede 128 KB.');
-  const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
-  const required = Array.isArray(schema.required) ? schema.required as string[] : [];
-  for (const key of required) if (!(key in input)) throw new Error(`Parâmetro obrigatório ausente: '${key}'.`);
-  if (schema.additionalProperties === false) {
-    for (const key of Object.keys(input)) if (!(key in properties)) throw new Error(`Parâmetro não permitido: '${key}'.`);
-  }
-  for (const [key, value] of Object.entries(input)) {
-    const rule = properties[key];
-    if (!rule) continue;
-    if (rule.type === 'string' && typeof value !== 'string') throw new Error(`Parâmetro '${key}' deve ser texto.`);
-    if (rule.type === 'number' && (typeof value !== 'number' || !Number.isFinite(value))) throw new Error(`Parâmetro '${key}' deve ser número.`);
-    if (rule.type === 'boolean' && typeof value !== 'boolean') throw new Error(`Parâmetro '${key}' deve ser booleano.`);
-    if (rule.type === 'array' && !Array.isArray(value)) throw new Error(`Parâmetro '${key}' deve ser uma lista.`);
-    if (Array.isArray(rule.enum) && !rule.enum.includes(value)) throw new Error(`Valor inválido para '${key}'.`);
-  }
+  if (serialized === undefined || Buffer.byteLength(serialized, 'utf8') > MAX_INPUT_BYTES) throw new Error('Entrada da tool do plugin excede 128 KB.');
+  const cloned = JSON.parse(serialized) as Record<string, unknown>;
+  validateInputNode(schema, cloned, '$', 0);
+  return cloned;
 }
 
 function generatedName(pluginId: string, toolId: string): ToolName {
@@ -165,8 +243,8 @@ export class PluginToolCatalog {
     if (!entry) return { toolCallId: '', ok: false, error: `Tool de plugin desconhecida: ${name}` };
     if (!this.executor) return { toolCallId: '', ok: false, error: 'Executor de plugins ainda não está disponível.' };
     try {
-      validateInput(entry.parameters, input);
-      const value = await this.executor(entry.pluginId, entry.toolId, structuredClone(input), context);
+      const validatedInput = validateInput(entry.parameters, input);
+      const value = await this.executor(entry.pluginId, entry.toolId, validatedInput, context);
       const output = typeof value === 'string' ? value : JSON.stringify(value ?? null);
       return { toolCallId: '', ok: true, output: output.slice(0, 64 * 1024) };
     } catch (error) {
