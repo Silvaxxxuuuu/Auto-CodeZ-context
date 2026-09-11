@@ -68,22 +68,41 @@ ipcMain.handle('plugins:renderer-ready', (event) => {
   return true;
 });
 ipcMain.handle('plugins:snapshot', async () => (await pluginService()).snapshot());
-ipcMain.handle('plugins:refresh', async () => (await pluginService()).refresh());
+ipcMain.handle('plugins:refresh', async () => {
+  sandboxCalls.cancelAll('Plugins foram recarregados.');
+  return (await pluginService()).refresh();
+});
 ipcMain.handle('plugins:install-folder', async () => {
   const result = await dialog.showOpenDialog({
     title: 'Instalar plugin do Auto CodeZ',
     properties: ['openDirectory'],
   });
   if (result.canceled || !result.filePaths[0]) return null;
+  sandboxCalls.cancelAll('Pacotes de plugins foram atualizados.');
   return (await pluginService()).install(result.filePaths[0]);
 });
-ipcMain.handle('plugins:uninstall', async (_event, pluginId: unknown) => (await pluginService()).uninstall(requirePluginId(pluginId)));
-ipcMain.handle('plugins:grant', async (_event, pluginId: unknown, permissions: unknown) => (await pluginService()).grant(requirePluginId(pluginId), requirePermissionList(permissions)));
+ipcMain.handle('plugins:uninstall', async (_event, pluginId: unknown) => {
+  const id = requirePluginId(pluginId);
+  sandboxCalls.cancelPlugin(id, 'Plugin foi removido durante a execução.');
+  return (await pluginService()).uninstall(id);
+});
+ipcMain.handle('plugins:grant', async (_event, pluginId: unknown, permissions: unknown) => {
+  const id = requirePluginId(pluginId);
+  const updated = await (await pluginService()).grant(id, requirePermissionList(permissions));
+  if (updated.state !== 'enabled') sandboxCalls.cancelPlugin(id, 'Permissões do plugin foram alteradas durante a execução.');
+  return updated;
+});
 ipcMain.handle('plugins:enable', async (_event, pluginId: unknown) => (await pluginService()).enable(requirePluginId(pluginId)));
-ipcMain.handle('plugins:disable', async (_event, pluginId: unknown) => (await pluginService()).disable(requirePluginId(pluginId)));
+ipcMain.handle('plugins:disable', async (_event, pluginId: unknown) => {
+  const id = requirePluginId(pluginId);
+  sandboxCalls.cancelPlugin(id);
+  return (await pluginService()).disable(id);
+});
 ipcMain.handle('plugins:revoke', async (_event, pluginId: unknown, permission: unknown) => {
   if (typeof permission !== 'string') throw new Error('Permissão inválida.');
-  return (await pluginService()).revoke(requirePluginId(pluginId), permission as PluginPermission);
+  const id = requirePluginId(pluginId);
+  sandboxCalls.cancelPlugin(id, 'Permissão do plugin foi revogada durante a execução.');
+  return (await pluginService()).revoke(id, permission as PluginPermission);
 });
 ipcMain.handle('plugins:source', async (_event, pluginId: unknown) => (await pluginService()).readMainSource(requirePluginId(pluginId)));
 ipcMain.handle('plugins:invoke', async (_event, pluginId: unknown, request: unknown): Promise<PluginCapabilityResponse> => {
@@ -95,7 +114,9 @@ ipcMain.handle('plugins:healthy', async (_event, pluginId: unknown, message: unk
 });
 ipcMain.handle('plugins:failed', async (_event, pluginId: unknown, reason: unknown) => {
   if (typeof reason !== 'string' || !reason.trim()) throw new Error('Motivo de falha inválido.');
-  return (await pluginService()).markFailed(requirePluginId(pluginId), reason);
+  const id = requirePluginId(pluginId);
+  sandboxCalls.cancelPlugin(id, 'Plugin falhou durante a execução.');
+  return (await pluginService()).markFailed(id, reason);
 });
 ipcMain.handle('plugins:sandbox-call-result', async (event, result: unknown) => sandboxCalls.resolve(event, result));
 
