@@ -9,6 +9,7 @@ export type PluginSandboxCall = {
 };
 
 type PendingCall = {
+  pluginId: string;
   webContentsId: number;
   resolve(value: unknown): void;
   reject(error: Error): void;
@@ -53,7 +54,7 @@ export class PluginSandboxCallRouter {
         this.pending.delete(id);
         reject(new Error('Tool do plugin excedeu o tempo limite no sandbox.'));
       }, CALL_TIMEOUT_MS);
-      this.pending.set(id, { webContentsId: target.id, resolve, reject, timer });
+      this.pending.set(id, { pluginId, webContentsId: target.id, resolve, reject, timer });
       target.send('plugins:sandbox-call', payload);
     });
   }
@@ -74,6 +75,18 @@ export class PluginSandboxCallRouter {
     assertSize(value.value, MAX_OUTPUT_BYTES, 'Saída da tool de plugin');
     pending.resolve(structuredClone(value.value));
     return true;
+  }
+
+  cancelPlugin(pluginId: string, reason = 'Plugin foi desativado durante a execução.'): number {
+    let cancelled = 0;
+    for (const [id, pending] of this.pending) {
+      if (pending.pluginId !== pluginId) continue;
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+      this.pending.delete(id);
+      cancelled += 1;
+    }
+    return cancelled;
   }
 
   cancelAll(reason = 'Sandbox de plugins foi encerrado.'): void {
