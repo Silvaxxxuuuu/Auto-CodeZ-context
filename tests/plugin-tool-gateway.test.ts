@@ -186,3 +186,72 @@ test('plugin_list_tools returns bounded metadata without invoking any plugin', a
     await fx.cleanup();
   }
 });
+
+test('plugin tool schema rejects nested unexpected properties before sandbox execution', async () => {
+  const fx = await fixture();
+  try {
+    const [definition] = pluginToolCatalog.register('test.plugin', [{
+      id: 'configure_scene',
+      description: 'Configure a bounded scene object.',
+      risk: 'read',
+      parameters: {
+        type: 'object',
+        properties: {
+          scene: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', maxLength: 32 },
+              enabled: { type: 'boolean' },
+            },
+            required: ['name'],
+            additionalProperties: false,
+          },
+        },
+        required: ['scene'],
+        additionalProperties: false,
+      },
+    }]);
+    let executions = 0;
+    pluginToolCatalog.configureExecutor(async () => {
+      executions += 1;
+      return { ok: true };
+    });
+
+    const result = await fx.tools.execute('chat-a', 'project-a', 'read-only', {
+      id: 'nested-invalid',
+      name: 'plugin_call',
+      input: {
+        tool: definition.name,
+        arguments: JSON.stringify({ scene: { name: 'Main', enabled: true, injected: 'blocked' } }),
+      },
+    }, 'run-a');
+
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? '', /não permitido/i);
+    assert.equal(executions, 0);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test('plugin tool schema rejects unsupported ambiguous schemas during registration', async () => {
+  const fx = await fixture();
+  try {
+    assert.throws(() => pluginToolCatalog.register('test.plugin', [{
+      id: 'ambiguous',
+      description: 'Invalid ambiguous schema.',
+      risk: 'read',
+      parameters: {
+        type: 'object',
+        properties: {
+          payload: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+        },
+        required: ['payload'],
+        additionalProperties: false,
+      },
+    }]), /tipo de schema não suportado/i);
+    assert.equal(pluginToolCatalog.list('test.plugin').length, 0);
+  } finally {
+    await fx.cleanup();
+  }
+});
