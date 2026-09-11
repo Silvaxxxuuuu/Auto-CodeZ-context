@@ -5,6 +5,7 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_TIMEOUT_MS = 60_000;
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
+const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 
 export type PluginBridgeRequest = {
   url: string;
@@ -21,6 +22,7 @@ export type PluginBridgeResponse = {
 };
 
 function parseLoopbackUrl(raw: string): URL {
+  if (typeof raw !== 'string' || !raw.trim()) throw new Error('URL da bridge local inválida.');
   let url: URL;
   try {
     url = new URL(raw);
@@ -39,7 +41,29 @@ function parseLoopbackUrl(raw: string): URL {
   return url;
 }
 
+function validateMethod(value: unknown): PluginBridgeRequest['method'] {
+  if (value === undefined) return 'GET';
+  if (typeof value !== 'string' || !ALLOWED_METHODS.has(value)) throw new Error('Método da bridge local inválido.');
+  return value as PluginBridgeRequest['method'];
+}
+
+function validateTimeout(value: unknown): number {
+  if (value === undefined) return DEFAULT_TIMEOUT_MS;
+  if (typeof value !== 'number' || !Number.isInteger(value) || !Number.isFinite(value) || value < 100 || value > MAX_TIMEOUT_MS) {
+    throw new Error('Timeout da bridge local deve ser um inteiro entre 100 e 60000 ms.');
+  }
+  return value;
+}
+
+function validateBody(value: unknown): string {
+  if (value === undefined) return '';
+  if (typeof value !== 'string') throw new Error('Body da bridge local precisa ser texto.');
+  if (Buffer.byteLength(value, 'utf8') > MAX_RESPONSE_BYTES) throw new Error('Payload da bridge local excede 2 MB.');
+  return value;
+}
+
 function validateHeaders(headers: Record<string, string> | undefined): Record<string, string> {
+  if (headers !== undefined && (!headers || typeof headers !== 'object' || Array.isArray(headers))) throw new Error('Headers da bridge local inválidos.');
   const output: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers ?? {})) {
     const normalizedName = name.trim().toLowerCase();
@@ -53,12 +77,12 @@ function validateHeaders(headers: Record<string, string> | undefined): Record<st
 
 export class PluginLocalBridgeRuntime {
   async request(input: PluginBridgeRequest, signal?: AbortSignal): Promise<PluginBridgeResponse> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Solicitação da bridge local inválida.');
     const url = parseLoopbackUrl(input.url);
-    const method = input.method ?? 'GET';
+    const method = validateMethod(input.method);
     const headers = validateHeaders(input.headers);
-    const body = input.body ?? '';
-    if (Buffer.byteLength(body, 'utf8') > MAX_RESPONSE_BYTES) throw new Error('Payload da bridge local excede 2 MB.');
-    const timeoutMs = Math.min(Math.max(input.timeoutMs ?? DEFAULT_TIMEOUT_MS, 100), MAX_TIMEOUT_MS);
+    const body = validateBody(input.body);
+    const timeoutMs = validateTimeout(input.timeoutMs);
     const transport = url.protocol === 'https:' ? https : http;
 
     return new Promise<PluginBridgeResponse>((resolve, reject) => {
