@@ -11,15 +11,15 @@ function fakeTarget(id = 41) {
   return {
     target: {
       id,
-      isDestroyed: () => destroyed,
-      once: (event: string, listener: DestroyListener) => {
+      isDestroyed: (): boolean => destroyed,
+      once: (event: string, listener: DestroyListener): undefined => {
         if (event === 'destroyed') onDestroyed = listener;
         return undefined;
       },
-      send: (channel: string, payload: Record<string, unknown>) => { sent.push({ channel, payload }); },
+      send: (channel: string, payload: Record<string, unknown>): void => { sent.push({ channel, payload }); },
     },
     sent,
-    destroy: () => {
+    destroy: (): void => {
       destroyed = true;
       onDestroyed?.();
     },
