@@ -44,8 +44,16 @@ const SANDBOX_DOCUMENT = `<!doctype html>
 let registration = null;
 let sequence = 0;
 const pending = new Map();
+const MAX_REQUEST_CHARS = 256 * 1024;
+const MAX_RESULT_CHARS = 2 * 1024 * 1024;
 const send = (payload) => postMessage({ channel: 'autocodez-plugin', ...payload });
+const assertPayloadSize = (value, maximum, label) => {
+  let serialized;
+  try { serialized = JSON.stringify(value ?? null); } catch { throw new Error(label + ' não é serializável.'); }
+  if (serialized.length > maximum) throw new Error(label + ' excede o limite permitido.');
+};
 const request = (method, input) => new Promise((resolve, reject) => {
+  try { assertPayloadSize(input, MAX_REQUEST_CHARS, 'Payload da capability'); } catch (error) { reject(error); return; }
   const id = 'req-' + (++sequence) + '-' + Math.random().toString(36).slice(2);
   pending.set(id, { resolve, reject });
   send({ type: 'request', id, method, input });
@@ -105,6 +113,7 @@ onmessage = async (event) => {
     try {
       if (!registration || typeof registration.invoke !== 'function') throw new Error('Plugin não expõe invoke().');
       const value = await registration.invoke(data.method, data.input, api);
+      assertPayloadSize(value, MAX_RESULT_CHARS, 'Resposta da tool do plugin');
       send({ type: 'call-result', id: data.id, value });
     } catch (error) {
       send({ type: 'call-result', id: data.id, error: error instanceof Error ? error.message : String(error) });
@@ -205,7 +214,10 @@ export class PluginSandboxManager {
     return new Promise<unknown>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         instance.calls.delete(id);
-        reject(new Error('Chamada ao plugin excedeu o tempo limite.'));
+        const error = new Error('Chamada ao plugin excedeu o tempo limite.');
+        reject(error);
+        void this.bridge.markFailed(pluginId, error.message);
+        this.destroy(pluginId);
       }, CALL_TIMEOUT_MS);
       instance.calls.set(id, { resolve, reject, timer });
       instance.iframe.contentWindow?.postMessage({ channel: 'autocodez-plugin', type: 'call', id, method, input }, '*');
