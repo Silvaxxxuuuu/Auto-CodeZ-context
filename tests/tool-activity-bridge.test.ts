@@ -32,6 +32,6 @@ test('marca aprovação pendente sem perder o resultado associado', () => {
   const snapshot = createToolActivitySnapshot(runId, 'tool-3', 'git_commit', result);
   const input = toActivityInput(snapshot);
   assert.equal(input.status, 'pending');
-  assert.equal(input.message, 'Aguardando aprovação: git_commit');
+  assert.equal(input.message, 'Aguardando sua aprovação.');
   assert.deepEqual(input.gitResult, gitResult);
 });

@@ -1,0 +1,117 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { ChatManager, UNCONFIGURED_MODEL_ID, UNCONFIGURED_PROVIDER_ID } from '../src/ai/chat-manager';
+import { ProviderManager } from '../src/ai/provider-manager';
+import type { AIModel, AIProviderAdapter, ChatRecord } from '../src/ai/types';
+
+class MemoryStorage {
+  private readonly values = new Map<string, unknown>();
+  private readonly encrypted = new Map<string, string>();
+  async read<T>(name: string, fallback: T): Promise<T> { return (this.values.get(name) as T | undefined) ?? fallback; }
+  async write<T>(name: string, value: T): Promise<void> { this.values.set(name, value); }
+  async readEncrypted(name: string): Promise<string | null> { return this.encrypted.get(name) ?? null; }
+  async writeEncrypted(name: string, value: string): Promise<void> { this.encrypted.set(name, value); }
+}
+
+const adapter: AIProviderAdapter = {
+  id: 'openai',
+  displayName: 'OpenAI',
+  listModels: async (config) => [{ id: config.selectedModel || 'model', name: config.selectedModel || 'model', providerId: config.id, capabilities: ['text', 'streaming'] } as AIModel],
+  send: async () => ({ content: 'ok', model: 'model', providerId: 'openai' }),
+};
+
+test('unconfigured chat keeps a valid model sentinel so intelligence can be updated before provider setup', async () => {
+  const storage = new MemoryStorage();
+  const manager = new ChatManager(storage);
+  await manager.init();
+
+  const created = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
+  assert.equal(created.providerId, UNCONFIGURED_PROVIDER_ID);
+  assert.equal(created.model, UNCONFIGURED_MODEL_ID);
+
+  const updated = await manager.updateSettings({
+    chatId: created.id,
+    providerId: created.providerId,
+    model: created.model,
+    intelligence: 'high',
+    permissionLevel: 'ask',
+  });
+
+  assert.equal(updated.intelligence, 'high');
+  assert.equal(updated.permissionLevel, 'ask');
+  assert.equal(updated.model, UNCONFIGURED_MODEL_ID);
+});
+
+test('initialization migrates legacy unconfigured chats with a blank model', async () => {
+  const storage = new MemoryStorage();
+  const legacy: ChatRecord = {
+    id: 'legacy-unconfigured',
+    title: 'Novo chat',
+    providerId: UNCONFIGURED_PROVIDER_ID,
+    model: '',
+    intelligence: 'normal',
+    permissionLevel: 'safe',
+    messages: [],
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  await storage.write('chats.json', [legacy]);
+
+  const manager = new ChatManager(storage);
+  await manager.init();
+
+  assert.equal((await manager.list())[0]?.model, UNCONFIGURED_MODEL_ID);
+  const persisted = await storage.read<ChatRecord[]>('chats.json', []);
+  assert.equal(persisted[0]?.model, UNCONFIGURED_MODEL_ID);
+});
+
+test('chat persists the exact saved API key selection', async () => {
+  const storage = new MemoryStorage();
+  const manager = new ChatManager(storage);
+  await manager.init();
+  const created = await manager.create({ intelligence: 'normal', permissionLevel: 'safe' });
+
+  const updated = await manager.updateSettings({ chatId: created.id, providerId: 'openai', model: 'model', apiKeyId: 'key-123', intelligence: 'normal', permissionLevel: 'safe' });
+  assert.equal(updated.apiKeyId, 'key-123');
+
+  const restored = new ChatManager(storage);
+  await restored.init();
+  assert.equal((await restored.list())[0].apiKeyId, 'key-123');
+});
+
+test('chat keeps the exact API key when only model or intelligence settings change', async () => {
+  const storage = new MemoryStorage();
+  const manager = new ChatManager(storage);
+  await manager.init();
+  const created = await manager.create({ providerId: 'openai', model: 'model', apiKeyId: 'key-123', intelligence: 'normal', permissionLevel: 'safe' });
+
+  const updated = await manager.updateSettings({ chatId: created.id, providerId: 'openai', model: 'another-model', intelligence: 'high', permissionLevel: 'safe' });
+  assert.equal(updated.apiKeyId, 'key-123');
+  assert.equal(updated.model, 'another-model');
+  assert.equal(updated.intelligence, 'high');
+});
+
+test('chat clears a stale API key when the provider changes without a new key', async () => {
+  const storage = new MemoryStorage();
+  const manager = new ChatManager(storage);
+  await manager.init();
+  const created = await manager.create({ providerId: 'openai', model: 'model', apiKeyId: 'key-123', intelligence: 'normal', permissionLevel: 'safe' });
+
+  const updated = await manager.updateSettings({ chatId: created.id, providerId: 'anthropic', model: 'claude-model', intelligence: 'normal', permissionLevel: 'safe' });
+  assert.equal(updated.apiKeyId, undefined);
+  assert.equal(updated.providerId, 'anthropic');
+});
+
+test('provider manager resolves the exact selected key instead of the provider active key', async () => {
+  const storage = new MemoryStorage();
+  const manager = new ProviderManager(storage);
+  manager.registry.register(adapter);
+
+  const first = await manager.saveKey({ providerId: 'openai', name: 'Primeira', apiKey: 'key-first-1234', model: 'model' });
+  const second = await manager.saveKey({ providerId: 'openai', name: 'Segunda', apiKey: 'key-second-5678', model: 'model' });
+  await manager.setActiveKey(second.key.id);
+
+  assert.equal(manager.getConfig('openai').apiKey, 'key-second-5678');
+  assert.equal(manager.getConfigForKey(first.key.id).apiKey, 'key-first-1234');
+  assert.equal(manager.getConfigForKey(first.key.id).id, 'openai');
+});

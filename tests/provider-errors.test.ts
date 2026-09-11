@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ProviderRequestError, classifyProviderError, formatProviderError, normalizeProviderError } from '../src/ai/provider-errors';
+import { ProviderRequestError, classifyProviderError, formatProviderError, normalizeProviderError, createProviderRequestError } from '../src/ai/provider-errors';
 
 test('classifies quota errors independently of provider', () => {
   assert.equal(classifyProviderError(429, 'You exceeded your current quota'), 'quota');
@@ -19,6 +19,15 @@ test('classifies authentication and rate limit failures', () => {
   assert.equal(classifyProviderError(0, 'Invalid API key'), 'authentication');
   assert.equal(classifyProviderError(403, 'Forbidden'), 'authentication');
   assert.equal(classifyProviderError(429, 'Too many requests'), 'rate_limit');
+});
+
+test('preserves provider HTTP status when normalizing adapter errors', () => {
+  const adapterError = createProviderRequestError('OpenAI', 'send', 402, 'payment required');
+  const normalized = normalizeProviderError('OpenAI', 'send', adapterError);
+  assert.equal(normalized.status, 402);
+  assert.equal(normalized.kind, 'billing');
+  assert.equal(normalized.provider, 'OpenAI');
+  assert.equal(normalized.operation, 'send');
 });
 
 test('normalizes unknown adapter failures without losing the original detail', () => {
