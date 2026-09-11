@@ -75,6 +75,7 @@ let rendering = false;
 const activeSandboxIds = new Set<string>();
 const activities = new Map<string, PluginActivity>();
 const jobs = new Map<string, PluginJob>();
+const permissionDrafts = new Map<string, Set<string>>();
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
@@ -140,6 +141,7 @@ function showPermissionModal(plugin: PluginSummary): void {
   const root = document.querySelector<HTMLElement>('#modal-root');
   if (!root) return;
   const granted = new Set(plugin.grantedPermissions);
+  permissionDrafts.set(plugin.id, new Set(granted));
   root.innerHTML = `<div class="modal-backdrop"><section class="modal plugin-permission-modal" role="dialog" aria-modal="true" aria-label="Permissões de ${escapeHtml(plugin.name)}">
     <div class="modal-kicker">PLUGIN</div><button class="modal-close" data-plugin-modal-close aria-label="Fechar"></button>
     <h2>${escapeHtml(plugin.name)}</h2><p>O plugin só recebe capabilities marcadas aqui. Alterar grants pode desativá-lo imediatamente.</p>
@@ -222,6 +224,7 @@ async function savePermissions(pluginId: string, selected: string[]): Promise<vo
   } catch (error) {
     console.error('Falha ao salvar permissões do plugin.', error);
   } finally {
+    permissionDrafts.delete(pluginId);
     loading = false;
     render();
   }
@@ -255,11 +258,27 @@ if (bridge) {
   bridge.onJob((job) => { jobs.set(job.id, job); render(); });
   bridge.onSandboxCall((call) => { void handleSandboxCall(call); });
 
+  document.addEventListener('change', (event) => {
+    const target = event.target as HTMLElement;
+    const input = target.closest<HTMLInputElement>('[data-plugin-permission-value]');
+    if (!input) return;
+    const modal = input.closest<HTMLElement>('.plugin-permission-modal');
+    const save = modal?.querySelector<HTMLElement>('[data-plugin-save-permissions]');
+    const pluginId = save?.getAttribute('data-plugin-save-permissions');
+    const permission = input.getAttribute('data-plugin-permission-value');
+    if (!pluginId || !permission) return;
+    const draft = permissionDrafts.get(pluginId);
+    if (!draft) return;
+    if (input.checked) draft.add(permission);
+    else draft.delete(permission);
+  });
+
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLElement>('[data-plugin-install],[data-plugin-refresh],[data-plugin-enable],[data-plugin-disable],[data-plugin-permissions],[data-plugin-uninstall],[data-plugin-modal-close],[data-plugin-save-permissions]');
     if (!button) return;
     if (button.hasAttribute('data-plugin-modal-close')) {
+      permissionDrafts.clear();
       const root = document.querySelector<HTMLElement>('#modal-root');
       if (root) root.innerHTML = '';
       return;
@@ -282,9 +301,8 @@ if (bridge) {
       return;
     }
     if (button.hasAttribute('data-plugin-save-permissions')) {
-      const selected = [...document.querySelectorAll<HTMLInputElement>('[data-plugin-permission-value]:checked')]
-        .map((input) => input.getAttribute('data-plugin-permission-value')!)
-        .filter(Boolean);
+      const draft = permissionDrafts.get(pluginId) ?? new Set<string>();
+      const selected = plugin.requestedPermissions.filter((permission) => draft.has(permission));
       void savePermissions(pluginId, selected);
     }
   });
