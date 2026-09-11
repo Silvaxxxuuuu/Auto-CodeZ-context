@@ -85,6 +85,13 @@ function isPluginPanel(): boolean {
   return Boolean(panel && panel.querySelector('.panel-title')?.textContent?.trim() === 'Plugins');
 }
 
+function replacePluginSummary(updated: PluginSummary): void {
+  snapshot = {
+    ...snapshot,
+    plugins: snapshot.plugins.map((plugin) => plugin.id === updated.id ? updated : plugin),
+  };
+}
+
 function currentWork(pluginId: string): string | undefined {
   const activeJobs = [...jobs.values()].filter((job) => job.pluginId === pluginId && (job.state === 'queued' || job.state === 'running'));
   activeJobs.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -141,7 +148,7 @@ function showPermissionModal(plugin: PluginSummary): void {
   </section></div>`;
 }
 
-async function syncSandboxes(): Promise<void> {
+async function syncSandboxes(refreshSnapshot = true): Promise<void> {
   if (!bridge || !sandboxes) return;
   const desired = new Set(snapshot.plugins.filter((plugin) => plugin.state === 'enabled' && plugin.hasMain).map((plugin) => plugin.id));
   for (const pluginId of [...activeSandboxIds]) {
@@ -153,7 +160,10 @@ async function syncSandboxes(): Promise<void> {
   for (const plugin of snapshot.plugins) {
     if (plugin.state !== 'enabled') continue;
     if (!plugin.hasMain) {
-      if (plugin.health.state !== 'healthy') await bridge.markHealthy(plugin.id, 'Plugin declarativo ativo.').catch((): undefined => undefined);
+      if (plugin.health.state !== 'healthy') {
+        const updated = await bridge.markHealthy(plugin.id, 'Plugin declarativo ativo.').catch((): undefined => undefined);
+        if (updated) replacePluginSummary(updated);
+      }
       continue;
     }
     if (activeSandboxIds.has(plugin.id)) continue;
@@ -162,10 +172,11 @@ async function syncSandboxes(): Promise<void> {
       await sandboxes.activate(plugin.id, source);
       activeSandboxIds.add(plugin.id);
     } catch (error) {
-      await bridge.markFailed(plugin.id, error instanceof Error ? error.message : String(error)).catch((): undefined => undefined);
+      const updated = await bridge.markFailed(plugin.id, error instanceof Error ? error.message : String(error)).catch((): undefined => undefined);
+      if (updated) replacePluginSummary(updated);
     }
   }
-  snapshot = await bridge.snapshot();
+  if (refreshSnapshot) snapshot = await bridge.snapshot();
   render();
 }
 
@@ -192,6 +203,24 @@ async function act(action: () => Promise<unknown>): Promise<void> {
     await syncSandboxes();
   } catch (error) {
     console.error('Falha na operação de plugin.', error);
+  } finally {
+    loading = false;
+    render();
+  }
+}
+
+async function savePermissions(pluginId: string, selected: string[]): Promise<void> {
+  if (!bridge || loading) return;
+  loading = true;
+  render();
+  try {
+    const updated = await bridge.grant(pluginId, selected);
+    replacePluginSummary(updated);
+    const root = document.querySelector<HTMLElement>('#modal-root');
+    if (root) root.innerHTML = '';
+    await syncSandboxes(false);
+  } catch (error) {
+    console.error('Falha ao salvar permissões do plugin.', error);
   } finally {
     loading = false;
     render();
@@ -253,12 +282,10 @@ if (bridge) {
       return;
     }
     if (button.hasAttribute('data-plugin-save-permissions')) {
-      const selected = [...document.querySelectorAll<HTMLInputElement>('[data-plugin-permission-value]:checked')].map((input) => input.getAttribute('data-plugin-permission-value')!).filter(Boolean);
-      void act(async () => {
-        await bridge.grant(pluginId, selected);
-        const root = document.querySelector<HTMLElement>('#modal-root');
-        if (root) root.innerHTML = '';
-      });
+      const selected = [...document.querySelectorAll<HTMLInputElement>('[data-plugin-permission-value]:checked')]
+        .map((input) => input.getAttribute('data-plugin-permission-value')!)
+        .filter(Boolean);
+      void savePermissions(pluginId, selected);
     }
   });
 
