@@ -4,7 +4,7 @@ import path from 'node:path';
 
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
 type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number };
-export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: number };
+export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: number; windowsBatch?: boolean };
 export type McpToolDescriptor = { name: string; description?: string; inputSchema?: unknown };
 export type McpToolList = { tools: McpToolDescriptor[] };
 export type McpSpawn = (command: string, args: string[], options: { windowsHide: boolean; stdio: ['pipe', 'pipe', 'pipe'] }) => ChildProcessWithoutNullStreams;
@@ -52,7 +52,14 @@ export class PluginMcpStdioRuntime {
   async connect(pluginId: string, input: McpConnectInput): Promise<{ sessionId: string; protocolVersion?: string; serverName?: string; serverVersion?: string }> {
     const owned = this.sessions.get(pluginId) ?? new Map<string, Session>();
     if (owned.size >= MAX_SESSIONS) throw new Error('Plugin excedeu o limite de sessões MCP.');
-    const child = this.spawnProcess(command(input?.command), args(input?.args), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const requestedCommand = command(input?.command);
+    const requestedArgs = args(input?.args);
+    const useCmd = input?.windowsBatch === true && process.platform === 'win32';
+    const child = this.spawnProcess(
+      useCmd ? (process.env.ComSpec || 'cmd.exe') : requestedCommand,
+      useCmd ? ['/d', '/s', '/c', requestedCommand, ...requestedArgs] : requestedArgs,
+      { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
     const sessionId = crypto.randomUUID();
     const session: Session = { child, pending: new Map(), buffer: '', nextId: 1 };
     owned.set(sessionId, session);
