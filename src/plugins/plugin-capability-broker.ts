@@ -184,6 +184,7 @@ export class PluginCapabilityBroker {
       const value = requireRecord(input);
       return this.mcp.connect(pluginId, {
         command: requireString(value.command, 'Comando MCP', 4096),
+        ...(value.windowsBatch === true ? { windowsBatch: true } : {}),
         ...(Array.isArray(value.args) ? { args: value.args as string[] } : {}),
         ...(typeof value.timeoutMs === 'number' ? { timeoutMs: value.timeoutMs } : {}),
       });
