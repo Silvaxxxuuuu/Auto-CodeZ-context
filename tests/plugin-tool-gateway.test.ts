@@ -3,9 +3,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { AgentRuntime } from '../src/agent/agent-runtime';
 import { ApprovalRuntime } from '../src/agent/approval-runtime';
 import { ShadowAwareToolRuntime } from '../src/agent/shadow-aware-tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
+import { ChatRuntime } from '../src/ai/chat-runtime';
+import { ProviderRegistry } from '../src/ai/provider-registry';
+import type { AIProviderConfig, ChatRecord } from '../src/ai/types';
 import { pluginToolCatalog } from '../src/plugins/plugin-tool-catalog';
 
 async function fixture() {
@@ -122,6 +126,95 @@ test('write-risk plugin tool is blocked in read-only and requires approval in sa
     const approved = await fx.tools.approve(pending.approvalId as string);
     assert.equal(approved.ok, true);
     assert.deepEqual(JSON.parse(approved.output ?? '{}'), { changed: true });
+    assert.equal(executions, 1);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test('AgentRuntime pauses plugin_call for approval and resumes through the plugin executor exactly once', async () => {
+  const fx = await fixture();
+  try {
+    const name = registerTool('write');
+    let executions = 0;
+    let receivedContext: unknown;
+    pluginToolCatalog.configureExecutor(async (pluginId, toolId, input, context) => {
+      executions += 1;
+      receivedContext = { pluginId, toolId, input, context };
+      return { changed: true, target: input.target };
+    });
+
+    const providerConfig: AIProviderConfig = {
+      id: 'plugin-agent-provider',
+      displayName: 'Plugin Agent Provider',
+      apiKey: 'test-key',
+      enabled: true,
+    };
+    let providerCalls = 0;
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: providerConfig.id,
+      displayName: providerConfig.displayName,
+      async listModels() {
+        return [{ id: 'plugin-agent-model', name: 'Plugin Agent Model', providerId: providerConfig.id, capabilities: ['text', 'tools'] }];
+      },
+      async send() {
+        providerCalls += 1;
+        if (providerCalls === 1) {
+          return {
+            content: '',
+            model: 'plugin-agent-model',
+            providerId: providerConfig.id,
+            toolCalls: [{
+              id: 'plugin-agent-call',
+              name: 'plugin_call' as const,
+              input: { tool: name, arguments: JSON.stringify({ target: 'scene' }) },
+            }],
+          };
+        }
+        return { content: 'Plugin action finished.', model: 'plugin-agent-model', providerId: providerConfig.id };
+      },
+    });
+    const chatRuntime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, fx.tools.listDefinitions());
+    const agent = new AgentRuntime(chatRuntime, fx.tools);
+    const chat: ChatRecord = {
+      id: 'chat-agent-plugin',
+      title: 'Plugin Agent Integration',
+      projectId: 'project-a',
+      providerId: providerConfig.id,
+      model: 'plugin-agent-model',
+      intelligence: 'normal',
+      permissionLevel: 'ask',
+      messages: [{ role: 'user', content: 'Change the connected scene.' }],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const pending = await agent.run(providerConfig, chat, undefined, 'ask');
+    assert.equal(pending.pendingApprovalIds.length, 1);
+    assert.equal(pending.toolRounds, 1);
+    assert.equal(executions, 0);
+    assert.equal(agent.hasPendingForChat(chat.id), true);
+
+    const resumed = await agent.resume(pending.pendingApprovalIds[0]);
+    assert.equal(resumed.pendingApprovalIds.length, 0);
+    assert.equal(resumed.toolRounds, 1);
+    assert.equal(resumed.response.content, 'Plugin action finished.');
+    assert.equal(executions, 1);
+    assert.equal(providerCalls, 2);
+    assert.equal(agent.hasPendingForChat(chat.id), false);
+    assert.deepEqual(JSON.parse(resumed.messages.find((message) => message.role === 'tool' && message.toolCallId === 'plugin-agent-call')?.content ?? '{}'), { changed: true, target: 'scene' });
+
+    const contextEnvelope = receivedContext as { pluginId: string; toolId: string; input: unknown; context: { chatId: string; projectId: string; runId?: string; permission: string } };
+    assert.equal(contextEnvelope.pluginId, 'test.plugin');
+    assert.equal(contextEnvelope.toolId, 'external_action');
+    assert.deepEqual(contextEnvelope.input, { target: 'scene' });
+    assert.equal(contextEnvelope.context.chatId, chat.id);
+    assert.equal(contextEnvelope.context.projectId, chat.projectId);
+    assert.equal(contextEnvelope.context.permission, 'ask');
+    assert.ok(contextEnvelope.context.runId);
+
+    await assert.rejects(agent.resume(pending.pendingApprovalIds[0]), /Aprovação não encontrada/);
     assert.equal(executions, 1);
   } finally {
     await fx.cleanup();
