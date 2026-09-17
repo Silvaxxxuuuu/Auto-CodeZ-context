@@ -20,7 +20,9 @@ const normalizeToolId = (name) => 'studio_' + name.replace(/[^A-Za-z0-9_-]/g, '_
 async function connect(api) {
   if (sessionId) return;
   const command = await api.settings.get('mcpCommand');
-  const resolved = typeof command === 'string' && command.trim() ? command.trim() : 'roblox-studio-mcp';
+  const resolved = typeof command === 'string' && command.trim()
+    ? command.trim()
+    : (await api.mcp.resolveRobloxStudio()).command;
   await api.activity.publish('Conectando ao Roblox Studio...', 'running');
   const connected = await api.mcp.connect({ command: resolved, timeoutMs: 15000 });
   sessionId = connected.sessionId;
