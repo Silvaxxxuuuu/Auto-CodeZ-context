@@ -55,9 +55,10 @@ export class PluginMcpStdioRuntime {
     const requestedCommand = command(input?.command);
     const requestedArgs = args(input?.args);
     const useCmd = input?.windowsBatch === true && process.platform === 'win32';
+    if (useCmd && !requestedCommand.toLowerCase().endsWith('.bat')) throw new Error('Launcher MCP confiável precisa ser um arquivo .bat.');
     const child = this.spawnProcess(
       useCmd ? (process.env.ComSpec || 'cmd.exe') : requestedCommand,
-      useCmd ? ['/d', '/s', '/c', requestedCommand, ...requestedArgs] : requestedArgs,
+      useCmd ? ['/d', '/s', '/c', `"${requestedCommand}"`, ...requestedArgs] : requestedArgs,
       { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
     );
     const sessionId = crypto.randomUUID();
