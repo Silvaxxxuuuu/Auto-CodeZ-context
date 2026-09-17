@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
 type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number };
@@ -10,6 +12,15 @@ export type McpSpawn = (command: string, args: string[], options: { windowsHide:
 const DEFAULT_TIMEOUT = 30_000;
 const MAX_LINE_BYTES = 4 * 1024 * 1024;
 const MAX_SESSIONS = 4;
+
+export function resolveRobloxStudioMcpCommand(platform = process.platform, env: NodeJS.ProcessEnv = process.env): string {
+  if (platform !== 'win32') return 'roblox-studio-mcp';
+  const localAppData = env.LOCALAPPDATA;
+  if (!localAppData) throw new Error('LOCALAPPDATA não está disponível para localizar o Roblox Studio MCP.');
+  const candidate = path.join(localAppData, 'Roblox', 'mcp.bat');
+  if (!fs.existsSync(candidate)) throw new Error('Roblox Studio MCP não foi encontrado. Atualize ou abra o Roblox Studio e tente novamente.');
+  return candidate;
+}
 
 function timeout(value?: number): number {
   if (value === undefined) return DEFAULT_TIMEOUT;
