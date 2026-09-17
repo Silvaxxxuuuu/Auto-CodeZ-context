@@ -220,8 +220,26 @@ async function runTest() {
   const permissions = modal.locator('[data-plugin-permission-value]');
   if (await permissions.count() !== 3) throw new Error('Modal não exibiu as três capabilities solicitadas.');
   for (let index = 0; index < await permissions.count(); index += 1) await permissions.nth(index).check();
+  const checkedPermissions = await permissions.evaluateAll((inputs) => inputs.filter((input) => input.checked).map((input) => input.getAttribute('data-plugin-permission-value')));
+  if (checkedPermissions.length !== 3) throw new Error(`Checkboxes não permaneceram marcados antes de salvar: ${JSON.stringify(checkedPermissions)}`);
   await modal.locator('[data-plugin-save-permissions="visual.plugin"]').click();
   await modal.waitFor({ state: 'detached', timeout: 10_000 });
+
+  const grantDiagnostic = await page.evaluate(async () => {
+    const current = await window.autoCodezPlugins?.snapshot();
+    const plugin = current?.plugins?.find((item) => item.id === 'visual.plugin');
+    const cardText = document.querySelector('[data-plugin-id="visual.plugin"]')?.textContent || '';
+    return {
+      requestedPermissions: plugin?.requestedPermissions || [],
+      grantedPermissions: plugin?.grantedPermissions || [],
+      missingPermissions: plugin?.missingPermissions || [],
+      state: plugin?.state || null,
+      cardText,
+    };
+  });
+  if (grantDiagnostic.grantedPermissions.length !== 3 || grantDiagnostic.missingPermissions.length !== 0) {
+    throw new Error(`Grants não persistiram após salvar: ${JSON.stringify(grantDiagnostic)}; console=${JSON.stringify(consoleErrors)}`);
+  }
 
   await card.locator('[data-plugin-enable="visual.plugin"]').waitFor({ state: 'visible', timeout: 10_000 });
   await card.locator('[data-plugin-enable="visual.plugin"]').click();
