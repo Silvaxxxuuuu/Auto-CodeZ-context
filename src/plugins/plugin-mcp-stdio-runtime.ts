@@ -1,9 +1,9 @@
-import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
 type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number };
 export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: number };
-export type McpSpawn = (command: string, args: readonly string[], options: SpawnOptionsWithoutStdio & { stdio: ['pipe', 'pipe', 'pipe'] }) => ChildProcessWithoutNullStreams;
+export type McpSpawn = (command: string, args: string[], options: { windowsHide: boolean; stdio: ['pipe', 'pipe', 'pipe'] }) => ChildProcessWithoutNullStreams;
 
 const DEFAULT_TIMEOUT = 30_000;
 const MAX_LINE_BYTES = 4 * 1024 * 1024;
