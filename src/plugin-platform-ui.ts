@@ -105,7 +105,7 @@ async function syncSandboxes(refreshSnapshot = true): Promise<void> {
     if (plugin.state !== 'enabled') continue;
     if (!plugin.hasMain) { if (plugin.health.state !== 'healthy') { const updated = await bridge.markHealthy(plugin.id, 'Plugin declarativo ativo.').catch((): undefined => undefined); if (updated) replacePluginSummary(updated); } continue; }
     if (activeSandboxIds.has(plugin.id)) continue;
-    try { const source = await bridge.source(plugin.id); await sandboxes.activate(plugin.id, source); activeSandboxIds.add(plugin.id); }
+    try { const source = await bridge.source(plugin.id); await sandboxes.activate(plugin.id, source); activeSandboxIds.add(plugin.id); const updated = await bridge.snapshot(); const current = updated.plugins.find((item) => item.id === plugin.id); if (current) replacePluginSummary(current); }
     catch (error) { const updated = await bridge.markFailed(plugin.id, error instanceof Error ? error.message : String(error)).catch((): undefined => undefined); if (updated) replacePluginSummary(updated); }
   }
   if (refreshSnapshot) snapshot = await bridge.snapshot(); render();
