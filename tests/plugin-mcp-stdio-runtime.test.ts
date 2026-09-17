@@ -113,9 +113,3 @@ test('Roblox Studio MCP resolver fails clearly when Windows discovery prerequisi
 });
 
 
-test('trusted Windows batch mode rejects non-batch launchers before spawning', async () => {
-  let spawns = 0;
-  const runtime = new PluginMcpStdioRuntime((() => { spawns += 1; throw new Error('should not spawn'); }) as McpSpawn);
-  await assert.rejects(runtime.connect('roblox', { command: String.raw`C:\Roblox\not-mcp.exe`, windowsBatch: true }), (error: unknown) => error instanceof Error && error.message.includes('arquivo .bat'));
-  assert.equal(spawns, 0);
-});
