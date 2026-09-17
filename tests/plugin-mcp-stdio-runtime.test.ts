@@ -91,11 +91,11 @@ test('MCP stdio sessions are isolated by plugin and fail closed after server exi
   });
   const runtime = new PluginMcpStdioRuntime(fixture.spawn);
   const connected = await runtime.connect('plugin.a', { command: 'server' });
-  await assert.rejects(runtime.listTools('plugin.b', connected.sessionId), /não encontrada/i);
+  assert.throws(() => runtime.listTools('plugin.b', connected.sessionId), /não encontrada/i);
   const pending = runtime.listTools('plugin.a', connected.sessionId);
   fixture.server.exit(17);
   await assert.rejects(pending, /encerrou|código/i);
-  await assert.rejects(runtime.listTools('plugin.a', connected.sessionId), /não encontrada/i);
+  assert.throws(() => runtime.listTools('plugin.a', connected.sessionId), /não encontrada/i);
 });
 
 test('MCP stdio transport rejects unsafe command and bounded input before spawning', async () => {
