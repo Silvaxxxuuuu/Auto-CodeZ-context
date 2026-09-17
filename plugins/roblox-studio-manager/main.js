@@ -20,11 +20,10 @@ const normalizeToolId = (name) => 'studio_' + name.replace(/[^A-Za-z0-9_-]/g, '_
 async function connect(api) {
   if (sessionId) return;
   const command = await api.settings.get('mcpCommand');
-  const resolved = typeof command === 'string' && command.trim()
-    ? command.trim()
-    : (await api.mcp.resolveRobloxStudio()).command;
+  const custom = typeof command === 'string' && command.trim();
+  const resolved = custom ? { command: command.trim(), windowsBatch: false } : { ...(await api.mcp.resolveRobloxStudio()), windowsBatch: true };
   await api.activity.publish('Conectando ao Roblox Studio...', 'running');
-  const connected = await api.mcp.connect({ command: resolved, timeoutMs: 15000 });
+  const connected = await api.mcp.connect({ command: resolved.command, windowsBatch: resolved.windowsBatch, timeoutMs: 15000 });
   sessionId = connected.sessionId;
   const catalog = await api.mcp.listTools(sessionId, 15000);
   studioTools = new Map(catalog.tools.map((tool) => [normalizeToolId(tool.name), tool]));
