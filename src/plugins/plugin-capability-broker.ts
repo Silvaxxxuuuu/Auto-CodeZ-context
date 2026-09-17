@@ -2,7 +2,7 @@ import { PluginRegistry } from './plugin-registry';
 import { PluginActivityRuntime, type PluginActivityStatus } from './plugin-activity-runtime';
 import { PluginJobRuntime } from './plugin-job-runtime';
 import { PluginLocalBridgeRuntime, type PluginBridgeRequest } from './plugin-local-bridge';
-import { PluginMcpStdioRuntime } from './plugin-mcp-stdio-runtime';
+import { PluginMcpStdioRuntime, resolveRobloxStudioMcpCommand } from './plugin-mcp-stdio-runtime';
 import { PluginSettingsStore } from './plugin-settings-store';
 import { pluginToolCatalog, type PluginToolRegistration } from './plugin-tool-catalog';
 import type { PluginPermission } from './plugin-types';
@@ -179,6 +179,7 @@ export class PluginCapabilityBroker {
       const value = requireRecord(input);
       return this.localBridge.request(value as unknown as PluginBridgeRequest);
     });
+    this.register('mcp.resolve-roblox-studio', 'terminal:execute', async () => ({ command: resolveRobloxStudioMcpCommand() }));
     this.register('mcp.connect', 'terminal:execute', async (pluginId, input) => {
       const value = requireRecord(input);
       return this.mcp.connect(pluginId, {
