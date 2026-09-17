@@ -4,7 +4,7 @@ import path from 'node:path';
 
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
 type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number };
-export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: number; windowsBatch?: boolean };
+export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: number };
 export type McpToolDescriptor = { name: string; description?: string; inputSchema?: unknown };
 export type McpToolList = { tools: McpToolDescriptor[] };
 export type McpSpawn = (command: string, args: string[], options: { windowsHide: boolean; stdio: ['pipe', 'pipe', 'pipe'] }) => ChildProcessWithoutNullStreams;
@@ -54,13 +54,7 @@ export class PluginMcpStdioRuntime {
     if (owned.size >= MAX_SESSIONS) throw new Error('Plugin excedeu o limite de sessões MCP.');
     const requestedCommand = command(input?.command);
     const requestedArgs = args(input?.args);
-    const useCmd = input?.windowsBatch === true && process.platform === 'win32';
-    if (useCmd && !requestedCommand.toLowerCase().endsWith('.bat')) throw new Error('Launcher MCP confiável precisa ser um arquivo .bat.');
-    const child = this.spawnProcess(
-      useCmd ? (process.env.ComSpec || 'cmd.exe') : requestedCommand,
-      useCmd ? ['/d', '/s', '/c', `"${requestedCommand}"`, ...requestedArgs] : requestedArgs,
-      { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
-    );
+    const child = this.spawnProcess(requestedCommand, requestedArgs, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const sessionId = crypto.randomUUID();
     const session: Session = { child, pending: new Map(), buffer: '', nextId: 1 };
     owned.set(sessionId, session);
@@ -83,6 +77,13 @@ export class PluginMcpStdioRuntime {
       this.disconnect(pluginId, sessionId);
       throw error;
     }
+  }
+
+  async connectRobloxStudio(pluginId: string, timeoutMs?: number): Promise<{ sessionId: string; protocolVersion?: string; serverName?: string; serverVersion?: string }> {
+    const launcher = resolveRobloxStudioMcpCommand();
+    if (process.platform !== 'win32') return this.connect(pluginId, { command: launcher, timeoutMs });
+    const comspec = process.env.ComSpec || 'cmd.exe';
+    return this.connect(pluginId, { command: comspec, args: ['/d', '/s', '/c', '\"' + launcher + '\"'], timeoutMs });
   }
 
   async listTools(pluginId: string, sessionId: string, timeoutMs?: number): Promise<McpToolList> {
