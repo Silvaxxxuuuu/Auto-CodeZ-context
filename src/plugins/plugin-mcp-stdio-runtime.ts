@@ -3,6 +3,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
 type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number };
 export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: number };
+export type McpToolDescriptor = { name: string; description?: string; inputSchema?: unknown };
+export type McpToolList = { tools: McpToolDescriptor[] };
 export type McpSpawn = (command: string, args: string[], options: { windowsHide: boolean; stdio: ['pipe', 'pipe', 'pipe'] }) => ChildProcessWithoutNullStreams;
 
 const DEFAULT_TIMEOUT = 30_000;
@@ -64,8 +66,20 @@ export class PluginMcpStdioRuntime {
     }
   }
 
-  listTools(pluginId: string, sessionId: string, timeoutMs?: number): Promise<unknown> {
-    return this.request(this.requireSession(pluginId, sessionId), 'tools/list', {}, timeout(timeoutMs));
+  async listTools(pluginId: string, sessionId: string, timeoutMs?: number): Promise<McpToolList> {
+    const result = await this.request(this.requireSession(pluginId, sessionId), 'tools/list', {}, timeout(timeoutMs));
+    if (!result || typeof result !== 'object' || !Array.isArray((result as { tools?: unknown }).tools)) throw new Error('Servidor MCP retornou catálogo de tools inválido.');
+    const tools = (result as { tools: unknown[] }).tools.map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Servidor MCP retornou tool inválida.');
+      const value = item as Record<string, unknown>;
+      if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 256) throw new Error('Servidor MCP retornou tool inválida.');
+      return {
+        name: value.name.trim(),
+        ...(typeof value.description === 'string' ? { description: value.description.slice(0, 4096) } : {}),
+        ...(Object.prototype.hasOwnProperty.call(value, 'inputSchema') ? { inputSchema: value.inputSchema } : {}),
+      };
+    });
+    return { tools };
   }
 
   callTool(pluginId: string, sessionId: string, name: string, input: unknown, timeoutMs?: number): Promise<unknown> {
