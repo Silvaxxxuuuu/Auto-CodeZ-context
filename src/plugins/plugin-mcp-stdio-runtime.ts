@@ -1,8 +1,9 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process';
 
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
 type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number };
 export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: number };
+export type McpSpawn = (command: string, args: readonly string[], options: SpawnOptionsWithoutStdio & { stdio: ['pipe', 'pipe', 'pipe'] }) => ChildProcessWithoutNullStreams;
 
 const DEFAULT_TIMEOUT = 30_000;
 const MAX_LINE_BYTES = 4 * 1024 * 1024;
@@ -33,10 +34,12 @@ function args(value: unknown): string[] {
 export class PluginMcpStdioRuntime {
   private readonly sessions = new Map<string, Map<string, Session>>();
 
+  constructor(private readonly spawnProcess: McpSpawn = spawn) {}
+
   async connect(pluginId: string, input: McpConnectInput): Promise<{ sessionId: string; protocolVersion?: string; serverName?: string; serverVersion?: string }> {
     const owned = this.sessions.get(pluginId) ?? new Map<string, Session>();
     if (owned.size >= MAX_SESSIONS) throw new Error('Plugin excedeu o limite de sessões MCP.');
-    const child = spawn(command(input?.command), args(input?.args), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = this.spawnProcess(command(input?.command), args(input?.args), { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const sessionId = crypto.randomUUID();
     const session: Session = { child, pending: new Map(), buffer: '', nextId: 1 };
     owned.set(sessionId, session);
