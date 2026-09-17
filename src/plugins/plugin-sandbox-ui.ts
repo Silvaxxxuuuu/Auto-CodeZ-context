@@ -84,7 +84,7 @@ const api = Object.freeze({
   tools: Object.freeze({ register: (tools) => request('tools.register', { tools }) }),
   bridge: Object.freeze({ request: (input) => request('bridge.request', input) }),
   mcp: Object.freeze({
-    resolveRobloxStudio: () => request('mcp.resolve-roblox-studio'),
+    connectRobloxStudio: (timeoutMs) => request('mcp.connect-roblox-studio', { timeoutMs }),
     connect: (input) => request('mcp.connect', input),
     listTools: (sessionId, timeoutMs) => request('mcp.list-tools', { sessionId, timeoutMs }),
     callTool: (sessionId, name, args, timeoutMs) => request('mcp.call-tool', { sessionId, name, arguments: args, timeoutMs }),
