@@ -160,6 +160,6 @@ export function initializePluginPlatformUi(): void {
     if (button.hasAttribute('data-plugin-save-permissions')) { const modal = button.closest<HTMLElement>('.plugin-permission-modal'); const checked = modal ? [...modal.querySelectorAll<HTMLInputElement>('[data-plugin-permission-value]:checked')].map((input) => input.getAttribute('data-plugin-permission-value')).filter((permission): permission is string => Boolean(permission)) : []; const selected = plugin.requestedPermissions.filter((permission) => checked.includes(permission)); void savePermissions(pluginId, selected); }
   });
   const observer = new MutationObserver(() => { if (rendering || !isPluginPanel()) return; const panel = document.querySelector<HTMLElement>('#nav-panel'); if (!panel || panel.querySelector('[data-plugin-platform-owned]')) return; selectedPluginId = null; render(); });
-  observer.observe(document.body, { childList: true, subtree: true });
+  const panel = document.querySelector<HTMLElement>('#nav-panel'); if (panel) observer.observe(panel, { childList: true, subtree: true });
   void refresh();
 }
