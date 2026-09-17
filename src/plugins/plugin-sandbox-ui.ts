@@ -83,6 +83,12 @@ const api = Object.freeze({
   }),
   tools: Object.freeze({ register: (tools) => request('tools.register', { tools }) }),
   bridge: Object.freeze({ request: (input) => request('bridge.request', input) }),
+  mcp: Object.freeze({
+    connect: (input) => request('mcp.connect', input),
+    listTools: (sessionId, timeoutMs) => request('mcp.list-tools', { sessionId, timeoutMs }),
+    callTool: (sessionId, name, args, timeoutMs) => request('mcp.call-tool', { sessionId, name, arguments: args, timeoutMs }),
+    disconnect: (sessionId) => request('mcp.disconnect', { sessionId }),
+  }),
   web: Object.freeze({
     search: (query, limit) => request('web.search', { query, limit }),
     fetch: (url) => request('web.fetch', { url }),
