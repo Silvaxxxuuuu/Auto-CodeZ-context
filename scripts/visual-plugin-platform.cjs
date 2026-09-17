@@ -26,7 +26,7 @@ async function runTest() {
   page.on('pageerror', (error) => pageErrors.push(errorText(error))); page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   await page.setViewportSize({ width: 1440, height: 900 }); await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30000 });
   const failures = page.locator('#auto-codez-module-failures'); if (await failures.count()) throw new Error((await failures.first().innerText()).trim());
-  await page.locator('.rail-button[data-panel="plugins"]').click(); await page.locator('.plugin-platform-summary').waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('.rail-button[data-panel="plugins"]').click(); await page.locator('[data-plugin-platform-owned]').waitFor({ state: 'visible', timeout: 15000 });
   const listItem = page.locator('[data-plugin-open="visual.plugin"]'); await listItem.waitFor({ state: 'visible', timeout: 15000 });
   const listText = await listItem.innerText(); if (!listText.includes('Visual Sandbox Plugin')) throw new Error('Plugin fixture não foi descoberto na lista.'); if (!listText.includes('Fixture real para validar lifecycle, grants, sandbox e capabilities.')) throw new Error('Descrição compacta não foi exibida.');
   if (await page.locator('[data-plugin-id="visual.plugin"] [data-plugin-permissions],[data-plugin-id="visual.plugin"] [data-plugin-uninstall],[data-plugin-id="visual.plugin"] [data-plugin-enable]').count()) throw new Error('Lista compacta expôs ações que pertencem aos detalhes.');
