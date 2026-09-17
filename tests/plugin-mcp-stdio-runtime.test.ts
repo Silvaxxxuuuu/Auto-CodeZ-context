@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { PluginMcpStdioRuntime, type McpSpawn } from '../src/plugins/plugin-mcp-stdio-runtime';
+import { PluginMcpStdioRuntime, resolveRobloxStudioMcpCommand, type McpSpawn } from '../src/plugins/plugin-mcp-stdio-runtime';
 
 type FakeServer = {
   child: ChildProcessWithoutNullStreams;
@@ -104,4 +104,10 @@ test('MCP stdio transport rejects unsafe command and bounded input before spawni
   await assert.rejects(runtime.connect('plugin.a', { command: 'bad\ncommand' }), /Comando MCP inválido/);
   await assert.rejects(runtime.connect('plugin.a', { command: 'server', args: new Array(65).fill('x') }), /Argumentos MCP inválidos/);
   assert.equal(spawns, 0);
+});
+
+
+test('Roblox Studio MCP resolver fails clearly when Windows discovery prerequisites are missing', () => {
+  assert.throws(() => resolveRobloxStudioMcpCommand('win32', {}), /LOCALAPPDATA/);
+  assert.equal(resolveRobloxStudioMcpCommand('linux', {}), 'roblox-studio-mcp');
 });
