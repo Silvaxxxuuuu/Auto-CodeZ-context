@@ -2470,3 +2470,85 @@ PR #9 permanece:
 - draft;
 - não mesclado;
 - não fazer merge sem autorização explícita do usuário.
+
+
+------------------------------------------------------------
+24.24. PLUGIN PLATFORM V1 — BASELINE FUNCIONAL E UX DETALHADA
+------------------------------------------------------------
+
+Baseline validado:
+1047bbc1e797282d9f6ba52617e04c3b18701ca9
+
+A Plugin Platform v1 está integrada ao Auto CodeZ e validada de ponta a ponta.
+
+Arquitetura comprovada:
+- manifesto, scanner, registry e estado persistido;
+- grants explícitos e enable somente após permissões obrigatórias;
+- instalação gerenciada de pacote local;
+- sandbox de renderer restrito a allow-scripts;
+- settings, activity, jobs, tools e localhost bridge brokerados;
+- PluginToolCatalog integrado ao AgentRuntime;
+- plugin_list_tools e plugin_call expostos pela fronteira ShadowAwareToolRuntime;
+- políticas read-only/safe/ask/unrestricted aplicadas a chamadas de plugins;
+- operações write/sensitive exigem aprovação quando a política determina;
+- contexto autoritativo chatId/projectId/runId/permission é preservado;
+- chamadas aprovadas são revalidadas antes da execução e falham fechado se plugin/tool desaparecer;
+- sandbox e estado de saúde são sincronizados após ativação.
+
+UX consolidada:
+- a sidebar Plugins é um navegador compacto, no padrão de extensões de IDE;
+- cada item usa título e descrição em uma linha e é inteiramente clicável;
+- controles técnicos e permissões não poluem a lista;
+- clicar em um plugin abre uma superfície principal grande, separada da sidebar;
+- a página detalhada mostra somente metadata real: nome, publisher, versão, ID, descrição, homepage quando declarada, estado, runtime, saúde, mensagem, permissões e integrações declaradas;
+- ações reais disponíveis: Configurar, Ativar/Desativar e Desinstalar;
+- modal de configuração permanece acima da superfície detalhada e sua hierarquia é verificada pelo E2E;
+- nenhuma métrica, diagnóstico ou capacidade fictícia é exibida.
+
+Sequência de refinamento relevante:
+- a35d1a0ec0af21961ef0e946f094e4d60cfffe65 feat(plugins): open professional full-page plugin details
+- 39df417db62453a36967786502b2714e62bcf234 test(plugins): validate full-page plugin details
+- f5be04e444253b0441bef1605936e9722e136336 test(plugins): disambiguate repeated publisher metadata
+- 412aaff825b4dea24ac38369cb286748be655389 fix(plugins): keep permission modal above plugin details
+- 962be0111b75f1d9b0c98b6bfbaf2666b8ac14d5 test(plugins): guard detail modal layering
+- 0bde29923fbedec5589bc481e021eebcda12cedb fix(plugins): raise global modal layer over detail surface
+- 17b0ee256af5b84b10f7b7b5911cacabbec478cc test(plugins): target disabled status badge explicitly
+- 1047bbc1e797282d9f6ba52617e04c3b18701ca9 test(plugins): verify explicit return from detail page
+
+Validação final do HEAD exato 1047bbc1:
+Validate Auto CodeZ #3228:
+- run id 35282584488;
+- conclusão success;
+- TypeScript, core tests, ESLint, Forge package e startup smoke passaram.
+
+Visual Auto CodeZ #444:
+- run id 35282584572;
+- conclusão success;
+- artifact id 10523910675;
+- Capture visual flow passou;
+- unified local AI passou;
+- unavailable local runtime recovery passou;
+- secure local runtime settings passou;
+- LM Studio chat passou;
+- fluxo Plugin Platform comprovou lista compacta -> página detalhada -> configuração -> 3/3 grants -> ativação -> saúde operacional -> sandbox/activity/jobs/tools/bridge -> desativação -> remoção do sandbox -> retorno à lista;
+- zero falha no workflow visual.
+
+Próxima fronteira planejada:
+ROBLOX STUDIO MANAGER.
+
+Direção arquitetural:
+- primeiro plugin real construído sobre a Plugin Platform v1, sem atalhos fora dela;
+- Auto CodeZ/AgentRuntime -> PluginToolCatalog -> Roblox Studio Manager -> localhost -> Roblox Studio;
+- bridge local autenticado e explicitamente limitado;
+- operações estruturadas sobre DataModel/Instances em vez de execução arbitrária como API principal;
+- leitura de hierarquia e propriedades;
+- criação, alteração e remoção controlada de Instances;
+- operações em scripts Luau com escopo explícito;
+- suporte planejado a Workspace, ReplicatedStorage, ServerScriptService e terrain;
+- jobs, activity, erros, conexão e diagnósticos devem aparecer na página detalhada real do plugin;
+- capabilities e tools devem ser declaradas no manifesto e respeitar grants/política do AgentRuntime;
+- não enfraquecer Allowed Paths, approvals ou fronteiras existentes do runtime.
+
+Antes de expandir operações destrutivas, o Roblox Studio Manager deve começar pela camada de transporte, autenticação, estado de conexão e operações read-only, com testes locais/contratuais. Só depois evoluir para mutações estruturadas.
+
+PR #9 permanece open, draft e não mesclado. Não fazer merge sem autorização explícita do usuário.
