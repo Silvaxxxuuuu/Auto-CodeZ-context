@@ -163,3 +163,5 @@ export function initializePluginPlatformUi(): void {
   const panel = document.querySelector<HTMLElement>('#nav-panel'); if (panel) observer.observe(panel, { childList: true, subtree: true });
   void refresh();
 }
+
+initializePluginPlatformUi();
