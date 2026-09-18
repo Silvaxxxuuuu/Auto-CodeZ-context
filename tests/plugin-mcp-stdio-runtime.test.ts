@@ -296,6 +296,14 @@ test('MCP stdio runtime surfaces JSON-RPC errors and request timeouts', async ()
   const timeoutRuntime = new PluginMcpStdioRuntime(hanging.spawn);
   const timeoutConnected = await timeoutRuntime.connect('test.plugin', { command: 'fake' });
   await assert.rejects(() => timeoutRuntime.listTools('test.plugin', timeoutConnected.sessionId, 1000), /tempo limite/);
+  await new Promise((resolve) => setImmediate(resolve));
+  const timedOutRequest = hanging.server.requests.find((request) => request.method === 'tools/list');
+  const cancellation = hanging.server.notifications.find((notification) => notification.method === 'notifications/cancelled');
+  assert.ok(timedOutRequest?.id);
+  assert.deepEqual(cancellation?.params, {
+    requestId: timedOutRequest.id,
+    reason: 'Auto CodeZ timeout: tools/list',
+  });
   timeoutRuntime.disconnectPlugin('test.plugin');
 });
 
