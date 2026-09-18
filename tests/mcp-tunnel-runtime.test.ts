@@ -58,6 +58,13 @@ function fixture(options: { version?: string; ready?: boolean; killDelayMs?: num
       });
       return child;
     }
+    if (args[0] === 'doctor') {
+      queueMicrotask(() => {
+        (child.stdout as PassThrough).write('CHECK tunnel_id ok\nCHECK mcp_server_reachable ok\nRESULT ok\n');
+        child.emit('exit', 0, null);
+      });
+      return child;
+    }
     const urlFileIndex = args.indexOf('--health.url-file');
     const healthFile = urlFileIndex >= 0 ? args[urlFileIndex + 1] : undefined;
     if (options.ready !== false && healthFile) {
@@ -100,6 +107,42 @@ test('Secure MCP Tunnel doctor reports a supported client version without retain
     assert.equal(f.records.length, 1);
     assert.deepEqual(f.records[0].args, ['--version']);
     assert.equal(JSON.stringify(runtime.status()).includes('doctor-placeholder'), false);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('Secure MCP Tunnel real diagnose validates the trusted MCP binding with ephemeral secrets', async () => {
+  const f = fixture({ version: 'tunnel-client v0.0.14' });
+  try {
+    const runtime = await f.create({});
+    const result = await runtime.diagnose({
+      tunnelId: 'tunnel_' + '9'.repeat(32),
+      localEndpoint: 'http://127.0.0.1:7444/mcp',
+      localBearerToken: 'local-doctor-bearer-secret-1234567890',
+      controlPlaneApiKey: 'sk-doctor-control-secret',
+      executable: 'custom-tunnel-client',
+    });
+
+    assert.equal(result.executable, 'custom-tunnel-client');
+    assert.equal(result.version, '0.0.14');
+    assert.equal(result.supported, true);
+    assert.match(result.diagnostics, /RESULT ok/);
+
+    const doctor = f.records.find((record) => record.args[0] === 'doctor');
+    assert.ok(doctor);
+    assert.deepEqual(doctor.args, [
+      'doctor',
+      '--explain',
+      '--health.listen-addr',
+      '127.0.0.1:0',
+    ]);
+    assert.equal(doctor.env.CONTROL_PLANE_TUNNEL_ID, 'tunnel_' + '9'.repeat(32));
+    assert.equal(doctor.env.CONTROL_PLANE_API_KEY, 'sk-doctor-control-secret');
+    assert.equal(doctor.env.MCP_SERVER_URL, 'http://127.0.0.1:7444/mcp');
+    assert.equal(doctor.env.AUTO_CODEZ_MCP_AUTHORIZATION, 'Bearer local-doctor-bearer-secret-1234567890');
+    assert.equal(JSON.stringify(result).includes('sk-doctor-control-secret'), false);
+    assert.equal(JSON.stringify(result).includes('local-doctor-bearer-secret'), false);
   } finally {
     await f.cleanup();
   }
