@@ -50,6 +50,9 @@ async function runTest() {
   const mcpMode = page.locator('#mcp-mode-root'); await mcpMode.waitFor({ state: 'visible', timeout: 10000 }); await mcpMode.getByText('MCP MODE', { exact: true }).waitFor({ state: 'visible' }); await mcpMode.getByText('Sessões', { exact: true }).waitFor({ state: 'visible' });
   if (await mcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer próprio.');
   await page.waitForFunction(() => document.querySelectorAll('#mcp-mode-root .mcp-event').length > 0);
+  const firstEvent = mcpMode.locator('.mcp-event').first(); await firstEvent.locator('[data-mcp-expand]').click(); await firstEvent.locator('.mcp-event-expanded').waitFor({ state: 'visible', timeout: 5000 });
+  const expandedText = await firstEvent.locator('.mcp-event-expanded').innerText(); if (!expandedText.includes('eventId') || !expandedText.includes('sequence')) throw new Error(`Progressive disclosure do MCP Mode incompleto: ${expandedText}`);
+  if (await mcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer após expansão de evento.');
   const ledgerDiagnostic = await page.evaluate(async () => { const page = await window.autoCodez.listOperationalLedger({ limit: 250, direction: 'backward' }); return { count: page.events.length, categories: [...new Set(page.events.map((event) => event.category))], hasPlugin: page.events.some((event) => event.pluginId === 'visual.plugin') }; });
   if (!ledgerDiagnostic.count || !ledgerDiagnostic.hasPlugin) throw new Error(`MCP Mode não recebeu eventos autoritativos do plugin: ${JSON.stringify(ledgerDiagnostic)}`);
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-mode-ledger.png'), animations: 'disabled' });
