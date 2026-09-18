@@ -250,18 +250,16 @@ test('Roblox Studio Manager runs Play capture console Stop in order', async () =
   assert.equal(fixture.jobEvents.some((event) => event.type === 'complete'), true);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'fail'), false);
   assert.deepEqual(result, {
-    play: { ok: true },
+    playStarted: true,
     checkpoints: [],
     viewport: {
       operation: 'capture',
       artifacts: [{ id: 'image-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'image', mimeType: 'image/png', bytes: 128, createdAt: 1 }],
-      raw: { content: [{ type: 'artifact', artifact: { id: 'image-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'image', mimeType: 'image/png', bytes: 128, createdAt: 1 } }] },
     },
     console: {
       operation: 'console',
       artifacts: [],
       text: 'ok',
-      raw: { content: [{ type: 'text', text: 'ok' }] },
     },
   });
 });
@@ -402,7 +400,7 @@ test('Roblox Studio Manager returns visual and console checkpoints in timeline o
       stopInput: { mode: 'stop' },
     },
   }, fixture.api)) as {
-    checkpoints: Array<{ index: number; operation: string; artifacts: unknown[]; text?: string; raw: unknown }>;
+    checkpoints: Array<{ index: number; operation: string; artifacts: unknown[]; text?: string }>;
   };
 
   assert.deepEqual(fixture.calls, [
@@ -420,14 +418,39 @@ test('Roblox Studio Manager returns visual and console checkpoints in timeline o
       index: 1,
       operation: 'capture',
       artifacts: [{ id: 'image-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'image', mimeType: 'image/png', bytes: 128, createdAt: 1 }],
-      raw: { content: [{ type: 'artifact', artifact: { id: 'image-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'image', mimeType: 'image/png', bytes: 128, createdAt: 1 } }] },
     },
     {
       index: 3,
       operation: 'console',
       artifacts: [],
       text: 'ok',
-      raw: { content: [{ type: 'text', text: 'ok' }] },
     },
   ]);
+});
+
+
+test('Roblox Studio Manager keeps maximum checkpoint output below the agent tool result budget', async () => {
+  const plugin = await loadPlugin();
+  const fixture = createApi();
+  const originalObserved = fixture.api.mcp.callToolObserved;
+  fixture.api.mcp.callToolObserved = async (sessionId: string, name: string, input: unknown) => {
+    if (name === 'get_console_output') {
+      fixture.calls.push({ name, input });
+      return { content: [{ type: 'text', text: 'x'.repeat(16000) }] };
+    }
+    return originalObserved(sessionId, name, input);
+  };
+  await plugin.activate(fixture.api);
+
+  const result = plain(await plugin.invoke('run_playtest', {
+    input: {
+      playInput: { mode: 'play' },
+      interactions: Array.from({ length: 24 }, () => ({ operation: 'console', consoleInput: { level: 'all' } })),
+      captureInput: { format: 'png' },
+      consoleInput: { level: 'all' },
+      stopInput: { mode: 'stop' },
+    },
+  }, fixture.api));
+
+  assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') < 64 * 1024);
 });
