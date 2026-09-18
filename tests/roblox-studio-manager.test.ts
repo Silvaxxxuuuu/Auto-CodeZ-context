@@ -23,6 +23,10 @@ type McpCall = {
 
 type FakeApi = ReturnType<typeof createApi>['api'];
 
+function plain<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 async function loadPlugin(): Promise<PluginRegistration> {
   const source = await readFile(path.resolve('plugins/roblox-studio-manager/main.js'), 'utf8');
   let registration: PluginRegistration | undefined;
@@ -157,9 +161,13 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
       },
       async callTool(_sessionId: string, name: string, input: unknown) {
         calls.push({ name, input });
-        if (name === 'screen_capture' && options.failCapture) throw new Error('capture failed');
         if (name === 'start_stop_play' && options.failStop && (input as { mode?: string } | undefined)?.mode === 'stop') throw new Error('stop failed');
-        if (name === 'screen_capture') return { content: [{ type: 'image', data: 'fake' }] };
+        return { ok: true };
+      },
+      async callToolObserved(_sessionId: string, name: string, input: unknown) {
+        calls.push({ name, input });
+        if (name === 'screen_capture' && options.failCapture) throw new Error('capture failed');
+        if (name === 'screen_capture') return { content: [{ type: 'artifact', artifact: { id: 'image-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'image', mimeType: 'image/png', bytes: 128, createdAt: 1 } }] };
         if (name === 'get_console_output') return { content: [{ type: 'text', text: 'ok' }] };
         return { ok: true };
       },
@@ -181,7 +189,7 @@ test('Roblox Studio Manager derives guarded playtest schemas from the live MCP c
   assert.ok(playtest);
   assert.equal(playtest.risk, 'write');
 
-  const parameters = playtest.parameters as {
+  const parameters = plain(playtest.parameters) as {
     properties: {
       playInput: { properties: { mode: { enum: string[] } }; required: string[] };
       stopInput: { properties: { mode: { enum: string[] } }; required: string[] };
@@ -224,14 +232,14 @@ test('Roblox Studio Manager runs Play capture console Stop in order', async () =
   const fixture = createApi();
   await plugin.activate(fixture.api);
 
-  const result = await plugin.invoke('run_playtest', {
+  const result = plain(await plugin.invoke('run_playtest', {
     input: {
       playInput: { mode: 'play' },
       captureInput: { format: 'png' },
       consoleInput: { level: 'all' },
       stopInput: { mode: 'stop' },
     },
-  }, fixture.api);
+  }, fixture.api));
 
   assert.deepEqual(fixture.calls, [
     { name: 'start_stop_play', input: { mode: 'play' } },
@@ -244,8 +252,17 @@ test('Roblox Studio Manager runs Play capture console Stop in order', async () =
   assert.deepEqual(result, {
     play: { ok: true },
     checkpoints: [],
-    viewport: { content: [{ type: 'image', data: 'fake' }] },
-    console: { content: [{ type: 'text', text: 'ok' }] },
+    viewport: {
+      operation: 'capture',
+      artifacts: [{ id: 'image-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'image', mimeType: 'image/png', bytes: 128, createdAt: 1 }],
+      raw: { content: [{ type: 'artifact', artifact: { id: 'image-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'image', mimeType: 'image/png', bytes: 128, createdAt: 1 } }] },
+    },
+    console: {
+      operation: 'console',
+      artifacts: [],
+      text: 'ok',
+      raw: { content: [{ type: 'text', text: 'ok' }] },
+    },
   });
 });
 
@@ -371,7 +388,7 @@ test('Roblox Studio Manager returns visual and console checkpoints in timeline o
   const fixture = createApi();
   await plugin.activate(fixture.api);
 
-  const result = await plugin.invoke('run_playtest', {
+  const result = plain(await plugin.invoke('run_playtest', {
     input: {
       playInput: { mode: 'play' },
       interactions: [
@@ -384,8 +401,8 @@ test('Roblox Studio Manager returns visual and console checkpoints in timeline o
       consoleInput: { level: 'all' },
       stopInput: { mode: 'stop' },
     },
-  }, fixture.api) as {
-    checkpoints: Array<{ index: number; operation: string; result: unknown }>;
+  }, fixture.api)) as {
+    checkpoints: Array<{ index: number; operation: string; artifacts: unknown[]; text?: string; raw: unknown }>;
   };
 
   assert.deepEqual(fixture.calls, [
@@ -399,7 +416,18 @@ test('Roblox Studio Manager returns visual and console checkpoints in timeline o
     { name: 'start_stop_play', input: { mode: 'stop' } },
   ]);
   assert.deepEqual(result.checkpoints, [
-    { index: 1, operation: 'capture', result: { content: [{ type: 'image', data: 'fake' }] } },
-    { index: 3, operation: 'console', result: { content: [{ type: 'text', text: 'ok' }] } },
+    {
+      index: 1,
+      operation: 'capture',
+      artifacts: [{ id: 'image-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'image', mimeType: 'image/png', bytes: 128, createdAt: 1 }],
+      raw: { content: [{ type: 'artifact', artifact: { id: 'image-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'image', mimeType: 'image/png', bytes: 128, createdAt: 1 } }] },
+    },
+    {
+      index: 3,
+      operation: 'console',
+      artifacts: [],
+      text: 'ok',
+      raw: { content: [{ type: 'text', text: 'ok' }] },
+    },
   ]);
 });
