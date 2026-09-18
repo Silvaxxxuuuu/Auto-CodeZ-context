@@ -17,12 +17,18 @@ export type OperationalLedgerEvent = {
   chatId?: string;
   runId?: string;
   projectId?: string;
+  sessionId?: string;
+  providerId?: string;
+  clientId?: string;
   pluginId?: string;
   toolCallId?: string;
   toolName?: string;
   jobId?: string;
   causationId?: string;
   artifactIds?: string[];
+  resources?: string[];
+  sourceRefs?: string[];
+  diff?: { files: number; addedLines: number; removedLines: number };
   progress?: number;
   durationMs?: number;
   error?: string;
@@ -63,6 +69,10 @@ const MAX_SUMMARY = 512;
 const MAX_ERROR = 2048;
 const MAX_ID = 160;
 const MAX_ARTIFACTS = 32;
+const MAX_RESOURCES = 64;
+const MAX_SOURCE_REFS = 32;
+const MAX_RESOURCE = 512;
+const MAX_SOURCE_REF = 2048;
 const MAX_DETAILS = 32;
 const MAX_DETAIL_KEY = 96;
 const MAX_DETAIL_STRING = 512;
@@ -106,6 +116,9 @@ function cloneEvent(event: OperationalLedgerEvent): OperationalLedgerEvent {
   return {
     ...event,
     ...(event.artifactIds ? { artifactIds: [...event.artifactIds] } : {}),
+    ...(event.resources ? { resources: [...event.resources] } : {}),
+    ...(event.sourceRefs ? { sourceRefs: [...event.sourceRefs] } : {}),
+    ...(event.diff ? { diff: { ...event.diff } } : {}),
     ...(event.details ? { details: { ...event.details } } : {}),
   };
 }
@@ -120,7 +133,7 @@ export function isOperationalLedgerEvent(value: unknown): value is OperationalLe
   if (!CATEGORIES.has(event.category as OperationalLedgerCategory)) return false;
   if (!STATES.has(event.state as OperationalLedgerState)) return false;
   if (typeof event.summary !== 'string' || !event.summary.trim() || event.summary.length > MAX_SUMMARY) return false;
-  for (const id of [event.chatId, event.runId, event.projectId, event.pluginId, event.toolCallId, event.toolName, event.jobId, event.causationId]) {
+  for (const id of [event.chatId, event.runId, event.projectId, event.sessionId, event.providerId, event.clientId, event.pluginId, event.toolCallId, event.toolName, event.jobId, event.causationId]) {
     if (id !== undefined && (typeof id !== 'string' || !id.trim() || id.length > MAX_ID)) return false;
   }
   if (event.progress !== undefined && (typeof event.progress !== 'number' || !Number.isFinite(event.progress) || event.progress < 0 || event.progress > 1)) return false;
@@ -130,6 +143,20 @@ export function isOperationalLedgerEvent(value: unknown): value is OperationalLe
     if (!Array.isArray(event.artifactIds) || event.artifactIds.length > MAX_ARTIFACTS) return false;
     if (!event.artifactIds.every((id) => typeof id === 'string' && id.trim() && id.length <= MAX_ID)) return false;
     if (new Set(event.artifactIds).size !== event.artifactIds.length) return false;
+  }
+  if (event.resources !== undefined) {
+    if (!Array.isArray(event.resources) || event.resources.length > MAX_RESOURCES) return false;
+    if (!event.resources.every((item) => typeof item === 'string' && item.trim() && item.length <= MAX_RESOURCE)) return false;
+    if (new Set(event.resources).size !== event.resources.length) return false;
+  }
+  if (event.sourceRefs !== undefined) {
+    if (!Array.isArray(event.sourceRefs) || event.sourceRefs.length > MAX_SOURCE_REFS) return false;
+    if (!event.sourceRefs.every((item) => typeof item === 'string' && item.trim() && item.length <= MAX_SOURCE_REF)) return false;
+    if (new Set(event.sourceRefs).size !== event.sourceRefs.length) return false;
+  }
+  if (event.diff !== undefined) {
+    if (!event.diff || typeof event.diff !== 'object') return false;
+    if (![event.diff.files, event.diff.addedLines, event.diff.removedLines].every((item) => Number.isInteger(item) && item >= 0)) return false;
   }
   if (event.details !== undefined) {
     if (!event.details || typeof event.details !== 'object' || Array.isArray(event.details) || Object.keys(event.details).length > MAX_DETAILS) return false;
@@ -186,6 +213,17 @@ export class OperationalLedger {
       ? undefined
       : [...new Set(input.artifactIds.map((id) => normalizeId(id, 'Artifact')!))];
     if (artifactIds && artifactIds.length > MAX_ARTIFACTS) throw new Error('Evento do ledger possui artifacts demais.');
+    const resources = input.resources === undefined
+      ? undefined
+      : [...new Set(input.resources.map((item) => sanitizeText(item, MAX_RESOURCE, 'Recurso do ledger')))];
+    if (resources && resources.length > MAX_RESOURCES) throw new Error('Evento do ledger possui recursos demais.');
+    const sourceRefs = input.sourceRefs === undefined
+      ? undefined
+      : [...new Set(input.sourceRefs.map((item) => sanitizeText(item, MAX_SOURCE_REF, 'Fonte do ledger')))];
+    if (sourceRefs && sourceRefs.length > MAX_SOURCE_REFS) throw new Error('Evento do ledger possui fontes demais.');
+    if (input.diff && (![input.diff.files, input.diff.addedLines, input.diff.removedLines].every((item) => Number.isInteger(item) && item >= 0))) {
+      throw new Error('Resumo de diff do ledger inválido.');
+    }
     if (input.progress !== undefined && (!Number.isFinite(input.progress) || input.progress < 0 || input.progress > 1)) throw new Error('Progresso do ledger inválido.');
     if (input.durationMs !== undefined && (!Number.isFinite(input.durationMs) || input.durationMs < 0)) throw new Error('Duração do ledger inválida.');
 
@@ -200,12 +238,18 @@ export class OperationalLedger {
       ...(normalizeId(input.chatId, 'Chat') ? { chatId: normalizeId(input.chatId, 'Chat') } : {}),
       ...(normalizeId(input.runId, 'Run') ? { runId: normalizeId(input.runId, 'Run') } : {}),
       ...(normalizeId(input.projectId, 'Projeto') ? { projectId: normalizeId(input.projectId, 'Projeto') } : {}),
+      ...(normalizeId(input.sessionId, 'Sessão') ? { sessionId: normalizeId(input.sessionId, 'Sessão') } : {}),
+      ...(normalizeId(input.providerId, 'Provider') ? { providerId: normalizeId(input.providerId, 'Provider') } : {}),
+      ...(normalizeId(input.clientId, 'Cliente') ? { clientId: normalizeId(input.clientId, 'Cliente') } : {}),
       ...(normalizeId(input.pluginId, 'Plugin') ? { pluginId: normalizeId(input.pluginId, 'Plugin') } : {}),
       ...(normalizeId(input.toolCallId, 'Tool call') ? { toolCallId: normalizeId(input.toolCallId, 'Tool call') } : {}),
       ...(normalizeId(input.toolName, 'Tool') ? { toolName: normalizeId(input.toolName, 'Tool') } : {}),
       ...(normalizeId(input.jobId, 'Job') ? { jobId: normalizeId(input.jobId, 'Job') } : {}),
       ...(normalizeId(input.causationId, 'Causation') ? { causationId: normalizeId(input.causationId, 'Causation') } : {}),
       ...(artifactIds?.length ? { artifactIds } : {}),
+      ...(resources?.length ? { resources } : {}),
+      ...(sourceRefs?.length ? { sourceRefs } : {}),
+      ...(input.diff ? { diff: { ...input.diff } } : {}),
       ...(input.progress !== undefined ? { progress: input.progress } : {}),
       ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
       ...(input.error ? { error: sanitizeText(input.error, MAX_ERROR, 'Erro do ledger') } : {}),
