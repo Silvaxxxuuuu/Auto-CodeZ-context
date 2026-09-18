@@ -1,5 +1,6 @@
 import { PluginRegistry } from './plugin-registry';
 import { PluginActivityRuntime, type PluginActivityStatus } from './plugin-activity-runtime';
+import { PluginArtifactRuntime } from './plugin-artifact-runtime';
 import { PluginJobRuntime } from './plugin-job-runtime';
 import { PluginLocalBridgeRuntime, type PluginBridgeRequest } from './plugin-local-bridge';
 import { PluginMcpStdioRuntime } from './plugin-mcp-stdio-runtime';
@@ -70,6 +71,7 @@ export class PluginCapabilityBroker {
     private readonly settings: PluginSettingsStore,
     private readonly activities = new PluginActivityRuntime(),
     private readonly jobs = new PluginJobRuntime(),
+    private readonly artifacts = new PluginArtifactRuntime(),
     private readonly localBridge = new PluginLocalBridgeRuntime(),
     private readonly mcp = new PluginMcpStdioRuntime(),
     private readonly web = new WebRetrievalRuntime(),
@@ -116,9 +118,14 @@ export class PluginCapabilityBroker {
     return this.jobs;
   }
 
+  getArtifactRuntime(): PluginArtifactRuntime {
+    return this.artifacts;
+  }
+
   cancelPluginWork(pluginId: string): void {
     this.jobs.cancelPlugin(pluginId);
     this.activities.clear(pluginId);
+    this.artifacts.clear(pluginId);
     pluginToolCatalog.clear(pluginId);
     this.mcp.disconnectPlugin(pluginId);
   }
@@ -207,6 +214,17 @@ export class PluginCapabilityBroker {
     this.register('mcp.call-tool', 'terminal:execute', async (pluginId, input) => {
       const value = requireRecord(input);
       return this.mcp.callTool(pluginId, requireString(value.sessionId, 'Sessão MCP', 128), requireString(value.name, 'Tool MCP', 256), value.arguments, optionalNumber(value.timeoutMs, 'Timeout'));
+    });
+    this.register('mcp.call-tool-observed', 'terminal:execute', async (pluginId, input) => {
+      const value = requireRecord(input);
+      const result = await this.mcp.callTool(
+        pluginId,
+        requireString(value.sessionId, 'Sessão MCP', 128),
+        requireString(value.name, 'Tool MCP', 256),
+        value.arguments,
+        optionalNumber(value.timeoutMs, 'Timeout'),
+      );
+      return this.artifacts.externalizeMcpResult(pluginId, result);
     });
     this.register('mcp.disconnect', 'terminal:execute', async (pluginId, input) => {
       const value = requireRecord(input);
