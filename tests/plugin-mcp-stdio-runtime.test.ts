@@ -139,7 +139,7 @@ test('MCP stdio runtime rejects malformed JSON and closes the session', async ()
   });
   const runtime = new PluginMcpStdioRuntime(fixture.spawn);
   const connected = await runtime.connect('test.plugin', { command: 'fake' });
-  fixture.server.child.stdout.write('{not-json}\n');
+  (fixture.server.child.stdout as PassThrough).write('{not-json}\n');
   await new Promise((resolve) => setImmediate(resolve));
   await assert.rejects(() => runtime.listTools('test.plugin', connected.sessionId), /não encontrada|encerrada/i);
 });
@@ -150,7 +150,7 @@ test('MCP stdio runtime rejects an oversized single message without penalizing p
   });
   const runtime = new PluginMcpStdioRuntime(fixture.spawn);
   const connected = await runtime.connect('test.plugin', { command: 'fake' });
-  fixture.server.child.stdout.write('\n'.repeat(16));
+  (fixture.server.child.stdout as PassThrough).write('\n'.repeat(16));
   (fixture.server.child.stdout as PassThrough).write('x'.repeat(4 * 1024 * 1024 + 1));
   await new Promise((resolve) => setImmediate(resolve));
   await assert.rejects(() => runtime.listTools('test.plugin', connected.sessionId), /não encontrada|encerrada/i);
