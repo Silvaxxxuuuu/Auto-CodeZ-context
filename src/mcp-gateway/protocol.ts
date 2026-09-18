@@ -1,5 +1,6 @@
 import type { OperationalLedgerPage } from '../operational-ledger';
 import type { OperationalLedgerRetrieval, OperationalLedgerScope, OperationalSessionSummary } from '../operational-ledger-retrieval';
+import type { McpGatewayExecutionRuntime, McpGatewayOperation } from './execution-runtime';
 
 export const MCP_GATEWAY_PROTOCOL_VERSION = '2026-07-28';
 const LEGACY_PROTOCOL_VERSIONS = new Set(['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25']);
@@ -79,7 +80,7 @@ const SUMMARY_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-const tools: McpGatewayTool[] = [
+const retrievalTools: McpGatewayTool[] = [
   {
     name: 'session_summary',
     description: 'Return a bounded operational summary for an Auto CodeZ session, run, chat, project, or plugin scope.',
@@ -117,6 +118,20 @@ const tools: McpGatewayTool[] = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
 ];
+
+const operationStatusTool: McpGatewayTool = {
+  name: 'operation_status',
+  description: 'Return the current state and bounded result for a previously started Auto CodeZ MCP operation.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      operationId: { type: 'string', maxLength: 160 },
+    },
+    required: ['operationId'],
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+};
 
 function boundedTextResult(value: unknown): string {
   const serialized = JSON.stringify(value);
@@ -195,10 +210,27 @@ function validateArgumentsSize(value: unknown): void {
 }
 
 export class McpGatewayProtocol {
-  constructor(private readonly retrieval: OperationalLedgerRetrieval) {}
+  constructor(
+    private readonly retrieval: OperationalLedgerRetrieval,
+    private readonly execution?: McpGatewayExecutionRuntime,
+  ) {}
 
   listTools(): McpGatewayTool[] {
-    return tools.map((tool) => structuredClone(tool));
+    const dynamic = this.execution?.listTools().map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: structuredClone(tool.inputSchema),
+      annotations: {
+        readOnlyHint: tool.risk === 'read',
+        destructiveHint: tool.risk !== 'read',
+        idempotentHint: tool.risk === 'read',
+        openWorldHint: false,
+      },
+    })) ?? [];
+    return [
+      ...retrievalTools.map((tool) => structuredClone(tool)),
+      ...(this.execution ? [structuredClone(operationStatusTool), ...dynamic] : []),
+    ];
   }
 
   handle(request: McpJsonRpcRequest, context: McpGatewayClientContext = {}): McpJsonRpcResponse | undefined {
@@ -249,17 +281,36 @@ export class McpGatewayProtocol {
       if (!name || name.length > 128) return rpcError(id, -32602, 'Invalid tool name.');
       validateArgumentsSize(params.arguments);
 
-      let result: OperationalSessionSummary | OperationalLedgerPage;
+      let result: OperationalSessionSummary | OperationalLedgerPage | McpGatewayOperation;
       if (name === 'session_summary') {
         result = this.retrieval.sessionSummary(summaryScope(params.arguments));
-      } else {
+      } else if (name === 'session_recent_events' || name === 'session_changes' || name === 'session_errors' || name === 'session_artifacts' || name === 'session_sources') {
         const query = sessionQuery(params.arguments);
         if (name === 'session_recent_events') result = this.retrieval.recentEvents(query.scope, query.limit, query.beforeSequence);
         else if (name === 'session_changes') result = this.retrieval.changes(query.scope, query.limit, query.beforeSequence);
         else if (name === 'session_errors') result = this.retrieval.errors(query.scope, query.limit, query.beforeSequence);
         else if (name === 'session_artifacts') result = this.retrieval.artifacts(query.scope, query.limit, query.beforeSequence);
-        else if (name === 'session_sources') result = this.retrieval.sources(query.scope, query.limit, query.beforeSequence);
-        else return rpcError(id, -32602, `Unknown tool: ${name}.`);
+        else result = this.retrieval.sources(query.scope, query.limit, query.beforeSequence);
+      } else if (name === 'operation_status') {
+        if (!this.execution) return rpcError(id, -32602, 'External execution is not enabled.');
+        const args = asRecord(params.arguments, 'arguments');
+        const operationId = optionalIdentifier(args.operationId, 'operationId');
+        if (!operationId || Object.keys(args).some((key) => key !== 'operationId')) return rpcError(id, -32602, 'Invalid operation_status arguments.');
+        const operation = this.execution.getOperation(operationId);
+        if (!operation) return rpcError(id, -32602, 'Operation not found or expired.');
+        result = operation;
+      } else if (this.execution?.listTools().some((tool) => tool.name === name)) {
+        const args = asRecord(params.arguments, 'arguments');
+        const meta = params._meta && typeof params._meta === 'object' && !Array.isArray(params._meta)
+          ? params._meta as Record<string, unknown>
+          : {};
+        const clientInfo = meta['io.modelcontextprotocol/clientInfo'];
+        const clientName = clientInfo && typeof clientInfo === 'object' && !Array.isArray(clientInfo) && typeof (clientInfo as Record<string, unknown>).name === 'string'
+          ? String((clientInfo as Record<string, unknown>).name).slice(0, 80)
+          : context.clientName;
+        result = await this.execution.execute(name, args, { clientId: clientName || 'mcp-external', permission: 'ask' });
+      } else {
+        return rpcError(id, -32602, `Unknown tool: ${name}.`);
       }
 
       return { jsonrpc: '2.0', id, result: toolResult(result) };
