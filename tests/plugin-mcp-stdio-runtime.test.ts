@@ -227,6 +227,40 @@ test('MCP stdio runtime rejects an oversized single message without penalizing p
   await assert.rejects(() => runtime.listTools('test.plugin', connected.sessionId), /não encontrada|encerrada/i);
 });
 
+test('MCP stdio runtime rejects tool-level isError results with bounded text detail', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') return reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+    if (message.method === 'tools/call') return reply({
+      isError: true,
+      content: [
+        { type: 'text', text: 'Studio refused the operation' },
+        { type: 'text', text: 'because Play is unavailable' },
+      ],
+    });
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  await assert.rejects(
+    () => runtime.callTool('test.plugin', connected.sessionId, 'start_stop_play', { mode: 'play' }),
+    /Studio refused the operation\nbecause Play is unavailable/,
+  );
+  runtime.disconnectPlugin('test.plugin');
+});
+
+test('MCP stdio runtime uses a deterministic fallback for tool-level errors without text', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') return reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+    if (message.method === 'tools/call') return reply({ isError: true, content: [] });
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  await assert.rejects(
+    () => runtime.callTool('test.plugin', connected.sessionId, 'execute_luau', {}),
+    /Tool MCP 'execute_luau' retornou erro/,
+  );
+  runtime.disconnectPlugin('test.plugin');
+});
+
 test('MCP stdio runtime surfaces JSON-RPC errors and request timeouts', async () => {
   const fixture = fakeServer((message, reply) => {
     if (message.method === 'initialize') return reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
