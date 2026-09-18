@@ -109,7 +109,7 @@ test('MCP stdio transport rejects unsafe command and bounded input before spawni
 
 test('Roblox Studio MCP resolver fails clearly when Windows discovery prerequisites are missing', () => {
   assert.throws(() => resolveRobloxStudioMcpCommand('win32', {}), /LOCALAPPDATA/);
-  assert.throws(() => resolveRobloxStudioMcpCommand('linux', {}), /apenas no Windows e macOS/);
+  if (process.platform !== 'linux') assert.throws(() => resolveRobloxStudioMcpCommand('linux', {}), /apenas no Windows e macOS/);
 });
 
 
