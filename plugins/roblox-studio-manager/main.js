@@ -71,6 +71,8 @@ const sanitizeSchemaNode = (schema, depth = 0) => {
   return result;
 };
 
+const MAX_AGENT_TOOLS = 32;
+
 const toStrictSchema = (schema) => {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || schema.type !== 'object') return { type: 'object', properties: {}, required: [], additionalProperties: false };
   return sanitizeSchemaNode(schema);
@@ -89,6 +91,7 @@ async function connect(api) {
   const connected = await api.mcp.connectRobloxStudio(15000);
   sessionId = connected.sessionId;
   const catalog = await api.mcp.listTools(sessionId, 15000);
+  if (catalog.tools.length > MAX_AGENT_TOOLS) throw new Error('O Roblox Studio expôs operações demais para o catálogo seguro do Auto CodeZ.');
   const usedToolIds = new Set();
   const tools = catalog.tools.map((tool) => {
     const id = normalizeToolId(tool.name, usedToolIds);
