@@ -95,26 +95,82 @@ function createCommandEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
   return environment;
 }
 
-function terminateProcessTree(child: ChildProcess): void {
-  if (child.killed) return;
-  if (process.platform === 'win32' && child.pid) {
-    const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+function childHasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function waitForChildClose(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (childHasExited(child)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (closed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('close', onClose);
+      child.removeListener('error', onError);
+      resolve(closed);
+    };
+    const onClose = () => finish(true);
+    const onError = () => finish(true);
+    const timer = setTimeout(() => finish(childHasExited(child)), timeoutMs);
+    child.once('close', onClose);
+    child.once('error', onError);
+  });
+}
+
+async function runWindowsTaskkill(pid: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
       windowsHide: true,
       stdio: 'ignore',
       shell: false,
     });
-    killer.unref();
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      try { killer.kill(); } catch {}
+      finish();
+    }, 1_500);
+    killer.once('error', finish);
+    killer.once('exit', finish);
+  });
+}
+
+async function terminateProcessTree(child: ChildProcess): Promise<void> {
+  if (childHasExited(child)) return;
+
+  if (process.platform === 'win32' && child.pid) {
+    await runWindowsTaskkill(child.pid);
+    if (await waitForChildClose(child, 750)) return;
+    try { child.kill('SIGKILL'); } catch {}
+    await waitForChildClose(child, 750);
     return;
   }
+
   if (child.pid === undefined) {
-    child.kill('SIGTERM');
-    return;
+    try { child.kill('SIGTERM'); } catch {}
+  } else {
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+    } catch {
+      try { child.kill('SIGTERM'); } catch {}
+    }
   }
+
+  if (await waitForChildClose(child, TERMINATION_GRACE_MS)) return;
   try {
-    process.kill(-child.pid, 'SIGTERM');
+    if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+    else child.kill('SIGKILL');
   } catch {
-    child.kill('SIGTERM');
+    try { child.kill('SIGKILL'); } catch {}
   }
+  await waitForChildClose(child, 500);
 }
 
 function commandForPlatform(command: string, environment: NodeJS.ProcessEnv): { executable: string; args: string[] } {
@@ -178,11 +234,10 @@ export class CommandRuntime {
       let timedOut = false;
       let aborted = false;
       let settled = false;
-      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      let terminationPromise: Promise<void> | undefined;
 
       const cleanup = (): void => {
         clearTimeout(timeout);
-        if (killTimer) clearTimeout(killTimer);
         executionSignal?.removeEventListener('abort', abort);
       };
 
@@ -197,25 +252,35 @@ export class CommandRuntime {
         }
       };
 
-      const beginTermination = (): void => {
-        terminateProcessTree(child);
-        if (!killTimer) {
-          killTimer = setTimeout(() => {
-            if (!settled) child.kill('SIGKILL');
-          }, TERMINATION_GRACE_MS);
-        }
+      const beginTermination = (): Promise<void> => {
+        terminationPromise ??= terminateProcessTree(child);
+        return terminationPromise;
       };
 
       const abort = (): void => {
         if (settled || aborted) return;
         aborted = true;
-        beginTermination();
+        void beginTermination().then(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(createAbortError(executionSignal));
+        });
       };
 
       const timeout = setTimeout(() => {
         if (settled) return;
         timedOut = true;
-        beginTermination();
+        void beginTermination().then(() => {
+          if (settled) return;
+          finish({
+            command: normalizedCommand,
+            exitCode: 1,
+            stdout,
+            stderr: `${stderr}\nCommand timed out after ${TIMEOUT_MS / 60000} minutes.`.trim(),
+            timedOut: true,
+          });
+        });
       }, TIMEOUT_MS);
 
       const finish = (partial: Omit<CommandResult, 'startedAt' | 'finishedAt' | 'durationMs'>): void => {
