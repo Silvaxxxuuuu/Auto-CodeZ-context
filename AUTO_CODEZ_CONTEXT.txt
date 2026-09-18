@@ -4362,3 +4362,537 @@ MCP Gateway
 → PluginToolCatalog.
 
 O Tunnel jamais deve receber caminho alternativo direto para Roblox, Blender, filesystem ou terminal.
+
+
+------------------------------------------------------------
+24.33. SECURE MCP TUNNEL — IMPLEMENTAÇÃO REAL VALIDADA
+------------------------------------------------------------
+
+BASELINE EXATO VALIDADO
+
+Commit funcional:
+d33e560dd465fcd7cfb7ca2dd38348c9f33bcf0b
+fix(mcp-tunnel): centralize authoritative child exit detection
+
+Workflows exatos:
+- Validate Auto CodeZ #35382998249: SUCCESS.
+- Visual Auto CodeZ #35382998306: SUCCESS.
+
+Artifact visual:
+- auto-codez-visual-35382998306
+- artifact id 10562984194
+- size 3.891.083 bytes.
+
+Validate deste HEAD:
+- TypeScript: SUCCESS;
+- Core tests: SUCCESS;
+- ESLint: SUCCESS;
+- Electron Forge package build: SUCCESS;
+- Electron startup smoke: SUCCESS.
+
+Visual deste HEAD:
+- rebuild node-pty: SUCCESS;
+- package/build Electron: SUCCESS;
+- Capture visual flow: SUCCESS;
+- unified local AI: SUCCESS;
+- unavailable local runtime recovery: SUCCESS;
+- secure local runtime settings: SUCCESS;
+- LM Studio chat: SUCCESS;
+- upload de screenshots: SUCCESS.
+
+PR #9 permanece:
+- OPEN;
+- DRAFT;
+- mergeable;
+- NÃO MESCLADO.
+Nunca fazer merge sem autorização explícita.
+
+ARQUIVO PRINCIPAL
+
+Implementado:
+src/mcp-gateway/tunnel-runtime.ts
+
+Classe:
+McpTunnelRuntime
+
+O Secure MCP Tunnel agora é código real, não apenas planejamento.
+
+TOPOLOGIA IMPLEMENTADA
+
+ChatGPT / OpenAI tunnel control plane
+→ conexão HTTPS de saída do tunnel-client
+→ tunnel-client local
+→ Auto CodeZ MCP Gateway em 127.0.0.1
+→ AgentRuntime
+→ PermissionRuntime / ApprovalRuntime
+→ PluginToolCatalog
+→ plugins.
+
+O Tunnel continua sendo apenas TRANSPORTE.
+Ele não recebe qualquer caminho alternativo direto para:
+- Roblox;
+- Blender;
+- filesystem;
+- terminal;
+- plugins.
+
+Toda execução MCP externa continua passando pelo Gateway e pelo AgentRuntime.
+
+VERSÃO / DOCTOR
+
+McpTunnelRuntime.doctor():
+- executa tunnel-client --version;
+- exige versão mínima compatível com sessionless MCP 2026-07-28;
+- mínimo atual codificado: 0.0.14;
+- versão incompatível falha fechado;
+- versão não identificável falha fechado;
+- timeout de versão é bounded;
+- processo de doctor é encerrado se exceder timeout.
+
+A API interna do runtime ainda permite injetar executable customizado para testes unitários.
+A superfície de PRODUTO não permite override arbitrário de executável.
+
+EXECUTÁVEL CONFIÁVEL — FRONTEIRA DE PRODUTO
+
+Renderer/preload/IPC não aceitam caminho de executável arbitrário.
+
+Produção usa somente:
+tunnel-client
+
+Hardening aplicado:
+- renderer não controla executable;
+- preload não expõe executable;
+- IPC main não aceita executable;
+- Doctor via IPC usa o cliente confiável padrão;
+- Start via IPC usa o cliente confiável padrão.
+
+Isso impede transformar o canal MCP Tunnel em primitive de execução arbitrária local.
+
+TUNNEL ID
+
+Formato exigido:
+tunnel_<32 hex lowercase>
+
+Pattern atual:
+^tunnel_[0-9a-f]{32}$
+
+Entrada inválida é rejeitada antes de spawn.
+
+ENDPOINT LOCAL
+
+Tunnel só pode apontar para:
+- http:;
+- host loopback:
+  - 127.0.0.1
+  - localhost
+  - ::1
+- pathname exatamente /mcp;
+- porta explícita válida;
+- sem username/password;
+- sem query;
+- sem fragment.
+
+A ligação usada em produção vem de:
+McpGatewayHttpServer.trustedTunnelBinding()
+
+Renderer NÃO fornece:
+- endpoint local;
+- Bearer do Gateway.
+
+Portanto o usuário/renderer não pode redirecionar o Tunnel para um servidor arbitrário através do IPC.
+
+TRUSTED TUNNEL BINDING
+
+McpGatewayHttpServer possui boundary interna:
+trustedTunnelBinding()
+
+Ela retorna para o main process:
+- endpoint localhost real;
+- bearerToken efêmero real.
+
+Essa informação não é exposta como status público do Gateway depois que a UI perde a credencial.
+O Tunnel usa a binding autoritativa diretamente no main.
+
+SEGREDOS — CONTROL PLANE
+
+McpTunnelRuntime exige control-plane credential.
+
+Ordem:
+1. controlPlaneApiKey fornecida somente para aquela chamada/session;
+2. CONTROL_PLANE_API_KEY do ambiente;
+3. OPENAI_API_KEY como fallback compatível com tunnel-client.
+
+Não há persistência automática da chave.
+
+O campo da UI:
+- type=password;
+- começa vazio;
+- usa autocomplete=new-password;
+- chave digitada é session-only;
+- não é reidratada do runtime;
+- é limpa após tentativa de conexão;
+- é perdida em re-render/refresh da superfície.
+
+Status expõe somente:
+credentialAvailable: boolean
+
+Nunca o valor da credencial.
+
+SEGREDOS — BEARER LOCAL
+
+Gateway gera bearerToken efêmero por start.
+
+Tunnel recebe esse segredo apenas no environment do child:
+AUTO_CODEZ_MCP_AUTHORIZATION=Bearer <token>
+
+Configuração entregue ao tunnel-client:
+MCP_EXTRA_HEADERS=Authorization: env:AUTO_CODEZ_MCP_AUTHORIZATION
+MCP_DISCOVERY_EXTRA_HEADERS=Authorization: env:AUTO_CODEZ_MCP_AUTHORIZATION
+
+O segredo NÃO entra em argv.
+
+CONTROL_PLANE_API_KEY também é passado somente por environment do child.
+
+ENVIRONMENT MÍNIMO
+
+O child process não herda indiscriminadamente process.env.
+
+São preservados somente valores necessários de runtime/SO, por exemplo:
+- PATH / Path;
+- PATHEXT;
+- SYSTEMROOT / SystemRoot;
+- WINDIR;
+- TEMP / TMP;
+- HOME;
+- USERPROFILE.
+
+Depois são adicionadas somente as variáveis necessárias do Tunnel/MCP.
+
+Outros segredos do processo pai, incluindo chaves não relacionadas, não são propagados por padrão.
+
+HEALTH / READY
+
+Tunnel é iniciado com health listener em loopback/porta efêmera.
+
+Runtime usa:
+--health.listen-addr 127.0.0.1:0
+--health.url-file <temp>
+--log.level info
+--log.format struct-text
+
+O health URL precisa ser HTTP loopback.
+
+Runtime consulta:
+/readyz
+
+Startup:
+- timeout total bounded;
+- cada fetch de health tem timeout;
+- somente status HTTP OK marca ready=true;
+- se o tunnel-client morrer durante startup, falha;
+- se não ficar ready, falha e faz cleanup.
+
+STATUS REATIVO
+
+McpTunnelRuntime agora possui subscribe().
+
+Eventos de status são publicados em mudanças de lifecycle:
+- start inicial running=true/ready=false;
+- ready;
+- erro/exit;
+- stop.
+
+Falha em um listener não interfere nos outros listeners nem no runtime.
+
+Main process repassa status por:
+mcp-tunnel:event
+
+Preload:
+onMcpTunnelStatus(...)
+
+MCP Mode assina essa stream.
+Portanto a UI reage a lifecycle sem polling manual contínuo.
+
+STATUS SANITIZADO
+
+McpTunnelStatus pode conter:
+- running;
+- ready;
+- version;
+- tunnelId;
+- localEndpoint;
+- healthUrl;
+- error sanitizado.
+
+Não contém:
+- control-plane key;
+- Gateway bearer;
+- Authorization header;
+- raw environment.
+
+LOGS — LIMITES E REDACTION
+
+stdout/stderr do tunnel-client:
+- não são expostos crus;
+- tail total é bounded;
+- MAX_LOG_CHARS atual: 16.384;
+- retenção preserva o trecho recente em vez do início do log.
+
+Redaction inclui:
+- Bearer tokens;
+- padrões sk-/sess-/proj- longos;
+- api_key/token/secret/password em formas comuns;
+- control-plane key exata da sessão;
+- localBearerToken exato;
+- string Bearer exata.
+
+Objetivo:
+- diagnóstico recente permanece útil;
+- nenhum segredo de sessão deve sobreviver no status/error.
+
+Falha inesperada do child:
+- preserva diagnóstico recente sanitizado;
+- status fica running=false;
+- ready=false;
+- error bounded.
+
+PROCESS LIFECYCLE / STOP
+
+stop() agora espera encerramento bounded do child antes de retornar.
+
+No Windows, quando pid está disponível:
+- usa taskkill.exe /PID <pid> /T /F;
+- isso inclui a process tree.
+
+Em outras condições:
+- SIGTERM;
+- se necessário, escalada para SIGKILL.
+
+A escalada usa estado REAL de saída, não apenas child.killed.
+
+Foi criada a helper central:
+hasChildExited(child)
+
+Ela considera exit real quando exitCode é definido e não-null.
+
+Isso corrige a distinção entre:
+- kill signal solicitado;
+- processo realmente encerrado.
+
+waitForChildExit():
+- resolve imediatamente apenas para child realmente encerrado;
+- caso contrário observa exit com timeout.
+
+O fake ChildProcess dos testes agora também modela exitCode de forma fiel:
+- null enquanto ativo;
+- 0 no emit de exit.
+
+SHUTDOWN DO AUTO CODEZ
+
+O main process agora intercepta before-quit.
+
+Primeiro quit:
+- preventDefault;
+- marca cleanup iniciado;
+- await mcpTunnelRuntime.stop();
+- await mcpGatewayServer.stop();
+- chama app.quit() novamente.
+
+Segundo before-quit:
+- passa direto.
+
+Isso evita o Auto CodeZ sair deixando tunnel-client órfão.
+
+Também mantém a ordem correta:
+Tunnel para antes do Gateway.
+
+STOP DO GATEWAY
+
+mcp-gateway:stop:
+- tenta parar Tunnel antes;
+- depois encerra Gateway.
+
+Logo não existe intenção de manter tunnel-client apontando para uma porta local já destruída.
+
+UI — SECURE MCP TUNNEL
+
+MCP Mode agora contém card próprio:
+Secure MCP Tunnel
+
+Estados:
+- Opcional · desligado;
+- Inicializando…;
+- Conectado e pronto;
+- erro sanitizado.
+
+Controles quando desligado:
+- Tunnel ID;
+- control-plane key session-only;
+- Doctor;
+- Conectar.
+
+Quando ativo:
+- Parar Tunnel.
+
+Conectar permanece disabled enquanto o MCP Gateway local estiver desligado.
+
+UI mostra:
+- tunnelId;
+- tunnel-client version;
+- status ready;
+- resultado sanitizado do Doctor;
+- erro sanitizado.
+
+Não mostra segredos.
+
+DRAFTS / RE-RENDER
+
+Foi detectado e corrigido que render() poderia destruir inputs e perder valores não-secretos.
+
+Comportamento final:
+- tunnelIdDraft pode sobreviver ao re-render;
+- control-plane key NÃO sobrevive;
+- segredo continua deliberadamente ephemeral.
+
+O teste visual confirma:
+- preencher Tunnel ID;
+- preencher chave;
+- provocar refresh/re-render;
+- Tunnel ID continua;
+- campo de chave volta vazio.
+
+TESTES UNITÁRIOS DO TUNNEL
+
+Cobertura atual inclui:
+- version gate 0.0.14+;
+- doctor supported;
+- doctor incompatible;
+- tunnelId inválido;
+- endpoint não-loopback;
+- ausência de control-plane key;
+- secrets somente no environment;
+- segredos fora de argv;
+- environment mínimo;
+- não propagar chaves não relacionadas;
+- control key session-only;
+- unexpected child exit;
+- status sanitizado;
+- listeners reativos;
+- isolamento de falha de listener;
+- redaction de segredos exatos nos logs;
+- retenção do tail recente;
+- diagnostics recentes após logs grandes;
+- stop aguarda child exit;
+- child exitCode fiel no fixture;
+- detecção de exit centralizada;
+- escalada baseada em exit real.
+
+TESTE VISUAL / E2E
+
+Visual empacotado confirma as fronteiras de UI:
+- MCP Mode abre;
+- Secure MCP Tunnel está presente;
+- control key input é password;
+- control key inicia vazio;
+- Tunnel Connect fica disabled antes do Gateway;
+- Tunnel ID draft sobrevive ao refresh;
+- secret draft não sobrevive;
+- Gateway start habilita a possibilidade de Tunnel;
+- fluxo externo MCP do plugin continua funcionando;
+- write tool continua esperando approval;
+- approval local continua concluindo a operação;
+- operation_status continua success;
+- Bearer local continua ausente do ledger;
+- Gateway stop limpa a credencial da UI.
+
+O CI NÃO precisa de um tunnel-client/control-plane real para testar as boundaries de UI.
+O teste real ChatGPT ↔ Tunnel ↔ Auto CodeZ ainda é o próximo estágio manual/integrado.
+
+ESTADO DO CHATGPT / PLUGIN PESSOAL
+
+Evidência empírica do usuário permanece:
+- conta ChatGPT Plus;
+- Developer Mode ativo no desktop/web;
+- aba Plugins;
+- botão +;
+- Novo plugin;
+- conexão por URL do servidor OU Túnel;
+- plugins podem ser mencionados em chat normal;
+- também será testado no Work.
+
+Não assumir previamente que Work é obrigatório.
+
+Não afirmar ainda:
+- que Free possui full write MCP customizado;
+- que toda conta Plus terá exatamente o mesmo rollout.
+
+O teste real da conta do usuário é a fonte autoritativa para o rollout disponível nela.
+
+PRÓXIMA ORDEM TÉCNICA
+
+1. Preservar baseline d33e560... como Secure MCP Tunnel implementation green.
+2. Instalar/validar tunnel-client oficial compatível no ambiente real do usuário.
+3. Executar Doctor real.
+4. Criar/obter tunnel id na UI oficial do ChatGPT.
+5. Fornecer control-plane key somente para a sessão ou ambiente.
+6. Iniciar Auto CodeZ Gateway.
+7. Iniciar Secure MCP Tunnel.
+8. Confirmar Ready.
+9. Adicionar plugin pessoal Auto CodeZ pela opção Túnel.
+10. Confirmar tools/list real no ChatGPT.
+11. Testar retrieval/read tool.
+12. Testar write tool com waiting_approval.
+13. Aceitar no Auto CodeZ.
+14. Confirmar operation_status success no ChatGPT.
+15. Testar em chat normal.
+16. Testar também em Work.
+17. Depois conectar Roblox Studio Manager real e repetir fluxo.
+18. Depois Session Capsule/handoff refinado.
+19. Depois ponte multimodal controlada para artifacts.
+20. Blender 3D Automation entra depois da fundação Gateway/Roblox estar comprovada no cliente ChatGPT real.
+
+BLENDER — DIREÇÃO PRESERVADA
+
+Nada desta implementação do Tunnel reduz o plano do Blender.
+
+Futuro fluxo continua:
+ChatGPT/Claude/Auto CodeZ AI
+→ Gateway/Tunnel quando aplicável
+→ AgentRuntime/policies
+→ Blender 3D Automation
+→ Blender Python API / tools estruturadas
+→ Blender background/headless + checkpoints visuais.
+
+Objetivo continua suportar:
+- meshes complexas por etapas;
+- modifiers;
+- Geometry Nodes;
+- materiais/UV;
+- armatures;
+- bones;
+- skinning;
+- constraints;
+- keyframes;
+- animações;
+- render/viewport checkpoints;
+- correção visual iterativa.
+
+Performance:
+- minimizar Blender não significa GPU zero;
+- preferir background/headless;
+- viewport somente em checkpoints;
+- perfis Eco / Balanced / Maximum continuam planejados.
+
+SEGURANÇA QUE NÃO MUDA
+
+- Tunnel é transporte, nunca autoridade.
+- Gateway continua localhost-only quando usado pelo Tunnel.
+- write externa continua AgentRuntime/policies.
+- nenhuma write bypassa approval por existir via MCP.
+- nenhum secret no ledger.
+- nenhum secret persistido por padrão.
+- nenhum executable arbitrário via renderer/IPC.
+- nenhum endpoint arbitrário via renderer/IPC.
+- PluginToolCatalog continua authoritative.
+- Roblox/Blender/filesystem/terminal não recebem bypass direto.
+- PR #9 não deve ser mesclado sem autorização explícita.
