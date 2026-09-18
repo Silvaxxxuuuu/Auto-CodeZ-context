@@ -682,6 +682,23 @@ ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatI
 ipcMain.handle('agent:list-operational-ledger', async (_event, query: OperationalLedgerQuery | undefined) => operationalLedger.query(query ?? {}));
 
 ipcMain.handle('mcp-gateway:status', async () => mcpGatewayServer.status());
+ipcMain.handle('mcp-gateway:preflight', async () => {
+  const result = await mcpGatewayServer.preflight();
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'MCP Gateway local passou no preflight.',
+    clientId: 'autocodez-mcp-gateway',
+    details: {
+      protocolVersion: result.protocolVersion,
+      toolCount: result.toolCount,
+      writeToolCount: result.writeToolCount,
+    },
+  });
+  return result;
+});
+
 ipcMain.handle('mcp-tunnel:status', async () => ({
   ...mcpTunnelRuntime.status(),
   credentialAvailable: Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()),
