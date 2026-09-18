@@ -8,6 +8,7 @@ import { PluginSandboxCallRouter } from './plugin-sandbox-call-router';
 import { pluginToolCatalog } from './plugin-tool-catalog';
 import type { PluginCapabilityRequest, PluginCapabilityResponse } from './plugin-capability-broker';
 import type { PluginPermission } from './plugin-types';
+import { operationalLedger } from '../operational-ledger';
 
 let servicePromise: Promise<PluginService> | undefined;
 const sandboxCalls = new PluginSandboxCallRouter();
@@ -52,11 +53,115 @@ async function createPluginService(): Promise<PluginService> {
   const service = new PluginService(pluginsRoot, new PluginStateStore(storage), settings, builtInPluginsRoot);
   await service.init();
   const broker = service.getBroker();
-  broker.getActivityRuntime().subscribe((activity) => broadcast('plugins:activity', activity));
-  broker.getJobRuntime().subscribe((job) => broadcast('plugins:job', job));
+  const jobArtifacts = new Map<string, Set<string>>();
+
+  broker.getActivityRuntime().subscribe((activity) => {
+    broadcast('plugins:activity', activity);
+    operationalLedger.record({
+      actor: 'plugin',
+      category: 'plugin',
+      state: activity.status === 'completed' ? 'success' : activity.status === 'failed' ? 'failed' : activity.status === 'waiting' ? 'waiting' : 'running',
+      summary: activity.message,
+      pluginId: activity.pluginId,
+      timestamp: activity.updatedAt,
+    });
+  });
+
+  broker.getJobRuntime().subscribe((job) => {
+    broadcast('plugins:job', job);
+    operationalLedger.record({
+      actor: 'plugin',
+      category: 'job',
+      state: job.state === 'completed' ? 'success' : job.state === 'failed' ? 'failed' : job.state === 'cancelled' ? 'cancelled' : 'running',
+      summary: job.activity || job.label,
+      pluginId: job.pluginId,
+      jobId: job.id,
+      artifactIds: job.artifactIds,
+      progress: job.progress,
+      error: job.error,
+      timestamp: job.updatedAt,
+    });
+
+    const previous = jobArtifacts.get(job.id) ?? new Set<string>();
+    const current = new Set(job.artifactIds ?? []);
+    for (const artifactId of current) {
+      if (previous.has(artifactId)) continue;
+      const artifact = broker.getArtifactRuntime().get(job.pluginId, artifactId);
+      operationalLedger.record({
+        actor: 'plugin',
+        category: 'artifact',
+        state: 'success',
+        summary: artifact ? `Artifact ${artifact.kind} produzido pelo job.` : 'Artifact produzido pelo job.',
+        pluginId: job.pluginId,
+        jobId: job.id,
+        causationId: job.id,
+        artifactIds: [artifactId],
+        ...(artifact ? {
+          details: {
+            kind: artifact.kind,
+            mimeType: artifact.mimeType,
+            bytes: artifact.bytes,
+          },
+        } : {}),
+        timestamp: job.updatedAt,
+      });
+    }
+    jobArtifacts.set(job.id, current);
+  });
+
   pluginToolCatalog.configureExecutor(async (pluginId, toolId, input, context) => {
     if (!service.hasPermission(pluginId, 'ai:tool')) throw new Error(`Plugin '${pluginId}' perdeu a permissão ai:tool.`);
-    return sandboxCalls.call(pluginId, toolId, { input, context });
+    const startedAt = Date.now();
+    operationalLedger.record({
+      actor: 'plugin',
+      category: 'tool',
+      state: 'running',
+      summary: `Executando tool do plugin: ${toolId}.`,
+      pluginId,
+      toolName: toolId,
+      chatId: context.chatId,
+      runId: context.runId,
+      projectId: context.projectId,
+      toolCallId: context.toolCallId,
+      causationId: context.toolCallId,
+      timestamp: startedAt,
+    });
+    try {
+      const value = await sandboxCalls.call(pluginId, toolId, { input, context });
+      operationalLedger.record({
+        actor: 'plugin',
+        category: 'tool',
+        state: 'success',
+        summary: `Tool do plugin concluída: ${toolId}.`,
+        pluginId,
+        toolName: toolId,
+        chatId: context.chatId,
+        runId: context.runId,
+        projectId: context.projectId,
+        toolCallId: context.toolCallId,
+        causationId: context.toolCallId,
+        durationMs: Date.now() - startedAt,
+      });
+      return value;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      operationalLedger.record({
+        actor: 'plugin',
+        category: 'tool',
+        state: 'failed',
+        summary: `Tool do plugin falhou: ${toolId}.`,
+        pluginId,
+        toolName: toolId,
+        chatId: context.chatId,
+        runId: context.runId,
+        projectId: context.projectId,
+        toolCallId: context.toolCallId,
+        causationId: context.toolCallId,
+        durationMs: Date.now() - startedAt,
+        error: message,
+      });
+      throw error;
+    }
   });
   return service;
 }
