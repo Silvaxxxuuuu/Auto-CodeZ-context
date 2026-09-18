@@ -11,6 +11,8 @@ export type PluginArtifactSnapshot = {
   createdAt: number;
 };
 
+export type PluginArtifactListener = (artifact: PluginArtifactSnapshot) => void;
+
 type InternalArtifact = PluginArtifactSnapshot & {
   encoding: 'base64' | 'utf8';
   payload: string;
@@ -36,6 +38,7 @@ function cloneSnapshot(artifact: InternalArtifact): PluginArtifactSnapshot {
 
 export class PluginArtifactRuntime {
   private readonly artifacts = new Map<string, InternalArtifact>();
+  private readonly listeners = new Set<PluginArtifactListener>();
 
   storeImage(pluginId: string, data: string, mimeType = 'image/png', now = Date.now()): PluginArtifactSnapshot {
     if (typeof data !== 'string' || !data) throw new Error('Imagem do artifact inválida.');
@@ -145,6 +148,11 @@ export class PluginArtifactRuntime {
       .map(cloneSnapshot);
   }
 
+  subscribe(listener: PluginArtifactListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   clear(pluginId: string): number {
     let removed = 0;
     for (const [id, artifact] of this.artifacts) {
@@ -160,7 +168,14 @@ export class PluginArtifactRuntime {
     const id = crypto.randomUUID();
     const artifact: InternalArtifact = { id, ...input };
     this.artifacts.set(id, artifact);
-    return cloneSnapshot(artifact);
+    const snapshot = cloneSnapshot(artifact);
+    for (const listener of this.listeners) {
+      try {
+        listener({ ...snapshot });
+      } catch {
+      }
+    }
+    return snapshot;
   }
 
   private prune(pluginId: string, incomingBytes: number): void {
