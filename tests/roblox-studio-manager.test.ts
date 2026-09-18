@@ -389,10 +389,7 @@ test('Roblox Studio Manager rejects mismatched and oversized playtest interactio
       stopInput: { mode: 'stop' },
     },
   }, fixture.api), /Payload da interação de playtest inválido/);
-  assert.deepEqual(plain(fixture.calls), [
-    { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
-    { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
-  ]);
+  assert.deepEqual(plain(fixture.calls), []);
 
   const overflow = createApi();
   const secondPlugin = await loadPlugin();
@@ -407,10 +404,7 @@ test('Roblox Studio Manager rejects mismatched and oversized playtest interactio
       stopInput: { mode: 'stop' },
     },
   }, overflow.api), /limite de 24 interações/);
-  assert.deepEqual(plain(overflow.calls), [
-    { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
-    { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
-  ]);
+  assert.deepEqual(plain(overflow.calls), []);
 });
 
 
