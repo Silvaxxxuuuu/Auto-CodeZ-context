@@ -249,7 +249,7 @@ test('MCP Gateway preflight fails closed on an unexpected discovery protocol ver
       if (request.method === 'server/discover') {
         return { jsonrpc: '2.0', id: request.id ?? null, result: { protocolVersion: '2099-01-01' } };
       }
-      return { jsonrpc: '2.0', id: request.id ?? null, result: { tools: [] } };
+      return { jsonrpc: '2.0', id: request.id ?? null, result: { tools: [] as unknown[] } };
     },
   } as unknown as McpGatewayProtocol;
   const server = new McpGatewayHttpServer(protocol);
