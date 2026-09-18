@@ -59,6 +59,7 @@ import { OperationalLedgerRetrieval, type OperationalLedgerScope } from './opera
 import { McpGatewayProtocol } from './mcp-gateway/protocol';
 import { McpGatewayHttpServer } from './mcp-gateway/http-server';
 import { McpGatewayExecutionRuntime } from './mcp-gateway/execution-runtime';
+import { McpTunnelRuntime } from './mcp-gateway/tunnel-runtime';
 import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -99,6 +100,7 @@ const operationalLedgerRetrieval = new OperationalLedgerRetrieval(operationalLed
 const mcpGatewayExecutionRuntime = new McpGatewayExecutionRuntime(agentRuntime, pluginToolCatalog, operationalLedger);
 const mcpGatewayProtocol = new McpGatewayProtocol(operationalLedgerRetrieval, mcpGatewayExecutionRuntime);
 const mcpGatewayServer = new McpGatewayHttpServer(mcpGatewayProtocol);
+const mcpTunnelRuntime = new McpTunnelRuntime();
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
 const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
@@ -676,6 +678,59 @@ ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatI
 ipcMain.handle('agent:list-operational-ledger', async (_event, query: OperationalLedgerQuery | undefined) => operationalLedger.query(query ?? {}));
 
 ipcMain.handle('mcp-gateway:status', async () => mcpGatewayServer.status());
+ipcMain.handle('mcp-tunnel:status', async () => ({
+  ...mcpTunnelRuntime.status(),
+  credentialAvailable: Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()),
+}));
+ipcMain.handle('mcp-tunnel:doctor', async (_event, input: unknown) => {
+  const value = input === undefined ? {} : requireObject(input, 'Configuração do Secure MCP Tunnel');
+  const executable = value.executable === undefined ? undefined : requireNonEmptyString(value.executable, 'Executável tunnel-client');
+  return mcpTunnelRuntime.doctor(executable);
+});
+ipcMain.handle('mcp-tunnel:start', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Configuração do Secure MCP Tunnel');
+  const tunnelId = requireIdentifier(value.tunnelId, 'Tunnel ID');
+  const executable = value.executable === undefined ? undefined : requireNonEmptyString(value.executable, 'Executável tunnel-client');
+  const controlPlaneApiKey = value.controlPlaneApiKey === undefined
+    ? undefined
+    : requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane');
+  const binding = mcpGatewayServer.trustedTunnelBinding();
+  const status = await mcpTunnelRuntime.start({
+    tunnelId,
+    localEndpoint: binding.endpoint,
+    localBearerToken: binding.bearerToken,
+    ...(executable ? { executable } : {}),
+    ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
+  });
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'Secure MCP Tunnel conectado.',
+    clientId: 'autocodez-secure-mcp-tunnel',
+    details: {
+      tunnelId: status.tunnelId ?? tunnelId,
+      version: status.version ?? '',
+      ready: status.ready,
+    },
+  });
+  return status;
+});
+ipcMain.handle('mcp-tunnel:stop', async () => {
+  const previous = mcpTunnelRuntime.status();
+  const stopped = await mcpTunnelRuntime.stop();
+  if (stopped) {
+    operationalLedger.record({
+      actor: 'runtime',
+      category: 'system',
+      state: 'cancelled',
+      summary: 'Secure MCP Tunnel encerrado.',
+      clientId: 'autocodez-secure-mcp-tunnel',
+      ...(previous.tunnelId ? { details: { tunnelId: previous.tunnelId } } : {}),
+    });
+  }
+  return { stopped };
+});
 ipcMain.handle('mcp-gateway:start', async (_event, input: unknown) => {
   const value = input === undefined ? {} : requireObject(input, 'Configuração do MCP Gateway');
   const port = value.port === undefined ? undefined : Number(value.port);
@@ -692,6 +747,7 @@ ipcMain.handle('mcp-gateway:start', async (_event, input: unknown) => {
   return info;
 });
 ipcMain.handle('mcp-gateway:stop', async () => {
+  await mcpTunnelRuntime.stop();
   const stopped = await mcpGatewayServer.stop();
   if (stopped) {
     operationalLedger.record({
@@ -1127,5 +1183,8 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on('before-quit', () => { void mcpGatewayServer.stop(); });
+app.on('before-quit', () => {
+  void mcpTunnelRuntime.stop();
+  void mcpGatewayServer.stop();
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
