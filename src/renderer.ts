@@ -24,6 +24,7 @@ declare global {
       deleteChat: (chatId: string) => Promise<Chat[]>;
       updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
       streamChat: (input: { chatId: string; content: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
+      stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
       listOperationalLedger: (query?: {
         afterSequence?: number;
