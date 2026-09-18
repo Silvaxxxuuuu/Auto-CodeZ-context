@@ -41,10 +41,11 @@ async function loadPlugin(): Promise<PluginRegistration> {
   return registration;
 }
 
-function createApi(options: { failCapture?: boolean; failStop?: boolean; structuredConsoleArtifact?: boolean } = {}) {
+function createApi(options: { failCapture?: boolean; failStop?: boolean; structuredConsoleArtifact?: boolean; failListTools?: boolean; failRegisterNonEmpty?: boolean } = {}) {
   const registeredTools: RegisteredTool[] = [];
   const calls: McpCall[] = [];
   const jobEvents: Array<{ type: string; value?: unknown }> = [];
+  const disconnects: string[] = [];
   const catalog = {
     tools: [
       {
@@ -126,9 +127,11 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean; structu
     },
     settings: {
       async set(): Promise<undefined> { return undefined; },
+      async remove(): Promise<undefined> { return undefined; },
     },
     tools: {
       async register(tools: RegisteredTool[]) {
+        if (options.failRegisterNonEmpty && tools.length > 0) throw new Error('register failed');
         registeredTools.splice(0, registeredTools.length, ...tools);
       },
     },
@@ -164,6 +167,7 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean; structu
         return { connected: true };
       },
       async listTools() {
+        if (options.failListTools) throw new Error('catalog failed');
         return catalog;
       },
       async callTool(_sessionId: string, name: string, input: unknown) {
@@ -184,13 +188,14 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean; structu
         }
         return { ok: true };
       },
-      async disconnect() {
+      async disconnect(session: string) {
+        disconnects.push(session);
         return true;
       },
     },
   };
 
-  return { api, registeredTools, calls, jobEvents };
+  return { api, registeredTools, calls, jobEvents, disconnects };
 }
 
 test('Roblox Studio Manager derives guarded playtest schemas from the live MCP catalog', async () => {
@@ -557,4 +562,93 @@ test('Roblox Studio Manager links structured observation artifacts to the playte
     fixture.jobEvents.some((event) => event.type === 'artifact' && (event.value as { artifactId?: string }).artifactId === 'console-structured-1'),
     true,
   );
+});
+
+
+test('Roblox Studio Manager cleans up a partially opened MCP session when catalog setup fails', async () => {
+  const plugin = await loadPlugin();
+  const options = { failListTools: true };
+  const fixture = createApi(options);
+  await plugin.activate(fixture.api);
+
+  assert.deepEqual(fixture.disconnects, ['studio-session']);
+  assert.deepEqual(fixture.registeredTools, []);
+
+  options.failListTools = false;
+  const result = plain(await plugin.invoke('capture_viewport', {
+    input: { format: 'png', studio_id: 'studio-a' },
+  }, fixture.api));
+
+  assert.equal((result as { content?: unknown[] }).content?.length, 1);
+});
+
+test('Roblox Studio Manager clears the agent tool catalog if tool registration fails after MCP connect', async () => {
+  const plugin = await loadPlugin();
+  const options = { failRegisterNonEmpty: true };
+  const fixture = createApi(options);
+  await plugin.activate(fixture.api);
+
+  assert.deepEqual(fixture.disconnects, ['studio-session']);
+  assert.deepEqual(fixture.registeredTools, []);
+
+  options.failRegisterNonEmpty = false;
+  await plugin.invoke('capture_viewport', {
+    input: { format: 'png', studio_id: 'studio-a' },
+  }, fixture.api);
+  assert.ok(fixture.registeredTools.length > 0);
+});
+
+test('Roblox Studio Manager rejects concurrent playtests for the same Studio and releases the lock afterwards', async () => {
+  const plugin = await loadPlugin();
+  const fixture = createApi();
+  await plugin.activate(fixture.api);
+
+  const originalCallTool = fixture.api.mcp.callTool;
+  let releasePlay!: () => void;
+  let enteredPlay!: () => void;
+  const playGate = new Promise<void>((resolve) => { releasePlay = resolve; });
+  const entered = new Promise<void>((resolve) => { enteredPlay = resolve; });
+
+  fixture.api.mcp.callTool = async (sessionId: string, name: string, input: unknown) => {
+    if (name === 'start_stop_play' && (input as { mode?: string }).mode === 'play') {
+      enteredPlay();
+      await playGate;
+    }
+    return originalCallTool(sessionId, name, input);
+  };
+
+  const first = plugin.invoke('run_playtest', {
+    input: {
+      studioId: 'studio-a',
+      playInput: { mode: 'play' },
+      captureInput: { format: 'png' },
+      consoleInput: { level: 'all' },
+      stopInput: { mode: 'stop' },
+    },
+  }, fixture.api);
+
+  await entered;
+
+  await assert.rejects(() => plugin.invoke('run_playtest', {
+    input: {
+      studioId: 'studio-a',
+      playInput: { mode: 'play' },
+      captureInput: { format: 'png' },
+      consoleInput: { level: 'all' },
+      stopInput: { mode: 'stop' },
+    },
+  }, fixture.api), /Já existe um playtest ativo/);
+
+  releasePlay();
+  await first;
+
+  await plugin.invoke('run_playtest', {
+    input: {
+      studioId: 'studio-a',
+      playInput: { mode: 'play' },
+      captureInput: { format: 'png' },
+      consoleInput: { level: 'all' },
+      stopInput: { mode: 'stop' },
+    },
+  }, fixture.api);
 });
