@@ -45,8 +45,11 @@ async function createPluginService(): Promise<PluginService> {
   const storage = new LocalStorage();
   await storage.init();
   const pluginsRoot = path.join(app.getPath('userData'), 'plugins');
+  const builtInPluginsRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'plugins')
+    : path.join(app.getAppPath(), 'plugins');
   const settings = new PluginSettingsStore(storage);
-  const service = new PluginService(pluginsRoot, new PluginStateStore(storage), settings);
+  const service = new PluginService(pluginsRoot, new PluginStateStore(storage), settings, builtInPluginsRoot);
   await service.init();
   const broker = service.getBroker();
   broker.getActivityRuntime().subscribe((activity) => broadcast('plugins:activity', activity));
