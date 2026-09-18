@@ -121,6 +121,11 @@ export class McpGatewayHttpServer {
     return { running: true, host: this.info.host, port: this.info.port, endpoint: this.info.endpoint };
   }
 
+  trustedTunnelBinding(): { endpoint: string; bearerToken: string } {
+    if (!this.info || !this.server) throw new Error('MCP Gateway local não está em execução.');
+    return { endpoint: this.info.endpoint, bearerToken: this.info.bearerToken };
+  }
+
   async stop(): Promise<boolean> {
     const server = this.server;
     this.server = undefined;
