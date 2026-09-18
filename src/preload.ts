@@ -110,6 +110,12 @@ contextBridge.exposeInMainWorld('autoCodez', {
   listApprovals: (filters?: ApprovalScope) => invoke('agent:list-approvals', requireApprovalScope(filters)),
   listExecutions: (chatId?: string) => invoke('agent:list-executions', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
   mcpTunnelStatus: () => invoke('mcp-tunnel:status'),
+  onMcpTunnelStatus: (listener: (event: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+    ipcRenderer.on('mcp-tunnel:event', handler);
+    return () => ipcRenderer.removeListener('mcp-tunnel:event', handler);
+  },
+
   doctorMcpTunnel: () => invoke('mcp-tunnel:doctor'),
   startMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => {
     const value = requireObject(input, 'Configuração do Secure MCP Tunnel');
