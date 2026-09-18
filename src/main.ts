@@ -53,6 +53,8 @@ import { reconcileExecutionBootstrapState } from './execution-bootstrap-state';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
+import { operationalLedger, type OperationalLedgerQuery, type OperationalLedgerState } from './operational-ledger';
+import { OperationalLedgerPersistence, OperationalLedgerStore } from './operational-ledger-store';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -86,6 +88,8 @@ const executionStatePersistence = new ExecutionStatePersistence(executionStateSt
 const executionTimeline = new ExecutionTimeline();
 const executionTimelineStore = new ExecutionTimelineStore(storage);
 const executionTimelinePersistence = new ExecutionTimelinePersistence(executionTimelineStore);
+const operationalLedgerStore = new OperationalLedgerStore(storage);
+const operationalLedgerPersistence = new OperationalLedgerPersistence(operationalLedgerStore);
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
 const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
@@ -117,6 +121,7 @@ const executionShadowWorkspaceStore = new ExecutionShadowWorkspaceStore(storage)
 const executionShadowWorkspacePersistence = new ExecutionShadowWorkspacePersistence(executionShadowWorkspaceStore);
 let executionPersistenceEnabled = false;
 let executionTimelinePersistenceEnabled = false;
+let operationalLedgerPersistenceEnabled = false;
 let executionPlanPersistenceEnabled = false;
 let executionPlanHistoryPersistenceEnabled = false;
 let executionQualityGatePersistenceEnabled = false;
@@ -182,6 +187,10 @@ function sendExecutionPlanChange(change: ExecutionPlanChange): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution-plan:event', change);
 }
 
+function sendOperationalLedgerEvent(event: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('operational-ledger:event', event);
+}
+
 executionPlanner.subscribe((change) => {
   sendExecutionPlanChange(change);
   const historyChanged = executionPlanHistory.record(change);
@@ -192,6 +201,37 @@ executionPlanner.subscribe((change) => {
 executionManager.subscribe((change) => {
   sendExecutionChange(change);
   const timelineEvents = executionTimeline.record(change);
+  if (change.type === 'upsert') {
+    const state: OperationalLedgerState = change.snapshot.state === 'waiting_approval'
+      ? 'waiting'
+      : change.snapshot.state === 'completed'
+        ? 'success'
+        : change.snapshot.state === 'failed'
+          ? 'failed'
+          : change.snapshot.state === 'interrupted'
+            ? 'cancelled'
+            : 'running';
+    operationalLedger.record({
+      actor: 'runtime',
+      category: 'execution',
+      state,
+      summary: `Execução ${change.snapshot.state}.`,
+      chatId: change.snapshot.chatId,
+      runId: change.snapshot.runId,
+      toolName: change.snapshot.currentTool,
+      error: change.snapshot.error,
+      timestamp: change.snapshot.updatedAt,
+    });
+  } else {
+    operationalLedger.record({
+      actor: 'runtime',
+      category: 'execution',
+      state: 'success',
+      summary: 'Execução removida do estado ativo.',
+      chatId: change.chatId,
+      runId: change.runId,
+    });
+  }
   if (executionPersistenceEnabled) executionStatePersistence.schedule(executionManager.list());
   if (executionTimelinePersistenceEnabled && timelineEvents.length) executionTimelinePersistence.schedule(executionTimeline.list());
 });
@@ -212,6 +252,19 @@ function recordConsumedApprovalDecision(
     at,
   });
   if (executionTimelinePersistenceEnabled && events.length) executionTimelinePersistence.schedule(executionTimeline.list());
+  operationalLedger.record({
+    actor: 'user',
+    category: 'approval',
+    state: decision === 'approved' ? 'success' : 'failed',
+    summary: decision === 'approved' ? `Aprovação concedida para ${approval.toolCall.name}.` : `Aprovação recusada para ${approval.toolCall.name}.`,
+    chatId: approval.chatId,
+    runId: approval.runId,
+    toolCallId: approval.toolCall.id,
+    toolName: approval.toolCall.name,
+    causationId: approval.id,
+    details: { decision },
+    timestamp: at,
+  });
 }
 
 function isAbortError(error: unknown): boolean {
@@ -561,6 +614,7 @@ ipcMain.handle('agent:list-approvals', async (_event, filters?: { chatId?: strin
   return toolRuntime.listApprovals({ chatId, runId });
 });
 ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatId === undefined ? executionManager.list() : executionManager.get(requireIdentifier(chatId, 'Chat')) ?? null);
+ipcMain.handle('agent:list-operational-ledger', async (_event, query: OperationalLedgerQuery | undefined) => operationalLedger.query(query ?? {}));
 ipcMain.handle('agent:list-execution-timeline', async (_event, filters?: { chatId?: string; runId?: string }) => {
   if (filters === undefined) return executionTimeline.list();
   const value = requireObject(filters, 'Filtro da timeline de execução');
@@ -815,6 +869,7 @@ ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExt
 
 app.whenReady().then(async () => {
   await storage.init();
+  operationalLedger.restore(await operationalLedgerStore.load());
   await providerManager.init();
   await chatManager.init();
   await projectManager.init();
@@ -836,6 +891,7 @@ app.whenReady().then(async () => {
   for (const run of listRecoverableRuns(agentRuntime)) executionCoordinator.resumePlan(run.chatId, run.runId);
   executionPersistenceEnabled = true;
   executionTimelinePersistenceEnabled = true;
+  operationalLedgerPersistenceEnabled = true;
   executionPlanPersistenceEnabled = true;
   executionPlanHistoryPersistenceEnabled = true;
   executionQualityGatePersistenceEnabled = true;
@@ -846,6 +902,7 @@ app.whenReady().then(async () => {
   executionShadowWorkspacePersistenceEnabled = true;
   executionStatePersistence.schedule(executionManager.list());
   executionTimelinePersistence.schedule(executionTimeline.list());
+  operationalLedgerPersistence.schedule(operationalLedger.listAll());
   executionPlanPersistence.schedule(executionPlanner.list());
   executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
   executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
@@ -854,7 +911,25 @@ app.whenReady().then(async () => {
   executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
   executionChangeBudgetPersistence.schedule(executionChangeBudgetRuntime.list());
   executionShadowWorkspacePersistence.schedule(executionShadowWorkspaceRuntime.list());
-  activityRuntime.subscribe((event) => sendActivity(event));
+  operationalLedger.subscribe((event) => {
+    sendOperationalLedgerEvent(event);
+    if (operationalLedgerPersistenceEnabled) operationalLedgerPersistence.schedule(operationalLedger.listAll());
+  });
+  activityRuntime.subscribe((event) => {
+    sendActivity(event);
+    operationalLedger.record({
+      actor: 'agent',
+      category: event.type === 'test' || event.type === 'build' ? 'test' : 'tool',
+      state: event.status === 'pending' ? 'pending' : event.status === 'running' ? 'running' : event.status === 'failed' ? 'failed' : 'success',
+      summary: event.message,
+      chatId: event.chatId,
+      runId: event.runId,
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      error: event.error,
+      timestamp: event.createdAt,
+    });
+  });
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
   createWindow();
