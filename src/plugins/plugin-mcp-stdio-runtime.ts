@@ -14,12 +14,19 @@ const MAX_LINE_BYTES = 4 * 1024 * 1024;
 const MAX_SESSIONS = 4;
 
 export function resolveRobloxStudioMcpCommand(platform = process.platform, env: NodeJS.ProcessEnv = process.env): string {
-  if (platform !== 'win32') return 'roblox-studio-mcp';
-  const localAppData = env.LOCALAPPDATA;
-  if (!localAppData) throw new Error('LOCALAPPDATA não está disponível para localizar o Roblox Studio MCP.');
-  const candidate = path.join(localAppData, 'Roblox', 'mcp.bat');
-  if (!fs.existsSync(candidate)) throw new Error('Roblox Studio MCP não foi encontrado. Atualize ou abra o Roblox Studio e tente novamente.');
-  return candidate;
+  if (platform === 'win32') {
+    const localAppData = env.LOCALAPPDATA?.trim();
+    if (!localAppData) throw new Error('LOCALAPPDATA não está disponível para localizar o Roblox Studio MCP.');
+    const candidate = path.join(localAppData, 'Roblox', 'mcp.bat');
+    if (!fs.existsSync(candidate)) throw new Error('Roblox Studio MCP não foi encontrado. Atualize ou abra o Roblox Studio e tente novamente.');
+    return candidate;
+  }
+  if (platform === 'darwin') {
+    const candidate = '/Applications/RobloxStudio.app/Contents/MacOS/StudioMCP';
+    if (!fs.existsSync(candidate)) throw new Error('Roblox Studio MCP não foi encontrado. Atualize ou abra o Roblox Studio e tente novamente.');
+    return candidate;
+  }
+  throw new Error('O MCP oficial do Roblox Studio é suportado pelo Auto CodeZ apenas no Windows e macOS.');
 }
 
 function timeout(value?: number): number {
