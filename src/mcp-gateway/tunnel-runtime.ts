@@ -129,8 +129,9 @@ function createChildEnvironment(
   env.CONTROL_PLANE_TUNNEL_ID = input.tunnelId;
   env.CONTROL_PLANE_API_KEY = input.controlPlaneApiKey;
   env.MCP_SERVER_URL = input.endpoint;
-  env.AUTO_CODEZ_MCP_BEARER = input.bearerToken;
-  env.MCP_EXTRA_HEADERS = 'Authorization: Bearer env:AUTO_CODEZ_MCP_BEARER';
+  env.AUTO_CODEZ_MCP_AUTHORIZATION = `Bearer ${input.bearerToken}`;
+  env.MCP_EXTRA_HEADERS = 'Authorization: env:AUTO_CODEZ_MCP_AUTHORIZATION';
+  env.MCP_DISCOVERY_EXTRA_HEADERS = 'Authorization: env:AUTO_CODEZ_MCP_AUTHORIZATION';
   env.MCP_STARTUP_WAIT_TIMEOUT = '15s';
   return env;
 }
@@ -162,6 +163,7 @@ async function readHealthUrl(file: string): Promise<string | undefined> {
 
 export class McpTunnelRuntime {
   private active?: ActiveTunnel;
+  private lastStatus: McpTunnelStatus = { running: false, ready: false };
 
   constructor(
     private readonly spawnProcess: McpTunnelSpawn = spawn as McpTunnelSpawn,
@@ -171,7 +173,7 @@ export class McpTunnelRuntime {
   ) {}
 
   status(): McpTunnelStatus {
-    return this.active ? { ...this.active.status } : { running: false, ready: false };
+    return this.active ? { ...this.active.status } : { ...this.lastStatus };
   }
 
   async doctor(executable?: string): Promise<{ executable: string; version: string; supported: true }> {
@@ -239,6 +241,7 @@ export class McpTunnelRuntime {
       },
     };
     this.active = active;
+    this.lastStatus = { ...active.status };
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => { active.stdout = appendLog(active.stdout, chunk); });
@@ -248,6 +251,7 @@ export class McpTunnelRuntime {
 
     try {
       await this.waitUntilReady(active);
+      this.lastStatus = { ...active.status };
       return { ...active.status };
     } catch (error) {
       const message = sanitizedError(error);
@@ -260,6 +264,7 @@ export class McpTunnelRuntime {
     const active = this.active;
     if (!active) return false;
     this.active = undefined;
+    this.lastStatus = { ...active.status, running: false, ready: false };
     processTreeKill(active.child);
     await fs.rm(path.dirname(active.healthFile), { recursive: true, force: true }).catch((): undefined => undefined);
     return true;
@@ -341,6 +346,7 @@ export class McpTunnelRuntime {
       ready: false,
       error: sanitizedError(reason),
     };
+    this.lastStatus = { ...active.status };
     this.active = undefined;
     void fs.rm(path.dirname(active.healthFile), { recursive: true, force: true }).catch((): undefined => undefined);
   }
