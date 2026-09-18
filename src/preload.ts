@@ -114,8 +114,12 @@ contextBridge.exposeInMainWorld('autoCodez', {
     beforeSequence?: number;
     chatId?: string;
     runId?: string;
+    projectId?: string;
+    sessionId?: string;
     pluginId?: string;
+    toolCallId?: string;
     jobId?: string;
+    artifactId?: string;
     category?: string;
     state?: string;
     limit?: number;
