@@ -244,14 +244,19 @@ async function connect(api) {
       const captureTool = catalog.tools.find((tool) => tool.name === 'screen_capture');
       const consoleTool = catalog.tools.find((tool) => tool.name === 'get_console_output');
       const playSchema = withoutStudioId(playTool.inputSchema);
+      const captureSchema = withoutStudioId(captureTool.inputSchema);
+      const consoleSchema = withoutStudioId(consoleTool.inputSchema);
       const interactionSchema = buildPlaytestInteractionSchema(catalog);
       const playtestProperties = {
         playInput: playSchema,
         studioId: { type: 'string', maxLength: 128 },
-        captureInput: withoutStudioId(captureTool.inputSchema),
-        consoleInput: withoutStudioId(consoleTool.inputSchema),
+        captureInput: captureSchema,
+        consoleInput: consoleSchema,
         stopInput: playSchema,
       };
+      const requiredInputs = ['studioId', 'playInput', 'stopInput'];
+      if (captureSchema.required.length > 0) requiredInputs.push('captureInput');
+      if (consoleSchema.required.length > 0) requiredInputs.push('consoleInput');
       if (interactionSchema) playtestProperties.interactions = interactionSchema;
       tools.push({
         id: PLAYTEST_TOOL_ID,
@@ -261,7 +266,7 @@ async function connect(api) {
         parameters: {
           type: 'object',
           properties: playtestProperties,
-          required: ['studioId', 'playInput', 'stopInput'],
+          required: requiredInputs,
           additionalProperties: false,
         },
       });
@@ -327,44 +332,48 @@ autoCodez.register({
       if (!playTool || !captureTool || !consoleTool) throw new Error('O Roblox Studio conectado não oferece todas as operações necessárias para playtest.');
       const studioId = typeof rawInput.studioId === 'string' ? rawInput.studioId.trim() : '';
       if (!studioId || studioId.length > 128) throw new Error('studioId do playtest inválido.');
+
+      const interactions = Array.isArray(rawInput.interactions) ? rawInput.interactions : [];
+      if (interactions.length > MAX_PLAYTEST_INTERACTIONS) throw new Error('O playtest excedeu o limite de 24 interações.');
+      const interactionTools = {
+        keyboard: { tool: [...studioTools.values()].find((tool) => tool.name === 'user_keyboard_input'), key: 'keyboardInput', checkpoint: false },
+        mouse: { tool: [...studioTools.values()].find((tool) => tool.name === 'user_mouse_input'), key: 'mouseInput', checkpoint: false },
+        navigate: { tool: [...studioTools.values()].find((tool) => tool.name === 'character_navigation'), key: 'navigationInput', checkpoint: false },
+        capture: { tool: captureTool, key: 'captureInput', checkpoint: true },
+        console: { tool: consoleTool, key: 'consoleInput', checkpoint: true },
+      };
+      const validatedInteractions = interactions.map((step, index) => {
+        if (!step || typeof step !== 'object' || Array.isArray(step)) throw new Error('Interação de playtest inválida.');
+        const definition = interactionTools[step.operation];
+        if (!definition || !definition.tool) throw new Error('Interação de playtest não disponível no Roblox Studio conectado.');
+        const input = step[definition.key];
+        if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Payload da interação de playtest inválido.');
+        const unexpected = Object.keys(step).filter((key) => key !== 'operation' && key !== definition.key);
+        if (unexpected.length > 0) throw new Error('Interação de playtest contém payload incompatível com a operação selecionada.');
+        return { index, operation: step.operation, definition, input };
+      });
+
       if (activePlaytests.has(studioId)) throw new Error('Já existe um playtest ativo para esta instância do Roblox Studio.');
       activePlaytests.add(studioId);
       try {
         const job = await api.jobs.begin('Playtest do Roblox Studio');
         let started = false;
-      let stopAttempted = false;
-      try {
-        await api.jobs.update(job.id, { progress: 0.1, activity: 'Iniciando Play...' });
-        await api.mcp.callTool(sessionId, playTool.name, withStudioId(rawInput.playInput || {}, studioId), 60000);
-        started = true;
-        const interactions = Array.isArray(rawInput.interactions) ? rawInput.interactions : [];
-        if (interactions.length > MAX_PLAYTEST_INTERACTIONS) throw new Error('O playtest excedeu o limite de 24 interações.');
-        const interactionTools = {
-          keyboard: { tool: [...studioTools.values()].find((tool) => tool.name === 'user_keyboard_input'), key: 'keyboardInput', checkpoint: false },
-          mouse: { tool: [...studioTools.values()].find((tool) => tool.name === 'user_mouse_input'), key: 'mouseInput', checkpoint: false },
-          navigate: { tool: [...studioTools.values()].find((tool) => tool.name === 'character_navigation'), key: 'navigationInput', checkpoint: false },
-          capture: { tool: captureTool, key: 'captureInput', checkpoint: true },
-          console: { tool: consoleTool, key: 'consoleInput', checkpoint: true },
-        };
-        const checkpoints = [];
-        for (let index = 0; index < interactions.length; index += 1) {
-          const step = interactions[index];
-          if (!step || typeof step !== 'object' || Array.isArray(step)) throw new Error('Interação de playtest inválida.');
-          const definition = interactionTools[step.operation];
-          if (!definition || !definition.tool) throw new Error('Interação de playtest não disponível no Roblox Studio conectado.');
-          const input = step[definition.key];
-          if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Payload da interação de playtest inválido.');
-          const unexpected = Object.keys(step).filter((key) => key !== 'operation' && key !== definition.key);
-          if (unexpected.length > 0) throw new Error('Interação de playtest contém payload incompatível com a operação selecionada.');
-          const progress = 0.2 + ((index + 1) / Math.max(interactions.length, 1)) * 0.35;
-          await api.jobs.update(job.id, { progress, activity: 'Executando interação ' + (index + 1) + ' de ' + interactions.length + '...' });
-          const result = await callStudioTool(api, definition.tool, withStudioId(input, studioId), 60000);
-          if (definition.checkpoint) {
-            const observation = summarizeObservation(step.operation, result);
-            await attachObservationArtifacts(api, job.id, observation);
-            checkpoints.push({ index, ...observation });
+        let stopAttempted = false;
+        try {
+          await api.jobs.update(job.id, { progress: 0.1, activity: 'Iniciando Play...' });
+          await api.mcp.callTool(sessionId, playTool.name, withStudioId(rawInput.playInput || {}, studioId), 60000);
+          started = true;
+          const checkpoints = [];
+          for (const prepared of validatedInteractions) {
+            const progress = 0.2 + ((prepared.index + 1) / Math.max(validatedInteractions.length, 1)) * 0.35;
+            await api.jobs.update(job.id, { progress, activity: 'Executando interação ' + (prepared.index + 1) + ' de ' + validatedInteractions.length + '...' });
+            const result = await callStudioTool(api, prepared.definition.tool, withStudioId(prepared.input, studioId), 60000);
+            if (prepared.definition.checkpoint) {
+              const observation = summarizeObservation(prepared.operation, result);
+              await attachObservationArtifacts(api, job.id, observation);
+              checkpoints.push({ index: prepared.index, ...observation });
+            }
           }
-        }
         await api.jobs.update(job.id, { progress: 0.65, activity: 'Capturando viewport...' });
         const viewportResult = await callStudioTool(api, captureTool, withStudioId(rawInput.captureInput || {}, studioId), 60000);
         const viewport = summarizeObservation('capture', viewportResult);
