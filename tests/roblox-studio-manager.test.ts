@@ -208,7 +208,9 @@ test('Roblox Studio Manager derives guarded playtest schemas from the live MCP c
       stopInput: { properties: { mode: { enum: string[] } }; required: string[] };
       captureInput: { properties: { format: { enum: string[] } } };
       consoleInput: { properties: { level: { enum: string[] } } };
+      studioId: { maxLength: number };
       interactions: {
+        maxItems: number;
         items: {
           properties: {
             operation: { enum: string[] };
@@ -227,6 +229,8 @@ test('Roblox Studio Manager derives guarded playtest schemas from the live MCP c
 
   assert.deepEqual(parameters.required, ['studioId', 'playInput', 'stopInput']);
   assert.equal((parameters.properties as Record<string, unknown>).studioId !== undefined, true);
+  assert.equal(parameters.properties.studioId.maxLength, 128);
+  assert.equal(parameters.properties.interactions.maxItems, 24);
   assert.equal(parameters.additionalProperties, false);
   assert.deepEqual(parameters.properties.playInput.required, ['mode']);
   assert.deepEqual(parameters.properties.playInput.properties.mode.enum, ['play', 'stop']);
