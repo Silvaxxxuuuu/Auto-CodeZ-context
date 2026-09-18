@@ -29,7 +29,7 @@ declare global {
       mcpTunnelStatus: () => Promise<{ running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean }>;
       onMcpTunnelStatus: (listener: (event: { running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean }) => void) => () => void;
 
-      doctorMcpTunnel: () => Promise<{ executable: string; version: string; supported: true }>;
+      doctorMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => Promise<{ executable: string; version: string; supported: true; diagnostics: string }>;
       startMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => Promise<{ running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string }>;
       stopMcpTunnel: () => Promise<{ stopped: boolean }>;
       mcpGatewayStatus: () => Promise<{ running: boolean; host: string; port: number; endpoint: string }>;
