@@ -3,10 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
-type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number; closed: boolean; closeReason?: string };
+type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number; closed: boolean; closeReason?: string; protocolVersion?: string; serverName?: string; serverVersion?: string };
 export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: number };
 export type McpToolDescriptor = { name: string; description?: string; inputSchema?: unknown };
 export type McpToolList = { tools: McpToolDescriptor[] };
+export type McpSessionStatus = { connected: boolean; protocolVersion?: string; serverName?: string; serverVersion?: string };
 export type McpSpawn = (command: string, args: string[], options: { windowsHide: boolean; stdio: ['pipe', 'pipe', 'pipe'] }) => ChildProcessWithoutNullStreams;
 export type RobloxStudioLaunchPlan = { command: string; args: string[] };
 
@@ -84,6 +85,9 @@ export class PluginMcpStdioRuntime {
         clientInfo: { name: 'Auto CodeZ', version: '2.0.0-alpha.1' },
       }, timeout(input?.timeoutMs)) as { protocolVersion?: unknown; serverInfo?: { name?: unknown; version?: unknown } };
       if (!result?.protocolVersion || typeof result.protocolVersion !== 'string' || result.protocolVersion.length > 128) throw new Error('Servidor MCP retornou protocolVersion inválida.');
+      session.protocolVersion = result.protocolVersion;
+      if (typeof result?.serverInfo?.name === 'string') session.serverName = result.serverInfo.name;
+      if (typeof result?.serverInfo?.version === 'string') session.serverVersion = result.serverInfo.version;
       this.notify(session, 'notifications/initialized', {});
       return {
         sessionId,
@@ -137,6 +141,17 @@ export class PluginMcpStdioRuntime {
     if (typeof name !== 'string' || !name.trim() || name.length > 256) throw new Error('Tool MCP inválida.');
     const toolInput = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
     return this.request(this.requireSession(pluginId, sessionId), 'tools/call', { name: name.trim(), arguments: toolInput }, timeout(timeoutMs));
+  }
+
+  status(pluginId: string, sessionId: string): McpSessionStatus {
+    const session = this.sessions.get(pluginId)?.get(sessionId);
+    if (!session || session.closed) return { connected: false };
+    return {
+      connected: true,
+      ...(session.protocolVersion ? { protocolVersion: session.protocolVersion } : {}),
+      ...(session.serverName ? { serverName: session.serverName } : {}),
+      ...(session.serverVersion ? { serverVersion: session.serverVersion } : {}),
+    };
   }
 
   disconnect(pluginId: string, sessionId: string): boolean {
