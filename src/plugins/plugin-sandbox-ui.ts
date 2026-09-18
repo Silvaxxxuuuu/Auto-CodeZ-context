@@ -89,6 +89,7 @@ const api = Object.freeze({
     status: (sessionId) => request('mcp.status', { sessionId }),
     listTools: (sessionId, timeoutMs) => request('mcp.list-tools', { sessionId, timeoutMs }),
     callTool: (sessionId, name, args, timeoutMs) => request('mcp.call-tool', { sessionId, name, arguments: args, timeoutMs }),
+    callToolObserved: (sessionId, name, args, timeoutMs) => request('mcp.call-tool-observed', { sessionId, name, arguments: args, timeoutMs }),
     disconnect: (sessionId) => request('mcp.disconnect', { sessionId }),
   }),
   web: Object.freeze({
