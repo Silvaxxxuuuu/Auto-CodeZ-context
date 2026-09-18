@@ -14,6 +14,7 @@ export type RobloxStudioLaunchPlan = { command: string; args: string[] };
 const DEFAULT_TIMEOUT = 30_000;
 const MAX_LINE_BYTES = 4 * 1024 * 1024;
 const MAX_SESSIONS = 4;
+const MAX_SERVER_TOOL_CATALOG = 256;
 
 export function resolveRobloxStudioMcpCommand(platform = process.platform, env: NodeJS.ProcessEnv = process.env): string {
   if (platform === 'win32') {
@@ -128,6 +129,7 @@ export class PluginMcpStdioRuntime {
         if (seen.has(tool.name)) throw new Error(`Servidor MCP retornou tool duplicada: '${tool.name}'.`);
         seen.add(tool.name);
         tools.push(tool);
+        if (tools.length > MAX_SERVER_TOOL_CATALOG) throw new Error('Servidor MCP excedeu o limite de 256 tools.');
       }
       const next = (result as { nextCursor?: unknown }).nextCursor;
       if (next === undefined || next === null || next === '') return { tools };
