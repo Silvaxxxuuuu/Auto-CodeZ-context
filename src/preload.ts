@@ -116,7 +116,13 @@ contextBridge.exposeInMainWorld('autoCodez', {
     return () => ipcRenderer.removeListener('mcp-tunnel:event', handler);
   },
 
-  doctorMcpTunnel: () => invoke('mcp-tunnel:doctor'),
+  doctorMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => {
+    const value = requireObject(input, 'Diagnóstico do Secure MCP Tunnel');
+    return invoke('mcp-tunnel:doctor', {
+      tunnelId: requireIdentifier(value.tunnelId, 'Tunnel ID'),
+      ...(value.controlPlaneApiKey === undefined ? {} : { controlPlaneApiKey: requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane') }),
+    });
+  },
   startMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => {
     const value = requireObject(input, 'Configuração do Secure MCP Tunnel');
     return invoke('mcp-tunnel:start', {
