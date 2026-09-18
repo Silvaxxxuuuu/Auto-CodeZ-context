@@ -121,6 +121,12 @@ const summarizeObservation = (operation, result) => {
   };
 };
 
+const attachObservationArtifacts = async (api, jobId, observation) => {
+  for (const artifact of observation.artifacts || []) {
+    await api.jobs.attachArtifact(jobId, artifact.id);
+  }
+};
+
 const buildPlaytestInteractionSchema = (catalog) => {
   const definitions = [
     ['keyboard', 'user_keyboard_input', 'keyboardInput'],
@@ -280,14 +286,20 @@ autoCodez.register({
           const progress = 0.2 + ((index + 1) / Math.max(interactions.length, 1)) * 0.35;
           await api.jobs.update(job.id, { progress, activity: 'Executando interação ' + (index + 1) + ' de ' + interactions.length + '...' });
           const result = await callStudioTool(api, definition.tool, input, 60000);
-          if (definition.checkpoint) checkpoints.push({ index, ...summarizeObservation(step.operation, result) });
+          if (definition.checkpoint) {
+            const observation = summarizeObservation(step.operation, result);
+            await attachObservationArtifacts(api, job.id, observation);
+            checkpoints.push({ index, ...observation });
+          }
         }
         await api.jobs.update(job.id, { progress: 0.65, activity: 'Capturando viewport...' });
         const viewportResult = await callStudioTool(api, captureTool, rawInput.captureInput || {}, 60000);
         const viewport = summarizeObservation('capture', viewportResult);
+        await attachObservationArtifacts(api, job.id, viewport);
         await api.jobs.update(job.id, { progress: 0.8, activity: 'Lendo console...' });
         const consoleResult = await callStudioTool(api, consoleTool, rawInput.consoleInput || {}, 60000);
         const consoleOutput = summarizeObservation('console', consoleResult);
+        await attachObservationArtifacts(api, job.id, consoleOutput);
         await api.jobs.update(job.id, { progress: 0.92, activity: 'Encerrando Play...' });
         stopAttempted = true;
         await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000);
