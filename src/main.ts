@@ -202,6 +202,10 @@ function sendOperationalLedgerEvent(event: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('operational-ledger:event', event);
 }
 
+function sendMcpTunnelStatus(status: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('mcp-tunnel:event', status);
+}
+
 executionPlanner.subscribe((change) => {
   sendExecutionPlanChange(change);
   const historyChanged = executionPlanHistory.record(change);
@@ -1129,6 +1133,12 @@ app.whenReady().then(async () => {
   operationalLedger.subscribe((event) => {
     sendOperationalLedgerEvent(event);
     if (operationalLedgerPersistenceEnabled) operationalLedgerPersistence.schedule(operationalLedger.listAll());
+  });
+  mcpTunnelRuntime.subscribe((status) => {
+    sendMcpTunnelStatus({
+      ...status,
+      credentialAvailable: Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()),
+    });
   });
   activityRuntime.subscribe((event) => {
     sendActivity(event);
