@@ -276,6 +276,31 @@ function recordConsumedApprovalDecision(
   });
 }
 
+function recordExternalApprovalDecision(
+  approval: { id: string; chatId?: string; runId?: string; toolCall: { id: string; name: string } },
+  operation: { operationId: string; projectId: string; pluginId: string; externalToolName: string },
+  decision: 'approved' | 'denied',
+  at: number,
+): void {
+  operationalLedger.record({
+    actor: 'user',
+    category: 'approval',
+    state: decision === 'approved' ? 'success' : 'failed',
+    summary: decision === 'approved'
+      ? `Aprovação MCP concedida para ${operation.externalToolName}.`
+      : `Aprovação MCP recusada para ${operation.externalToolName}.`,
+    chatId: approval.chatId,
+    runId: approval.runId,
+    projectId: operation.projectId,
+    pluginId: operation.pluginId,
+    toolCallId: approval.toolCall.id,
+    toolName: operation.externalToolName,
+    causationId: operation.operationId,
+    details: { decision, approvalId: approval.id },
+    timestamp: at,
+  });
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
@@ -869,7 +894,7 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
   if (mcpGatewayExecutionRuntime.ownsApproval(id)) {
     const decisionAt = Date.now();
     const operation = await mcpGatewayExecutionRuntime.approve(id);
-    recordConsumedApprovalDecision(approval, 'approved', decisionAt);
+    recordExternalApprovalDecision(approval, operation, 'approved', decisionAt);
     return {
       chatId: approval.chatId,
       pendingApprovalIds: operation.state === 'waiting_approval' && operation.approvalId ? [operation.approvalId] : [],
@@ -922,7 +947,7 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
   if (mcpGatewayExecutionRuntime.ownsApproval(id)) {
     const decisionAt = Date.now();
     const operation = mcpGatewayExecutionRuntime.deny(id);
-    recordConsumedApprovalDecision(approval, 'denied', decisionAt);
+    recordExternalApprovalDecision(approval, operation, 'denied', decisionAt);
     return { chatId: approval.chatId, pendingApprovalIds: [], messages: [], operation };
   }
   const chatId = approval.chatId;
