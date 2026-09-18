@@ -194,6 +194,8 @@ test('Roblox Studio Manager derives guarded playtest schemas from the live MCP c
             keyboardInput: { required: string[] };
             mouseInput: { required: string[] };
             navigationInput: { required: string[] };
+            captureInput: { properties: { format: { enum: string[] } } };
+            consoleInput: { properties: { level: { enum: string[] } } };
           };
         };
       };
@@ -209,10 +211,12 @@ test('Roblox Studio Manager derives guarded playtest schemas from the live MCP c
   assert.deepEqual(parameters.properties.stopInput.properties.mode.enum, ['play', 'stop']);
   assert.deepEqual(parameters.properties.captureInput.properties.format.enum, ['png']);
   assert.deepEqual(parameters.properties.consoleInput.properties.level.enum, ['all', 'error']);
-  assert.deepEqual(parameters.properties.interactions.items.properties.operation.enum, ['keyboard', 'mouse', 'navigate']);
+  assert.deepEqual(parameters.properties.interactions.items.properties.operation.enum, ['keyboard', 'mouse', 'navigate', 'capture', 'console']);
   assert.deepEqual(parameters.properties.interactions.items.properties.keyboardInput.required, ['key']);
   assert.deepEqual(parameters.properties.interactions.items.properties.mouseInput.required, ['x', 'y']);
   assert.deepEqual(parameters.properties.interactions.items.properties.navigationInput.required, ['direction']);
+  assert.deepEqual(parameters.properties.interactions.items.properties.captureInput.properties.format.enum, ['png']);
+  assert.deepEqual(parameters.properties.interactions.items.properties.consoleInput.properties.level.enum, ['all', 'error']);
 });
 
 test('Roblox Studio Manager runs Play capture console Stop in order', async () => {
@@ -239,6 +243,7 @@ test('Roblox Studio Manager runs Play capture console Stop in order', async () =
   assert.equal(fixture.jobEvents.some((event) => event.type === 'fail'), false);
   assert.deepEqual(result, {
     play: { ok: true },
+    checkpoints: [],
     viewport: { content: [{ type: 'image', data: 'fake' }] },
     console: { content: [{ type: 'text', text: 'ok' }] },
   });
@@ -357,5 +362,44 @@ test('Roblox Studio Manager rejects mismatched and oversized playtest interactio
   assert.deepEqual(overflow.calls, [
     { name: 'start_stop_play', input: { mode: 'play' } },
     { name: 'start_stop_play', input: { mode: 'stop' } },
+  ]);
+});
+
+
+test('Roblox Studio Manager returns visual and console checkpoints in timeline order', async () => {
+  const plugin = await loadPlugin();
+  const fixture = createApi();
+  await plugin.activate(fixture.api);
+
+  const result = await plugin.invoke('run_playtest', {
+    input: {
+      playInput: { mode: 'play' },
+      interactions: [
+        { operation: 'keyboard', keyboardInput: { key: 'W' } },
+        { operation: 'capture', captureInput: { format: 'png' } },
+        { operation: 'mouse', mouseInput: { x: 100, y: 200 } },
+        { operation: 'console', consoleInput: { level: 'error' } },
+      ],
+      captureInput: { format: 'png' },
+      consoleInput: { level: 'all' },
+      stopInput: { mode: 'stop' },
+    },
+  }, fixture.api) as {
+    checkpoints: Array<{ index: number; operation: string; result: unknown }>;
+  };
+
+  assert.deepEqual(fixture.calls, [
+    { name: 'start_stop_play', input: { mode: 'play' } },
+    { name: 'user_keyboard_input', input: { key: 'W' } },
+    { name: 'screen_capture', input: { format: 'png' } },
+    { name: 'user_mouse_input', input: { x: 100, y: 200 } },
+    { name: 'get_console_output', input: { level: 'error' } },
+    { name: 'screen_capture', input: { format: 'png' } },
+    { name: 'get_console_output', input: { level: 'all' } },
+    { name: 'start_stop_play', input: { mode: 'stop' } },
+  ]);
+  assert.deepEqual(result.checkpoints, [
+    { index: 1, operation: 'capture', result: { content: [{ type: 'image', data: 'fake' }] } },
+    { index: 3, operation: 'console', result: { content: [{ type: 'text', text: 'ok' }] } },
   ]);
 });
