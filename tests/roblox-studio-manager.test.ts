@@ -41,7 +41,7 @@ async function loadPlugin(): Promise<PluginRegistration> {
   return registration;
 }
 
-function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) {
+function createApi(options: { failCapture?: boolean; failStop?: boolean; structuredConsoleArtifact?: boolean } = {}) {
   const registeredTools: RegisteredTool[] = [];
   const calls: McpCall[] = [];
   const jobEvents: Array<{ type: string; value?: unknown }> = [];
@@ -175,7 +175,13 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
         calls.push({ name, input });
         if (name === 'screen_capture' && options.failCapture) throw new Error('capture failed');
         if (name === 'screen_capture') return { content: [{ type: 'artifact', artifact: { id: 'image-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'image', mimeType: 'image/png', bytes: 128, createdAt: 1 } }] };
-        if (name === 'get_console_output') return { content: [{ type: 'text', text: 'ok' }] };
+        if (name === 'get_console_output') {
+          if (options.structuredConsoleArtifact) return {
+            content: [{ type: 'text', text: 'ok' }],
+            structuredContentArtifact: { id: 'console-structured-1', pluginId: 'autocodez.roblox-studio-manager', kind: 'text', mimeType: 'application/json', bytes: 256, createdAt: 2 },
+          };
+          return { content: [{ type: 'text', text: 'ok' }] };
+        }
         return { ok: true };
       },
       async disconnect() {
@@ -520,4 +526,31 @@ test('Roblox Studio Manager externalizes direct viewport captures through observ
       },
     }],
   });
+});
+
+
+test('Roblox Studio Manager links structured observation artifacts to the playtest job', async () => {
+  const plugin = await loadPlugin();
+  const fixture = createApi({ structuredConsoleArtifact: true });
+  await plugin.activate(fixture.api);
+
+  const result = plain(await plugin.invoke('run_playtest', {
+    input: {
+      studioId: 'studio-a',
+      playInput: { mode: 'play' },
+      captureInput: { format: 'png' },
+      consoleInput: { level: 'all' },
+      stopInput: { mode: 'stop' },
+    },
+  }, fixture.api)) as {
+    artifactIds: string[];
+    console: { artifacts: Array<{ id: string }> };
+  };
+
+  assert.deepEqual(result.artifactIds, ['image-1', 'console-structured-1']);
+  assert.deepEqual(result.console.artifacts.map((artifact) => artifact.id), ['console-structured-1']);
+  assert.equal(
+    fixture.jobEvents.some((event) => event.type === 'artifact' && (event.value as { artifactId?: string }).artifactId === 'console-structured-1'),
+    true,
+  );
 });
