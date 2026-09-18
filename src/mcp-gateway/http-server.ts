@@ -151,7 +151,7 @@ export class McpGatewayHttpServer {
     try {
       const raw = await readJson(request);
       const rpc = requestObject(raw);
-      const result = this.protocol.handle(rpc, { protocolVersion });
+      const result = await this.protocol.handle(rpc, { protocolVersion });
       if (!result) {
         response.writeHead(202, { 'cache-control': 'no-store' });
         response.end();
