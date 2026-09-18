@@ -1,0 +1,142 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { OperationalLedger } from '../src/operational-ledger';
+import { OperationalLedgerRetrieval } from '../src/operational-ledger-retrieval';
+import { McpGatewayProtocol } from '../src/mcp-gateway/protocol';
+import { McpGatewayHttpServer } from '../src/mcp-gateway/http-server';
+
+function gateway() {
+  const ledger = new OperationalLedger();
+  ledger.record({
+    actor: 'runtime',
+    category: 'execution',
+    state: 'success',
+    summary: 'Execução concluída.',
+    chatId: 'chat-a',
+    runId: 'run-a',
+    timestamp: 1000,
+  });
+  const protocol = new McpGatewayProtocol(new OperationalLedgerRetrieval(ledger));
+  return new McpGatewayHttpServer(protocol);
+}
+
+async function post(endpoint: string, token: string | undefined, body: unknown, headers: Record<string, string> = {}) {
+  return fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+test('MCP Gateway HTTP server binds only to loopback and requires bearer authentication', async () => {
+  const server = gateway();
+  const info = await server.start({ bearerToken: 'a'.repeat(48) });
+  try {
+    assert.equal(info.host, '127.0.0.1');
+    assert.match(info.endpoint, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+    assert.equal(server.status().running, true);
+
+    const unauthorized = await post(info.endpoint, undefined, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    assert.equal(unauthorized.status, 401);
+
+    const wrong = await post(info.endpoint, 'b'.repeat(48), { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    assert.equal(wrong.status, 401);
+
+    const authorized = await post(info.endpoint, info.bearerToken, { jsonrpc: '2.0', id: 3, method: 'tools/list' });
+    assert.equal(authorized.status, 200);
+    const payload = await authorized.json() as { result?: { tools?: unknown[] } };
+    assert.ok(Array.isArray(payload.result?.tools));
+  } finally {
+    await server.stop();
+  }
+});
+
+test('MCP Gateway HTTP server exposes health without leaking bearer token', async () => {
+  const server = gateway();
+  const info = await server.start({ bearerToken: 'c'.repeat(48) });
+  try {
+    const response = await fetch(`http://127.0.0.1:${info.port}/health`);
+    assert.equal(response.status, 200);
+    const payload = await response.json() as Record<string, unknown>;
+    assert.equal(payload.ok, true);
+    assert.equal('bearerToken' in payload, false);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('MCP Gateway HTTP server supports modern stateless discovery and legacy initialized notification', async () => {
+  const server = gateway();
+  const info = await server.start({ bearerToken: 'd'.repeat(48) });
+  try {
+    const discovery = await post(
+      info.endpoint,
+      info.bearerToken,
+      { jsonrpc: '2.0', id: 'discover', method: 'server/discover', params: {} },
+      { 'mcp-protocol-version': '2026-07-28' },
+    );
+    assert.equal(discovery.status, 200);
+    const discoveryPayload = await discovery.json() as { result?: { protocolVersion?: string } };
+    assert.equal(discoveryPayload.result?.protocolVersion, '2026-07-28');
+
+    const notification = await post(
+      info.endpoint,
+      info.bearerToken,
+      { jsonrpc: '2.0', method: 'notifications/initialized' },
+    );
+    assert.equal(notification.status, 202);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('MCP Gateway HTTP server rejects unsupported routes, methods and media types', async () => {
+  const server = gateway();
+  const info = await server.start({ bearerToken: 'e'.repeat(48) });
+  try {
+    const missing = await fetch(`http://127.0.0.1:${info.port}/missing`);
+    assert.equal(missing.status, 404);
+
+    const method = await fetch(info.endpoint, { method: 'GET' });
+    assert.equal(method.status, 405);
+
+    const media = await fetch(info.endpoint, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${info.bearerToken}`, 'content-type': 'text/plain' },
+      body: '{}',
+    });
+    assert.equal(media.status, 415);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('MCP Gateway HTTP server returns bounded JSON-RPC parse errors', async () => {
+  const server = gateway();
+  const info = await server.start({ bearerToken: 'f'.repeat(48) });
+  try {
+    const response = await fetch(info.endpoint, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${info.bearerToken}`, 'content-type': 'application/json' },
+      body: '{not-json',
+    });
+    assert.equal(response.status, 400);
+    const payload = await response.json() as { error?: { code?: number; message?: string } };
+    assert.equal(payload.error?.code, -32700);
+    assert.match(payload.error?.message ?? '', /valid JSON/);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('MCP Gateway HTTP server stop is idempotent', async () => {
+  const server = gateway();
+  await server.start({ bearerToken: 'g'.repeat(48) });
+  assert.equal(await server.stop(), true);
+  assert.equal(await server.stop(), false);
+  assert.equal(server.status().running, false);
+});
