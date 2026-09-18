@@ -201,7 +201,26 @@ test('MCP stdio runtime rejects invalid initialize protocol versions', async () 
     if (message.method === 'initialize') reply({ protocolVersion: null, serverInfo: { name: 'broken' } });
   });
   const runtime = new PluginMcpStdioRuntime(fixture.spawn);
-  await assert.rejects(() => runtime.connect('test.plugin', { command: 'fake' }), /protocolVersion inválida/);
+  await assert.rejects(() => runtime.connect('test.plugin', { command: 'fake' }), /protocolVersion incompatível/);
+});
+
+test('MCP stdio runtime accepts the newer handshake-era protocol but rejects the modern lifecycle on initialize', async () => {
+  const legacy = fakeServer((message, reply) => {
+    if (message.method === 'initialize') reply({ protocolVersion: '2025-11-25', serverInfo: { name: 'legacy-new' } });
+  });
+  const runtime = new PluginMcpStdioRuntime(legacy.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  assert.equal(connected.protocolVersion, '2025-11-25');
+  runtime.disconnectPlugin('test.plugin');
+
+  const modern = fakeServer((message, reply) => {
+    if (message.method === 'initialize') reply({ protocolVersion: '2026-07-28', serverInfo: { name: 'modern' } });
+  });
+  const modernRuntime = new PluginMcpStdioRuntime(modern.spawn);
+  await assert.rejects(
+    () => modernRuntime.connect('test.plugin', { command: 'fake' }),
+    /protocolVersion incompatível com o transporte stdio legado/,
+  );
 });
 
 test('MCP stdio runtime rejects malformed JSON and closes the session', async () => {
