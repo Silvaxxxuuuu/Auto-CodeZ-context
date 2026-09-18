@@ -218,7 +218,7 @@ export class McpGatewayProtocol {
   listTools(): McpGatewayTool[] {
     const dynamic = this.execution?.listTools().map((tool) => ({
       name: tool.name,
-      description: tool.description,
+      description: tool.risk === 'read' ? tool.description : `${tool.description} If Auto CodeZ requires local approval, this call returns state=waiting_approval; after the user decides in Auto CodeZ, call operation_status with the returned operationId.`,
       inputSchema: structuredClone(tool.inputSchema),
       annotations: {
         readOnlyHint: tool.risk === 'read',
@@ -251,7 +251,7 @@ export class McpGatewayProtocol {
             protocolVersion: requestedVersion,
             capabilities: { tools: { listChanged: false } },
             serverInfo: { name: 'Auto CodeZ MCP Gateway', version: '0.1.0' },
-            instructions: 'Auto CodeZ exposes bounded operational retrieval tools. Mutating tools are not enabled in this gateway phase.',
+            instructions: 'Auto CodeZ exposes bounded operational retrieval tools and enabled plugin tools. Mutating plugin tools are routed through Auto CodeZ policies and may return waiting_approval; use operation_status after the local user decision.',
           },
         };
       }
