@@ -109,6 +109,9 @@ contextBridge.exposeInMainWorld('autoCodez', {
   listTools: () => invoke('agent:list-tools'),
   listApprovals: (filters?: ApprovalScope) => invoke('agent:list-approvals', requireApprovalScope(filters)),
   listExecutions: (chatId?: string) => invoke('agent:list-executions', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  mcpGatewayStatus: () => invoke('mcp-gateway:status'),
+  startMcpGateway: (input?: { port?: number }) => invoke('mcp-gateway:start', input),
+  stopMcpGateway: () => invoke('mcp-gateway:stop'),
   listOperationalLedger: (query?: {
     afterSequence?: number;
     beforeSequence?: number;
