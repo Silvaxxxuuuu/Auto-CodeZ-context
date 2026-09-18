@@ -91,17 +91,6 @@ const HIGH_LEVEL_OPERATIONS = {
 };
 
 const PLAYTEST_TOOL_ID = 'run_playtest';
-const PLAYTEST_PARAMETERS = {
-  type: 'object',
-  properties: {
-    playInput: { type: 'object', properties: {}, required: [], additionalProperties: false },
-    captureInput: { type: 'object', properties: {}, required: [], additionalProperties: false },
-    consoleInput: { type: 'object', properties: {}, required: [], additionalProperties: false },
-    stopInput: { type: 'object', properties: {}, required: [], additionalProperties: false },
-  },
-  required: [],
-  additionalProperties: false,
-};
 
 const toStrictSchema = (schema) => {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || schema.type !== 'object') return { type: 'object', properties: {}, required: [], additionalProperties: false };
@@ -139,12 +128,26 @@ async function connect(api) {
   });
   const requiredPlaytestTools = ['start_stop_play', 'screen_capture', 'get_console_output'];
   if (requiredPlaytestTools.every((name) => catalog.tools.some((tool) => tool.name === name))) {
+    const playTool = catalog.tools.find((tool) => tool.name === 'start_stop_play');
+    const captureTool = catalog.tools.find((tool) => tool.name === 'screen_capture');
+    const consoleTool = catalog.tools.find((tool) => tool.name === 'get_console_output');
+    const playSchema = toStrictSchema(playTool.inputSchema);
     tools.push({
       id: PLAYTEST_TOOL_ID,
       title: 'Run Playtest',
       description: 'Executa um ciclo de playtest no Roblox Studio, captura a viewport, lê o console e garante Stop ao finalizar.',
       risk: 'write',
-      parameters: PLAYTEST_PARAMETERS,
+      parameters: {
+        type: 'object',
+        properties: {
+          playInput: playSchema,
+          captureInput: toStrictSchema(captureTool.inputSchema),
+          consoleInput: toStrictSchema(consoleTool.inputSchema),
+          stopInput: playSchema,
+        },
+        required: ['playInput', 'stopInput'],
+        additionalProperties: false,
+      },
     });
   }
   await api.tools.register(tools);
