@@ -13,6 +13,7 @@ export type PluginCapabilityRequest = {
   id: string;
   method: string;
   input?: unknown;
+  invocationId?: string;
 };
 
 export type PluginCapabilityResponse = {
