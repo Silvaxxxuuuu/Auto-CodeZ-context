@@ -110,7 +110,9 @@ async function connect(api) {
   const connected = await api.mcp.connectRobloxStudio(15000);
   sessionId = connected.sessionId;
   const catalog = await api.mcp.listTools(sessionId, 15000);
-  if (catalog.tools.length + 1 > MAX_AGENT_TOOLS) throw new Error('O Roblox Studio expôs operações demais para o catálogo seguro do Auto CodeZ.');
+  const requiredPlaytestTools = ['start_stop_play', 'screen_capture', 'get_console_output'];
+  const canRunPlaytest = requiredPlaytestTools.every((name) => catalog.tools.some((tool) => tool.name === name));
+  if (catalog.tools.length + (canRunPlaytest ? 1 : 0) > MAX_AGENT_TOOLS) throw new Error('O Roblox Studio expôs operações demais para o catálogo seguro do Auto CodeZ.');
   const usedToolIds = new Set();
   const preferredIds = new Map(Object.entries(HIGH_LEVEL_OPERATIONS).map(([id, name]) => [name, id]));
   const tools = catalog.tools.map((tool) => {
@@ -126,8 +128,7 @@ async function connect(api) {
       parameters: toStrictSchema(tool.inputSchema),
     };
   });
-  const requiredPlaytestTools = ['start_stop_play', 'screen_capture', 'get_console_output'];
-  if (requiredPlaytestTools.every((name) => catalog.tools.some((tool) => tool.name === name))) {
+  if (canRunPlaytest) {
     const playTool = catalog.tools.find((tool) => tool.name === 'start_stop_play');
     const captureTool = catalog.tools.find((tool) => tool.name === 'screen_capture');
     const consoleTool = catalog.tools.find((tool) => tool.name === 'get_console_output');
@@ -198,6 +199,7 @@ autoCodez.register({
       if (!playTool || !captureTool || !consoleTool) throw new Error('O Roblox Studio conectado não oferece todas as operações necessárias para playtest.');
       const job = await api.jobs.begin('Playtest do Roblox Studio');
       let started = false;
+      let stopAttempted = false;
       try {
         await api.jobs.update(job.id, { progress: 0.1, activity: 'Iniciando Play...' });
         const play = await api.mcp.callTool(sessionId, playTool.name, rawInput.playInput || {}, 60000);
@@ -206,15 +208,23 @@ autoCodez.register({
         const viewport = await api.mcp.callTool(sessionId, captureTool.name, rawInput.captureInput || {}, 60000);
         await api.jobs.update(job.id, { progress: 0.75, activity: 'Lendo console...' });
         const consoleOutput = await api.mcp.callTool(sessionId, consoleTool.name, rawInput.consoleInput || {}, 60000);
+        await api.jobs.update(job.id, { progress: 0.9, activity: 'Encerrando Play...' });
+        stopAttempted = true;
+        await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000);
         await api.jobs.complete(job.id, 'Playtest concluído.');
         return { play, viewport, console: consoleOutput };
       } catch (error) {
-        await api.jobs.fail(job.id, error instanceof Error ? error.message : String(error));
-        throw error;
-      } finally {
-        if (started) {
-          try { await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000); } catch {}
+        let failure = error instanceof Error ? error.message : String(error);
+        if (started && !stopAttempted) {
+          stopAttempted = true;
+          try {
+            await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000);
+          } catch (stopError) {
+            failure += '; também não foi possível encerrar Play: ' + (stopError instanceof Error ? stopError.message : String(stopError));
+          }
         }
+        await api.jobs.fail(job.id, failure);
+        throw new Error(failure);
       }
     }
     const tool = studioTools.get(method);
