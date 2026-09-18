@@ -250,7 +250,7 @@ test('Roblox Studio Manager runs Play capture console Stop in order', async () =
     },
   }, fixture.api));
 
-  assert.deepEqual(fixture.calls, [
+  assert.deepEqual(plain(fixture.calls), [
     { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
     { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
     { name: 'get_console_output', input: { level: 'all', studio_id: 'studio-a' } },
@@ -289,7 +289,7 @@ test('Roblox Studio Manager guarantees Stop when a playtest observation fails', 
     },
   }, fixture.api), /capture failed/);
 
-  assert.deepEqual(fixture.calls, [
+  assert.deepEqual(plain(fixture.calls), [
     { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
     { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
     { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
@@ -314,7 +314,7 @@ test('Roblox Studio Manager does not complete a playtest when Stop fails', async
     },
   }, fixture.api), /stop failed/);
 
-  assert.deepEqual(fixture.calls, [
+  assert.deepEqual(plain(fixture.calls), [
     { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
     { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
     { name: 'get_console_output', input: { level: 'all', studio_id: 'studio-a' } },
@@ -345,7 +345,7 @@ test('Roblox Studio Manager executes bounded playtest interactions in declared o
     },
   }, fixture.api);
 
-  assert.deepEqual(fixture.calls, [
+  assert.deepEqual(plain(fixture.calls), [
     { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
     { name: 'user_keyboard_input', input: { key: 'W', studio_id: 'studio-a' } },
     { name: 'user_mouse_input', input: { x: 320, y: 180, studio_id: 'studio-a' } },
@@ -371,7 +371,7 @@ test('Roblox Studio Manager rejects mismatched and oversized playtest interactio
       stopInput: { mode: 'stop' },
     },
   }, fixture.api), /Payload da interação de playtest inválido/);
-  assert.deepEqual(fixture.calls, [
+  assert.deepEqual(plain(fixture.calls), [
     { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
     { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
   ]);
@@ -389,7 +389,7 @@ test('Roblox Studio Manager rejects mismatched and oversized playtest interactio
       stopInput: { mode: 'stop' },
     },
   }, overflow.api), /limite de 24 interações/);
-  assert.deepEqual(overflow.calls, [
+  assert.deepEqual(plain(overflow.calls), [
     { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
     { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
   ]);
@@ -419,7 +419,7 @@ test('Roblox Studio Manager returns visual and console checkpoints in timeline o
     checkpoints: Array<{ index: number; operation: string; artifacts: unknown[]; text?: string }>;
   };
 
-  assert.deepEqual(fixture.calls, [
+  assert.deepEqual(plain(fixture.calls), [
     { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
     { name: 'user_keyboard_input', input: { key: 'W', studio_id: 'studio-a' } },
     { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
@@ -501,7 +501,7 @@ test('Roblox Studio Manager externalizes direct viewport captures through observ
     input: { format: 'png', studio_id: 'studio-a' },
   }, fixture.api));
 
-  assert.deepEqual(fixture.calls, [
+  assert.deepEqual(plain(fixture.calls), [
     { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
   ]);
   assert.deepEqual(result, {
