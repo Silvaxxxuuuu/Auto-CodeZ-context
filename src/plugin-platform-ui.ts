@@ -195,7 +195,7 @@ async function savePermissions(pluginId: string, selected: string[]): Promise<vo
 }
 async function handleSandboxCall(call: SandboxCall): Promise<void> {
   if (!bridge || !sandboxes || !call?.id || !call.pluginId || !call.method) return;
-  try { if (!sandboxes.has(call.pluginId)) throw new Error(`Plugin '${call.pluginId}' não está ativo no sandbox.`); const value = await sandboxes.call(call.pluginId, call.method, call.input); await bridge.respondSandboxCall({ id: call.id, value }); }
+  try { if (!sandboxes.has(call.pluginId)) throw new Error(`Plugin '${call.pluginId}' não está ativo no sandbox.`); const value = await sandboxes.call(call.pluginId, call.method, call.input, call.id); await bridge.respondSandboxCall({ id: call.id, value }); }
   catch (error) { await bridge.respondSandboxCall({ id: call.id, error: (error instanceof Error ? error.message : String(error)).slice(0, 2048) }).catch((): undefined => undefined); }
 }
 function installStyles(): void {
