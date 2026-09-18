@@ -104,6 +104,22 @@ test('MCP stdio runtime aggregates paginated tool catalogs', async () => {
   runtime.disconnectPlugin('test.plugin');
 });
 
+test('MCP stdio runtime bounds aggregate tool catalogs across pagination', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') return reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+    if (message.method === 'tools/list') {
+      const cursor = Number((message.params as { cursor?: string } | undefined)?.cursor ?? '0');
+      const tools = Array.from({ length: 64 }, (_, index) => ({ name: 'tool_' + cursor + '_' + index, inputSchema: { type: 'object' } }));
+      return reply({ tools, nextCursor: cursor < 4 ? String(cursor + 1) : undefined });
+    }
+    reply({});
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  await assert.rejects(() => runtime.listTools('test.plugin', connected.sessionId), /limite de 256 tools/);
+  runtime.disconnectPlugin('test.plugin');
+});
+
 test('MCP stdio runtime rejects duplicate tools across pages', async () => {
   const fixture = fakeServer((message, reply) => {
     if (message.method === 'initialize') return reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
