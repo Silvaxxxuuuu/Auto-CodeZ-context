@@ -133,6 +133,29 @@ test('MCP stdio sessions are isolated by plugin and fail closed after server exi
   await assert.rejects(runtime.listTools('plugin.a', connected.sessionId), /não encontrada/i);
 });
 
+test('MCP stdio runtime rejects malformed JSON and closes the session', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  fixture.server.child.stdout.write('{not-json}\n');
+  await new Promise((resolve) => setImmediate(resolve));
+  await assert.rejects(() => runtime.listTools('test.plugin', connected.sessionId), /não encontrada|encerrada/i);
+});
+
+test('MCP stdio runtime rejects an oversized single message without penalizing prior complete messages', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  fixture.server.child.stdout.write('\n'.repeat(16));
+  fixture.server.child.stdout.write('x'.repeat(4 * 1024 * 1024 + 1));
+  await new Promise((resolve) => setImmediate(resolve));
+  await assert.rejects(() => runtime.listTools('test.plugin', connected.sessionId), /não encontrada|encerrada/i);
+});
+
 test('MCP stdio transport rejects unsafe command and bounded input before spawning', async () => {
   let spawns = 0;
   const runtime = new PluginMcpStdioRuntime((() => { spawns += 1; throw new Error('should not spawn'); }) as McpSpawn);
