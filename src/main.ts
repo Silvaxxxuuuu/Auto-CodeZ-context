@@ -686,15 +686,10 @@ ipcMain.handle('mcp-tunnel:status', async () => ({
   ...mcpTunnelRuntime.status(),
   credentialAvailable: Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()),
 }));
-ipcMain.handle('mcp-tunnel:doctor', async (_event, input: unknown) => {
-  const value = input === undefined ? {} : requireObject(input, 'Configuração do Secure MCP Tunnel');
-  const executable = value.executable === undefined ? undefined : requireNonEmptyString(value.executable, 'Executável tunnel-client');
-  return mcpTunnelRuntime.doctor(executable);
-});
+ipcMain.handle('mcp-tunnel:doctor', async () => mcpTunnelRuntime.doctor());
 ipcMain.handle('mcp-tunnel:start', async (_event, input: unknown) => {
   const value = requireObject(input, 'Configuração do Secure MCP Tunnel');
   const tunnelId = requireIdentifier(value.tunnelId, 'Tunnel ID');
-  const executable = value.executable === undefined ? undefined : requireNonEmptyString(value.executable, 'Executável tunnel-client');
   const controlPlaneApiKey = value.controlPlaneApiKey === undefined
     ? undefined
     : requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane');
@@ -703,7 +698,6 @@ ipcMain.handle('mcp-tunnel:start', async (_event, input: unknown) => {
     tunnelId,
     localEndpoint: binding.endpoint,
     localBearerToken: binding.bearerToken,
-    ...(executable ? { executable } : {}),
     ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
   });
   operationalLedger.record({
