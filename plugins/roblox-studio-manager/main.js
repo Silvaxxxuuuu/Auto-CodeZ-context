@@ -19,6 +19,7 @@ const TOOL_RISK = {
 
 let sessionId = null;
 let studioTools = new Map();
+let studioState = { connected: false, server: null, tools: 0, instances: [] };
 
 const normalizeToolId = (name) => 'studio_' + name.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
 
@@ -39,12 +40,21 @@ async function connect(api) {
       : { type: 'object', additionalProperties: true },
   }));
   await api.tools.register(tools);
-  await api.settings.set('lastServer', {
-    name: connected.serverName || 'Roblox Studio',
-    version: connected.serverVersion || null,
-    protocolVersion: connected.protocolVersion || null,
+  studioState = {
+    connected: true,
+    server: { name: connected.serverName || 'Roblox Studio', version: connected.serverVersion || null, protocolVersion: connected.protocolVersion || null },
     tools: tools.length,
-  });
+    instances: [],
+  };
+  const listStudios = catalog.tools.find((tool) => tool.name === 'list_roblox_studios');
+  if (listStudios) {
+    try {
+      const listed = await api.mcp.callTool(sessionId, listStudios.name, {}, 15000);
+      studioState.instances = listed;
+    } catch {}
+  }
+  await api.settings.set('lastServer', studioState.server);
+  await api.settings.set('studioStatus', studioState);
   await api.activity.publish('Roblox Studio conectado.', 'completed');
 }
 
@@ -55,6 +65,8 @@ autoCodez.register({
     } catch (error) {
       sessionId = null;
       studioTools.clear();
+      studioState = { connected: false, server: null, tools: 0, instances: [] };
+      await api.settings.set('studioStatus', studioState);
       await api.activity.publish('Abra o Roblox Studio para conectar.', 'waiting');
     }
   },
@@ -73,6 +85,8 @@ autoCodez.register({
     if (sessionId) await api.mcp.disconnect(sessionId);
     sessionId = null;
     studioTools.clear();
+    studioState = { connected: false, server: null, tools: 0, instances: [] };
+    await api.settings.set('studioStatus', studioState);
     await api.activity.clear();
   },
 });
