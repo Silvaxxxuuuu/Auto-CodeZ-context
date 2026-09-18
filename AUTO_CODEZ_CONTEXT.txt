@@ -3391,3 +3391,237 @@ Próxima ordem:
 Não enviar base64 bruto de screenshots para histórico/tool text. A futura ponte multimodal deve ler artifacts pelo core e anexá-los ao request do provider de forma controlada, apenas quando o provider/modelo suportar vision.
 
 PR #9 permanece draft/open/unmerged.
+
+
+------------------------------------------------------------
+24.30. OPERATIONAL LEDGER AUTORITATIVO — VALIDADO
+------------------------------------------------------------
+
+BASELINE VALIDADO
+
+Baseline funcional:
+20d6ae4250a7cb1c4a8277a6be57167c81f6eae1
+test(plugins): cover host-owned sandbox invocation ids
+
+Workflows exatos:
+- Validate Auto CodeZ #35352701102: SUCCESS.
+- Visual Auto CodeZ #35352701072: SUCCESS.
+
+PR #9 permanece OPEN, DRAFT e NÃO MESCLADO.
+
+OBJETIVO
+
+Foi criada uma camada separada da antiga ExecutionTimeline para representar fatos operacionais reais e duráveis sem inferir comportamento a partir de texto do modelo.
+
+ExecutionTimeline continua responsável pelo lifecycle resumido das runs.
+OperationalLedger passa a representar eventos detalhados e consultáveis de:
+- execution;
+- tool;
+- approval;
+- plugin;
+- job;
+- artifact;
+- test;
+- web;
+- system.
+
+MODELO DE EVENTO
+
+OperationalLedgerEvent contém identidade e causalidade estruturadas:
+- eventId;
+- sequence monotônica;
+- timestamp;
+- actor;
+- category;
+- state;
+- summary;
+- chatId;
+- runId;
+- projectId;
+- sessionId;
+- providerId;
+- clientId;
+- pluginId;
+- toolCallId;
+- toolName;
+- jobId;
+- causationId;
+- artifactIds;
+- resources;
+- sourceRefs;
+- diff { files, addedLines, removedLines };
+- progress;
+- durationMs;
+- error sanitizado;
+- details pequenos e tipados.
+
+Não guardar prompts completos, tokens, API keys, base64 de imagens, stdout sem limite ou conteúdo inteiro de arquivos no ledger.
+
+LIMITES E SEGURANÇA
+
+- máximo nominal de 5.000 eventos;
+- máximo de 128 KB por evento;
+- orçamento total retido de 16 MB;
+- arrays de artifacts/resources/sources possuem limites próprios;
+- textos são bounded;
+- formas comuns de Bearer/API key/token/secret/password/basic-auth são redigidas antes da retenção;
+- retornos são clonados defensivamente;
+- listeners não podem interromper a operação observada.
+
+PERSISTÊNCIA
+
+Novo arquivo:
+operational-ledger.json
+
+Esse arquivo foi adicionado à allowlist SENSITIVE_JSON_FILES do LocalStorage:
+- persistência exige safeStorage;
+- gravação em repouso é criptografada;
+- indisponibilidade do armazenamento seguro falha fechada;
+- fila de persistência coalesce snapshots rápidos e grava a visão mais recente, evitando uma write criptografada por evento.
+
+RESTORE
+
+Restore:
+- descarta eventos inválidos;
+- preserva sequence persistida;
+- deduplica eventId e sequence;
+- respeita limite por evento;
+- resequencia eventos legítimos produzidos durante bootstrap antes da conclusão do restore;
+- não reutiliza sequence após pruning.
+
+PAGINAÇÃO E FILTROS
+
+OperationalLedger.query() suporta:
+- afterSequence;
+- beforeSequence;
+- direction forward/backward;
+- limit bounded;
+- chatId;
+- runId;
+- projectId;
+- sessionId;
+- pluginId;
+- toolCallId;
+- jobId;
+- artifactId;
+- category;
+- state.
+
+Preload oferece leitura paginada e stream incremental por operational-ledger:event.
+
+SESSION RETRIEVAL FOUNDATION
+
+Novo OperationalLedgerRetrieval expõe projeções controladas que serão usadas pelo futuro MCP Gateway:
+- sessionSummary;
+- recentEvents;
+- changes;
+- errors;
+- artifacts;
+- sources.
+
+Session summary agrega:
+- número de eventos;
+- first/last sequence;
+- startedAt/updatedAt;
+- lastState;
+- categorias;
+- tools e contagem de falhas;
+- resources;
+- artifactIds;
+- sourceRefs;
+- erros recentes;
+- diff agregado.
+
+PLUGIN/JOB/ARTIFACT OBSERVABILITY
+
+PluginActivityRuntime, PluginJobRuntime e PluginArtifactRuntime alimentam o ledger a partir de fatos do runtime.
+
+Artifact creation é observada na própria boundary do PluginArtifactRuntime; não depende de um job anexar o artifact. Isso cobre também capture_viewport direto.
+
+Agent ActivityRuntime alimenta:
+- tool/test/web/execution;
+- resources derivados de mudanças estruturadas;
+- diff stats;
+- sourceRefs;
+- metadata pequena de command/Git;
+- erros.
+
+TOOL CALL CAUSATION
+
+PluginToolExecutionContext agora transporta toolCallId autoritativo.
+
+O host cria um invocationId por execução de tool do plugin.
+
+Cadeia desejada:
+Agent toolCall
+→ plugin host invocationId
+→ sandbox call
+→ capability request
+→ job/artifact/activity
+→ completion/failure da tool.
+
+invocationId:
+- é criado pelo host;
+- não é escolhido pelo plugin;
+- é validado e bounded;
+- IDs ativos não podem colidir;
+- o sandbox preserva esse ID;
+- capabilities emitidas dentro da invocação carregam esse ID;
+- processo principal verifica se ele continua ativo e pertence ao mesmo plugin;
+- capability atrasada ou falsificada falha fechada.
+
+AsyncLocalStorage no processo principal associa capabilities concorrentes ao contexto autoritativo:
+- chatId;
+- runId;
+- projectId;
+- toolCallId.
+
+Isso impede mistura de causalidade quando o mesmo plugin é usado simultaneamente por várias runs.
+
+CONTEXT EVENT
+
+Ao iniciar uma run, o main runtime registra contexto autoritativo pequeno:
+- chatId;
+- runId;
+- projectId;
+- providerId;
+- clientId=autocodez-chat;
+- model;
+- permission level;
+- intelligence.
+
+Não registrar prompt, API key nem conteúdo de projeto nesse evento.
+
+TESTES
+
+Cobertura adicionada/expandida:
+- ordering;
+- filtering;
+- pagination;
+- defensive clones;
+- secret redaction;
+- restore/resequence;
+- encrypted persistence;
+- fail-closed sem safeStorage;
+- persistence coalescing;
+- session retrieval projections;
+- provenance/resource/diff metadata;
+- source propagation;
+- artifact observers;
+- toolCallId no PluginToolCatalog context;
+- host-owned sandbox invocation id;
+- duplicate active invocation rejection;
+- malformed/control-character invocation id rejection.
+
+PRÓXIMA ORDEM
+
+1. MCP Mode read-only como projeção do OperationalLedger;
+2. live run header;
+3. filtros/timeline/progressive disclosure;
+4. artifact strip e erros;
+5. approvals inline;
+6. somente depois Auto CodeZ MCP Gateway atrás de AgentRuntime/policies;
+7. Session Capsule/handoff;
+8. ponte multimodal controlada para artifacts visuais.
+
+MCP Mode continua SEM composer próprio. O cérebro/conversa permanece no cliente externo; Auto CodeZ mostra execução, observabilidade, aprovações e resultados.
