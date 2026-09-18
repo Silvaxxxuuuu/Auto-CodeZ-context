@@ -14,6 +14,7 @@ type PluginSummary = {
   grantedPermissions: string[];
   missingPermissions: string[];
   hasMain: boolean;
+  builtIn: boolean;
   health: PluginHealth;
   failureReason?: string;
 };
@@ -97,13 +98,13 @@ function detailView(plugin: PluginSummary): string {
         <section class="plugin-detail-hero">
           <div class="plugin-detail-icon" aria-hidden="true"></div>
           <div class="plugin-detail-identity">
-            <div class="plugin-detail-eyebrow">PLUGIN INSTALADO</div>
+            <div class="plugin-detail-eyebrow">${plugin.builtIn ? 'PLUGIN INTEGRADO' : 'PLUGIN INSTALADO'}</div>
             <h1>${escapeHtml(plugin.name)}</h1>
             <div class="plugin-detail-byline"><span>${escapeHtml(publisher)}</span><span>v${escapeHtml(plugin.version)}</span><code>${escapeHtml(plugin.id)}</code></div>
             <p>${escapeHtml(plugin.description || 'O autor não forneceu uma descrição para este plugin.')}</p>
             <div class="plugin-detail-status-row"><span class="plugin-platform-status ${escapeHtml(status)}">${escapeHtml(plugin.state === 'enabled' ? (healthLabels[plugin.health.state] || plugin.health.state) : (stateLabels[plugin.state] || status))}</span>${work ? `<span class="plugin-detail-work">${escapeHtml(work)}</span>` : ''}</div>
           </div>
-          <div class="plugin-detail-actions"><button class="plugin-platform-button" data-plugin-permissions="${escapeHtml(plugin.id)}">Configurar</button>${plugin.state === 'enabled' ? `<button class="plugin-platform-button secondary" data-plugin-disable="${escapeHtml(plugin.id)}">Desativar</button>` : canEnable ? `<button class="plugin-platform-button secondary" data-plugin-enable="${escapeHtml(plugin.id)}">Ativar</button>` : ''}<button class="plugin-platform-button danger" data-plugin-uninstall="${escapeHtml(plugin.id)}">Desinstalar</button></div>
+          <div class="plugin-detail-actions"><button class="plugin-platform-button" data-plugin-permissions="${escapeHtml(plugin.id)}">Configurar</button>${plugin.state === 'enabled' ? `<button class="plugin-platform-button secondary" data-plugin-disable="${escapeHtml(plugin.id)}">Desativar</button>` : canEnable ? `<button class="plugin-platform-button secondary" data-plugin-enable="${escapeHtml(plugin.id)}">Ativar</button>` : ''}${plugin.builtIn ? '' : `<button class="plugin-platform-button danger" data-plugin-uninstall="${escapeHtml(plugin.id)}">Desinstalar</button>`}</div>
         </section>
         ${plugin.failureReason ? `<div class="plugin-platform-error plugin-detail-alert"><strong>Falha registrada</strong><span>${escapeHtml(plugin.failureReason)}</span></div>` : ''}
         <div class="plugin-detail-grid">
