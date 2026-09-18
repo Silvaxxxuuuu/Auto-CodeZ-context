@@ -77,6 +77,7 @@ const api = Object.freeze({
   jobs: Object.freeze({
     begin: (label) => request('jobs.begin', { label }),
     update: (jobId, update) => request('jobs.update', { jobId, ...update }),
+    attachArtifact: (jobId, artifactId) => request('jobs.attach-artifact', { jobId, artifactId }),
     complete: (jobId, activity) => request('jobs.complete', { jobId, activity }),
     fail: (jobId, error) => request('jobs.fail', { jobId, error }),
     cancel: (jobId) => request('jobs.cancel', { jobId }),
