@@ -54,8 +54,9 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
           type: 'object',
           properties: {
             mode: { type: 'string', enum: ['play', 'stop'] },
+            studio_id: { type: 'string' },
           },
-          required: ['mode'],
+          required: ['mode', 'studio_id'],
           additionalProperties: false,
         },
       },
@@ -66,8 +67,9 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
           type: 'object',
           properties: {
             format: { type: 'string', enum: ['png'] },
+            studio_id: { type: 'string' },
           },
-          required: [] as string[],
+          required: ['studio_id'],
           additionalProperties: false,
         },
       },
@@ -78,8 +80,9 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
           type: 'object',
           properties: {
             level: { type: 'string', enum: ['all', 'error'] },
+            studio_id: { type: 'string' },
           },
-          required: [] as string[],
+          required: ['studio_id'],
           additionalProperties: false,
         },
       },
@@ -88,8 +91,8 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
         description: 'Send keyboard input.',
         inputSchema: {
           type: 'object',
-          properties: { key: { type: 'string' } },
-          required: ['key'],
+          properties: { key: { type: 'string' }, studio_id: { type: 'string' } },
+          required: ['key', 'studio_id'],
           additionalProperties: false,
         },
       },
@@ -98,8 +101,8 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
         description: 'Send mouse input.',
         inputSchema: {
           type: 'object',
-          properties: { x: { type: 'number' }, y: { type: 'number' } },
-          required: ['x', 'y'],
+          properties: { x: { type: 'number' }, y: { type: 'number' }, studio_id: { type: 'string' } },
+          required: ['x', 'y', 'studio_id'],
           additionalProperties: false,
         },
       },
@@ -108,8 +111,8 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
         description: 'Navigate the character.',
         inputSchema: {
           type: 'object',
-          properties: { direction: { type: 'string' } },
-          required: ['direction'],
+          properties: { direction: { type: 'string' }, studio_id: { type: 'string' } },
+          required: ['direction', 'studio_id'],
           additionalProperties: false,
         },
       },
@@ -216,7 +219,8 @@ test('Roblox Studio Manager derives guarded playtest schemas from the live MCP c
     additionalProperties: boolean;
   };
 
-  assert.deepEqual(parameters.required, ['playInput', 'stopInput']);
+  assert.deepEqual(parameters.required, ['studioId', 'playInput', 'stopInput']);
+  assert.equal((parameters.properties as Record<string, unknown>).studioId !== undefined, true);
   assert.equal(parameters.additionalProperties, false);
   assert.deepEqual(parameters.properties.playInput.required, ['mode']);
   assert.deepEqual(parameters.properties.playInput.properties.mode.enum, ['play', 'stop']);
@@ -238,6 +242,7 @@ test('Roblox Studio Manager runs Play capture console Stop in order', async () =
 
   const result = plain(await plugin.invoke('run_playtest', {
     input: {
+      studioId: 'studio-a',
       playInput: { mode: 'play' },
       captureInput: { format: 'png' },
       consoleInput: { level: 'all' },
@@ -246,10 +251,10 @@ test('Roblox Studio Manager runs Play capture console Stop in order', async () =
   }, fixture.api));
 
   assert.deepEqual(fixture.calls, [
-    { name: 'start_stop_play', input: { mode: 'play' } },
-    { name: 'screen_capture', input: { format: 'png' } },
-    { name: 'get_console_output', input: { level: 'all' } },
-    { name: 'start_stop_play', input: { mode: 'stop' } },
+    { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
+    { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
+    { name: 'get_console_output', input: { level: 'all', studio_id: 'studio-a' } },
+    { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
   ]);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'artifact' && (event.value as { artifactId?: string }).artifactId === 'image-1'), true);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'complete'), true);
@@ -276,6 +281,7 @@ test('Roblox Studio Manager guarantees Stop when a playtest observation fails', 
 
   await assert.rejects(() => plugin.invoke('run_playtest', {
     input: {
+      studioId: 'studio-a',
       playInput: { mode: 'play' },
       captureInput: { format: 'png' },
       consoleInput: { level: 'all' },
@@ -284,9 +290,9 @@ test('Roblox Studio Manager guarantees Stop when a playtest observation fails', 
   }, fixture.api), /capture failed/);
 
   assert.deepEqual(fixture.calls, [
-    { name: 'start_stop_play', input: { mode: 'play' } },
-    { name: 'screen_capture', input: { format: 'png' } },
-    { name: 'start_stop_play', input: { mode: 'stop' } },
+    { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
+    { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
+    { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
   ]);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'fail'), true);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'complete'), false);
@@ -300,6 +306,7 @@ test('Roblox Studio Manager does not complete a playtest when Stop fails', async
 
   await assert.rejects(() => plugin.invoke('run_playtest', {
     input: {
+      studioId: 'studio-a',
       playInput: { mode: 'play' },
       captureInput: { format: 'png' },
       consoleInput: { level: 'all' },
@@ -308,10 +315,10 @@ test('Roblox Studio Manager does not complete a playtest when Stop fails', async
   }, fixture.api), /stop failed/);
 
   assert.deepEqual(fixture.calls, [
-    { name: 'start_stop_play', input: { mode: 'play' } },
-    { name: 'screen_capture', input: { format: 'png' } },
-    { name: 'get_console_output', input: { level: 'all' } },
-    { name: 'start_stop_play', input: { mode: 'stop' } },
+    { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
+    { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
+    { name: 'get_console_output', input: { level: 'all', studio_id: 'studio-a' } },
+    { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
   ]);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'fail'), true);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'complete'), false);
@@ -325,6 +332,7 @@ test('Roblox Studio Manager executes bounded playtest interactions in declared o
 
   await plugin.invoke('run_playtest', {
     input: {
+      studioId: 'studio-a',
       playInput: { mode: 'play' },
       interactions: [
         { operation: 'keyboard', keyboardInput: { key: 'W' } },
@@ -338,13 +346,13 @@ test('Roblox Studio Manager executes bounded playtest interactions in declared o
   }, fixture.api);
 
   assert.deepEqual(fixture.calls, [
-    { name: 'start_stop_play', input: { mode: 'play' } },
-    { name: 'user_keyboard_input', input: { key: 'W' } },
-    { name: 'user_mouse_input', input: { x: 320, y: 180 } },
-    { name: 'character_navigation', input: { direction: 'forward' } },
-    { name: 'screen_capture', input: { format: 'png' } },
-    { name: 'get_console_output', input: { level: 'all' } },
-    { name: 'start_stop_play', input: { mode: 'stop' } },
+    { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
+    { name: 'user_keyboard_input', input: { key: 'W', studio_id: 'studio-a' } },
+    { name: 'user_mouse_input', input: { x: 320, y: 180, studio_id: 'studio-a' } },
+    { name: 'character_navigation', input: { direction: 'forward', studio_id: 'studio-a' } },
+    { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
+    { name: 'get_console_output', input: { level: 'all', studio_id: 'studio-a' } },
+    { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
   ]);
 });
 
@@ -355,6 +363,7 @@ test('Roblox Studio Manager rejects mismatched and oversized playtest interactio
 
   await assert.rejects(() => plugin.invoke('run_playtest', {
     input: {
+      studioId: 'studio-a',
       playInput: { mode: 'play' },
       interactions: [{ operation: 'keyboard', mouseInput: { x: 1, y: 2 } }],
       captureInput: {},
@@ -363,8 +372,8 @@ test('Roblox Studio Manager rejects mismatched and oversized playtest interactio
     },
   }, fixture.api), /Payload da interação de playtest inválido/);
   assert.deepEqual(fixture.calls, [
-    { name: 'start_stop_play', input: { mode: 'play' } },
-    { name: 'start_stop_play', input: { mode: 'stop' } },
+    { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
+    { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
   ]);
 
   const overflow = createApi();
@@ -372,6 +381,7 @@ test('Roblox Studio Manager rejects mismatched and oversized playtest interactio
   await secondPlugin.activate(overflow.api);
   await assert.rejects(() => secondPlugin.invoke('run_playtest', {
     input: {
+      studioId: 'studio-a',
       playInput: { mode: 'play' },
       interactions: Array.from({ length: 25 }, () => ({ operation: 'keyboard', keyboardInput: { key: 'W' } })),
       captureInput: {},
@@ -380,8 +390,8 @@ test('Roblox Studio Manager rejects mismatched and oversized playtest interactio
     },
   }, overflow.api), /limite de 24 interações/);
   assert.deepEqual(overflow.calls, [
-    { name: 'start_stop_play', input: { mode: 'play' } },
-    { name: 'start_stop_play', input: { mode: 'stop' } },
+    { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
+    { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
   ]);
 });
 
@@ -393,6 +403,7 @@ test('Roblox Studio Manager returns visual and console checkpoints in timeline o
 
   const result = plain(await plugin.invoke('run_playtest', {
     input: {
+      studioId: 'studio-a',
       playInput: { mode: 'play' },
       interactions: [
         { operation: 'keyboard', keyboardInput: { key: 'W' } },
@@ -409,14 +420,14 @@ test('Roblox Studio Manager returns visual and console checkpoints in timeline o
   };
 
   assert.deepEqual(fixture.calls, [
-    { name: 'start_stop_play', input: { mode: 'play' } },
-    { name: 'user_keyboard_input', input: { key: 'W' } },
-    { name: 'screen_capture', input: { format: 'png' } },
-    { name: 'user_mouse_input', input: { x: 100, y: 200 } },
-    { name: 'get_console_output', input: { level: 'error' } },
-    { name: 'screen_capture', input: { format: 'png' } },
-    { name: 'get_console_output', input: { level: 'all' } },
-    { name: 'start_stop_play', input: { mode: 'stop' } },
+    { name: 'start_stop_play', input: { mode: 'play', studio_id: 'studio-a' } },
+    { name: 'user_keyboard_input', input: { key: 'W', studio_id: 'studio-a' } },
+    { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
+    { name: 'user_mouse_input', input: { x: 100, y: 200, studio_id: 'studio-a' } },
+    { name: 'get_console_output', input: { level: 'error', studio_id: 'studio-a' } },
+    { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
+    { name: 'get_console_output', input: { level: 'all', studio_id: 'studio-a' } },
+    { name: 'start_stop_play', input: { mode: 'stop', studio_id: 'studio-a' } },
   ]);
   assert.equal(fixture.jobEvents.filter((event) => event.type === 'artifact').length, 2);
   assert.deepEqual(result.checkpoints, [
@@ -450,6 +461,7 @@ test('Roblox Studio Manager keeps maximum checkpoint output below the agent tool
 
   const result = plain(await plugin.invoke('run_playtest', {
     input: {
+      studioId: 'studio-a',
       playInput: { mode: 'play' },
       interactions: Array.from({ length: 24 }, () => ({ operation: 'console', consoleInput: { level: 'all' } })),
       captureInput: { format: 'png' },
