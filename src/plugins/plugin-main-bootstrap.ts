@@ -53,8 +53,6 @@ async function createPluginService(): Promise<PluginService> {
   const service = new PluginService(pluginsRoot, new PluginStateStore(storage), settings, builtInPluginsRoot);
   await service.init();
   const broker = service.getBroker();
-  const jobArtifacts = new Map<string, Set<string>>();
-
   broker.getActivityRuntime().subscribe((activity) => {
     broadcast('plugins:activity', activity);
     operationalLedger.record({
@@ -81,32 +79,23 @@ async function createPluginService(): Promise<PluginService> {
       error: job.error,
       timestamp: job.updatedAt,
     });
+  });
 
-    const previous = jobArtifacts.get(job.id) ?? new Set<string>();
-    const current = new Set(job.artifactIds ?? []);
-    for (const artifactId of current) {
-      if (previous.has(artifactId)) continue;
-      const artifact = broker.getArtifactRuntime().get(job.pluginId, artifactId);
-      operationalLedger.record({
-        actor: 'plugin',
-        category: 'artifact',
-        state: 'success',
-        summary: artifact ? `Artifact ${artifact.kind} produzido pelo job.` : 'Artifact produzido pelo job.',
-        pluginId: job.pluginId,
-        jobId: job.id,
-        causationId: job.id,
-        artifactIds: [artifactId],
-        ...(artifact ? {
-          details: {
-            kind: artifact.kind,
-            mimeType: artifact.mimeType,
-            bytes: artifact.bytes,
-          },
-        } : {}),
-        timestamp: job.updatedAt,
-      });
-    }
-    jobArtifacts.set(job.id, current);
+  broker.getArtifactRuntime().subscribe((artifact) => {
+    operationalLedger.record({
+      actor: 'plugin',
+      category: 'artifact',
+      state: 'success',
+      summary: `Artifact ${artifact.kind} produzido.`,
+      pluginId: artifact.pluginId,
+      artifactIds: [artifact.id],
+      details: {
+        kind: artifact.kind,
+        mimeType: artifact.mimeType,
+        bytes: artifact.bytes,
+      },
+      timestamp: artifact.createdAt,
+    });
   });
 
   pluginToolCatalog.configureExecutor(async (pluginId, toolId, input, context) => {
