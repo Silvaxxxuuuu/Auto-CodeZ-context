@@ -91,6 +91,7 @@ export class PluginCapabilityBroker {
     try {
       if (!REQUEST_ID_PATTERN.test(id)) throw new Error('ID da solicitação de plugin inválido.');
       if (!METHOD_PATTERN.test(request.method)) throw new Error('Método de capability inválido.');
+      if (request.invocationId !== undefined && !REQUEST_ID_PATTERN.test(request.invocationId)) throw new Error('ID da invocação do plugin inválido.');
       assertSerializableSize(request.input ?? null, MAX_REQUEST_BYTES, 'Payload da solicitação');
       const plugin = this.registry.get(pluginId);
       if (!plugin || plugin.state !== 'enabled') throw new Error(`Plugin '${pluginId}' não está habilitado.`);
