@@ -65,6 +65,8 @@ const CATEGORIES = new Set<OperationalLedgerCategory>(['execution', 'tool', 'app
 const STATES = new Set<OperationalLedgerState>(['pending', 'running', 'waiting', 'success', 'failed', 'cancelled']);
 
 const MAX_EVENTS = 5000;
+const MAX_EVENT_BYTES = 128 * 1024;
+const MAX_LEDGER_BYTES = 16 * 1024 * 1024;
 const MAX_SUMMARY = 512;
 const MAX_ERROR = 2048;
 const MAX_ID = 160;
@@ -181,10 +183,18 @@ export class OperationalLedger {
 
   restore(events: OperationalLedgerEvent[]): void {
     if (!Array.isArray(events)) throw new Error('Ledger persistido inválido.');
+    const seenIds = new Set<string>();
+    const seenSequences = new Set<number>();
     const restored = events
       .filter(isOperationalLedgerEvent)
       .sort((left, right) => left.sequence - right.sequence)
-      .filter((event, index, list) => index === 0 || event.eventId !== list[index - 1].eventId)
+      .filter((event) => {
+        if (seenIds.has(event.eventId) || seenSequences.has(event.sequence)) return false;
+        if (Buffer.byteLength(JSON.stringify(event), 'utf8') > MAX_EVENT_BYTES) return false;
+        seenIds.add(event.eventId);
+        seenSequences.add(event.sequence);
+        return true;
+      })
       .slice(-this.maxEvents)
       .map(cloneEvent);
 
@@ -256,6 +266,7 @@ export class OperationalLedger {
       ...(input.details ? { details: normalizeDetails(input.details) } : {}),
     };
 
+    if (Buffer.byteLength(JSON.stringify(event), 'utf8') > MAX_EVENT_BYTES) throw new Error('Evento do ledger excede o limite de 128 KB.');
     this.events.push(event);
     this.prune();
     const snapshot = cloneEvent(event);
@@ -311,6 +322,11 @@ export class OperationalLedger {
 
   private prune(): void {
     while (this.events.length > this.maxEvents) this.events.shift();
+    let bytes = this.events.reduce((total, event) => total + Buffer.byteLength(JSON.stringify(event), 'utf8'), 0);
+    while (bytes > MAX_LEDGER_BYTES && this.events.length > 1) {
+      const removed = this.events.shift();
+      if (removed) bytes -= Buffer.byteLength(JSON.stringify(removed), 'utf8');
+    }
   }
 }
 
