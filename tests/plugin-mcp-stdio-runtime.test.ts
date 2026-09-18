@@ -84,6 +84,41 @@ test('MCP stdio transport performs initialize, initialized, tools/list and tools
   assert.equal(runtime.disconnect('roblox.studio-manager', connected.sessionId), false);
 });
 
+test('MCP stdio runtime aggregates paginated tool catalogs', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') return reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+    if (message.method === 'tools/list') {
+      const cursor = (message.params as { cursor?: string } | undefined)?.cursor;
+      return cursor === 'page-2'
+        ? reply({ tools: [{ name: 'second', inputSchema: { type: 'object' } }] })
+        : reply({ tools: [{ name: 'first', inputSchema: { type: 'object' } }], nextCursor: 'page-2' });
+    }
+    reply({});
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  const listed = await runtime.listTools('test.plugin', connected.sessionId);
+  assert.deepEqual(listed.tools.map((tool) => tool.name), ['first', 'second']);
+  const listRequests = fixture.server.requests.filter((request) => request.method === 'tools/list');
+  assert.deepEqual(listRequests.map((request) => request.params), [{}, { cursor: 'page-2' }]);
+  runtime.disconnectPlugin('test.plugin');
+});
+
+test('MCP stdio runtime rejects duplicate tools across pages', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') return reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+    if (message.method === 'tools/list') {
+      const cursor = (message.params as { cursor?: string } | undefined)?.cursor;
+      return cursor ? reply({ tools: [{ name: 'same' }] }) : reply({ tools: [{ name: 'same' }], nextCursor: 'next' });
+    }
+    reply({});
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  await assert.rejects(() => runtime.listTools('test.plugin', connected.sessionId), /tool duplicada/);
+  runtime.disconnectPlugin('test.plugin');
+});
+
 test('MCP stdio sessions are isolated by plugin and fail closed after server exit', async () => {
   const fixture = fakeServer((message, reply) => {
     if (message.method === 'initialize') reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'Test MCP', version: '1' } });
