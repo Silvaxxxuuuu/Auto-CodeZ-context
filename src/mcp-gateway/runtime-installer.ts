@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -144,6 +145,18 @@ export class McpRuntimeInstaller {
 
     try {
       await fs.mkdir(extractRoot, { recursive: true });
+      const checksumUrl = `${RELEASE_BASE}/SHA256SUMS.txt`;
+      const checksumResponse = await this.fetchImpl(checksumUrl, { redirect: 'follow' });
+      if (!checksumResponse.ok) throw new Error(`Manifesto oficial de checksums indisponível (HTTP ${checksumResponse.status}).`);
+      const checksumFinalUrl = new URL(checksumResponse.url || checksumUrl);
+      if (checksumFinalUrl.protocol !== 'https:' || !['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'].includes(checksumFinalUrl.hostname)) {
+        throw new Error('Origem inesperada ao baixar checksums do tunnel-client.');
+      }
+      const checksumText = await checksumResponse.text();
+      const checksumLine = checksumText.split(/\r?\n/).find((line) => line.trim().endsWith(asset.archive));
+      const checksumMatch = checksumLine?.match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/);
+      if (!checksumMatch || checksumMatch[2].trim() !== asset.archive) throw new Error('Checksum oficial do pacote tunnel-client não foi encontrado.');
+
       const url = `${RELEASE_BASE}/${asset.archive}`;
       const response = await this.fetchImpl(url, { redirect: 'follow' });
       if (!response.ok || !response.body) throw new Error(`Download oficial do tunnel-client falhou (HTTP ${response.status}).`);
@@ -153,6 +166,8 @@ export class McpRuntimeInstaller {
       }
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.byteLength < 100_000 || bytes.byteLength > 200_000_000) throw new Error('Pacote do tunnel-client possui tamanho inesperado.');
+      const actualChecksum = createHash('sha256').update(bytes).digest('hex');
+      if (actualChecksum !== checksumMatch[1].toLowerCase()) throw new Error('Falha de integridade no pacote tunnel-client baixado.');
       await fs.writeFile(archivePath, bytes);
       await this.extractArchive(archivePath, extractRoot);
       const extracted = await findExecutable(extractRoot, asset.executable);
