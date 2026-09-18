@@ -109,6 +109,22 @@ contextBridge.exposeInMainWorld('autoCodez', {
   listTools: () => invoke('agent:list-tools'),
   listApprovals: (filters?: ApprovalScope) => invoke('agent:list-approvals', requireApprovalScope(filters)),
   listExecutions: (chatId?: string) => invoke('agent:list-executions', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
+  listOperationalLedger: (query?: {
+    afterSequence?: number;
+    beforeSequence?: number;
+    chatId?: string;
+    runId?: string;
+    pluginId?: string;
+    jobId?: string;
+    category?: string;
+    state?: string;
+    limit?: number;
+  }) => invoke('agent:list-operational-ledger', query),
+  onOperationalLedgerEvent: (listener: (event: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+    ipcRenderer.on('operational-ledger:event', handler);
+    return () => ipcRenderer.removeListener('operational-ledger:event', handler);
+  },
   listExecutionTimeline: (filters?: ApprovalScope) => invoke('agent:list-execution-timeline', requireApprovalScope(filters)),
   listExecutionPlans: (filters?: ApprovalScope) => invoke('agent:list-execution-plans', requireApprovalScope(filters)),
   listExecutionPlanHistory: (filters?: ApprovalScope) => invoke('agent:list-execution-plan-history', requireApprovalScope(filters)),
