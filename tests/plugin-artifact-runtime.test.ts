@@ -53,3 +53,18 @@ test('plugin artifact runtime enforces per-artifact size bounds', () => {
   const runtime = new PluginArtifactRuntime();
   assert.throws(() => runtime.storeText('test.plugin', 'x'.repeat(2 * 1024 * 1024 + 1)), /2 MB/);
 });
+
+
+test('plugin artifact runtime rejects malformed base64 and prunes by plugin memory budget', () => {
+  const runtime = new PluginArtifactRuntime();
+  assert.throws(() => runtime.storeImage('test.plugin', 'not-base64!'), /base64 válido/);
+
+  const payload = Buffer.alloc(1024 * 1024, 1).toString('base64');
+  const ids: string[] = [];
+  for (let index = 0; index < 17; index += 1) {
+    ids.push(runtime.storeImage('test.plugin', payload, 'image/png', index + 1).id);
+  }
+
+  assert.equal(runtime.get('test.plugin', ids[0]), undefined);
+  assert.ok(runtime.list('test.plugin').length <= 16);
+});
