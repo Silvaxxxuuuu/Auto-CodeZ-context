@@ -90,6 +90,19 @@ const HIGH_LEVEL_OPERATIONS = {
   navigate_character: 'character_navigation',
 };
 
+const PLAYTEST_TOOL_ID = 'run_playtest';
+const PLAYTEST_PARAMETERS = {
+  type: 'object',
+  properties: {
+    playInput: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    captureInput: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    consoleInput: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    stopInput: { type: 'object', properties: {}, required: [], additionalProperties: false },
+  },
+  required: [],
+  additionalProperties: false,
+};
+
 const toStrictSchema = (schema) => {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || schema.type !== 'object') return { type: 'object', properties: {}, required: [], additionalProperties: false };
   return sanitizeSchemaNode(schema);
@@ -108,7 +121,7 @@ async function connect(api) {
   const connected = await api.mcp.connectRobloxStudio(15000);
   sessionId = connected.sessionId;
   const catalog = await api.mcp.listTools(sessionId, 15000);
-  if (catalog.tools.length > MAX_AGENT_TOOLS) throw new Error('O Roblox Studio expôs operações demais para o catálogo seguro do Auto CodeZ.');
+  if (catalog.tools.length + 1 > MAX_AGENT_TOOLS) throw new Error('O Roblox Studio expôs operações demais para o catálogo seguro do Auto CodeZ.');
   const usedToolIds = new Set();
   const preferredIds = new Map(Object.entries(HIGH_LEVEL_OPERATIONS).map(([id, name]) => [name, id]));
   const tools = catalog.tools.map((tool) => {
@@ -124,6 +137,16 @@ async function connect(api) {
       parameters: toStrictSchema(tool.inputSchema),
     };
   });
+  const requiredPlaytestTools = ['start_stop_play', 'screen_capture', 'get_console_output'];
+  if (requiredPlaytestTools.every((name) => catalog.tools.some((tool) => tool.name === name))) {
+    tools.push({
+      id: PLAYTEST_TOOL_ID,
+      title: 'Run Playtest',
+      description: 'Executa um ciclo de playtest no Roblox Studio, captura a viewport, lê o console e garante Stop ao finalizar.',
+      risk: 'write',
+      parameters: PLAYTEST_PARAMETERS,
+    });
+  }
   await api.tools.register(tools);
   studioState = {
     connected: true,
@@ -162,12 +185,38 @@ autoCodez.register({
 
   async invoke(method, payload, api) {
     await connect(api);
-    const tool = studioTools.get(method);
-    if (!tool) throw new Error('A operação solicitada não está disponível no Roblox Studio conectado.');
-    const input = payload && typeof payload === 'object' && payload.input && typeof payload.input === 'object'
+    const rawInput = payload && typeof payload === 'object' && payload.input && typeof payload.input === 'object'
       ? payload.input
       : (payload && typeof payload === 'object' ? payload : {});
-    return api.mcp.callTool(sessionId, tool.name, input, 60000);
+    if (method === PLAYTEST_TOOL_ID) {
+      const playTool = [...studioTools.values()].find((tool) => tool.name === 'start_stop_play');
+      const captureTool = [...studioTools.values()].find((tool) => tool.name === 'screen_capture');
+      const consoleTool = [...studioTools.values()].find((tool) => tool.name === 'get_console_output');
+      if (!playTool || !captureTool || !consoleTool) throw new Error('O Roblox Studio conectado não oferece todas as operações necessárias para playtest.');
+      const job = await api.jobs.begin('Playtest do Roblox Studio');
+      let started = false;
+      try {
+        await api.jobs.update(job.id, { progress: 0.1, activity: 'Iniciando Play...' });
+        const play = await api.mcp.callTool(sessionId, playTool.name, rawInput.playInput || {}, 60000);
+        started = true;
+        await api.jobs.update(job.id, { progress: 0.45, activity: 'Capturando viewport...' });
+        const viewport = await api.mcp.callTool(sessionId, captureTool.name, rawInput.captureInput || {}, 60000);
+        await api.jobs.update(job.id, { progress: 0.75, activity: 'Lendo console...' });
+        const consoleOutput = await api.mcp.callTool(sessionId, consoleTool.name, rawInput.consoleInput || {}, 60000);
+        await api.jobs.complete(job.id, 'Playtest concluído.');
+        return { play, viewport, console: consoleOutput };
+      } catch (error) {
+        await api.jobs.fail(job.id, error instanceof Error ? error.message : String(error));
+        throw error;
+      } finally {
+        if (started) {
+          try { await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000); } catch {}
+        }
+      }
+    }
+    const tool = studioTools.get(method);
+    if (!tool) throw new Error('A operação solicitada não está disponível no Roblox Studio conectado.');
+    return api.mcp.callTool(sessionId, tool.name, rawInput, 60000);
   },
 
   async deactivate(api) {
