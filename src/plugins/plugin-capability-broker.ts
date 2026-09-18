@@ -169,6 +169,13 @@ export class PluginCapabilityBroker {
         ...(value.activity !== undefined ? { activity: requireString(value.activity, 'Atividade', 512) } : {}),
       });
     });
+    this.register('jobs.attach-artifact', 'background:run', async (pluginId, input) => {
+      const value = requireRecord(input);
+      const jobId = requireString(value.jobId, 'Job', 128);
+      const artifactId = requireString(value.artifactId, 'Artifact', 128);
+      if (!this.artifacts.get(pluginId, artifactId)) throw new Error('Artifact do plugin não encontrado.');
+      return this.jobs.attachArtifact(pluginId, jobId, artifactId);
+    });
     this.register('jobs.complete', 'background:run', async (pluginId, input) => {
       const value = requireRecord(input);
       return this.jobs.complete(pluginId, requireString(value.jobId, 'Job', 128), value.activity === undefined ? undefined : requireString(value.activity, 'Atividade', 512));
