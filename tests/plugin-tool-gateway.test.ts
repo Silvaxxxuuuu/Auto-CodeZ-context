@@ -87,6 +87,7 @@ test('read-risk plugin tool executes directly and receives authoritative executi
         chatId: 'chat-a',
         projectId: 'project-a',
         runId: 'run-a',
+        toolCallId: 'call-a',
         permission: 'read-only',
       },
     });
@@ -205,7 +206,7 @@ test('AgentRuntime pauses plugin_call for approval and resumes through the plugi
     assert.equal(agent.hasPendingForChat(chat.id), false);
     assert.deepEqual(JSON.parse(resumed.messages.find((message) => message.role === 'tool' && message.toolCallId === 'plugin-agent-call')?.content ?? '{}'), { changed: true, target: 'scene' });
 
-    const contextEnvelope = receivedContext as { pluginId: string; toolId: string; input: unknown; context: { chatId: string; projectId: string; runId?: string; permission: string } };
+    const contextEnvelope = receivedContext as { pluginId: string; toolId: string; input: unknown; context: { chatId: string; projectId: string; runId?: string; toolCallId?: string; permission: string } };
     assert.equal(contextEnvelope.pluginId, 'test.plugin');
     assert.equal(contextEnvelope.toolId, 'external_action');
     assert.deepEqual(contextEnvelope.input, { target: 'scene' });
@@ -213,6 +214,7 @@ test('AgentRuntime pauses plugin_call for approval and resumes through the plugi
     assert.equal(contextEnvelope.context.projectId, chat.projectId);
     assert.equal(contextEnvelope.context.permission, 'ask');
     assert.ok(contextEnvelope.context.runId);
+    assert.equal(contextEnvelope.context.toolCallId, 'plugin-agent-call');
 
     await assert.rejects(agent.resume(pending.pendingApprovalIds[0]), /Aprovação não encontrada/);
     assert.equal(executions, 1);
