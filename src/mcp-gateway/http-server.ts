@@ -4,6 +4,9 @@ import { McpGatewayProtocol, MCP_GATEWAY_PROTOCOL_VERSION, type McpJsonRpcReques
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const LOOPBACK_HOST = '127.0.0.1';
+const MAX_REQUEST_ID_LENGTH = 160;
+const MAX_METHOD_LENGTH = 128;
+const MAX_CONNECTIONS = 32;
 
 export type McpGatewayServerInfo = {
   host: string;
@@ -52,8 +55,14 @@ function validBearer(header: string | undefined, token: string): boolean {
 function requestObject(value: unknown): McpJsonRpcRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('MCP JSON-RPC request must be an object.');
   const record = value as Record<string, unknown>;
-  if (record.jsonrpc !== '2.0' || typeof record.method !== 'string') throw new Error('Invalid MCP JSON-RPC request.');
+  if (record.jsonrpc !== '2.0' || typeof record.method !== 'string' || !record.method || record.method.length > MAX_METHOD_LENGTH || /[\u0000-\u001f\u007f]/.test(record.method)) {
+    throw new Error('Invalid MCP JSON-RPC request.');
+  }
   if (record.id !== undefined && record.id !== null && typeof record.id !== 'string' && typeof record.id !== 'number') throw new Error('Invalid MCP request id.');
+  if (typeof record.id === 'string' && (!record.id || record.id.length > MAX_REQUEST_ID_LENGTH || /[\u0000-\u001f\u007f]/.test(record.id))) {
+    throw new Error('Invalid MCP request id.');
+  }
+  if (typeof record.id === 'number' && (!Number.isFinite(record.id) || !Number.isSafeInteger(record.id))) throw new Error('Invalid MCP request id.');
   return {
     jsonrpc: '2.0',
     ...(record.id === undefined ? {} : { id: record.id as string | number | null }),
@@ -77,6 +86,13 @@ export class McpGatewayHttpServer {
 
     const server = http.createServer((request, response) => {
       void this.handleHttp(request, response, bearerToken);
+    });
+    server.requestTimeout = 15_000;
+    server.headersTimeout = 10_000;
+    server.keepAliveTimeout = 5_000;
+    server.maxConnections = MAX_CONNECTIONS;
+    server.on('clientError', (_error, socket) => {
+      if (!socket.destroyed) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
     });
 
     await new Promise<void>((resolve, reject) => {
