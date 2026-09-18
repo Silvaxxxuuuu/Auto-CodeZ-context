@@ -494,7 +494,7 @@ function install(): void {
       const keyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
       const tunnelId = (tunnelIdInput?.value ?? '').trim();
       const executable = (executableInput?.value ?? '').trim();
-      const controlPlaneApiKey = keyInput?.value ?? '';
+      let controlPlaneApiKey = keyInput?.value ?? '';
       if (keyInput) keyInput.value = '';
       try {
         await window.autoCodez.startMcpTunnel({
@@ -505,6 +505,8 @@ function install(): void {
         tunnelDoctorResult = '';
       } catch (error) {
         tunnelError = error instanceof Error ? error.message : String(error);
+      } finally {
+        controlPlaneApiKey = '';
       }
       await refresh();
       return;
