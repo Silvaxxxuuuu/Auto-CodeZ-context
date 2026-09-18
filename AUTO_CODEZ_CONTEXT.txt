@@ -2887,3 +2887,188 @@ Hardening adicional iniciado após esse baseline:
 Decisão: o caminho oficial/confiável do Roblox Studio deve permanecer core-owned. Qualquer futura opção de servidor customizado precisa ser desenhada como funcionalidade explicitamente separada e não pode reutilizar a identidade de conexão confiável do built-in.
 
 PR #9 permanece draft/open/unmerged.
+
+
+------------------------------------------------------------
+24.27. AUTO CODEZ MCP GATEWAY + MCP MODE — DIREÇÃO CENTRAL
+------------------------------------------------------------
+
+DECISÃO DE ARQUITETURA
+
+O Roblox Studio MCP continua necessário e deve ser finalizado. Existem duas direções MCP independentes e complementares:
+
+ENTRADA:
+IA/cliente MCP externo -> Auto CodeZ MCP Gateway -> AgentRuntime -> políticas/aprovações -> PluginToolCatalog -> plugins.
+
+SAÍDA:
+Auto CodeZ -> Roblox Studio Manager -> MCP oficial do Roblox Studio -> Roblox Studio.
+
+Portanto, conectar ChatGPT/Claude/outros ao Auto CodeZ NÃO substitui a ponte oficial com o Roblox Studio. O Gateway torna o Auto CodeZ servidor MCP; o Roblox Studio Manager mantém o Auto CodeZ como cliente MCP do Studio. O objetivo estrutural é Auto CodeZ consumir e oferecer MCP.
+
+Motivação:
+- evitar que o produto dependa de um único fornecedor de IA;
+- permitir que usuários usem clientes/modelos aos quais já tenham acesso quando a integração oficial suportar as ações necessárias;
+- API própria e modelos locais permanecem opções, não requisitos arquiteturais;
+- não prometer uso ilimitado, nem assumir que assinatura de chat equivale a API;
+- não automatizar/scrapear interfaces web para transformar assinaturas em APIs.
+
+O Gateway externo NÃO deve contornar AgentRuntime, Allowed Paths, approval policy, attachment write boundary ou PluginToolCatalog. Toda mutação continua atravessando as fronteiras autoritativas existentes. Não expor shell/FS bruto como atalho.
+
+MCP MODE — SUPERFÍCIE OPERACIONAL
+
+Nova decisão de produto: criar um modo chamado conceitualmente MCP Mode. Ele NÃO é um segundo chat conversacional e NÃO possui composer/campo de digitação.
+
+Quando uma IA externa opera o Auto CodeZ via MCP, MCP Mode funciona como ledger/timeline ao vivo e auditável da sessão. A UI deve registrar ações reais do runtime em linguagem humana, por exemplo:
+- Verificou a árvore da experiência
+- Leu src/shared/...
+- Alterou src/shared/... (Roblox Studio) +370 -14
+- Executou build: ...
+- Iniciou Play
+- Simulou W/A/S/D
+- Capturou viewport
+- Leu console
+- Pesquisou ...
+- Consultou fonte ...
+- Gerou imagem ...
+- Chamou plugin/tool ...
+- Aguardando aprovação
+- Operação recusada/falhou/concluiu
+
+Não gerar eventos falsos a partir de texto do modelo. A timeline deve nascer de eventos estruturados e autoritativos do AgentRuntime, PluginToolCatalog, jobs, ferramentas, providers e plugins.
+
+OBJETIVO DO MCP MODE
+
+1. Dar observabilidade quase total ao usuário enquanto uma IA externa trabalha.
+2. Permitir auditoria posterior: o usuário deve saber o que foi lido, alterado, executado e testado.
+3. Servir como memória operacional recuperável quando o cliente de IA perder contexto.
+4. Permitir que uma nova sessão/IA reconstrua o estado do trabalho sem depender de todo o histórico textual original.
+5. Tornar execução longa compreensível sem transformar cada tool call em ruído técnico.
+
+IMPORTANTE: “contexto ilimitado” deve ser entendido como histórico persistente/recuperável, NÃO como uma janela de contexto infinita enviada ao modelo. O sistema deve compactar/indexar/retrieval sob demanda.
+
+MODELO DE EVENTO RECOMENDADO
+
+Cada evento deve possuir, quando aplicável:
+- eventId
+- sessionId
+- runId
+- parent/causation id
+- timestamp
+- actor/provider/client
+- plugin/tool
+- project/workspace/place
+- categoria (inspect/read/write/execute/test/search/source/media/approval/error/system)
+- estado (started/progress/completed/failed/cancelled/denied)
+- resumo humano
+- dados estruturados mínimos
+- duração
+- arquivos/Instances afetados
+- diff stats (+/-) quando houver
+- artifact refs (screenshot, imagem, log, relatório)
+- source refs quando pesquisa/fonte existir
+- error/diagnostic sanitizado
+- approval id quando existir.
+
+Não persistir secrets, tokens, credenciais, conteúdo sensível desnecessário ou stdout ilimitado. Payloads grandes devem virar artifacts com limites/retenção, e o ledger guarda referência/resumo.
+
+CAMADAS DE VISUALIZAÇÃO
+
+A timeline deve ter disclosure progressivo:
+- padrão: ações humanas importantes;
+- expandido: arquivo/Instance, duração, diff stats, resultado;
+- técnico/diagnóstico: tool id, plugin id, request ids, payload sanitizado, protocolo.
+
+Filtros úteis:
+- Tudo
+- Alterações
+- Execuções/Testes
+- Roblox
+- Arquivos
+- Pesquisas/Fontes
+- Mídia
+- Aprovações
+- Erros
+
+Agrupar eventos repetitivos. Ex.: dezenas de reads podem aparecer como “Inspecionou 18 arquivos”, expansível.
+
+IDEIAS ADICIONAIS FECHADAS COMO DIREÇÃO
+
+A) SESSION CAPSULE / HANDOFF
+Ao encerrar ou pausar uma sessão MCP, gerar uma cápsula estruturada:
+- objetivo atual;
+- alterações realizadas;
+- arquivos/Instances tocados;
+- testes executados e resultados;
+- erros ainda abertos;
+- decisões/aprovações;
+- próximos passos;
+- artifacts/fontes relevantes.
+Uma nova IA pode solicitar essa cápsula para retomar trabalho com baixo custo de contexto.
+
+B) CHECKPOINTS
+Permitir checkpoints nomeados/automáticos antes de operações grandes e playtests. Checkpoint não significa necessariamente git commit. Deve registrar estado suficiente para comparação/rollback quando a integração subjacente suportar.
+
+C) DIFF FIRST
+Toda mutação de arquivo/script deve produzir diff stats e, quando possível, diff visual expansível. Para Roblox Instances/propriedades, produzir equivalente estrutural before/after.
+
+D) LIVE RUN HEADER
+MCP Mode deve mostrar no topo: cliente/IA conectada, projeto/Place, run atual, duração, estado, nível de autonomia e Stop. Stop deve cancelar o job real.
+
+E) APPROVALS INLINE
+Aprovações aparecem na timeline e usam a mesma política autoritativa. Nunca conceder permissão apenas porque o cliente MCP pediu.
+
+F) ARTIFACT STRIP
+Screenshots de playtest, imagens geradas, relatórios e logs importantes devem ficar ligados ao evento e também acessíveis numa visão de artifacts da sessão.
+
+G) SEARCH/SOURCE PROVENANCE
+Quando uma capability real de pesquisa for usada, registrar consulta, domínio/fonte, timestamp e relação com a ação subsequente. Não fingir provenance se o provider não fornecer dados estruturados.
+
+H) CONTEXT EXPORT
+Expor ao cliente MCP ferramentas de recuperação controlada, por exemplo conceitualmente:
+- session_summary
+- session_recent_events
+- session_changes
+- session_errors
+- session_artifacts
+- session_sources
+Isso permite recuperar contexto sob demanda sem reenviar o ledger inteiro.
+
+I) REPLAY NÃO É REEXECUÇÃO
+A timeline pode reconstruir o que ocorreu, mas não deve automaticamente repetir ações mutáveis. Qualquer “reexecutar” é uma nova operação sujeita às políticas atuais.
+
+J) RETENÇÃO E PERFORMANCE
+Ledger persistente deve ser append-oriented, paginado e indexado por session/run/category/resource. Não manter tudo no DOM nem carregar logs gigantes na memória. Definir retenção/limites configuráveis.
+
+K) MULTI-CLIENT FUTURO
+O modelo deve suportar identificar cliente/provider por sessão para que ChatGPT, Claude ou outro cliente MCP possam operar sem misturar autoria/estado.
+
+MCP MODE vs CHAT NORMAL
+
+Chat normal:
+- usuário conversa diretamente no Auto CodeZ;
+- possui composer;
+- provider selecionado pelo Auto CodeZ;
+- timeline de ferramentas pode aparecer como suporte à conversa.
+
+MCP Mode:
+- nenhuma caixa de texto;
+- cliente externo é o cérebro/conversação;
+- Auto CodeZ é executor/orquestrador e observador;
+- tela principal é timeline/ledger + approvals + artifacts + status.
+
+POP-UP FLUTUANTE
+
+O pop-up já especificado continua sendo a superfície de comando para Chat normal. Quando uma sessão MCP externa estiver ativa, ele pode opcionalmente entrar em estado observador compacto, mostrando atividade atual/approval/Stop, sem inventar um composer MCP.
+
+ORDEM DE IMPLEMENTAÇÃO
+
+1. Finalizar/harden MCP stdio cliente e Roblox Studio Manager.
+2. Fechar camada Roblox estável e playtest visual.
+3. Criar event ledger interno independente de UI, aproveitando eventos reais já existentes.
+4. Criar MCP Mode como projeção desse ledger.
+5. Implementar Auto CodeZ MCP Gateway como servidor, sempre atrás do AgentRuntime/policies.
+6. Implementar Session Capsule/retrieval.
+7. Conectar/testar clientes MCP suportados (ChatGPT/Claude/outros) conforme capacidades oficiais disponíveis.
+8. Refinar multi-client, artifacts, provenance, checkpoints e handoff.
+
+PR #9 continua OPEN, DRAFT e NÃO MESCLADO. Não fazer merge sem autorização explícita.
