@@ -29,6 +29,15 @@ export type McpTunnelStartInput = {
   controlPlaneApiKey?: string;
 };
 
+export type McpTunnelDoctorInput = McpTunnelStartInput;
+
+export type McpTunnelDoctorResult = {
+  executable: string;
+  version: string;
+  supported: true;
+  diagnostics: string;
+};
+
 type SpawnOptions = {
   windowsHide: boolean;
   stdio: ['ignore', 'pipe', 'pipe'];
@@ -248,6 +257,32 @@ export class McpTunnelRuntime {
     return { executable: command, version: version.join('.'), supported: true };
   }
 
+  async diagnose(input: McpTunnelDoctorInput): Promise<McpTunnelDoctorResult> {
+    const tunnelId = requireTunnelId(input?.tunnelId);
+    const localEndpoint = requireLocalEndpoint(input?.localEndpoint);
+    const localBearerToken = requireSecret(input?.localBearerToken, 'Bearer local do MCP Gateway');
+    const controlPlaneApiKey = requireSecret(
+      input?.controlPlaneApiKey ?? this.parentEnvironment.CONTROL_PLANE_API_KEY ?? this.parentEnvironment.OPENAI_API_KEY,
+      'Chave do control plane do Secure MCP Tunnel',
+    );
+    const doctor = await this.doctor(input?.executable);
+    const env = createChildEnvironment(this.parentEnvironment, {
+      tunnelId,
+      endpoint: localEndpoint,
+      bearerToken: localBearerToken,
+      controlPlaneApiKey,
+    });
+    const diagnostics = await this.runDoctor(
+      doctor.executable,
+      env,
+      [controlPlaneApiKey, localBearerToken, `Bearer ${localBearerToken}`],
+    );
+    return {
+      ...doctor,
+      diagnostics,
+    };
+  }
+
   async start(input: McpTunnelStartInput): Promise<McpTunnelStatus> {
     if (this.active) throw new Error('Secure MCP Tunnel já está em execução.');
 
@@ -333,6 +368,58 @@ export class McpTunnelRuntime {
     await processTreeKill(active.child);
     await fs.rm(path.dirname(active.healthFile), { recursive: true, force: true }).catch((): undefined => undefined);
     return true;
+  }
+
+  private async runDoctor(executable: string, env: NodeJS.ProcessEnv, redactions: string[]): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      let stdout = '';
+      let stderr = '';
+      let settled = false;
+      let child: ChildProcessWithoutNullStreams;
+      try {
+        child = this.spawnProcess(executable, [
+          'doctor',
+          '--explain',
+          '--health.listen-addr', '127.0.0.1:0',
+        ], {
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env,
+        });
+      } catch (error) {
+        reject(new Error(`Não foi possível executar tunnel-client doctor: ${sanitizedError(error)}`));
+        return;
+      }
+
+      const finish = (error?: Error, value?: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error) reject(error);
+        else resolve(value ?? '');
+      };
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        void processTreeKill(child);
+        reject(new Error('tunnel-client doctor --explain excedeu o tempo limite.'));
+      }, 20_000);
+
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (chunk: string) => { stdout = appendLog(stdout, chunk, redactions); });
+      child.stderr.on('data', (chunk: string) => { stderr = appendLog(stderr, chunk, redactions); });
+      child.once('error', (error) => finish(new Error(`tunnel-client doctor falhou: ${sanitizedError(error)}`)));
+      child.once('exit', (code) => {
+        const combined = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
+        if (code !== 0) {
+          finish(new Error(`tunnel-client doctor falhou: ${latestLogError(combined, `código ${code}`)}`));
+          return;
+        }
+        finish(undefined, redactText(combined, redactions).slice(-MAX_LOG_CHARS));
+      });
+    });
   }
 
   private async runVersion(executable: string): Promise<string> {
