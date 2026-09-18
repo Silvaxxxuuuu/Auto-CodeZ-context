@@ -328,7 +328,7 @@ function render(): void {
             ? '<button class="danger" type="button" data-mcp-tunnel-stop>Parar Tunnel</button>'
             : `<input type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="tunnel_…" value="${escapeHtml(tunnelIdDraft)}" data-mcp-tunnel-id aria-label="Tunnel ID">
                <input type="password" maxlength="8192" autocomplete="new-password" placeholder="${tunnelStatus.credentialAvailable ? 'Credencial detectada no ambiente' : 'Chave do control plane (somente sessão)'}" data-mcp-tunnel-key aria-label="Chave do control plane">
-               <button type="button" data-mcp-tunnel-doctor>Doctor</button>
+               <button type="button" data-mcp-tunnel-doctor ${gatewayStatus.running ? '' : 'disabled'}>Doctor real</button>
                <button class="primary" type="button" data-mcp-tunnel-start ${gatewayStatus.running ? '' : 'disabled'}>Conectar</button>`}
         </div>
       </section>
@@ -482,12 +482,29 @@ function install(): void {
     }
     if (target.closest('[data-mcp-tunnel-doctor]')) {
       tunnelError = '';
+      const tunnelIdInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-id]');
+      const keyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
+      const tunnelId = (tunnelIdInput?.value ?? tunnelIdDraft).trim();
+      tunnelIdDraft = tunnelId;
+      let controlPlaneApiKey = keyInput?.value ?? '';
+      if (keyInput) keyInput.value = '';
       try {
-        const result = await window.autoCodez.doctorMcpTunnel();
-        tunnelDoctorResult = `Doctor OK · ${result.executable} · v${result.version}`;
+        const result = await window.autoCodez.doctorMcpTunnel({
+          tunnelId,
+          ...(controlPlaneApiKey.trim() ? { controlPlaneApiKey } : {}),
+        });
+        const diagnosticTail = result.diagnostics
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .slice(-2)
+          .join(' · ');
+        tunnelDoctorResult = `Doctor OK · ${result.executable} · v${result.version}${diagnosticTail ? ` · ${diagnosticTail}` : ''}`;
       } catch (error) {
         tunnelDoctorResult = '';
         tunnelError = error instanceof Error ? error.message : String(error);
+      } finally {
+        controlPlaneApiKey = '';
       }
       render();
       return;
