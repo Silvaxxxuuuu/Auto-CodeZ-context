@@ -54,6 +54,7 @@ export class PluginService {
     private readonly pluginsRoot: string,
     private readonly stateStore: PluginStateStore,
     private readonly settingsStore?: PluginSettingsStore,
+    private readonly builtInPluginsRoot?: string,
   ) {
     this.installer = new PluginPackageInstaller(pluginsRoot);
     if (settingsStore) this.broker = new PluginCapabilityBroker(this.registry, settingsStore);
@@ -184,18 +185,33 @@ export class PluginService {
   }
 
   private async discover(): Promise<void> {
-    const scan = await scanPluginPackages(this.pluginsRoot);
-    this.failures = scan.failures.map((failure) => ({ ...failure }));
-    for (const discovered of scan.packages) {
+    const roots = [
+      ...(this.builtInPluginsRoot ? [{ root: this.builtInPluginsRoot, builtIn: true }] : []),
+      { root: this.pluginsRoot, builtIn: false },
+    ];
+    this.failures = [];
+    for (const source of roots) {
+      let scan;
       try {
-        this.registry.register(discovered.manifest);
-        this.packages.set(discovered.manifest.id, discovered);
-        this.health.set(discovered.manifest.id, inactiveHealth(discovered.manifest.id));
+        scan = await scanPluginPackages(source.root);
       } catch (error) {
-        this.failures.push({
-          directory: discovered.rootPath,
-          reason: error instanceof Error ? error.message : String(error),
-        });
+        if (!source.builtIn) throw error;
+        this.failures.push({ directory: source.root, reason: error instanceof Error ? error.message : String(error) });
+        continue;
+      }
+      this.failures.push(...scan.failures.map((failure) => ({ ...failure })));
+      for (const discovered of scan.packages) {
+        try {
+          if (this.packages.has(discovered.manifest.id)) throw new Error(`Plugin '${discovered.manifest.id}' está duplicado entre fontes.`);
+          this.registry.register(discovered.manifest);
+          this.packages.set(discovered.manifest.id, discovered);
+          this.health.set(discovered.manifest.id, inactiveHealth(discovered.manifest.id));
+        } catch (error) {
+          this.failures.push({
+            directory: discovered.rootPath,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     }
     await this.stateStore.restore(this.registry);
