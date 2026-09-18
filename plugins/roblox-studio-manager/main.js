@@ -5,11 +5,16 @@ const TOOL_RISK = {
   script_read: 'read',
   get_console_output: 'read',
   screen_capture: 'read',
+  get_studio_state: 'read',
+  list_roblox_studios: 'read',
+  script_search: 'read',
+  script_grep: 'read',
   multi_edit: 'write',
   execute_luau: 'sensitive',
   start_stop_play: 'write',
   user_keyboard_input: 'write',
   user_mouse_input: 'write',
+  character_navigation: 'write',
 };
 
 let sessionId = null;
