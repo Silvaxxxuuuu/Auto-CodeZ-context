@@ -12,6 +12,9 @@ function cloneEvent(event: OperationalLedgerEvent): OperationalLedgerEvent {
   return {
     ...event,
     ...(event.artifactIds ? { artifactIds: [...event.artifactIds] } : {}),
+    ...(event.resources ? { resources: [...event.resources] } : {}),
+    ...(event.sourceRefs ? { sourceRefs: [...event.sourceRefs] } : {}),
+    ...(event.diff ? { diff: { ...event.diff } } : {}),
     ...(event.details ? { details: { ...event.details } } : {}),
   };
 }
