@@ -72,8 +72,10 @@ export class PluginService {
 
   async refresh(): Promise<PluginDiscoverySnapshot> {
     this.requireInitialized();
-    this.broker?.getJobRuntime().list().forEach((job) => this.broker?.cancelPluginWork(job.pluginId));
-    for (const plugin of this.registry.list()) this.registry.unregister(plugin.manifest.id);
+    for (const plugin of this.registry.list()) {
+      this.broker?.cancelPluginWork(plugin.manifest.id);
+      this.registry.unregister(plugin.manifest.id);
+    }
     this.packages.clear();
     this.builtInIds.clear();
     this.health.clear();
