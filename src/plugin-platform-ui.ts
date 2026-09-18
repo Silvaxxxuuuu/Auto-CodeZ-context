@@ -35,6 +35,7 @@ type PluginBridge = {
   invoke(pluginId: string, request: { id: string; method: string; input?: unknown }): Promise<{ id: string; ok: boolean; value?: unknown; error?: string }>;
   markHealthy(pluginId: string, message?: string): Promise<PluginSummary>;
   markFailed(pluginId: string, reason: string): Promise<PluginSummary>;
+  settings(pluginId: string): Promise<Record<string, unknown>>;
   respondSandboxCall(result: { id: string; value?: unknown; error?: string }): Promise<boolean>;
   onSandboxCall(listener: (call: SandboxCall) => void): () => void;
   onActivity(listener: (activity: PluginActivity) => void): () => void;
@@ -62,6 +63,7 @@ let selectedPluginId: string | null = null;
 const activeSandboxIds = new Set<string>();
 const activities = new Map<string, PluginActivity>();
 const jobs = new Map<string, PluginJob>();
+const pluginSettings = new Map<string, Record<string, unknown>>();
 
 function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!)); }
 function isPluginPanel(): boolean { const panel = document.querySelector<HTMLElement>('#nav-panel'); return Boolean(panel && panel.querySelector('.panel-title')?.textContent?.includes('Plugins')); }
@@ -89,6 +91,7 @@ function detailView(plugin: PluginSummary): string {
   const runtime = plugin.hasMain ? 'Sandbox isolado' : 'Declarativo';
   const isRobloxManager = plugin.id === 'autocodez.roblox-studio-manager';
   const robloxServer = isRobloxManager ? plugin.health.message : undefined;
+  const robloxStatus = isRobloxManager ? pluginSettings.get(plugin.id)?.studioStatus as { connected?: boolean; tools?: number; instanceCount?: number } | undefined : undefined;
   const publisher = plugin.publisher || 'Autor não informado';
   return `<section class="plugin-detail-overlay" data-plugin-detail="${escapeHtml(plugin.id)}" aria-label="Detalhes de ${escapeHtml(plugin.name)}">
     <div class="plugin-detail-page">
@@ -113,7 +116,7 @@ function detailView(plugin: PluginSummary): string {
           <section class="plugin-detail-card plugin-detail-about"><div class="plugin-detail-card-heading"><div><span>VISÃO GERAL</span><h2>Sobre este plugin</h2></div></div><p>${escapeHtml(plugin.description || 'O manifesto não inclui uma descrição do plugin.')}</p><dl><div><dt>Desenvolvedor</dt><dd>${escapeHtml(publisher)}</dd></div><div><dt>Versão</dt><dd>${escapeHtml(plugin.version)}</dd></div><div><dt>Identificador</dt><dd><code>${escapeHtml(plugin.id)}</code></dd></div>${plugin.homepage ? `<div><dt>Homepage</dt><dd>${escapeHtml(plugin.homepage)}</dd></div>` : ''}</dl></section>
           <section class="plugin-detail-card"><div class="plugin-detail-card-heading"><div><span>EXECUÇÃO</span><h2>Estado e diagnóstico</h2></div></div><div class="plugin-detail-facts"><div><span>Estado</span><strong>${escapeHtml(stateLabels[plugin.state] || plugin.state)}</strong></div><div><span>Runtime</span><strong>${runtime}</strong></div><div><span>Saúde</span><strong>${escapeHtml(healthLabels[plugin.health.state] || plugin.health.state)}</strong></div><div><span>Última atualização</span><strong>${new Date(plugin.health.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong></div></div>${plugin.health.message ? `<div class="plugin-detail-runtime-message">${escapeHtml(plugin.health.message)}</div>` : ''}</section>
           <section class="plugin-detail-card"><div class="plugin-detail-card-heading"><div><span>SEGURANÇA</span><h2>Acesso solicitado</h2></div><strong>${plugin.grantedPermissions.length}/${plugin.requestedPermissions.length} autorizadas</strong></div><div class="plugin-detail-permissions">${permissions}</div></section>
-          ${isRobloxManager ? `<section class="plugin-detail-card"><div class="plugin-detail-card-heading"><div><span>ROBLOX STUDIO</span><h2>Conexão com o Studio</h2></div></div><div class="plugin-detail-facts"><div><span>Conexão</span><strong>${escapeHtml(plugin.health.state === 'healthy' ? 'Conectado' : plugin.health.state === 'starting' ? 'Conectando' : 'Aguardando Studio')}</strong></div><div><span>Integração</span><strong>MCP oficial do Studio</strong></div></div><div class="plugin-detail-runtime-message">${escapeHtml(robloxServer || 'Abra o Roblox Studio e habilite o Studio como servidor MCP para conectar.')}</div></section>` : ''}<section class="plugin-detail-card"><div class="plugin-detail-card-heading"><div><span>CAPACIDADES</span><h2>Integrações declaradas</h2></div></div><div class="plugin-detail-chips">${contributions}</div><p class="plugin-detail-note">Somente capacidades declaradas pelo manifesto e autorizadas pelo Auto CodeZ podem ser usadas pelo runtime.</p></section>
+          ${isRobloxManager ? `<section class="plugin-detail-card"><div class="plugin-detail-card-heading"><div><span>ROBLOX STUDIO</span><h2>Conexão com o Studio</h2></div></div><div class="plugin-detail-facts"><div><span>Conexão</span><strong>${escapeHtml(robloxStatus?.connected ? 'Conectado' : plugin.health.state === 'starting' ? 'Conectando' : 'Aguardando Studio')}</strong></div><div><span>Studios detectados</span><strong>${robloxStatus?.connected ? String(robloxStatus.instanceCount ?? 0) : '—'}</strong></div><div><span>Operações disponíveis</span><strong>${robloxStatus?.connected ? String(robloxStatus.tools ?? 0) : '—'}</strong></div><div><span>Integração</span><strong>MCP oficial do Studio</strong></div></div><div class="plugin-detail-runtime-message">${escapeHtml(robloxServer || 'Abra o Roblox Studio e habilite o Studio como servidor MCP para conectar.')}</div></section>` : ''}<section class="plugin-detail-card"><div class="plugin-detail-card-heading"><div><span>CAPACIDADES</span><h2>Integrações declaradas</h2></div></div><div class="plugin-detail-chips">${contributions}</div><p class="plugin-detail-note">Somente capacidades declaradas pelo manifesto e autorizadas pelo Auto CodeZ podem ser usadas pelo runtime.</p></section>
         </div>
       </main>
     </div>
@@ -164,7 +167,7 @@ async function syncSandboxes(refreshSnapshot = true): Promise<void> {
 }
 async function refresh(useRescan = false): Promise<void> {
   if (!bridge || loading) return; loading = true; render();
-  try { snapshot = useRescan ? await bridge.refresh() : await bridge.snapshot(); await syncSandboxes(); }
+  try { snapshot = useRescan ? await bridge.refresh() : await bridge.snapshot(); const roblox = snapshot.plugins.find((plugin) => plugin.id === 'autocodez.roblox-studio-manager'); if (roblox) pluginSettings.set(roblox.id, await bridge.settings(roblox.id).catch(() => ({}))); await syncSandboxes(); }
   finally { loading = false; render(); }
 }
 async function act(action: () => Promise<unknown>): Promise<void> {
