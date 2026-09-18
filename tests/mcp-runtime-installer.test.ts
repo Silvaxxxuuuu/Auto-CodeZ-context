@@ -54,7 +54,7 @@ test('MCP runtime installer downloads, verifies and installs the exact Windows a
 
   const spawnProcess = ((command: string, args: string[]) => {
     const child = fakeChild();
-    if (args.includes('--version')) {
+    if (args.includes('--version') && command !== 'tunnel-client') {
       queueMicrotask(() => {
         (child.stdout as PassThrough).end('0.0.14+fixture\n');
         Object.defineProperty(child, 'exitCode', { value: 0, configurable: true });
