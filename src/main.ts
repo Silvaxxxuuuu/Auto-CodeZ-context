@@ -487,11 +487,35 @@ ipcMain.handle('chat:update-settings', async (_event, input: unknown) => {
   return chatManager.updateSettings({ chatId, providerId, model: requireIdentifier(value.model, 'Modelo'), apiKeyId, intelligence: requireIdentifier(value.intelligence, 'Inteligência'), permissionLevel: requireIdentifier(value.permissionLevel, 'Permissão') });
 });
 
+function recordExecutionContext(
+  chat: Awaited<ReturnType<ChatManager['list']>>[number],
+  config: AIProviderConfig,
+  runId: string,
+): void {
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'execution',
+    state: 'running',
+    summary: 'Contexto autoritativo da execução iniciado.',
+    chatId: chat.id,
+    runId,
+    projectId: chat.projectId,
+    providerId: config.id,
+    clientId: 'autocodez-chat',
+    details: {
+      model: chat.model,
+      permission: chat.permissionLevel,
+      intelligence: chat.intelligence,
+    },
+  });
+}
+
 async function executeChat(chatId: string, content: string, allowedPaths?: string[]): Promise<{ pendingApprovalIds: string[]; chat: Awaited<ReturnType<ChatManager['list']>>[number] | undefined }> {
   const { chat, config } = await getChatContext(chatId);
   reconcileExecutionSlot(chatId);
   const execution = executionManager.start(chatId);
   const runId = execution.runId;
+  recordExecutionContext(chat, config, runId);
   try {
     captureExecutionTaskCapsule(chat, runId, content);
     await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
@@ -561,6 +585,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   const controller = new AbortController();
   activeStreamControllers.set(chatId, { runId: execution.runId, controller });
   const runId = execution.runId;
+  recordExecutionContext(chat, config, runId);
 
   const emit = (event: AIStreamEvent): void => {
     try {
