@@ -96,6 +96,7 @@ const HIGH_LEVEL_OPERATIONS = {
 };
 
 const PLAYTEST_TOOL_ID = 'run_playtest';
+const activePlaytests = new Set();
 
 const toStrictSchema = (schema) => {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || schema.type !== 'object') return { type: 'object', properties: {}, required: [], additionalProperties: false };
@@ -204,6 +205,7 @@ async function connect(api) {
     if (status && status.connected) return;
     sessionId = null;
     studioTools.clear();
+    activePlaytests.clear();
     studioState = { connected: false, server: null, tools: 0, instanceCount: 0 };
     await api.settings.set('studioStatus', studioState);
   }
@@ -325,8 +327,11 @@ autoCodez.register({
       if (!playTool || !captureTool || !consoleTool) throw new Error('O Roblox Studio conectado não oferece todas as operações necessárias para playtest.');
       const studioId = typeof rawInput.studioId === 'string' ? rawInput.studioId.trim() : '';
       if (!studioId || studioId.length > 128) throw new Error('studioId do playtest inválido.');
-      const job = await api.jobs.begin('Playtest do Roblox Studio');
-      let started = false;
+      if (activePlaytests.has(studioId)) throw new Error('Já existe um playtest ativo para esta instância do Roblox Studio.');
+      activePlaytests.add(studioId);
+      try {
+        const job = await api.jobs.begin('Playtest do Roblox Studio');
+        let started = false;
       let stopAttempted = false;
       try {
         await api.jobs.update(job.id, { progress: 0.1, activity: 'Iniciando Play...' });
@@ -394,6 +399,9 @@ autoCodez.register({
         }
         await api.jobs.fail(job.id, failure);
         throw new Error(failure);
+        }
+      } finally {
+        activePlaytests.delete(studioId);
       }
     }
     const tool = studioTools.get(method);
