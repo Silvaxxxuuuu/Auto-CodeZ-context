@@ -22,6 +22,8 @@ const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const MAX_PLUGIN_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 const MAX_INLINE_TEXT_BYTES = 16 * 1024;
+const MAX_INLINE_STRUCTURED_BYTES = 16 * 1024;
+const MAX_CONTENT_ITEMS = 128;
 
 function byteLength(value: string, encoding: BufferEncoding): number {
   return Buffer.byteLength(value, encoding);
@@ -70,10 +72,19 @@ export class PluginArtifactRuntime {
   externalizeMcpResult(pluginId: string, result: unknown): unknown {
     if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
     const value = result as Record<string, unknown>;
-    if (!Array.isArray(value.content)) return structuredClone(result);
+    const sourceContent = Array.isArray(value.content) ? value.content : [];
+    if (sourceContent.length > MAX_CONTENT_ITEMS) throw new Error('Resultado MCP observado possui itens demais.');
 
-    const content = value.content.map((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return structuredClone(item);
+    let inlineTextBytes = 0;
+    const content = sourceContent.map((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        const serialized = JSON.stringify(item ?? null);
+        if (byteLength(serialized, 'utf8') > 4096) {
+          const artifact = this.storeText(pluginId, serialized, 'application/json');
+          return { type: 'artifact', artifact };
+        }
+        return structuredClone(item);
+      }
       const entry = item as Record<string, unknown>;
       if (entry.type === 'image' && typeof entry.data === 'string') {
         const artifact = this.storeImage(
@@ -83,14 +94,33 @@ export class PluginArtifactRuntime {
         );
         return { type: 'artifact', artifact };
       }
-      if (entry.type === 'text' && typeof entry.text === 'string' && byteLength(entry.text, 'utf8') > MAX_INLINE_TEXT_BYTES) {
-        const artifact = this.storeText(pluginId, entry.text);
+      if (entry.type === 'text' && typeof entry.text === 'string') {
+        const bytes = byteLength(entry.text, 'utf8');
+        if (bytes > MAX_INLINE_TEXT_BYTES || inlineTextBytes + bytes > MAX_INLINE_TEXT_BYTES) {
+          const artifact = this.storeText(pluginId, entry.text);
+          return { type: 'artifact', artifact };
+        }
+        inlineTextBytes += bytes;
+        return { type: 'text', text: entry.text };
+      }
+      const serialized = JSON.stringify(entry);
+      if (byteLength(serialized, 'utf8') > 4096) {
+        const artifact = this.storeText(pluginId, serialized, 'application/json');
         return { type: 'artifact', artifact };
       }
-      return structuredClone(item);
+      return structuredClone(entry);
     });
 
-    return { ...structuredClone(value), content };
+    const normalized: Record<string, unknown> = { content };
+    if (Object.prototype.hasOwnProperty.call(value, 'structuredContent')) {
+      const serialized = JSON.stringify(value.structuredContent);
+      if (serialized !== undefined && byteLength(serialized, 'utf8') <= MAX_INLINE_STRUCTURED_BYTES) {
+        normalized.structuredContent = structuredClone(value.structuredContent);
+      } else if (serialized !== undefined) {
+        normalized.structuredContentArtifact = this.storeText(pluginId, serialized, 'application/json');
+      }
+    }
+    return normalized;
   }
 
   get(pluginId: string, artifactId: string): PluginArtifactSnapshot | undefined {
