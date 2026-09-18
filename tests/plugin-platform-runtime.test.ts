@@ -15,18 +15,18 @@ class MemoryStorage {
   async write<T>(name: string, value: T): Promise<void> { this.data.set(name, structuredClone(value)); }
 }
 
-function enabledRegistry(permissions: Array<'network:localhost' | 'network:fetch' | 'background:run' | 'ai:tool'> = []): PluginRegistry {
+function enabledRegistry(permissions: Array<'network:localhost' | 'network:fetch' | 'background:run' | 'ai:tool' | 'terminal:execute'> = [], pluginId = 'test.plugin'): PluginRegistry {
   const registry = new PluginRegistry();
   registry.register({
     apiVersion: 1,
-    id: 'test.plugin',
+    id: pluginId,
     name: 'Test Plugin',
     version: '1.0.0',
     contributions: permissions.includes('ai:tool') ? ['tool'] : [],
     permissions,
   });
-  registry.grantPermissions('test.plugin', permissions);
-  registry.enable('test.plugin');
+  registry.grantPermissions(pluginId, permissions);
+  registry.enable(pluginId);
   return registry;
 }
 
@@ -209,4 +209,16 @@ test('tool catalog validates arguments before invoking the sandbox executor', as
     toolId: 'read_state',
     input: { target: 'workspace' },
   });
+});
+
+
+test('trusted Roblox Studio MCP capability is reserved to the integrated manager', async () => {
+  const storage = new MemoryStorage();
+  const settings = new PluginSettingsStore(storage);
+  await settings.init();
+  const genericRegistry = enabledRegistry(['terminal:execute']);
+  const genericBroker = new PluginCapabilityBroker(genericRegistry, settings);
+  const denied = await genericBroker.invoke('test.plugin', { id: 'roblox-denied', method: 'mcp.connect-roblox-studio', input: {} });
+  assert.equal(denied.ok, false);
+  assert.match(denied.error ?? '', /reservada ao Roblox Studio Manager integrado/i);
 });
