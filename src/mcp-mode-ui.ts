@@ -73,7 +73,7 @@ let onboardingStep: OnboardingStep = (() => {
 let activationBusy = false;
 let activationMessage = '';
 let activationError = '';
-let selectedClients = (() => {
+const selectedClients = (() => {
   try {
     const stored = JSON.parse(localStorage.getItem('auto-codez:mcp-clients') || '[]') as unknown;
     if (Array.isArray(stored)) {
