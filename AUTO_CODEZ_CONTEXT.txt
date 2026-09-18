@@ -3072,3 +3072,162 @@ ORDEM DE IMPLEMENTAÇÃO
 8. Refinar multi-client, artifacts, provenance, checkpoints e handoff.
 
 PR #9 continua OPEN, DRAFT e NÃO MESCLADO. Não fazer merge sem autorização explícita.
+
+
+------------------------------------------------------------
+24.28. ROBLOX PLAYTEST VISUAL + ARTIFACTS + MULTI-STUDIO — VALIDADO
+------------------------------------------------------------
+
+MILESTONE VALIDADO
+
+Baseline funcional validado deste bloco:
+f5f413a3282537a8bf7209b71cc7b4a1507cd0b6
+
+Workflows exatos:
+- Validate Auto CodeZ #35309270958: SUCCESS.
+- Visual Auto CodeZ #35309271060: SUCCESS.
+- Artifact visual: auto-codez-visual-35309271060, artifact id 10533415128.
+
+PR #9 continua OPEN, DRAFT e NÃO MESCLADO.
+
+ROBLOX STUDIO MANAGER — PLAYTEST COMPOSTO
+
+O plugin integrado agora expõe uma primitive de alto nível run_playtest quando o catálogo MCP oficial conectado oferece start_stop_play, screen_capture e get_console_output.
+
+Fluxo suportado:
+Play -> interações ordenadas -> checkpoints visuais/console -> screenshot final -> console final -> Stop.
+
+Garantias:
+- Stop precisa ser confirmado antes de o job ser marcado completed.
+- erro durante captura/console/interação tenta Stop antes de falhar.
+- falha de Stop torna o playtest failed; não existe sucesso falso.
+- máximo de 24 interações por playtest.
+- operações internas permitidas são fechadas: keyboard, mouse, navigate, capture e console.
+- nenhuma interação aceita nome arbitrário de tool MCP.
+- schemas das entradas são derivados dinamicamente do catálogo MCP real do Studio e sanitizados pelo contrato estrito do PluginToolCatalog.
+- resposta composta fica abaixo do orçamento de 64 KB do PluginToolCatalog mesmo no teste de pior caso com 24 checkpoints de console grandes.
+- resultados MCP crus não são duplicados no retorno composto.
+
+MULTI-STUDIO
+
+A documentação oficial atual do Roblox confirma que tools do Studio são endereçadas por studio_id e list_roblox_studios é a descoberta das instâncias.
+
+run_playtest usa um único studioId no topo. O wrapper remove studio_id dos subinputs expostos ao agente e injeta internamente o MESMO studio_id em:
+- start Play;
+- teclado/mouse/navegação;
+- screenshots intermediários;
+- console intermediário;
+- screenshot final;
+- console final;
+- Stop, inclusive no caminho de recuperação após erro.
+
+Objetivo: impedir que um playtest composto comece numa janela do Studio e observe/pare outra por erro de repetição do modelo.
+
+As tools oficiais http_get e skill foram adicionadas ao risk map como read-only. Tools oficiais desconhecidas continuam sensitive por padrão.
+
+ARTIFACT RUNTIME
+
+Novo:
+src/plugins/plugin-artifact-runtime.ts
+
+Objetivo:
+externalizar outputs MCP grandes, especialmente imagens de screen_capture e texto extenso, antes de eles atravessarem a saída limitada do PluginToolCatalog.
+
+Limites:
+- 2 MB por artifact;
+- 16 MB por plugin;
+- 32 MB globais;
+- máximo de 64 artifacts por plugin;
+- máximo de 256 artifacts globais;
+- texto acima de 16 KB é externalizado;
+- base64 de imagem é validado;
+- pruning por quantidade e orçamento de bytes.
+
+Snapshots de artifact expõem apenas metadata:
+id, pluginId, kind, mimeType, bytes, createdAt.
+Payload/encoding não vazam pelo snapshot.
+
+O broker agora possui mcp.call-tool-observed. Essa capability executa a tool MCP no core e externaliza imagens/textos grandes ANTES de devolver a resposta ao sandbox. O sandbox expõe api.mcp.callToolObserved().
+
+Roblox usa chamadas observadas para:
+- screen_capture;
+- get_console_output;
+- capture_viewport direto;
+- checkpoints de captura/console;
+- observações finais do playtest.
+
+JOB -> ARTIFACT
+
+PluginJobSnapshot agora pode carregar artifactIds.
+
+Nova capability:
+jobs.attach-artifact
+
+Regras:
+- exige background:run;
+- valida ownership do artifact no broker;
+- foreign artifact falha fechado;
+- referências duplicadas não são duplicadas;
+- máximo de 32 artifacts vinculados por job;
+- snapshots clonam artifactIds defensivamente para impedir mutação externa do estado interno.
+
+Roblox run_playtest vincula automaticamente os artifacts observados ao job real. Isso prepara diretamente o Artifact Strip e o ledger autoritativo do MCP Mode.
+
+LIFECYCLE
+
+PluginService.refresh() agora cancela/limpa runtime resources de TODOS os plugins registrados antes de unregister, e não somente plugins encontrados na lista de jobs. Isso fecha retenção acidental de sessão MCP/artifacts após refresh.
+
+SETTINGS / RENDERER SECURITY
+
+Removido o renderer IPC genérico:
+plugins:settings
+
+Removida do preload a API renderer settings(pluginId).
+
+Substituído por:
+plugins:public-status
+publicStatus(pluginId)
+
+No momento apenas o Roblox Studio Manager possui status público específico e sanitizado:
+- connected boolean;
+- tools inteiro 0..32;
+- instanceCount inteiro 0..100.
+
+Nenhum settings arbitrário/secreto do plugin é entregue ao renderer.
+
+A UI do Roblox consome esse objeto diretamente e atualiza publicStatus reativamente em eventos de activity/job. Um sequence guard impede resposta assíncrona antiga de sobrescrever status mais novo.
+
+TESTES ADICIONADOS/EXPANDIDOS
+
+- artifact externalization de imagem e texto grande;
+- payload não aparece em snapshot;
+- isolamento por plugin;
+- clear;
+- limite por artifact;
+- base64 inválido;
+- pruning por orçamento de memória;
+- job artifact ownership;
+- deduplicação;
+- defensive cloning;
+- schemas dinâmicos do run_playtest;
+- Play/capture/console/Stop;
+- Stop após erro de observação;
+- falha de Stop;
+- interações ordenadas;
+- payload incompatível;
+- limite de 24 interações;
+- checkpoints visuais/console em ordem;
+- orçamento final abaixo de 64 KB;
+- studioId obrigatório;
+- mesmo studio_id em toda a sequência;
+- capture_viewport direto usando artifact observado.
+
+PR #9 permanece draft/open/unmerged. Não fazer merge sem autorização explícita.
+
+PRÓXIMA ORDEM
+
+1. iniciar event ledger interno autoritativo usando jobs/artifact refs já estruturados;
+2. projetar eventos de tool/plugin/playtest sem inferir de texto de modelo;
+3. depois criar MCP Mode como projeção desse ledger;
+4. só então implementar Auto CodeZ MCP Gateway atrás do AgentRuntime/policies;
+5. manter integração Roblox MCP oficial como camada de saída.
