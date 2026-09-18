@@ -126,6 +126,9 @@ const summarizeObservation = (operation, result) => {
   const artifacts = content
     .filter((item) => item && item.type === 'artifact' && item.artifact && typeof item.artifact.id === 'string')
     .map((item) => item.artifact);
+  if (result && typeof result === 'object' && result.structuredContentArtifact && typeof result.structuredContentArtifact.id === 'string') {
+    artifacts.push(result.structuredContentArtifact);
+  }
   const text = content
     .filter((item) => item && item.type === 'text' && typeof item.text === 'string')
     .map((item) => item.text)
