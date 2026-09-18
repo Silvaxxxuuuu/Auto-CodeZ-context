@@ -30,6 +30,7 @@ export type PluginSummary = {
   hasMain: boolean;
   health: PluginHealth;
   failureReason?: string;
+  builtIn: boolean;
 };
 
 export type PluginDiscoverySnapshot = {
@@ -237,6 +238,7 @@ export class PluginService {
       grantedPermissions,
       missingPermissions: requestedPermissions.filter((permission) => !grantedPermissions.includes(permission)),
       hasMain: Boolean(plugin.manifest.main),
+      builtIn: this.builtInIds.has(plugin.manifest.id),
       health: { ...(this.health.get(plugin.manifest.id) ?? inactiveHealth(plugin.manifest.id)) },
       ...(plugin.failureReason ? { failureReason: plugin.failureReason } : {}),
     };
