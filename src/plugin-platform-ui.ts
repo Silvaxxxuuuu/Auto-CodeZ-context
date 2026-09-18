@@ -35,7 +35,7 @@ type PluginBridge = {
   invoke(pluginId: string, request: { id: string; method: string; input?: unknown }): Promise<{ id: string; ok: boolean; value?: unknown; error?: string }>;
   markHealthy(pluginId: string, message?: string): Promise<PluginSummary>;
   markFailed(pluginId: string, reason: string): Promise<PluginSummary>;
-  settings(pluginId: string): Promise<Record<string, unknown>>;
+  publicStatus(pluginId: string): Promise<Record<string, unknown>>;
   respondSandboxCall(result: { id: string; value?: unknown; error?: string }): Promise<boolean>;
   onSandboxCall(listener: (call: SandboxCall) => void): () => void;
   onActivity(listener: (activity: PluginActivity) => void): () => void;
@@ -63,7 +63,7 @@ let selectedPluginId: string | null = null;
 const activeSandboxIds = new Set<string>();
 const activities = new Map<string, PluginActivity>();
 const jobs = new Map<string, PluginJob>();
-const pluginSettings = new Map<string, Record<string, unknown>>();
+const pluginPublicStatus = new Map<string, Record<string, unknown>>();
 
 function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!)); }
 function isPluginPanel(): boolean { const panel = document.querySelector<HTMLElement>('#nav-panel'); return Boolean(panel && panel.querySelector('.panel-title')?.textContent?.includes('Plugins')); }
@@ -91,7 +91,7 @@ function detailView(plugin: PluginSummary): string {
   const runtime = plugin.hasMain ? 'Sandbox isolado' : 'Declarativo';
   const isRobloxManager = plugin.id === 'autocodez.roblox-studio-manager';
   const robloxServer = isRobloxManager ? plugin.health.message : undefined;
-  const robloxStatus = isRobloxManager ? pluginSettings.get(plugin.id)?.studioStatus as { connected?: boolean; tools?: number; instanceCount?: number } | undefined : undefined;
+  const robloxStatus = isRobloxManager ? pluginPublicStatus.get(plugin.id)?.studioStatus as { connected?: boolean; tools?: number; instanceCount?: number } | undefined : undefined;
   const publisher = plugin.publisher || 'Autor não informado';
   return `<section class="plugin-detail-overlay" data-plugin-detail="${escapeHtml(plugin.id)}" aria-label="Detalhes de ${escapeHtml(plugin.name)}">
     <div class="plugin-detail-page">
@@ -167,7 +167,7 @@ async function syncSandboxes(refreshSnapshot = true): Promise<void> {
 }
 async function refresh(useRescan = false): Promise<void> {
   if (!bridge || loading) return; loading = true; render();
-  try { snapshot = useRescan ? await bridge.refresh() : await bridge.snapshot(); const roblox = snapshot.plugins.find((plugin) => plugin.id === 'autocodez.roblox-studio-manager'); if (roblox) pluginSettings.set(roblox.id, await bridge.settings(roblox.id).catch(() => ({}))); await syncSandboxes(); }
+  try { snapshot = useRescan ? await bridge.refresh() : await bridge.snapshot(); const roblox = snapshot.plugins.find((plugin) => plugin.id === 'autocodez.roblox-studio-manager'); if (roblox) pluginPublicStatus.set(roblox.id, await bridge.publicStatus(roblox.id).catch(() => ({}))); await syncSandboxes(); }
   finally { loading = false; render(); }
 }
 async function act(action: () => Promise<unknown>): Promise<void> {
