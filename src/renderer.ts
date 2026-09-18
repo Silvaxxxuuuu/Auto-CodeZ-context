@@ -29,10 +29,11 @@ declare global {
       mcpTunnelStatus: () => Promise<{ running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean }>;
       onMcpTunnelStatus: (listener: (event: { running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean }) => void) => () => void;
 
-      doctorMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => Promise<{ executable: string; version: string; supported: true; diagnostics: string }>;
+      doctorMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => Promise<{ executable: string; version: string; supported: true; diagnostics: string; gateway: { ok: true; protocolVersion: string; toolCount: number; writeToolCount: number } }>;
       startMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => Promise<{ running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string }>;
       stopMcpTunnel: () => Promise<{ stopped: boolean }>;
       mcpGatewayStatus: () => Promise<{ running: boolean; host: string; port: number; endpoint: string }>;
+      preflightMcpGateway: () => Promise<{ ok: true; protocolVersion: string; toolCount: number; writeToolCount: number }>;
       startMcpGateway: (input?: { port?: number }) => Promise<{ host: string; port: number; endpoint: string; bearerToken: string }>;
       stopMcpGateway: () => Promise<{ stopped: boolean }>;
       listOperationalLedger: (query?: {
