@@ -197,7 +197,7 @@ async function processTreeKill(child: ChildProcessWithoutNullStreams): Promise<v
   }
 
   if (await exited) return;
-  if (!child.killed) child.kill('SIGKILL');
+  if (!hasChildExited(child)) child.kill('SIGKILL');
   await waitForChildExit(child, 1_000);
 }
 
