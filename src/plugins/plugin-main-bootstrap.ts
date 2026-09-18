@@ -140,6 +140,8 @@ async function createPluginService(): Promise<PluginService> {
   pluginToolCatalog.configureExecutor(async (pluginId, toolId, input, context) => {
     if (!service.hasPermission(pluginId, 'ai:tool')) throw new Error(`Plugin '${pluginId}' perdeu a permissão ai:tool.`);
     const startedAt = Date.now();
+    const invocationId = crypto.randomUUID();
+    const invocation: ActivePluginInvocation = { invocationId, pluginId, toolId, context: { ...context } };
     operationalLedger.record({
       actor: 'plugin',
       category: 'tool',
@@ -151,11 +153,9 @@ async function createPluginService(): Promise<PluginService> {
       runId: context.runId,
       projectId: context.projectId,
       toolCallId: context.toolCallId,
-      causationId: context.toolCallId,
+      causationId: invocationId,
       timestamp: startedAt,
     });
-    const invocationId = crypto.randomUUID();
-    const invocation: ActivePluginInvocation = { invocationId, pluginId, toolId, context: { ...context } };
     activePluginInvocations.set(invocationId, invocation);
     try {
       const value = await sandboxCalls.call(pluginId, toolId, { input, context }, invocationId);
@@ -170,7 +170,7 @@ async function createPluginService(): Promise<PluginService> {
         runId: context.runId,
         projectId: context.projectId,
         toolCallId: context.toolCallId,
-        causationId: context.toolCallId,
+        causationId: invocationId,
         durationMs: Date.now() - startedAt,
       });
       return value;
@@ -187,7 +187,7 @@ async function createPluginService(): Promise<PluginService> {
         runId: context.runId,
         projectId: context.projectId,
         toolCallId: context.toolCallId,
-        causationId: context.toolCallId,
+        causationId: invocationId,
         durationMs: Date.now() - startedAt,
         error: message,
       });
