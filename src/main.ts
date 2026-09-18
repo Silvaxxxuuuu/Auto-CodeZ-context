@@ -739,6 +739,7 @@ ipcMain.handle('mcp-tunnel:start', async (_event, input: unknown) => {
   const controlPlaneApiKey = value.controlPlaneApiKey === undefined
     ? undefined
     : requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane');
+  await mcpGatewayServer.preflight();
   const binding = mcpGatewayServer.trustedTunnelBinding();
   const status = await mcpTunnelRuntime.start({
     tunnelId,
