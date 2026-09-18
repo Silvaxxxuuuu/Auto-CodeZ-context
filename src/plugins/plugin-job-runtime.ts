@@ -6,6 +6,7 @@ const MAX_ACTIVE_PER_PLUGIN = 4;
 const MAX_LABEL_LENGTH = 160;
 const MAX_ACTIVITY_LENGTH = 512;
 const MAX_ERROR_LENGTH = 2048;
+const MAX_ARTIFACTS_PER_JOB = 32;
 
 export type PluginJobContext = {
   signal: AbortSignal;
@@ -65,6 +66,19 @@ export class PluginJobRuntime {
       job.progress = update.progress;
     }
     if (update.activity !== undefined) job.activity = boundedText(update.activity, MAX_ACTIVITY_LENGTH, 'Atividade do job');
+    job.updatedAt = now;
+    this.emit(job);
+    return clone(job);
+  }
+
+  attachArtifact(pluginId: string, jobId: string, artifactId: string, now = Date.now()): PluginJobSnapshot {
+    const job = this.requireActive(pluginId, jobId);
+    const normalizedArtifactId = boundedText(artifactId, 128, 'Artifact');
+    const artifactIds = job.artifactIds ?? [];
+    if (!artifactIds.includes(normalizedArtifactId)) {
+      if (artifactIds.length >= MAX_ARTIFACTS_PER_JOB) throw new Error('Job atingiu o limite de artifacts vinculados.');
+      job.artifactIds = [...artifactIds, normalizedArtifactId];
+    }
     job.updatedAt = now;
     this.emit(job);
     return clone(job);
