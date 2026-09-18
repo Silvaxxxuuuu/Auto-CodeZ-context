@@ -71,7 +71,7 @@ ipcMain.handle('plugins:renderer-ready', (event) => {
   return true;
 });
 ipcMain.handle('plugins:snapshot', async () => (await pluginService()).snapshot());
-ipcMain.handle('plugins:settings', async (_event, pluginId: unknown) => (await pluginService()).settings(requirePluginId(pluginId)));
+ipcMain.handle('plugins:public-status', async (_event, pluginId: unknown) => (await pluginService()).publicStatus(requirePluginId(pluginId)));
 ipcMain.handle('plugins:refresh', async () => {
   sandboxCalls.cancelAll('Plugins foram recarregados.');
   return (await pluginService()).refresh();
