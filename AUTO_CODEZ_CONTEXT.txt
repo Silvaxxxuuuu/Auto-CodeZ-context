@@ -4140,3 +4140,225 @@ SEGURANÇA / REGRAS QUE CONTINUAM
 - plugin/tool desaparecendo deve falhar fechado;
 - não confundir aprovação do cliente externo com aprovação interna Auto CodeZ;
 - MCP Mode é observabilidade/controle, não um segundo chat/composer.
+
+
+------------------------------------------------------------
+24.32. SECURE MCP TUNNEL — REVALIDAÇÃO OFICIAL E DECISÃO DE INTEGRAÇÃO
+------------------------------------------------------------
+
+CHECKPOINT DOCUMENTAL ANTERIOR VALIDADO
+
+Commit:
+cfd81d3976e3352fd947a04acfca9431afb1ff7d
+docs(context): checkpoint MCP Mode Gateway and Blender direction
+
+Workflows exatos:
+- Validate Auto CodeZ #35376480768: SUCCESS.
+- Visual Auto CodeZ #35376480819: SUCCESS.
+
+O código funcional que esse checkpoint documenta continua baseado no baseline:
+41d49efb35d1ada7084195823d7f99c58363771c
+
+REVALIDAÇÃO FEITA EM 2026-09-18
+
+Fontes oficiais consultadas novamente antes de codificar integração específica:
+- OpenAI Developers: Connect and test your plugin;
+- OpenAI Developers/API: Secure MCP Tunnel;
+- OpenAI tunnel-client repository/configuration/onboarding/releases.
+
+Conclusões atuais:
+
+1. Para desenvolvimento de plugin pessoal, ChatGPT aceita:
+   - MCP via endpoint HTTPS público; OU
+   - Secure MCP Tunnel para servidor privado/local.
+
+2. O endpoint público de MCP deve usar Streamable HTTP, normalmente /mcp.
+
+3. Secure MCP Tunnel é apropriado para desenvolvimento/teste privado.
+   Ele NÃO substitui o endpoint HTTPS público exigido para publicação pública de um plugin.
+
+4. tunnel-client roda dentro do mesmo perímetro que alcança o servidor MCP privado.
+   Para Auto CodeZ:
+   tunnel-client
+   → http://127.0.0.1:<porta>/mcp
+   é uma topologia oficialmente suportada.
+
+5. tunnel-client faz conexão HTTPS DE SAÍDA para a OpenAI.
+   O Auto CodeZ Gateway não precisa abrir porta pública de entrada.
+
+REQUISITO IMPORTANTE — CHAVE DE CONTROLE DO TÚNEL
+
+O Secure MCP Tunnel oficial NÃO é literalmente zero-key no computador.
+
+Requisitos mínimos documentados para tunnel-client:
+- CONTROL_PLANE_TUNNEL_ID / tunnel_id;
+- CONTROL_PLANE_API_KEY, com OPENAI_API_KEY como fallback em alguns fluxos;
+- um binding MCP main:
+  - MCP_SERVER_URL; OU
+  - MCP_COMMAND.
+
+Portanto:
+- ChatGPT Plus continua podendo ser o cérebro/modelo sem nossa aplicação pagar inferência por API;
+- porém o tunnel-client oficial precisa de uma credencial da Plataforma para autenticar o transporte/control plane;
+- essa credencial é uma fronteira separada da assinatura ChatGPT;
+- não prometer que Secure MCP Tunnel é “sem API key”.
+
+DECISÃO DE SEGURANÇA
+
+Auto CodeZ NÃO deve:
+- embutir uma chave da Plataforma;
+- persistir CONTROL_PLANE_API_KEY;
+- escrever essa chave no OperationalLedger;
+- colocar chave de controle ou Bearer local em argv quando houver alternativa;
+- imprimir segredo em logs.
+
+Primeira integração de Tunnel deve preferir:
+- credencial já presente no ambiente do processo; OU
+- segredo fornecido somente para a sessão e passado apenas no environment do child process;
+- nunca persistir por padrão.
+
+TUNNEL-CLIENT — VERSÃO ATUAL
+
+Versão oficial latest observada:
+v0.0.14, publicada em 2026-09-01.
+
+v0.0.14 é o rollout validado para MCP 2026-07-28 sessionless/self-contained.
+
+Histórico importante:
+- issue #40 reportou que v0.0.11 ainda sondava servidor MCP 2026-07-28 com initialize legado;
+- isso deixava servidor stateless moderno como not-ready;
+- issue foi fechada;
+- releases posteriores adicionaram suporte sessionless;
+- v0.0.14 declara explicitamente MCP 2026-07-28 sem dependência de initialize/notifications/initialized state.
+
+Implicação:
+- não testar Tunnel usando v0.0.11;
+- preferir v0.0.14 ou release posterior explicitamente compatível;
+- continuar mantendo lifecycle moderno e legacy separados no Auto CodeZ Gateway.
+
+AUTH LOCAL ENTRE TUNNEL-CLIENT E AUTO CODEZ
+
+tunnel-client atual suporta static MCP headers:
+- CLI: --mcp.extra-headers
+- env: MCP_EXTRA_HEADERS
+- YAML: mcp.extra_headers
+
+Valores de header aceitam referências:
+- env:VARNAME
+- file:/path/to/secret
+
+Isso permite preservar o Bearer token efêmero do Auto CodeZ Gateway sem gravá-lo em argv/config.
+
+Direção segura conceitual:
+- Auto CodeZ inicia Gateway;
+- gera bearerToken efêmero;
+- child tunnel-client recebe uma env temporária, por exemplo AUTO_CODEZ_MCP_BEARER;
+- configuração do tunnel-client referencia o segredo via env;
+- Authorization para o MCP localhost é enviado apenas ao origin configurado;
+- control-plane key é outro segredo e não é encaminhado para o MCP server.
+
+NÃO confundir:
+- CONTROL_PLANE_API_KEY = autentica tunnel-client com OpenAI tunnel control plane;
+- Auto CodeZ gateway bearer = autentica tunnel-client no nosso servidor localhost.
+
+TUNNEL RUNTIME — DESENHO PARA IMPLEMENTAÇÃO
+
+Ainda NÃO implementado neste checkpoint.
+
+Criar uma camada separada, por exemplo:
+McpTunnelRuntime
+
+Responsabilidades futuras:
+- detectar/validar tunnel-client compatível;
+- exigir versão mínima compatível com MCP 2026-07-28;
+- nunca iniciar automaticamente;
+- receber tunnel_id;
+- exigir control-plane key via ambiente/sessão, sem persistir;
+- iniciar primeiro o McpGatewayHttpServer;
+- injetar local gateway bearer somente no child environment;
+- apontar MCP_SERVER_URL para 127.0.0.1:<porta>/mcp;
+- configurar MCP extra Authorization header por referência env/file;
+- executar doctor/preflight;
+- acompanhar health/ready state;
+- expor status sanitizado na UI;
+- não expor raw stdout ilimitado;
+- matar tunnel-client ao parar conexão;
+- parar tunnel-client antes/de junto do Gateway;
+- encerrar no app quit;
+- ledger registra apenas lifecycle/status/versão/tunnel id sanitizado quando apropriado, nunca chaves/tokens.
+
+Possível UX:
+MCP Mode
+→ Gateway local
+→ seção Tunnel opcional
+→ caminho/status do tunnel-client
+→ tunnel_id
+→ estado da credencial: disponível/ausente, nunca valor
+→ Doctor
+→ Conectar
+→ Ready/Not ready
+→ Parar.
+
+NÃO colocar um campo de API key persistente em Settings na primeira versão.
+
+PUBLICAÇÃO FUTURA
+
+Secure MCP Tunnel é caminho de desenvolvimento/servidor privado.
+Para distribuição pública no diretório:
+- OpenAI exige endpoint MCP HTTPS público estável;
+- Tunnel não atende ao requisito de publicação pública.
+
+Portanto existem duas fases distintas:
+
+Teste pessoal:
+ChatGPT
+→ Secure MCP Tunnel
+→ tunnel-client local
+→ Auto CodeZ Gateway
+→ AgentRuntime
+→ plugins.
+
+Distribuição pública futura:
+ChatGPT
+→ endpoint/relay HTTPS público do Auto CodeZ
+→ conexão autenticada com runtime local ou arquitetura equivalente
+→ AgentRuntime
+→ plugins.
+
+A segunda fase exige desenho próprio de autenticação, relay, custo, privacidade e disponibilidade.
+Não implementar relay público improvisado somente para evitar o requisito da chave do Tunnel.
+
+CHATGPT — PLANO DE TESTE ATUAL
+
+A conta Plus do usuário empiricamente possui:
+- Developer Mode;
+- New Plugin;
+- Connection = Server URL / Tunnel;
+- plugins mencionáveis em chat normal.
+
+Depois do TunnelRuntime:
+1. conectar plugin pessoal;
+2. confirmar descoberta de tools;
+3. testar no chat normal com @Auto CodeZ;
+4. testar também no Work;
+5. read tool;
+6. write tool;
+7. waiting_approval local;
+8. Aceitar;
+9. operation_status success;
+10. Roblox Studio real.
+
+Não inferir comportamento do Free a partir desse teste.
+Não prometer suporte de write em Free até ser verificado.
+
+PRÓXIMO PASSO DE CÓDIGO
+
+Implementar McpTunnelRuntime opcional e fail-closed, sem enfraquecer o Gateway atual.
+A integração precisa tratar o tunnel-client como TRANSPORTE, não como nova fonte de autoridade.
+Toda tool continua passando por:
+MCP Gateway
+→ AgentRuntime
+→ policies/approvals
+→ PluginToolCatalog.
+
+O Tunnel jamais deve receber caminho alternativo direto para Roblox, Blender, filesystem ou terminal.
