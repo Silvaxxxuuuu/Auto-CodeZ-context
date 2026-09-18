@@ -123,6 +123,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
     category?: string;
     state?: string;
     limit?: number;
+    direction?: 'forward' | 'backward';
   }) => invoke('agent:list-operational-ledger', query),
   onOperationalLedgerEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
