@@ -745,7 +745,7 @@ Sync:
 20. ROADMAP
 ============================================================
 
-NOTA DE 04/09/2026: a ordem abaixo é histórica e será reorganizada em uma etapa separada. As ideias registradas na seção 23 mudam significativamente as prioridades e não devem ser encaixadas às pressas nesta ordem antiga.
+NOTA CANÔNICA DE 18/09/2026: a ordem abaixo é HISTÓRICA. O roadmap atual e autoritativo está na seção 24.37. Não usar as fases antigas abaixo para decidir prioridade de implementação quando houver conflito com 24.37.
 
 FASE 1 — ESTABILIZAÇÃO
 - billing/quota provider handling;
@@ -1663,31 +1663,18 @@ Funcionalidades futuras citadas:
 15. Sandbox, approvals, preconditions e secret protection permanecem invariantes mesmo em modo autônomo.
 
 ------------------------------------------------------------
-23.30. PONTO DE PARTIDA PARA A PRÓXIMA REORGANIZAÇÃO
+23.30. REORGANIZAÇÃO DO ROADMAP — CONCLUÍDA
 ------------------------------------------------------------
 
-Na próxima etapa, reorganizar TODO o roadmap considerando estas áreas:
-- Stability / Execution Reliability;
-- Monaco Diff e file-edit workflow;
-- Terminal PTY;
-- Context Engine / Tree-sitter;
-- AI Economy;
-- Usage Analytics;
-- Provider expansion;
-- Auto Change;
-- Orchestrator / Multi-Agent;
-- Execution Timeline;
-- Sandbox;
-- Account;
-- Sync;
-- MCP/Plugins;
-- semantic memory/vector DB;
-- incremental patch engine;
-- local models;
-- multimodal;
-- product/distribution.
+A reorganização solicitada nesta seção foi concluída em 18/09/2026.
 
-A reorganização deve considerar dependências. Não colocar uma feature visual antes da infraestrutura da qual ela depende. Não implementar Orchestrator antes de o estado de execução/contexto permitir continuidade confiável. Não implementar Auto Change como simples troca de dropdown; ele exige checkpoint/context handoff. Não implementar Usage Analytics sem uma camada normalizada de usage/cost telemetry.
+Fonte autoritativa atual:
+24.37. ROADMAP CANÔNICO — ACCOUNT/DEVICE/RELAY/PLUGIN PÚBLICO
+
+Regra:
+- preservar esta seção como histórico;
+- não usar a lista antiga de áreas como ordem de execução;
+- em caso de conflito, 24.37 prevalece.
 
 Não fazer merge do PR #9 sem autorização explícita do usuário.
 
@@ -5820,4 +5807,692 @@ AgentRuntime/policies
 
 Sem bypass para filesystem/terminal/processos.
 Background/headless e checkpoints visuais continuam como estratégia de performance.
+
+------------------------------------------------------------
+24.37. ROADMAP CANÔNICO — ACCOUNT / DEVICE / RELAY / PLUGIN PÚBLICO
+------------------------------------------------------------
+
+STATUS
+
+Esta seção substitui a ordem histórica da seção 20 e conclui a reorganização pedida em 23.30.
+
+A partir deste checkpoint, esta é a ordem autoritativa de implementação do Auto CodeZ quando houver conflito com roadmaps antigos.
+
+MOTIVO DA REORGANIZAÇÃO
+
+A experiência final desejada deixou claro que Account não é uma feature lateral.
+
+Account passa a ser infraestrutura obrigatória para:
+- identidade Auto CodeZ;
+- device identity;
+- associação segura entre ChatGPT e desktop;
+- relay MCP público;
+- revogação;
+- múltiplos dispositivos;
+- futura sincronização;
+- billing/planos quando existir;
+- plugin público sem exigir Developer Mode/Tunnel manual do usuário final.
+
+O Secure MCP Tunnel permanece válido, mas muda de papel:
+- desenvolvimento;
+- testes;
+- diagnóstico;
+- integração avançada;
+- fallback técnico.
+
+Ele NÃO é o caminho principal planejado para o usuário final.
+
+ARQUITETURA DE PRODUTO ALVO
+
+Fluxo normal:
+
+ChatGPT / Codex / outros clientes compatíveis
+→ plugin/app Auto CodeZ público
+→ endpoint MCP HTTPS oficial Auto CodeZ
+→ Auto CodeZ Relay
+→ conexão outbound autenticada já aberta pelo Auto CodeZ Desktop
+→ AgentRuntime
+→ policies / approvals
+→ PluginToolCatalog
+→ filesystem / terminal / Roblox / Blender / integrações.
+
+Regra permanente:
+Relay é transporte e roteamento, nunca autoridade.
+
+O backend não deve executar:
+- terminal;
+- filesystem local;
+- Roblox Studio;
+- Blender;
+- processos do usuário.
+
+Essas operações continuam somente no dispositivo local e continuam sujeitas a:
+- AgentRuntime;
+- Allowed Paths;
+- policies;
+- approvals;
+- sandbox;
+- secret protection;
+- PluginToolCatalog.
+
+GRAFO DE DEPENDÊNCIAS AUTORITATIVO
+
+Account Core
+→ Auth Session
+→ Device Identity
+→ Device Registry
+→ Relay Authentication
+→ Relay Connection
+→ Remote MCP Endpoint
+→ Public Auto CodeZ Plugin
+→ zero-config ChatGPT onboarding
+→ Roblox/Blender/outros plugins via cliente externo.
+
+Cloud Sync NÃO precisa bloquear o Relay inicial.
+Account/Device/Relay formam uma vertical menor e prioritária.
+Sync completo entra depois da identidade e do device registry estarem sólidos.
+
+============================================================
+FASE A — ACCOUNT CORE V1
+============================================================
+
+PRIORIDADE IMEDIATA.
+
+Objetivo:
+uma conta Auto CodeZ obrigatória e segura, com sessão persistente e recuperável.
+
+Modelo inicial:
+- userId estável e opaco;
+- primaryEmail;
+- displayName opcional;
+- createdAt;
+- accountStatus;
+- linkedIdentities;
+- security metadata mínima.
+
+Autenticação:
+passwordless-first permanece a direção.
+
+Ordem recomendada de implementação:
+1. Magic Link/email como caminho mais simples e universal;
+2. GitHub OAuth;
+3. Google OAuth;
+4. Microsoft OAuth;
+5. Passkeys depois da sessão/account model estar estabilizada.
+
+Não implementar cinco métodos simultaneamente antes de provar o account/session core.
+
+SESSION MODEL
+
+Separar:
+- login session de usuário;
+- device credential;
+- relay connection credential;
+- provider/API keys.
+
+Não reutilizar um único token para tudo.
+
+Sessão do usuário:
+- access token curto;
+- refresh token rotacionável;
+- refresh token revogável;
+- audience explícita;
+- issuer explícito;
+- expiração;
+- token binding/device association quando aplicável.
+
+Regras:
+- refresh token nunca no renderer;
+- tokens de sessão nunca no ledger;
+- tokens nunca em query string;
+- tokens nunca em logs;
+- acesso do renderer somente por APIs sanitizadas do preload;
+- persistência deve usar storage protegido pelo SO quando disponível.
+
+ACCOUNT UX
+
+Conta deve ser parte do primeiro onboarding do produto.
+
+Fluxo:
+Abrir Auto CodeZ
+→ tela de boas-vindas
+→ Entrar / Criar conta
+→ autenticação
+→ nomear dispositivo
+→ app principal.
+
+A conta é obrigatória para recursos cloud/relay.
+O modo local/offline do editor pode continuar funcional após sessão válida previamente estabelecida conforme política futura de offline grace.
+
+============================================================
+FASE B — DEVICE IDENTITY + DEVICE REGISTRY
+============================================================
+
+Executar imediatamente após Account Core.
+
+Cada instalação recebe:
+- deviceId aleatório e opaco;
+- device public identity;
+- nome amigável;
+- plataforma;
+- arquitetura;
+- versão do Auto CodeZ;
+- createdAt;
+- lastSeenAt;
+- revokedAt opcional.
+
+Nome amigável sugerido pelo app:
+ex.: "Gabriel-PC"
+
+O usuário pode renomear.
+
+NÃO usar como deviceId:
+- hostname puro;
+- MAC address;
+- serial de hardware;
+- machine GUID bruto;
+- fingerprint invasiva.
+
+DEVICE CREDENTIAL
+
+Criar credencial própria do dispositivo.
+
+Objetivo:
+o desktop prova ao backend que aquele deviceId pertence à conta sem reutilizar continuamente o refresh token de login.
+
+Preferência arquitetural:
+- chave assimétrica gerada localmente;
+- private key nunca sai da máquina;
+- public key registrada no backend;
+- desafio/assinatura para estabelecer sessões de relay.
+
+Se uma implementação assimétrica completa atrasar excessivamente o MVP, um device secret rotacionável protegido pelo SO pode ser usado como etapa intermediária, mas deve existir plano explícito de migração.
+
+DEVICE REGISTRY UI
+
+Settings → Account → Devices
+
+Mostrar:
+- nome;
+- plataforma;
+- versão;
+- online/offline;
+- last seen;
+- sessão atual;
+- revogar.
+
+Revogação deve:
+- invalidar novas conexões de relay;
+- encerrar relay ativo best-effort;
+- impedir refresh de device credential;
+- não apagar arquivos locais automaticamente.
+
+MULTI-DEVICE
+
+Vários dispositivos da mesma conta podem existir.
+
+Regra:
+nenhum dispositivo ganha controle automático de outro.
+
+Para MCP remoto:
+- plugin/cliente precisa escolher device quando houver mais de um elegível;
+OU
+- usar um activeDevice explícito configurado pelo usuário.
+
+Nunca adivinhar silently entre dois computadores online.
+
+============================================================
+FASE C — RELAY PROTOCOL V1
+============================================================
+
+Executar depois de Account + Device Registry.
+
+Objetivo:
+permitir que o Auto CodeZ Desktop mantenha uma conexão outbound segura com a infraestrutura Auto CodeZ.
+
+Topologia:
+
+Auto CodeZ Desktop
+→ HTTPS/WSS outbound
+→ Auto CodeZ Relay.
+
+Nenhuma porta inbound é necessária no PC.
+
+TRANSPORTE
+
+Preferência inicial:
+WebSocket TLS para sessão bidirecional persistente.
+
+Fallback futuro:
+HTTP streaming/long-poll se houver necessidade real.
+
+Não criar fallback antes de medir necessidade.
+
+HANDSHAKE
+
+Conceitualmente:
+1. desktop autentica device;
+2. backend valida conta + device + revogação;
+3. relaySessionId efêmero é criado;
+4. servidor envia challenge;
+5. device prova posse da credential;
+6. conexão fica ready;
+7. heartbeat mantém presence.
+
+Estados:
+- offline;
+- connecting;
+- authenticating;
+- ready;
+- reconnecting;
+- revoked;
+- error.
+
+RECONNECT
+
+Exponential backoff com jitter.
+Limite máximo.
+Sem busy loop.
+
+Internet caiu:
+- editor local continua;
+- relay vira offline;
+- novas chamadas remotas falham com erro claro;
+- não executar fila de writes remotas antigas automaticamente depois de horas sem revalidação.
+
+SEGURANÇA DO RELAY
+
+Relay nunca confia em:
+- clientId declarado pelo modelo;
+- projectId fornecido pela cloud;
+- pluginId arbitrário;
+- permission arbitrária.
+
+O desktop revalida tudo.
+
+Envelope remoto precisa ter:
+- protocol version;
+- requestId;
+- account context autenticado pelo servidor;
+- target device;
+- timestamp;
+- expiration/deadline;
+- operation type;
+- payload bounded;
+- idempotency key quando aplicável.
+
+Limites:
+- payload máximo;
+- requests concorrentes;
+- timeout;
+- rate limit por account/device/plugin;
+- conexão única ou política explícita por device.
+
+REPLAY PROTECTION
+
+Pedidos mutáveis precisam:
+- requestId único;
+- expiration curta;
+- duplicate detection;
+- idempotency semantics explícitas.
+
+Não reaplicar write apenas porque a conexão caiu antes do ACK.
+
+============================================================
+FASE D — REMOTE MCP GATEWAY / ENDPOINT PÚBLICO
+============================================================
+
+Executar sobre o Relay já autenticado.
+
+Endpoint alvo conceitual:
+https://mcp.autocodez.app/mcp
+
+Não fixar domínio definitivo no código antes de domínio/provisionamento real.
+
+Responsabilidades do endpoint:
+- autenticar usuário/plugin;
+- resolver account;
+- resolver device escolhido;
+- encaminhar MCP envelope;
+- devolver resposta;
+- nunca executar tool localmente.
+
+MCP PUBLIC BOUNDARY
+
+Publicar somente tools permitidas pelo Auto CodeZ local.
+
+PluginToolCatalog continua authoritative.
+
+A cloud não mantém catálogo privilegiado independente.
+
+Fluxo:
+tools/list remoto
+→ relay
+→ desktop
+→ catálogo local autoritativo
+→ resposta.
+
+tools/call remoto
+→ relay
+→ desktop
+→ AgentRuntime/policies
+→ approval local quando exigido
+→ resultado.
+
+READINESS
+
+Adicionar tool read-only própria:
+autocodez_connection_status
+
+Objetivo:
+validar conexão sem abrir CMD e sem pedir write.
+
+Resposta sanitizada possível:
+- connected=true;
+- deviceName;
+- appVersion;
+- projectAttached boolean;
+- mcpReady boolean;
+- Roblox Studio connected boolean quando plugin disponível;
+- outros capabilities sanitizados.
+
+Nunca retornar:
+- paths privados completos sem necessidade;
+- tokens;
+- environment;
+- bearer;
+- API keys.
+
+============================================================
+FASE E — PLUGIN PÚBLICO AUTO CODEZ
+============================================================
+
+Executar depois de Remote MCP Gateway real.
+
+Nome de produto:
+Auto CodeZ
+
+Evitar nome público:
+"Auto CodeZ MCP Connection"
+
+MCP é detalhe de implementação.
+
+Plugin público deve:
+- ter identidade visual própria;
+- apontar para endpoint HTTPS Auto CodeZ;
+- autenticar na conta Auto CodeZ;
+- expor skills/instruções de uso;
+- usar as tools publicadas pelo desktop conectado.
+
+O scaffold criado em:
+integrations/openai-plugin/auto-codez/
+
+continua útil, mas não deve receber IDs fictícios.
+
+Developer Mode:
+- continua necessário para desenvolvimento/teste privado quando exigido pela plataforma;
+- NÃO deve ser parte do onboarding normal depois que o plugin público estiver aprovado/disponível no diretório.
+
+Secure MCP Tunnel:
+- permanece modo Developer/Advanced;
+- não é onboarding principal.
+
+ONBOARDING CHATGPT FINAL DESEJADO
+
+No Auto CodeZ:
+
+"ChatGPT"
+
+1. Abra Plugins.
+2. Pesquise "Auto CodeZ".
+3. Instale e entre com sua conta Auto CodeZ.
+4. Pronto.
+
+Botão opcional:
+"Abrir ChatGPT" / "Copiar teste"
+
+Teste sugerido:
+"Use o Auto CodeZ e verifique se meu computador está conectado."
+
+Não usar:
+- CMD echo como teste padrão;
+- Tunnel ID;
+- localhost;
+- Bearer;
+- Doctor;
+- control-plane key.
+
+============================================================
+FASE F — MCP MODE NORMAL vs DEVELOPER
+============================================================
+
+Separar visualmente dois caminhos.
+
+NORMAL
+
+Conta + Relay + plugin público.
+
+Estados principais:
+- Não configurado;
+- Preparando;
+- Online;
+- Aguardando cliente;
+- Cliente conectado;
+- Approval pendente;
+- Error/reconnect.
+
+A UI normal não mostra:
+- porta;
+- localhost;
+- bearer;
+- tunnel-client;
+- Doctor;
+- Tunnel ID;
+- Runtime API key.
+
+DEVELOPER / ADVANCED
+
+Mantém o trabalho já implementado:
+- localhost Gateway;
+- Secure MCP Tunnel;
+- preflight;
+- Doctor;
+- Tunnel ID;
+- runtime diagnostics;
+- direct local connection;
+- ferramentas de troubleshooting.
+
+Nada do trabalho 24.32–24.36 é descartado.
+Ele vira infraestrutura de desenvolvimento e diagnóstico.
+
+============================================================
+FASE G — ROBLOX REAL VIA CAMINHO PÚBLICO
+============================================================
+
+Somente depois de Account/Device/Relay/Remote MCP/plugin público estarem comprovados.
+
+Prova:
+ChatGPT
+→ plugin Auto CodeZ
+→ Remote MCP
+→ Relay
+→ desktop
+→ AgentRuntime
+→ PluginToolCatalog
+→ Roblox Studio Manager
+→ Roblox Studio.
+
+Teste mínimo:
+- connection_status;
+- list studios;
+- inspect;
+- write simples;
+- waiting_approval;
+- approval local;
+- operation_status success;
+- screenshot/playtest;
+- artifact;
+- Stop.
+
+A integração Roblox já existente não deve ser reescrita para Relay.
+O Relay apenas entrega a chamada à fronteira MCP/AgentRuntime existente.
+
+============================================================
+FASE H — BLENDER 3D AUTOMATION
+============================================================
+
+Depois da vertical pública estar comprovada com Roblox.
+
+Motivo:
+Blender deve reutilizar:
+- identidade;
+- relay;
+- public MCP;
+- approvals;
+- artifacts;
+- multimodal bridge;
+- PluginToolCatalog.
+
+Não criar canal cloud separado para Blender.
+
+Contrato permanece:
+AgentRuntime/policies
+→ PluginToolCatalog
+→ Blender plugin
+→ Blender Python API.
+
+============================================================
+FASE I — SYNC V1
+============================================================
+
+Cloud Sync completo continua importante, mas NÃO bloqueia a primeira vertical Relay.
+
+Implementar depois do Account/Device core estar estável.
+
+Ordem sugerida:
+1. settings/preferences;
+2. chats/history;
+3. library;
+4. project metadata;
+5. projetos sincronizados opcionais;
+6. backups;
+7. conflict resolution;
+8. offline queue;
+9. Change Requests.
+
+Invariante permanece:
+local save
+→ queue
+→ sync
+→ server confirmation
+→ synced.
+
+Falha:
+local data permanece salvo + pending.
+
+============================================================
+FASE J — PRODUCT/DISTRIBUTION HARDENING
+============================================================
+
+Depois da vertical pública funcional:
+- updater;
+- signed builds;
+- release channels;
+- backend observability sem secrets;
+- status page;
+- rate limits;
+- abuse prevention;
+- account recovery;
+- support;
+- billing/plans quando decidido;
+- privacy controls;
+- data export/delete;
+- Terms/Privacy;
+- plugin directory publication flow.
+
+============================================================
+TRILHA PARALELA — ENGINE / AI PLATFORM
+============================================================
+
+Não bloquear correções críticas de engine.
+
+Pode evoluir em paralelo quando não conflitar com a vertical Account/Relay:
+- execution reliability;
+- DiffRuntime;
+- PTY;
+- Context Engine;
+- incremental patch;
+- provider expansion;
+- local models;
+- Usage Analytics telemetry foundation;
+- Auto Change checkpoints;
+- Orchestrator;
+- semantic memory;
+- multimodal.
+
+Regra:
+não iniciar uma iniciativa transversal grande se ela atrasar o primeiro caminho público Account → Relay → Plugin sem desbloquear esse caminho.
+
+============================================================
+PRÓXIMA IMPLEMENTAÇÃO CONCRETA
+============================================================
+
+Começar por Account Core V1.
+
+Antes de escrever UI de login, definir:
+1. backend/auth boundary;
+2. account schema;
+3. session schema;
+4. token lifecycle;
+5. protected local storage;
+6. renderer/preload IPC boundary;
+7. logout/revocation semantics;
+8. offline behavior;
+9. device bootstrap;
+10. test strategy.
+
+Primeiro slice recomendado:
+- AccountSessionRuntime local;
+- tipos Account/UserSession;
+- protected credential store abstraction;
+- IPC/preload sanitizado;
+- UI Login/Account shell;
+- backend adapter interface;
+- fake/local test adapter para E2E;
+- testes de secret non-disclosure;
+- testes logout/revocation;
+- depois integrar backend real.
+
+Não começar Relay antes de session/device identity terem contratos testados.
+
+NÃO FAZER AGORA
+
+- não publicar plugin com endpoint fictício;
+- não embutir uma conta OpenAI;
+- não usar uma Runtime API key compartilhada entre usuários;
+- não transformar Relay em executor;
+- não expor localhost publicamente;
+- não guardar private device key no renderer;
+- não persistir Bearer do Gateway;
+- não reaplicar write remoto automaticamente após reconnect;
+- não dar controle remoto entre dispositivos sem seleção/autorização explícita;
+- não reescrever Roblox/Blender para bypassar AgentRuntime;
+- não fazer merge do PR #9 sem autorização explícita do usuário.
+
+CRITÉRIO PARA CONSIDERAR ACCOUNT CORE V1 PRONTO
+
+- login real ou adapter de auth substituível funcionando;
+- sessão protegida fora do renderer;
+- refresh/revocation testados;
+- logout limpa sessão local;
+- conta sobrevive restart de modo seguro;
+- device bootstrap cria identidade estável;
+- renderer recebe apenas perfil/status sanitizado;
+- zero secret no ledger/log;
+- Validate verde;
+- Visual verde;
+- cenário de sessão expirada/revogação coberto.
+
+SÓ DEPOIS:
+Device Registry → Relay.
 
