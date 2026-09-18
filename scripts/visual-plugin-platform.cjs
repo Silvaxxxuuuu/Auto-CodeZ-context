@@ -55,10 +55,13 @@ async function runTest() {
   await mcpMode.getByText('Onde você quer usar o Auto CodeZ?', { exact: true }).waitFor({ state: 'visible', timeout: 20000 });
   await mcpMode.getByText('ChatGPT', { exact: true }).waitFor({ state: 'visible' });
   await mcpMode.getByText('ChatGPT Codex', { exact: true }).waitFor({ state: 'visible' });
+  await mcpMode.locator('[data-mcp-client="codex"]').click();
+  if (!(await mcpMode.locator('[data-mcp-client="chatgpt"]').evaluate((element) => element.classList.contains('selected'))) || !(await mcpMode.locator('[data-mcp-client="codex"]').evaluate((element) => element.classList.contains('selected')))) throw new Error('Seleção múltipla de clientes MCP não persistiu visualmente.');
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-clientes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Avançar' }).click();
   await mcpMode.getByText('Conecte seus clientes', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   await mcpMode.getByText('Modo de desenvolvedor', { exact: false }).waitFor({ state: 'visible' });
+  await mcpMode.getByText('App · CLI · extensão', { exact: true }).waitFor({ state: 'visible' });
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-instrucoes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Finalizar' }).click();
   await mcpMode.getByText('MCP MODE', { exact: true }).waitFor({ state: 'visible' }); await mcpMode.getByText('Sessões', { exact: true }).waitFor({ state: 'visible' });
