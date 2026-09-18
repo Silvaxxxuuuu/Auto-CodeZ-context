@@ -5309,3 +5309,162 @@ SEGURANÇA QUE CONTINUA INALTERADA
 - shell não foi habilitado para tunnel-client.
 - Roblox/Blender/filesystem/terminal não recebem bypass.
 - PR #9 continua draft/open/unmerged até autorização explícita.
+
+
+------------------------------------------------------------
+24.35. CHECKPOINT PÓS-TUNNEL — HEAD E VISUAL EXATOS REVALIDADOS
+------------------------------------------------------------
+
+BASELINE FUNCIONAL REVALIDADO
+
+Baseline funcional:
+1728057637d7439e95d2e40f63966d3a006977c0
+docs(context): checkpoint real Tunnel preflight and Doctor
+
+Workflows exatos:
+- Validate Auto CodeZ #35386490361 / run #3821: SUCCESS.
+- Visual Auto CodeZ #35386490486 / run #740: SUCCESS.
+- Artifact visual: auto-codez-visual-35386490486.
+- Artifact ID: 10564347253.
+- Tamanho: 3.896.471 bytes.
+- Digest: sha256:6aa19a6378ee4893e547effdc1620030a798065643150f6626b0bee5fb1249ad.
+
+VALIDATE
+
+Todos os jobs passaram:
+- TypeScript validation.
+- Core tests.
+- ESLint validation.
+- Electron Forge package build.
+- Electron startup smoke test.
+
+VISUAL
+
+O app empacotado Windows x64 foi usado.
+Todos os passos do workflow passaram:
+- rebuild node-pty.
+- package Electron.
+- Capture visual flow.
+- unified local AI.
+- unavailable local runtime recovery.
+- secure local runtime settings.
+- LM Studio chat.
+- upload screenshots.
+
+Manifest visual do artifact:
+- 19 cenários registrados.
+- 19 passed.
+- pageErrors = [].
+- consoleErrors = [].
+
+MCP / PLUGIN PLATFORM REVALIDADO NO APP EMPACOTADO
+
+O visual-plugin-platform continua cobrindo a cadeia completa:
+- descoberta do plugin fixture;
+- grants obrigatórios;
+- sandbox allow-scripts isolado;
+- settings;
+- jobs;
+- localhost bridge;
+- PluginToolCatalog;
+- MCP Mode;
+- Gateway localhost;
+- preflight autenticada;
+- tool dinâmica write identificada por contrato estável;
+- tools/call;
+- waiting_approval;
+- aprovação local;
+- operation_status;
+- success.
+
+A identificação da tool write NÃO depende de texto de descrição.
+Contrato usado:
+- name termina em _external_action;
+- annotations.readOnlyHint=false;
+- annotations.destructiveHint=true.
+
+SECURE MCP TUNNEL
+
+O estado validado permanece:
+Gateway Start
+→ authenticated local preflight
+→ tunnel-client version gate
+→ tunnel-client doctor --explain
+→ tunnel-client run
+→ /readyz
+→ ready=true.
+
+Tunnel continua somente transporte.
+Nenhuma write externa recebe bypass.
+AgentRuntime/policies e approval local continuam authoritative.
+PluginToolCatalog continua authoritative.
+
+ARTIFACT VISUAL CONFERIDO
+
+Screenshots atuais incluem:
+- funcional-plugin-platform-lista.png;
+- funcional-plugin-platform-detalhes.png;
+- funcional-plugin-platform.png;
+- funcional-plugin-platform-desativado.png;
+- funcional-mcp-mode-ledger.png;
+- demais telas principais e regressões do produto.
+
+O screenshot MCP mostra no ledger a operação externa passando por:
+- waiting;
+- tool execution;
+- plugin call;
+- approval concluída;
+- operação MCP concluída.
+
+PR #9
+
+- OPEN.
+- DRAFT.
+- merged=false.
+- Não mesclar sem autorização explícita.
+
+PRÓXIMO BLOQUEIO REAL
+
+Não há outra prova útil que CI/mock consiga substituir.
+
+A próxima etapa obrigatória é o primeiro teste integrado REAL:
+ChatGPT
+→ Secure MCP Tunnel oficial
+→ Gateway local do Auto CodeZ
+→ tools/list real
+→ read real
+→ write real
+→ waiting_approval local
+→ Aceitar no Auto CodeZ
+→ operation_status
+→ success no ChatGPT.
+
+Esse teste exige a máquina/conta do usuário porque usa:
+- tunnel-client oficial;
+- tunnel_id real;
+- Runtime API key real com Tunnels Read + Use;
+- ChatGPT Developer Mode / Plugins da conta real.
+
+Somente depois desse teste avançar para:
+- repetição em chat normal com @Auto CodeZ;
+- Work;
+- Roblox Studio Manager real;
+- Session Capsule/handoff refinado;
+- multimodal bridge controlada;
+- Blender 3D Automation.
+
+BLENDER CONTINUA COM O MESMO CONTRATO
+
+AgentRuntime/policies
+→ PluginToolCatalog
+→ Blender plugin
+→ Blender Python API.
+
+Performance:
+- background/headless quando possível;
+- evitar viewport pesada;
+- viewport/render somente em checkpoints úteis;
+- perfis Eco / Balanced / Maximum planejados;
+- estado de cena e checkpoints visuais para loops iterativos;
+- nenhum bypass para filesystem/terminal/processos.
+
