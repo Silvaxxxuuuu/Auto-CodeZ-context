@@ -72,6 +72,23 @@ const sanitizeSchemaNode = (schema, depth = 0) => {
 };
 
 const MAX_AGENT_TOOLS = 32;
+const HIGH_LEVEL_OPERATIONS = {
+  inspect_game: 'search_game_tree',
+  inspect_instance: 'inspect_instance',
+  read_script: 'script_read',
+  edit_scripts: 'multi_edit',
+  execute_luau: 'execute_luau',
+  studio_state: 'get_studio_state',
+  list_studios: 'list_roblox_studios',
+  search_scripts: 'script_search',
+  grep_scripts: 'script_grep',
+  read_console: 'get_console_output',
+  capture_viewport: 'screen_capture',
+  play: 'start_stop_play',
+  keyboard: 'user_keyboard_input',
+  mouse: 'user_mouse_input',
+  navigate_character: 'character_navigation',
+};
 
 const toStrictSchema = (schema) => {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || schema.type !== 'object') return { type: 'object', properties: {}, required: [], additionalProperties: false };
@@ -93,8 +110,11 @@ async function connect(api) {
   const catalog = await api.mcp.listTools(sessionId, 15000);
   if (catalog.tools.length > MAX_AGENT_TOOLS) throw new Error('O Roblox Studio expôs operações demais para o catálogo seguro do Auto CodeZ.');
   const usedToolIds = new Set();
+  const preferredIds = new Map(Object.entries(HIGH_LEVEL_OPERATIONS).map(([id, name]) => [name, id]));
   const tools = catalog.tools.map((tool) => {
-    const id = normalizeToolId(tool.name, usedToolIds);
+    const preferred = preferredIds.get(tool.name);
+    const id = preferred && !usedToolIds.has(preferred) ? preferred : normalizeToolId(tool.name, usedToolIds);
+    if (preferred) usedToolIds.add(id);
     studioTools.set(id, tool);
     return {
       id,
