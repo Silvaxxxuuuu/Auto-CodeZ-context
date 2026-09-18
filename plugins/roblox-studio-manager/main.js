@@ -21,7 +21,13 @@ let sessionId = null;
 let studioTools = new Map();
 let studioState = { connected: false, server: null, tools: 0, instanceCount: 0 };
 
-const normalizeToolId = (name) => 'studio_' + name.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
+const normalizeToolId = (name) => 'studio_' + name.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40);
+const toStrictSchema = (schema) => {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema) || schema.type !== 'object' || !schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)) {
+    return { type: 'object', properties: {}, required: [], additionalProperties: false };
+  }
+  return { ...schema, additionalProperties: false };
+};
 
 async function connect(api) {
   if (sessionId) return;
@@ -35,9 +41,7 @@ async function connect(api) {
     title: tool.name,
     description: tool.description || ('Executa ' + tool.name + ' no Roblox Studio conectado.'),
     risk: TOOL_RISK[tool.name] || 'sensitive',
-    inputSchema: tool.inputSchema && typeof tool.inputSchema === 'object'
-      ? tool.inputSchema
-      : { type: 'object', additionalProperties: true },
+    inputSchema: toStrictSchema(tool.inputSchema),
   }));
   await api.tools.register(tools);
   studioState = {
