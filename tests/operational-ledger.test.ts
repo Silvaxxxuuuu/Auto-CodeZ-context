@@ -158,3 +158,36 @@ test('operational ledger isolates listener failures', () => {
 
   assert.equal(observed, 1);
 });
+
+
+test('operational ledger preserves bounded resource diff source and session provenance', () => {
+  const ledger = new OperationalLedger();
+  const event = ledger.record({
+    actor: 'agent',
+    category: 'tool',
+    state: 'success',
+    summary: 'Arquivos atualizados.',
+    sessionId: 'session-a',
+    providerId: 'provider-a',
+    clientId: 'client-a',
+    resources: ['src/a.ts', 'src/b.ts'],
+    sourceRefs: ['https://example.com/a', 'https://example.com/b'],
+    diff: { files: 2, addedLines: 12, removedLines: 3 },
+  });
+
+  assert.equal(event.sessionId, 'session-a');
+  assert.equal(event.providerId, 'provider-a');
+  assert.equal(event.clientId, 'client-a');
+  assert.deepEqual(event.resources, ['src/a.ts', 'src/b.ts']);
+  assert.deepEqual(event.sourceRefs, ['https://example.com/a', 'https://example.com/b']);
+  assert.deepEqual(event.diff, { files: 2, addedLines: 12, removedLines: 3 });
+
+  event.resources?.push('outside');
+  event.sourceRefs?.push('outside');
+  if (event.diff) event.diff.files = 999;
+
+  const stored = ledger.listAll()[0];
+  assert.deepEqual(stored.resources, ['src/a.ts', 'src/b.ts']);
+  assert.deepEqual(stored.sourceRefs, ['https://example.com/a', 'https://example.com/b']);
+  assert.deepEqual(stored.diff, { files: 2, addedLines: 12, removedLines: 3 });
+});
