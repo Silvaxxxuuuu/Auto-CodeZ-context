@@ -3231,3 +3231,163 @@ PRÓXIMA ORDEM
 3. depois criar MCP Mode como projeção desse ledger;
 4. só então implementar Auto CodeZ MCP Gateway atrás do AgentRuntime/policies;
 5. manter integração Roblox MCP oficial como camada de saída.
+
+
+------------------------------------------------------------
+24.29. HARDENING FINAL DO ROBLOX MCP/PLAYTEST — VALIDADO
+------------------------------------------------------------
+
+BASELINE DE CÓDIGO VALIDADO
+
+Baseline funcional deste hardening:
+7d0715ab90f9eb1396715b6dd6631c69c65a1a98
+test(mcp): verify timeout cancellation notification
+
+Workflows exatos do baseline:
+- Validate Auto CodeZ #35310583032: SUCCESS.
+- Visual Auto CodeZ #35310583044: SUCCESS.
+- Artifact visual: auto-codez-visual-35310583044, artifact id 10532599400.
+- Core tests: 862/862 PASS, 0 FAIL.
+- TypeScript: SUCCESS.
+- ESLint: SUCCESS.
+- Electron Forge package build: SUCCESS.
+- Electron startup smoke: SUCCESS.
+- Visual flow e verificações de runtimes locais: SUCCESS.
+
+PR #9 permanece OPEN, DRAFT, mergeable e NÃO MESCLADO. Não fazer merge sem autorização explícita.
+
+MCP TOOL-LEVEL ERRORS
+
+PluginMcpStdioRuntime.callTool() agora trata um tools/call com JSON-RPC bem-sucedido mas result.isError=true como FALHA real.
+
+Garantias:
+- não existe falso sucesso para Play/Stop/edit/Luau quando o servidor MCP devolve isError=true;
+- texto de erro é agregado e limitado a 2048 caracteres;
+- quando não há texto, usa erro determinístico identificando a tool.
+
+OBSERVED MCP OUTPUT — BOUNDARY FINAL
+
+PluginArtifactRuntime.externalizeMcpResult() agora limita toda a superfície observada:
+- máximo 128 itens em content;
+- orçamento agregado de texto inline de 16 KB;
+- conteúdo não padrão grande vira artifact JSON;
+- structuredContent até 16 KB pode permanecer inline;
+- structuredContent maior é externalizado como structuredContentArtifact;
+- _meta não atravessa a boundary observada;
+- imagens continuam externalizadas;
+- payloads grandes não são duplicados no retorno da tool.
+
+Roblox summarizeObservation() preserva structuredContentArtifact e o vincula ao job/artifactIds.
+
+RUN_PLAYTEST — RESULTADO AUTORITATIVO
+
+run_playtest retorna agora, somente após Stop confirmado:
+- status: completed;
+- studioId;
+- playStarted: true;
+- artifactIds deduplicados;
+- checkpoints;
+- viewport;
+- console.
+
+O schema publicado ao AgentRuntime contém:
+- studioId.maxLength = 128;
+- interactions.maxItems = 24;
+- captureInput/consoleInput tornam-se required automaticamente se o schema MCP real exigir campos além de studio_id.
+
+Isso permite rejeitar entradas incompatíveis antes da execução e manter compatibilidade com mudanças futuras do Studio.
+
+CONEXÃO MCP DO ROBLOX — TRANSACIONAL
+
+connect(api) foi tornado transacional.
+
+Se uma sessão MCP abrir mas qualquer etapa posterior falhar — catálogo, status, registro de tools ou setup — o manager:
+- remove a sessionId candidata;
+- limpa studioTools;
+- marca studioStatus desconectado;
+- remove lastServer best-effort;
+- registra catálogo vazio best-effort;
+- desconecta a sessão MCP candidata;
+- propaga a falha.
+
+Objetivo: nenhuma sessão/tool catalog parcial pode sobreviver a uma conexão incompleta.
+
+list_roblox_studios também aceita resposta estruturada via structuredContent, além do formato textual JSON anterior.
+
+CONCORRÊNCIA DE PLAYTEST
+
+Playtests são serializados por studioId:
+- duas execuções simultâneas para a MESMA instância são rejeitadas antes do segundo Play;
+- instâncias diferentes continuam independentes;
+- lock é liberado após sucesso/falha;
+- locks são limpos em deactivate e quando a sessão conectada fica stale.
+
+VALIDAÇÃO ANTES DE EFEITOS
+
+Toda timeline de interactions é validada ANTES de abrir job ou chamar Play:
+- máximo 24 passos;
+- operação precisa existir no Studio conectado;
+- payload correto para a operação;
+- payload incompatível/extra é rejeitado.
+
+Timeline inválida resulta em ZERO chamadas ao Studio; não existe mais Play seguido de Stop apenas para descobrir que a entrada era inválida.
+
+MCP PROTOCOL LIFECYCLE
+
+O transporte stdio atual do Auto CodeZ permanece deliberadamente no lifecycle de handshake legado/compatível com Roblox.
+
+Protocol versions aceitas pelo initialize atual:
+- 2024-11-05
+- 2025-03-26
+- 2025-06-18
+- 2025-11-25
+
+A versão MCP 2026-07-28 usa lifecycle moderno sem initialize/initialized. O runtime atual NÃO mistura esses modelos: uma resposta 2026-07-28 no fluxo initialize falha fechado como incompatível.
+
+Suporte ao lifecycle moderno deve ser implementado como transporte/lifecycle próprio no futuro, não fingido sobre o cliente stdio legacy.
+
+TIMEOUT / CANCELLATION
+
+Quando uma request legacy stdio não-initialize excede timeout:
+- Auto CodeZ remove o pending request;
+- envia best-effort notifications/cancelled com requestId e motivo;
+- rejeita localmente a operação.
+
+Cancelamento é cooperativo; não deve ser interpretado como rollback de efeitos já executados pelo servidor.
+
+TESTES DE REGRESSÃO ADICIONADOS
+
+Cobertura final inclui:
+- tools/call isError=true;
+- fallback sem texto;
+- limites de observed MCP result;
+- stripping de _meta;
+- structuredContent artifact;
+- excesso de content items;
+- summary autoritativo do playtest;
+- bounds do schema antes de execução;
+- artifact estruturado ligado ao job;
+- conexão transacional após falha de catálogo;
+- limpeza após falha de registro de tools;
+- playtest concorrente na mesma instância;
+- liberação do lock;
+- timeline inválida sem qualquer Play;
+- required dinâmico de captureInput/consoleInput;
+- separação entre lifecycle handshake e MCP moderno;
+- notifications/cancelled em timeout legacy.
+
+ESTADO DE ENCERRAMENTO DESTE MILESTONE
+
+A camada Roblox MCP + playtest visual está suficientemente endurecida para sair da fase de fundação e iniciar a próxima etapa arquitetural.
+
+Próxima ordem:
+1. event ledger interno autoritativo;
+2. eventos estruturados de tool/plugin/playtest com artifact refs;
+3. MCP Mode como projeção do ledger;
+4. Auto CodeZ MCP Gateway atrás de AgentRuntime/policies;
+5. Session Capsule/retrieval;
+6. ponte multimodal controlada para consumo dos artifacts visuais pelos providers que suportarem vision.
+
+Não enviar base64 bruto de screenshots para histórico/tool text. A futura ponte multimodal deve ler artifacts pelo core e anexá-los ao request do provider de forma controlada, apenas quando o provider/modelo suportar vision.
+
+PR #9 permanece draft/open/unmerged.
