@@ -157,6 +157,16 @@ test('Roblox Studio Manager derives guarded playtest schemas from the live MCP c
       stopInput: { properties: { mode: { enum: string[] } }; required: string[] };
       captureInput: { properties: { format: { enum: string[] } } };
       consoleInput: { properties: { level: { enum: string[] } } };
+      interactions: {
+        items: {
+          properties: {
+            operation: { enum: string[] };
+            keyboardInput: { required: string[] };
+            mouseInput: { required: string[] };
+            navigationInput: { required: string[] };
+          };
+        };
+      };
     };
     required: string[];
     additionalProperties: boolean;
@@ -169,6 +179,10 @@ test('Roblox Studio Manager derives guarded playtest schemas from the live MCP c
   assert.deepEqual(parameters.properties.stopInput.properties.mode.enum, ['play', 'stop']);
   assert.deepEqual(parameters.properties.captureInput.properties.format.enum, ['png']);
   assert.deepEqual(parameters.properties.consoleInput.properties.level.enum, ['all', 'error']);
+  assert.deepEqual(parameters.properties.interactions.items.properties.operation.enum, ['keyboard', 'mouse', 'navigate']);
+  assert.deepEqual(parameters.properties.interactions.items.properties.keyboardInput.required, ['key']);
+  assert.deepEqual(parameters.properties.interactions.items.properties.mouseInput.required, ['x', 'y']);
+  assert.deepEqual(parameters.properties.interactions.items.properties.navigationInput.required, ['direction']);
 });
 
 test('Roblox Studio Manager runs Play capture console Stop in order', async () => {
@@ -246,4 +260,72 @@ test('Roblox Studio Manager does not complete a playtest when Stop fails', async
   ]);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'fail'), true);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'complete'), false);
+});
+
+
+test('Roblox Studio Manager executes bounded playtest interactions in declared order', async () => {
+  const plugin = await loadPlugin();
+  const fixture = createApi();
+  await plugin.activate(fixture.api);
+
+  await plugin.invoke('run_playtest', {
+    input: {
+      playInput: { mode: 'play' },
+      interactions: [
+        { operation: 'keyboard', keyboardInput: { key: 'W' } },
+        { operation: 'mouse', mouseInput: { x: 320, y: 180 } },
+        { operation: 'navigate', navigationInput: { direction: 'forward' } },
+      ],
+      captureInput: { format: 'png' },
+      consoleInput: { level: 'all' },
+      stopInput: { mode: 'stop' },
+    },
+  }, fixture.api);
+
+  assert.deepEqual(fixture.calls, [
+    { name: 'start_stop_play', input: { mode: 'play' } },
+    { name: 'user_keyboard_input', input: { key: 'W' } },
+    { name: 'user_mouse_input', input: { x: 320, y: 180 } },
+    { name: 'character_navigation', input: { direction: 'forward' } },
+    { name: 'screen_capture', input: { format: 'png' } },
+    { name: 'get_console_output', input: { level: 'all' } },
+    { name: 'start_stop_play', input: { mode: 'stop' } },
+  ]);
+});
+
+test('Roblox Studio Manager rejects mismatched and oversized playtest interactions and still stops Play', async () => {
+  const plugin = await loadPlugin();
+  const fixture = createApi();
+  await plugin.activate(fixture.api);
+
+  await assert.rejects(() => plugin.invoke('run_playtest', {
+    input: {
+      playInput: { mode: 'play' },
+      interactions: [{ operation: 'keyboard', mouseInput: { x: 1, y: 2 } }],
+      captureInput: {},
+      consoleInput: {},
+      stopInput: { mode: 'stop' },
+    },
+  }, fixture.api), /Payload da interação de playtest inválido/);
+  assert.deepEqual(fixture.calls, [
+    { name: 'start_stop_play', input: { mode: 'play' } },
+    { name: 'start_stop_play', input: { mode: 'stop' } },
+  ]);
+
+  const overflow = createApi();
+  const secondPlugin = await loadPlugin();
+  await secondPlugin.activate(overflow.api);
+  await assert.rejects(() => secondPlugin.invoke('run_playtest', {
+    input: {
+      playInput: { mode: 'play' },
+      interactions: Array.from({ length: 25 }, () => ({ operation: 'keyboard', keyboardInput: { key: 'W' } })),
+      captureInput: {},
+      consoleInput: {},
+      stopInput: { mode: 'stop' },
+    },
+  }, overflow.api), /limite de 24 interações/);
+  assert.deepEqual(overflow.calls, [
+    { name: 'start_stop_play', input: { mode: 'play' } },
+    { name: 'start_stop_play', input: { mode: 'stop' } },
+  ]);
 });
