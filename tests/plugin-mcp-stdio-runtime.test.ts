@@ -156,6 +156,25 @@ test('MCP stdio runtime rejects an oversized single message without penalizing p
   await assert.rejects(() => runtime.listTools('test.plugin', connected.sessionId), /não encontrada|encerrada/i);
 });
 
+test('MCP stdio runtime surfaces JSON-RPC errors and request timeouts', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') return reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+    if (message.method === 'tools/list') return reply(undefined, { code: -32000, message: 'catalog unavailable' });
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  await assert.rejects(() => runtime.listTools('test.plugin', connected.sessionId), /catalog unavailable/);
+  runtime.disconnectPlugin('test.plugin');
+
+  const hanging = fakeServer((message, reply) => {
+    if (message.method === 'initialize') reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+  });
+  const timeoutRuntime = new PluginMcpStdioRuntime(hanging.spawn);
+  const timeoutConnected = await timeoutRuntime.connect('test.plugin', { command: 'fake' });
+  await assert.rejects(() => timeoutRuntime.listTools('test.plugin', timeoutConnected.sessionId, 1000), /tempo limite/);
+  timeoutRuntime.disconnectPlugin('test.plugin');
+});
+
 test('MCP stdio transport rejects unsafe command and bounded input before spawning', async () => {
   let spawns = 0;
   const runtime = new PluginMcpStdioRuntime((() => { spawns += 1; throw new Error('should not spawn'); }) as McpSpawn);
