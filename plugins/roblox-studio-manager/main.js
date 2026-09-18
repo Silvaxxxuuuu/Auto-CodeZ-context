@@ -413,6 +413,7 @@ autoCodez.register({
     if (sessionId) await api.mcp.disconnect(sessionId);
     sessionId = null;
     studioTools.clear();
+    activePlaytests.clear();
     studioState = { connected: false, server: null, tools: 0, instanceCount: 0 };
     await api.settings.set('studioStatus', studioState);
     await api.activity.clear();
