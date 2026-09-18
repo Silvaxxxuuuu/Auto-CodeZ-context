@@ -123,6 +123,11 @@ function appendLog(current: string, chunk: Buffer | string, redactions: string[]
   return redactText(value, redactions).slice(-MAX_LOG_CHARS);
 }
 
+function latestLogError(log: string, fallback: string): string {
+  const trimmed = log.trim();
+  return sanitizedError(trimmed ? trimmed.slice(-2048) : fallback);
+}
+
 function createChildEnvironment(
   parent: NodeJS.ProcessEnv,
   input: {
@@ -301,7 +306,7 @@ export class McpTunnelRuntime {
     child.stdout.on('data', (chunk: string) => { active.stdout = appendLog(active.stdout, chunk, logRedactions); });
     child.stderr.on('data', (chunk: string) => { active.stderr = appendLog(active.stderr, chunk, logRedactions); });
     child.once('error', (error) => this.finishActive(active, sanitizedError(error)));
-    child.once('exit', (code) => this.finishActive(active, active.stderr.trim() || `tunnel-client encerrou com código ${code ?? 'desconhecido'}.`));
+    child.once('exit', (code) => this.finishActive(active, latestLogError(active.stderr, `tunnel-client encerrou com código ${code ?? 'desconhecido'}.`)));
 
     try {
       await this.waitUntilReady(active);
@@ -391,7 +396,7 @@ export class McpTunnelRuntime {
       }
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
-    throw new Error(active.stderr.trim() || 'Secure MCP Tunnel não ficou pronto dentro do tempo limite.');
+    throw new Error(latestLogError(active.stderr, 'Secure MCP Tunnel não ficou pronto dentro do tempo limite.'));
   }
 
   private finishActive(active: ActiveTunnel, reason: string): void {
