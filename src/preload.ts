@@ -110,18 +110,11 @@ contextBridge.exposeInMainWorld('autoCodez', {
   listApprovals: (filters?: ApprovalScope) => invoke('agent:list-approvals', requireApprovalScope(filters)),
   listExecutions: (chatId?: string) => invoke('agent:list-executions', chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')),
   mcpTunnelStatus: () => invoke('mcp-tunnel:status'),
-  doctorMcpTunnel: (input?: { executable?: string }) => {
-    if (input === undefined) return invoke('mcp-tunnel:doctor');
-    const value = requireObject(input, 'Configuração do Secure MCP Tunnel');
-    return invoke('mcp-tunnel:doctor', {
-      ...(value.executable === undefined ? {} : { executable: requireNonEmptyString(value.executable, 'Executável tunnel-client') }),
-    });
-  },
-  startMcpTunnel: (input: { tunnelId: string; executable?: string; controlPlaneApiKey?: string }) => {
+  doctorMcpTunnel: () => invoke('mcp-tunnel:doctor'),
+  startMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => {
     const value = requireObject(input, 'Configuração do Secure MCP Tunnel');
     return invoke('mcp-tunnel:start', {
       tunnelId: requireIdentifier(value.tunnelId, 'Tunnel ID'),
-      ...(value.executable === undefined ? {} : { executable: requireNonEmptyString(value.executable, 'Executável tunnel-client') }),
       ...(value.controlPlaneApiKey === undefined ? {} : { controlPlaneApiKey: requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane') }),
     });
   },
