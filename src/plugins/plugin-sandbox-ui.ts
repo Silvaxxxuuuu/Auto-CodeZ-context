@@ -1,5 +1,5 @@
 export type PluginSandboxBridge = {
-  invoke(pluginId: string, request: { id: string; method: string; input?: unknown }): Promise<{ id: string; ok: boolean; value?: unknown; error?: string }>;
+  invoke(pluginId: string, request: { id: string; method: string; input?: unknown; invocationId?: string }): Promise<{ id: string; ok: boolean; value?: unknown; error?: string }>;
   markHealthy(pluginId: string, message?: string): Promise<unknown>;
   markFailed(pluginId: string, reason: string): Promise<unknown>;
 };
@@ -12,6 +12,7 @@ type SandboxMessage = {
   input?: unknown;
   value?: unknown;
   error?: string;
+  invocationId?: string;
 };
 
 type SandboxInstance = {
@@ -52,52 +53,52 @@ const assertPayloadSize = (value, maximum, label) => {
   try { serialized = JSON.stringify(value ?? null); } catch { throw new Error(label + ' não é serializável.'); }
   if (serialized.length > maximum) throw new Error(label + ' excede o limite permitido.');
 };
-const request = (method, input) => new Promise((resolve, reject) => {
+const request = (method, input, invocationId) => new Promise((resolve, reject) => {
   try { assertPayloadSize(input, MAX_REQUEST_CHARS, 'Payload da capability'); } catch (error) { reject(error); return; }
   const id = 'req-' + (++sequence) + '-' + Math.random().toString(36).slice(2);
   pending.set(id, { resolve, reject });
-  send({ type: 'request', id, method, input });
+  send({ type: 'request', id, method, input, invocationId });
 });
 try { Object.defineProperty(globalThis, 'fetch', { value: undefined, writable: false, configurable: false }); } catch {}
 try { Object.defineProperty(globalThis, 'WebSocket', { value: undefined, writable: false, configurable: false }); } catch {}
 try { Object.defineProperty(globalThis, 'EventSource', { value: undefined, writable: false, configurable: false }); } catch {}
 try { Object.defineProperty(globalThis, 'importScripts', { value: undefined, writable: false, configurable: false }); } catch {}
-const api = Object.freeze({
-  request,
+const createApi = (invocationId) => Object.freeze({
+  request: (method, input) => request(method, input, invocationId),
   settings: Object.freeze({
-    list: () => request('settings.list'),
-    get: (key) => request('settings.get', { key }),
-    set: (key, value) => request('settings.set', { key, value }),
-    remove: (key) => request('settings.remove', { key }),
+    list: () => request('settings.list', undefined, invocationId),
+    get: (key) => request('settings.get', { key }, invocationId),
+    set: (key, value) => request('settings.set', { key, value }, invocationId),
+    remove: (key) => request('settings.remove', { key }, invocationId),
   }),
   activity: Object.freeze({
-    publish: (message, status = 'running') => request('activity.publish', { message, status }),
-    clear: () => request('activity.clear'),
+    publish: (message, status = 'running') => request('activity.publish', { message, status }, invocationId),
+    clear: () => request('activity.clear', undefined, invocationId),
   }),
   jobs: Object.freeze({
-    begin: (label) => request('jobs.begin', { label }),
-    update: (jobId, update) => request('jobs.update', { jobId, ...update }),
-    attachArtifact: (jobId, artifactId) => request('jobs.attach-artifact', { jobId, artifactId }),
-    complete: (jobId, activity) => request('jobs.complete', { jobId, activity }),
-    fail: (jobId, error) => request('jobs.fail', { jobId, error }),
-    cancel: (jobId) => request('jobs.cancel', { jobId }),
+    begin: (label) => request('jobs.begin', { label }, invocationId),
+    update: (jobId, update) => request('jobs.update', { jobId, ...update }, invocationId),
+    attachArtifact: (jobId, artifactId) => request('jobs.attach-artifact', { jobId, artifactId }, invocationId),
+    complete: (jobId, activity) => request('jobs.complete', { jobId, activity }, invocationId),
+    fail: (jobId, error) => request('jobs.fail', { jobId, error }, invocationId),
+    cancel: (jobId) => request('jobs.cancel', { jobId }, invocationId),
   }),
-  tools: Object.freeze({ register: (tools) => request('tools.register', { tools }) }),
-  bridge: Object.freeze({ request: (input) => request('bridge.request', input) }),
+  tools: Object.freeze({ register: (tools) => request('tools.register', { tools }, invocationId) }),
+  bridge: Object.freeze({ request: (input) => request('bridge.request', input, invocationId) }),
   mcp: Object.freeze({
-    connectRobloxStudio: (timeoutMs) => request('mcp.connect-roblox-studio', { timeoutMs }),
-    connect: (input) => request('mcp.connect', input),
-    status: (sessionId) => request('mcp.status', { sessionId }),
-    listTools: (sessionId, timeoutMs) => request('mcp.list-tools', { sessionId, timeoutMs }),
-    callTool: (sessionId, name, args, timeoutMs) => request('mcp.call-tool', { sessionId, name, arguments: args, timeoutMs }),
-    callToolObserved: (sessionId, name, args, timeoutMs) => request('mcp.call-tool-observed', { sessionId, name, arguments: args, timeoutMs }),
-    disconnect: (sessionId) => request('mcp.disconnect', { sessionId }),
+    connectRobloxStudio: (timeoutMs) => request('mcp.connect-roblox-studio', { timeoutMs }, invocationId),
+    connect: (input) => request('mcp.connect', input, invocationId),
+    status: (sessionId) => request('mcp.status', { sessionId }, invocationId),
+    listTools: (sessionId, timeoutMs) => request('mcp.list-tools', { sessionId, timeoutMs }, invocationId),
+    callTool: (sessionId, name, args, timeoutMs) => request('mcp.call-tool', { sessionId, name, arguments: args, timeoutMs }, invocationId),
+    callToolObserved: (sessionId, name, args, timeoutMs) => request('mcp.call-tool-observed', { sessionId, name, arguments: args, timeoutMs }, invocationId),
+    disconnect: (sessionId) => request('mcp.disconnect', { sessionId }, invocationId),
   }),
   web: Object.freeze({
-    search: (query, limit) => request('web.search', { query, limit }),
-    fetch: (url) => request('web.fetch', { url }),
+    search: (query, limit) => request('web.search', { query, limit }, invocationId),
+    fetch: (url) => request('web.fetch', { url }, invocationId),
   }),
-});
+})
 Object.defineProperty(globalThis, 'autoCodez', {
   value: Object.freeze({
     register(value) {
@@ -122,7 +123,7 @@ onmessage = async (event) => {
   if (data.type === 'call') {
     try {
       if (!registration || typeof registration.invoke !== 'function') throw new Error('Plugin não expõe invoke().');
-      const value = await registration.invoke(data.method, data.input, api);
+      const value = await registration.invoke(data.method, data.input, createApi(data.id));
       assertPayloadSize(value, MAX_RESULT_CHARS, 'Resposta da tool do plugin');
       send({ type: 'call-result', id: data.id, value });
     } catch (error) {
@@ -132,7 +133,7 @@ onmessage = async (event) => {
   }
   if (data.type === 'deactivate') {
     try {
-      if (registration && typeof registration.deactivate === 'function') await registration.deactivate(api);
+      if (registration && typeof registration.deactivate === 'function') await registration.deactivate(createApi(undefined));
     } finally {
       close();
     }
@@ -145,7 +146,7 @@ Promise.resolve().then(async () => {
   if (registration.activate !== undefined && typeof registration.activate !== 'function') throw new Error('activate precisa ser função.');
   if (registration.deactivate !== undefined && typeof registration.deactivate !== 'function') throw new Error('deactivate precisa ser função.');
   if (registration.invoke !== undefined && typeof registration.invoke !== 'function') throw new Error('invoke precisa ser função.');
-  if (registration.activate) await registration.activate(api);
+  if (registration.activate) await registration.activate(createApi(undefined));
   send({ type: 'ready' });
 }).catch((error) => send({ type: 'failed', error: error instanceof Error ? error.message : String(error) }));
 \`;
@@ -216,11 +217,11 @@ export class PluginSandboxManager {
     this.destroy(pluginId);
   }
 
-  async call(pluginId: string, method: string, input?: unknown): Promise<unknown> {
+  async call(pluginId: string, method: string, input?: unknown, invocationId?: string): Promise<unknown> {
     const instance = this.instances.get(pluginId);
     if (!instance) throw new Error(`Plugin '${pluginId}' não está ativo no sandbox.`);
     await instance.ready;
-    const id = crypto.randomUUID();
+    const id = invocationId || crypto.randomUUID();
     return new Promise<unknown>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         instance.calls.delete(id);
@@ -251,7 +252,7 @@ export class PluginSandboxManager {
     if (!data || data.channel !== 'autocodez-plugin') return;
     if (data.type === 'request') {
       if (!data.id || !data.method) return;
-      const response = await this.bridge.invoke(instance.pluginId, { id: data.id, method: data.method, input: data.input });
+      const response = await this.bridge.invoke(instance.pluginId, { id: data.id, method: data.method, input: data.input, ...(data.invocationId ? { invocationId: data.invocationId } : {}) });
       instance.iframe.contentWindow?.postMessage({ channel: 'autocodez-plugin', type: 'response', ...response }, '*');
       return;
     }
