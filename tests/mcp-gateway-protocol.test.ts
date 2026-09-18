@@ -98,9 +98,9 @@ test('MCP gateway keeps legacy Streamable HTTP initialization compatible without
   assert.equal(modernOverInitialize?.error?.code, -32602);
 });
 
-test('MCP gateway executes session retrieval tools and preserves structured content', () => {
+test('MCP gateway executes session retrieval tools and preserves structured content', async () => {
   const protocol = fixture();
-  const response = protocol.handle({
+  const response = await protocol.handle({
     jsonrpc: '2.0',
     id: 3,
     method: 'tools/call',
