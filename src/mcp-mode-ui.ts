@@ -372,7 +372,9 @@ function renderOnboarding(root: HTMLElement): void {
         <h1>Onde você quer usar o Auto CodeZ?</h1>
         <p>Escolha um ou mais clientes. Mostraremos somente os passos necessários para cada um.</p>
         <div class="mcp-client-grid">${MCP_CLIENTS.map((client) => `<button class="mcp-client-option ${selectedClients.has(client.id) ? 'selected' : ''}" data-mcp-client="${client.id}"><span class="mcp-client-check">${selectedClients.has(client.id) ? '✓' : ''}</span><span><strong>${escapeHtml(client.name)}</strong><small>${escapeHtml(client.detail)}</small></span><em>${escapeHtml(client.badge)}</em></button>`).join('')}</div>
-        <div class="mcp-onboarding-actions"><button class="mcp-onboarding-secondary" data-mcp-onboarding-back>Voltar</button><button class="mcp-onboarding-primary" data-mcp-onboarding-next ${selectedClients.size ? '' : 'disabled'}>Avançar</button></div>
+        ${activationMessage ? `<div class="mcp-onboarding-progress"><span></span>${escapeHtml(activationMessage)}</div>` : ''}
+        ${activationError ? `<div class="mcp-onboarding-error">${escapeHtml(activationError)}</div>` : ''}
+        <div class="mcp-onboarding-actions"><button class="mcp-onboarding-secondary" data-mcp-onboarding-back ${activationBusy ? 'disabled' : ''}>Voltar</button><button class="mcp-onboarding-primary" data-mcp-onboarding-next ${selectedClients.size && !activationBusy ? '' : 'disabled'}>${activationBusy ? 'Preparando…' : 'Avançar'}</button></div>
       </div>
     </section>`;
     return;
@@ -480,7 +482,7 @@ async function ensureOperationalRuntime(): Promise<void> {
   activationBusy = true;
   gatewayPreflightError = '';
   try {
-    runtimeStatus = await window.autoCodez.prepareMcpRuntime() as McpRuntimeStatus;
+    if (selectedClients.has('chatgpt')) runtimeStatus = await window.autoCodez.prepareMcpRuntime() as McpRuntimeStatus;
     const started = await window.autoCodez.startMcpGateway();
     gatewayStatus = { running: true, host: started.host, port: started.port, endpoint: started.endpoint };
     gatewayToken = started.bearerToken;
@@ -613,7 +615,6 @@ function install(): void {
       activationMessage = 'Verificando seu computador…';
       render();
       try {
-        runtimeStatus = await window.autoCodez.prepareMcpRuntime() as McpRuntimeStatus;
         activationMessage = 'Iniciando conexão local segura…';
         render();
         if (!gatewayStatus.running) {
@@ -642,7 +643,28 @@ function install(): void {
       render();
       return;
     }
-    if (target.closest('[data-mcp-onboarding-next]') && selectedClients.size) { onboardingStep = 'instructions'; render(); return; }
+    if (target.closest('[data-mcp-onboarding-next]') && selectedClients.size) {
+      activationError = '';
+      if (selectedClients.has('chatgpt')) {
+        activationBusy = true;
+        activationMessage = 'Preparando a conexão do ChatGPT…';
+        render();
+        try {
+          runtimeStatus = await window.autoCodez.prepareMcpRuntime() as McpRuntimeStatus;
+        } catch (error) {
+          activationError = error instanceof Error ? error.message : String(error);
+          activationMessage = '';
+          activationBusy = false;
+          render();
+          return;
+        }
+        activationBusy = false;
+        activationMessage = '';
+      }
+      onboardingStep = 'instructions';
+      render();
+      return;
+    }
     if (target.closest('[data-mcp-onboarding-back]')) { onboardingStep = 'activation'; render(); return; }
     if (target.closest('[data-mcp-onboarding-clients]')) { onboardingStep = 'clients'; render(); return; }
     if (target.closest('[data-mcp-onboarding-finish]')) { persistOnboardingComplete(); onboardingStep = 'operational'; render(); return; }
