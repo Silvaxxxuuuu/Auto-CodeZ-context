@@ -114,6 +114,7 @@ function asLedgerEvent(value: unknown): LedgerEvent | undefined {
 }
 
 function scopeKey(event: LedgerEvent): string {
+  if (event.chatId?.startsWith('mcp:')) return `chat:${event.chatId}`;
   if (event.sessionId) return `session:${event.sessionId}`;
   if (event.runId) return `run:${event.runId}`;
   if (event.chatId) return `chat:${event.chatId}`;
