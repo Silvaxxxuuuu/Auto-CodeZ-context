@@ -254,3 +254,29 @@ test('Secure MCP Tunnel publishes reactive status changes and isolates listener 
     await f.cleanup();
   }
 });
+
+
+test('Secure MCP Tunnel redacts exact session secrets before child logs are retained', async () => {
+  const f = fixture();
+  try {
+    const runtime = await f.create({ CONTROL_PLANE_API_KEY: 'sk-exact-control-secret' });
+    await runtime.start({
+      tunnelId: 'tunnel_' + '1'.repeat(32),
+      localEndpoint: 'http://127.0.0.1:7001/mcp',
+      localBearerToken: 'exact-local-bearer-secret-value',
+    });
+    const run = f.records.find((record) => record.args[0] === 'run');
+    assert.ok(run);
+    (run.child.stderr as PassThrough).write('sk-exact-control-secret exact-local-bearer-secret-value raw echo');
+    run.child.emit('exit', 19, null);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const status = runtime.status();
+    const serialized = JSON.stringify(status);
+    assert.equal(serialized.includes('sk-exact-control-secret'), false);
+    assert.equal(serialized.includes('exact-local-bearer-secret-value'), false);
+    assert.match(status.error ?? '', /REDACTED/);
+  } finally {
+    await f.cleanup();
+  }
+});
