@@ -47,7 +47,7 @@ function fixture(options: { version?: string; ready?: boolean } = {}) {
     records.push({ command, args: [...args], env: { ...spawnOptions.env }, child });
     if (args.includes('--version')) {
       queueMicrotask(() => {
-        child.stdout.write(options.version ?? 'tunnel-client v0.0.14\n');
+        (child.stdout as PassThrough).write(options.version ?? 'tunnel-client v0.0.14\n');
         child.emit('exit', 0, null);
       });
       return child;
@@ -215,7 +215,7 @@ test('Secure MCP Tunnel preserves a sanitized failure status after unexpected ch
     });
     const run = f.records.find((record) => record.args[0] === 'run');
     assert.ok(run);
-    run.child.stderr.write('token=super-secret-value fatal connection error');
+    (run.child.stderr as PassThrough).write('token=super-secret-value fatal connection error');
     run.child.emit('exit', 17, null);
     await new Promise((resolve) => setImmediate(resolve));
 
