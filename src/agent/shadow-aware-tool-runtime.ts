@@ -268,7 +268,7 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
         chatId,
         runId,
       });
-      const result = await pluginToolCatalog.execute(toolName, input, { chatId, projectId, ...(runId ? { runId } : {}), permission });
+      const result = await pluginToolCatalog.execute(toolName, input, { chatId, projectId, ...(runId ? { runId } : {}), toolCallId: call.id, permission });
       const normalized = { ...result, toolCallId: call.id };
       if (!normalized.ok) {
         this.webActivity.emit({ type: 'tool', message: `Falha na tool do plugin: ${safeActivityText(normalized.error || 'erro desconhecido')}`, status: 'failed', toolCallId: call.id, toolName: call.name, chatId, runId, error: normalized.error });
