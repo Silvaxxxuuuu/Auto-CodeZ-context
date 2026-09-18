@@ -60,6 +60,7 @@ import { McpGatewayProtocol } from './mcp-gateway/protocol';
 import { McpGatewayHttpServer } from './mcp-gateway/http-server';
 import { McpGatewayExecutionRuntime } from './mcp-gateway/execution-runtime';
 import { McpTunnelRuntime } from './mcp-gateway/tunnel-runtime';
+import { McpRuntimeInstaller } from './mcp-gateway/runtime-installer';
 import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -101,6 +102,7 @@ const mcpGatewayExecutionRuntime = new McpGatewayExecutionRuntime(agentRuntime, 
 const mcpGatewayProtocol = new McpGatewayProtocol(operationalLedgerRetrieval, mcpGatewayExecutionRuntime);
 const mcpGatewayServer = new McpGatewayHttpServer(mcpGatewayProtocol);
 const mcpTunnelRuntime = new McpTunnelRuntime();
+const mcpRuntimeInstaller = new McpRuntimeInstaller(() => app.getPath('userData'));
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
 const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
@@ -699,6 +701,19 @@ ipcMain.handle('mcp-gateway:preflight', async () => {
   return result;
 });
 
+ipcMain.handle('mcp-runtime:status', async () => mcpRuntimeInstaller.inspect());
+ipcMain.handle('mcp-runtime:prepare', async () => {
+  const status = await mcpRuntimeInstaller.prepare();
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'Runtime MCP local preparado.',
+    clientId: 'autocodez-mcp-runtime',
+    details: { platform: status.platform, arch: status.arch, version: status.version, managed: status.managed },
+  });
+  return status;
+});
 ipcMain.handle('mcp-tunnel:status', async () => ({
   ...mcpTunnelRuntime.status(),
   credentialAvailable: Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()),
@@ -709,12 +724,15 @@ ipcMain.handle('mcp-tunnel:doctor', async (_event, input: unknown) => {
   const controlPlaneApiKey = value.controlPlaneApiKey === undefined
     ? undefined
     : requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane');
+  const runtime = await mcpRuntimeInstaller.prepare();
+  if (!runtime.executable) throw new Error('Runtime MCP indisponível.');
   const gateway = await mcpGatewayServer.preflight();
   const binding = mcpGatewayServer.trustedTunnelBinding();
   const result = await mcpTunnelRuntime.diagnose({
     tunnelId,
     localEndpoint: binding.endpoint,
     localBearerToken: binding.bearerToken,
+    executable: runtime.executable,
     ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
   });
   operationalLedger.record({
@@ -739,12 +757,15 @@ ipcMain.handle('mcp-tunnel:start', async (_event, input: unknown) => {
   const controlPlaneApiKey = value.controlPlaneApiKey === undefined
     ? undefined
     : requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane');
+  const runtime = await mcpRuntimeInstaller.prepare();
+  if (!runtime.executable) throw new Error('Runtime MCP indisponível.');
   await mcpGatewayServer.preflight();
   const binding = mcpGatewayServer.trustedTunnelBinding();
   const status = await mcpTunnelRuntime.start({
     tunnelId,
     localEndpoint: binding.endpoint,
     localBearerToken: binding.bearerToken,
+    executable: runtime.executable,
     ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
   });
   operationalLedger.record({
