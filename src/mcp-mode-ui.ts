@@ -57,6 +57,8 @@ let gatewayToken = '';
 let tunnelStatus: TunnelStatus = { running: false, ready: false, credentialAvailable: false };
 let tunnelDoctorResult = '';
 let tunnelError = '';
+let tunnelIdDraft = '';
+let tunnelExecutableDraft = '';
 let refreshSequence = 0;
 
 function escapeHtml(value: unknown): string {
@@ -324,8 +326,8 @@ function render(): void {
         <div class="mcp-tunnel-controls">
           ${tunnelStatus.running
             ? '<button class="danger" type="button" data-mcp-tunnel-stop>Parar Tunnel</button>'
-            : `<input type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="tunnel_…" data-mcp-tunnel-id aria-label="Tunnel ID">
-               <input type="text" maxlength="4096" autocomplete="off" spellcheck="false" placeholder="tunnel-client (opcional)" data-mcp-tunnel-executable aria-label="Executável tunnel-client">
+            : `<input type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="tunnel_…" value="${escapeHtml(tunnelIdDraft)}" data-mcp-tunnel-id aria-label="Tunnel ID">
+               <input type="text" maxlength="4096" autocomplete="off" spellcheck="false" placeholder="tunnel-client (opcional)" value="${escapeHtml(tunnelExecutableDraft)}" data-mcp-tunnel-executable aria-label="Executável tunnel-client">
                <input type="password" maxlength="8192" autocomplete="new-password" placeholder="${tunnelStatus.credentialAvailable ? 'Credencial detectada no ambiente' : 'Chave do control plane (somente sessão)'}" data-mcp-tunnel-key aria-label="Chave do control plane">
                <button type="button" data-mcp-tunnel-doctor>Doctor</button>
                <button class="primary" type="button" data-mcp-tunnel-start ${gatewayStatus.running ? '' : 'disabled'}>Conectar</button>`}
@@ -438,6 +440,12 @@ function install(): void {
     if (target.closest('[data-panel],[data-action]')) hide();
   }, true);
 
+  root.addEventListener('input', (event) => {
+    const target = event.target as HTMLInputElement;
+    if (target.matches('[data-mcp-tunnel-id]')) tunnelIdDraft = target.value;
+    if (target.matches('[data-mcp-tunnel-executable]')) tunnelExecutableDraft = target.value;
+  });
+
   root.addEventListener('click', async (event) => {
     const target = event.target as HTMLElement;
     const scope = target.closest<HTMLElement>('[data-mcp-scope]');
@@ -476,7 +484,7 @@ function install(): void {
     }
     if (target.closest('[data-mcp-tunnel-doctor]')) {
       tunnelError = '';
-      const executable = (root.querySelector<HTMLInputElement>('[data-mcp-tunnel-executable]')?.value ?? '').trim();
+      const executable = tunnelExecutableDraft.trim();
       try {
         const result = await window.autoCodez.doctorMcpTunnel(executable ? { executable } : undefined);
         tunnelDoctorResult = `Doctor OK · ${result.executable} · v${result.version}`;
@@ -492,8 +500,10 @@ function install(): void {
       const tunnelIdInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-id]');
       const executableInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-executable]');
       const keyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
-      const tunnelId = (tunnelIdInput?.value ?? '').trim();
-      const executable = (executableInput?.value ?? '').trim();
+      const tunnelId = (tunnelIdInput?.value ?? tunnelIdDraft).trim();
+      const executable = (executableInput?.value ?? tunnelExecutableDraft).trim();
+      tunnelIdDraft = tunnelId;
+      tunnelExecutableDraft = executable;
       let controlPlaneApiKey = keyInput?.value ?? '';
       if (keyInput) keyInput.value = '';
       try {
