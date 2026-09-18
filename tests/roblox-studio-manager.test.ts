@@ -260,7 +260,10 @@ test('Roblox Studio Manager runs Play capture console Stop in order', async () =
   assert.equal(fixture.jobEvents.some((event) => event.type === 'complete'), true);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'fail'), false);
   assert.deepEqual(result, {
+    status: 'completed',
+    studioId: 'studio-a',
     playStarted: true,
+    artifactIds: ['image-1'],
     checkpoints: [],
     viewport: {
       operation: 'capture',
