@@ -4896,3 +4896,416 @@ SEGURANÇA QUE NÃO MUDA
 - PluginToolCatalog continua authoritative.
 - Roblox/Blender/filesystem/terminal não recebem bypass direto.
 - PR #9 não deve ser mesclado sem autorização explícita.
+
+
+------------------------------------------------------------
+24.34. SECURE MCP TUNNEL — PREFLIGHT LOCAL + DOCTOR REAL — VALIDADO
+------------------------------------------------------------
+
+BASELINE EXATO VALIDADO
+
+Baseline funcional:
+9b30a8c19d0612d7356a5844f5f4f7f379377b1b
+test(visual): use executable tunnel fixture on Windows
+
+Workflows exatos:
+- Validate Auto CodeZ #35385966866: SUCCESS.
+- Visual Auto CodeZ #35385966879: SUCCESS.
+- Artifact visual: auto-codez-visual-35385966879
+- Artifact ID: 10563534243
+- Tamanho: 3.895.279 bytes
+- Digest: sha256:8565b41b47ba100db492b8450866b9b5c9e9ddc726309150c01cb69151af0bbc
+
+Validate:
+- TypeScript: SUCCESS.
+- Core tests: SUCCESS.
+- ESLint: SUCCESS.
+- Electron Forge package build: SUCCESS.
+- Electron startup smoke: SUCCESS.
+
+Visual:
+- rebuild node-pty: SUCCESS.
+- package Electron: SUCCESS.
+- Capture visual flow: SUCCESS.
+- unified local AI: SUCCESS.
+- unavailable runtime recovery: SUCCESS.
+- secure local runtime settings: SUCCESS.
+- LM Studio chat: SUCCESS.
+- upload screenshots: SUCCESS.
+
+PR #9:
+- OPEN.
+- DRAFT.
+- mergeable=true.
+- merged=false.
+- head=9b30a8c19d0612d7356a5844f5f4f7f379377b1b.
+Não mesclar sem autorização explícita.
+
+POR QUE ESTE MILESTONE EXISTE
+
+O milestone 24.33 fechou a primeira implementação do Secure MCP Tunnel.
+A auditoria final contra a documentação oficial atual mostrou que o antigo botão Doctor validava somente:
+tunnel-client --version
+
+Isso provava existência/compatibilidade do binário, mas NÃO provava:
+- configuração do tunnel;
+- credencial do control plane;
+- conectividade;
+- MCP Gateway local real;
+- catálogo real de tools.
+
+A camada final foi endurecida para exigir provas reais antes de permitir a conexão.
+
+GATEWAY LOCAL PREFLIGHT AUTENTICADA
+
+McpGatewayHttpServer agora possui:
+preflight()
+
+A preflight usa exclusivamente trustedTunnelBinding() do processo principal:
+- endpoint localhost autoritativo;
+- Bearer efêmero autoritativo.
+
+Ela chama o próprio servidor MCP local pela rede HTTP real:
+1. POST /mcp server/discover;
+2. valida protocolVersion=2026-07-28;
+3. POST /mcp tools/list;
+4. valida catálogo de tools;
+5. conta tools totais;
+6. conta tools mutáveis/write pelas annotations.
+
+Retorno sanitizado:
+{
+  ok: true,
+  protocolVersion,
+  toolCount,
+  writeToolCount
+}
+
+Nenhum Bearer é retornado.
+
+Fail-closed:
+- Gateway desligado;
+- HTTP incompatível;
+- Content-Type incompatível;
+- JSON-RPC error;
+- result inválido;
+- protocolVersion inesperado;
+- catálogo malformed;
+- tool sem nome.
+
+PRELOAD / IPC DA PREFLIGHT
+
+Main:
+mcp-gateway:preflight
+
+Preload:
+preflightMcpGateway()
+
+Renderer possui typing correspondente.
+
+O MCP Mode mostra diagnóstico real:
+Preflight OK · MCP 2026-07-28 · N tools · M write
+
+Isso permite distinguir:
+- porta simplesmente aberta;
+de
+- servidor MCP local realmente utilizável pelo Tunnel.
+
+DOCTOR REAL DO TUNNEL-CLIENT
+
+McpTunnelRuntime mantém:
+doctor()
+
+Essa função continua sendo somente o version gate interno.
+
+Nova função:
+diagnose(input)
+
+Ela:
+1. valida tunnelId;
+2. valida endpoint loopback /mcp;
+3. valida Bearer local;
+4. resolve control-plane key efêmera/ambiente;
+5. valida versão do tunnel-client;
+6. executa o Doctor oficial real:
+   tunnel-client doctor --explain --health.listen-addr 127.0.0.1:0
+7. usa configuração SOMENTE por environment;
+8. aplica timeout bounded;
+9. redige segredos;
+10. retorna diagnóstico sanitizado.
+
+Resultado:
+- executable;
+- version;
+- supported=true;
+- diagnostics sanitizado.
+
+CONFIGURAÇÃO EFÊMERA OFICIALMENTE COMPATÍVEL
+
+Mantemos configuração direta por environment, sem perfil persistente.
+
+Variáveis usadas:
+- CONTROL_PLANE_TUNNEL_ID;
+- CONTROL_PLANE_API_KEY;
+- MCP_SERVER_URL;
+- MCP_EXTRA_HEADERS;
+- MCP_DISCOVERY_EXTRA_HEADERS;
+- AUTO_CODEZ_MCP_AUTHORIZATION.
+
+Essa rota é suportada pelo cliente oficial.
+Não criar YAML/profile apenas para persistir o que pode continuar efêmero.
+
+DOCTOR COMBINADO NO MAIN
+
+mcp-tunnel:doctor agora executa, em ordem:
+
+1. mcpGatewayServer.preflight();
+2. trustedTunnelBinding();
+3. mcpTunnelRuntime.diagnose(...).
+
+Portanto o botão Doctor só retorna sucesso quando existem DUAS provas:
+
+A) Gateway Proof:
+- protocolo correto;
+- MCP HTTP autenticado funcional;
+- tools/list válido;
+- write tool count conhecido.
+
+B) Tunnel Proof:
+- tunnel-client compatível;
+- tunnel ID/configuração válida;
+- control-plane credential aceita pelo Doctor;
+- diagnóstico real do cliente oficial.
+
+Ledger registra somente:
+- tunnelId;
+- version;
+- protocolVersion;
+- toolCount;
+- writeToolCount.
+
+NUNCA registra:
+- control-plane key;
+- Gateway Bearer;
+- Authorization;
+- raw environment.
+
+START NÃO PODE PULAR O DOCTOR
+
+McpTunnelRuntime.start() agora exige diagnose() real antes do run.
+
+Main mcp-tunnel:start também exige a preflight local do Gateway antes de iniciar.
+
+Cadeia final obrigatória:
+
+Gateway Start
+→ authenticated local preflight
+→ tunnel-client version gate
+→ tunnel-client doctor --explain
+→ tunnel-client run
+→ /readyz OK
+→ ready=true
+
+Logo clicar diretamente em “Conectar” NÃO pula o Doctor/preflight.
+
+MCP MODE — PROVAS VISÍVEIS
+
+Gateway card:
+- localhost endpoint;
+- protocolo;
+- preflight;
+- toolCount;
+- writeToolCount.
+
+Secure MCP Tunnel card:
+- Doctor real disabled enquanto Gateway estiver desligado;
+- Doctor real habilitado após Gateway ativo;
+- Tunnel ID;
+- session-only control-plane key;
+- prova combinada Gateway + Tunnel;
+- status initializing/ready;
+- erro sanitizado;
+- Stop.
+
+Resultado de Doctor mostrado de forma resumida:
+Gateway OK · MCP 2026-07-28 · N tools/M write · Tunnel Doctor OK · tunnel-client · vX.Y.Z ...
+
+O campo de secret:
+- type=password;
+- inicia vazio;
+- é apagado imediatamente da UI após Doctor/Connect;
+- não sobrevive re-render;
+- não aparece no ledger.
+
+TESTES DE PREFLIGHT
+
+Cobertura adicionada:
+- preflight autenticada usando o HTTP MCP real;
+- Gateway parado falha fechado;
+- dynamic plugin tools entram na contagem;
+- write annotations entram em writeToolCount;
+- discovery protocol inesperado falha;
+- malformed tools catalog falha;
+- bearer não aparece no resultado.
+
+TESTES DO DOCTOR REAL
+
+Cobertura adicionada:
+- diagnose usa tunnel ID real do input;
+- usa MCP_SERVER_URL;
+- usa control-plane key somente no child environment;
+- usa Bearer local somente no child environment;
+- executa doctor --explain;
+- secrets não aparecem no resultado;
+- timeout bounded;
+- start exige Doctor real.
+
+TESTE VISUAL — DOCTOR COMBINADO
+
+O E2E empacotado agora cobre:
+- Doctor Tunnel disabled antes do Gateway;
+- Connect disabled antes do Gateway;
+- Gateway start;
+- authenticated preflight;
+- catálogo dinâmico inclui write tool;
+- Doctor fica habilitado;
+- Tunnel ID/secret inseridos;
+- Doctor combinado executado;
+- secret apagado;
+- secret ausente da UI/ledger;
+- external MCP write continua:
+  tools/list
+  → tools/call
+  → waiting_approval
+  → Accept local
+  → operation_status
+  → success.
+
+FIXTURE WINDOWS — SEM ENFRAQUECER PRODUÇÃO
+
+Foi detectado no primeiro Visual que o fixture criava:
+tunnel-client.cmd
+
+O runtime de produção deliberadamente usa spawn(..., shell:false).
+Logo .cmd não era executável nessa boundary e produziu ENOENT.
+
+NÃO foi habilitado shell.
+NÃO foi criado override de executable no renderer.
+NÃO foi enfraquecida a boundary de processo.
+
+O fixture Windows agora compila em runtime um tunnel-client.exe sintético real via csc.exe.
+
+Ele suporta apenas:
+- --version;
+- doctor.
+
+Isso faz o CI testar a mesma forma de executable usada em produção sem command shell injection.
+
+ESTADO OFICIAL DO TUNNEL
+
+Na auditoria deste milestone:
+- tunnel-client público atual validado: v0.0.14;
+- release associada ao rollout MCP 2026-07-28;
+- configuração direta via environment é suportada;
+- doctor --explain é a ferramenta oficial de diagnóstico;
+- Tunnel mantém o MCP privado/local e abre conexão outbound ao control plane da OpenAI.
+
+Não inferir disponibilidade de plano apenas a partir disso.
+
+CHATGPT — ESTADO EMPÍRICO DO USUÁRIO
+
+Conta observada:
+- ChatGPT Plus;
+- Developer Mode ativo no desktop/web;
+- Plugins;
+- botão +;
+- diálogo Novo plugin;
+- opções URL do servidor OU Túnel;
+- plugins podem ser mencionados em chat normal;
+- Work também poderá ser testado.
+
+Isso comprova o rollout disponível NESTA conta.
+
+Ainda não afirmar como regra geral:
+- Free possui custom write MCP;
+- todo Plus possui o mesmo rollout;
+- Work é obrigatório.
+
+PRÓXIMA ETAPA REAL — NÃO MAIS MOCK
+
+A fundação Tunnel está suficientemente fechada.
+
+Próximo passo é o primeiro teste integrado REAL na máquina/conta do usuário:
+
+1. instalar/confirmar tunnel-client oficial v0.0.14+;
+2. obter/criar Tunnel ID pelo fluxo oficial do ChatGPT;
+3. obter Runtime API key com Tunnels Read + Use;
+4. abrir Auto CodeZ;
+5. iniciar MCP Gateway;
+6. confirmar Preflight OK;
+7. executar Doctor real;
+8. iniciar Tunnel;
+9. confirmar ready=true;
+10. no ChatGPT, Novo plugin → Túnel;
+11. conectar ao Tunnel;
+12. confirmar tools/list real;
+13. testar session_summary/read;
+14. testar uma write tool;
+15. confirmar waiting_approval no Auto CodeZ;
+16. clicar Aceitar;
+17. confirmar operation_status success no ChatGPT;
+18. repetir no chat normal mencionando @Auto CodeZ;
+19. testar também no Work;
+20. conectar Roblox Studio Manager real e repetir o mesmo fluxo.
+
+Depois:
+- Session Capsule/handoff refinado;
+- multimodal bridge controlada para screenshots/artifacts;
+- Blender 3D Automation sobre a mesma fundação.
+
+BLENDER — DIREÇÃO ATUAL
+
+Blender Automation continua planejado como plugin real sobre:
+AgentRuntime/policies → Blender tools/Python API.
+
+Não limitar a um fluxo to3D.
+
+Objetivo:
+- modelagem progressiva;
+- meshes mais complexas;
+- modifiers;
+- Geometry Nodes;
+- materiais;
+- UV;
+- rigs;
+- bones;
+- skinning;
+- constraints;
+- keyframes;
+- animações;
+- renders/checkpoints visuais;
+- loops iterativos de correção.
+
+Execução em background/headless quando possível.
+
+Performance:
+- minimizar Blender não significa GPU zero;
+- viewport pesada deve ser evitada durante background work;
+- preview/render somente em checkpoints necessários;
+- futuros perfis Eco / Balanced / Maximum;
+- operações pesadas continuam limitadas pelo hardware do usuário.
+
+SEGURANÇA QUE CONTINUA INALTERADA
+
+- Tunnel é transporte, não autoridade.
+- Gateway continua localhost-only para Tunnel.
+- write MCP externa passa por AgentRuntime/policies.
+- approval local continua authoritative.
+- PluginToolCatalog continua authoritative.
+- nenhum secret no ledger.
+- nenhum secret persistido por padrão.
+- nenhum executable arbitrário via renderer/IPC.
+- nenhum endpoint arbitrário via renderer/IPC.
+- shell não foi habilitado para tunnel-client.
+- Roblox/Blender/filesystem/terminal não recebem bypass.
+- PR #9 continua draft/open/unmerged até autorização explícita.
