@@ -246,6 +246,22 @@ test('MCP stdio runtime surfaces JSON-RPC errors and request timeouts', async ()
   timeoutRuntime.disconnectPlugin('test.plugin');
 });
 
+test('MCP stdio runtime surfaces synchronous spawn failures without retaining a session', async () => {
+  const runtime = new PluginMcpStdioRuntime((() => { throw new Error('ENOENT fake-server'); }) as McpSpawn);
+  await assert.rejects(() => runtime.connect('test.plugin', { command: 'missing-server' }), /Não foi possível iniciar o servidor MCP: ENOENT fake-server/);
+});
+
+test('MCP stdio disconnect is idempotent around an already killed child', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  Object.defineProperty(fixture.server.child, 'killed', { value: true, configurable: true });
+  assert.equal(runtime.disconnect('test.plugin', connected.sessionId), true);
+  assert.equal(runtime.disconnect('test.plugin', connected.sessionId), false);
+});
+
 test('MCP stdio transport rejects unsafe command and bounded input before spawning', async () => {
   let spawns = 0;
   const runtime = new PluginMcpStdioRuntime((() => { spawns += 1; throw new Error('should not spawn'); }) as McpSpawn);
