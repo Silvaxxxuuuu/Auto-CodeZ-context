@@ -83,7 +83,7 @@ export class PluginMcpStdioRuntime {
     const launcher = resolveRobloxStudioMcpCommand();
     if (process.platform !== 'win32') return this.connect(pluginId, { command: launcher, timeoutMs });
     const comspec = process.env.ComSpec || 'cmd.exe';
-    return this.connect(pluginId, { command: comspec, args: ['/d', '/s', '/c', '"' + launcher + '"'], timeoutMs });
+    return this.connect(pluginId, { command: comspec, args: ['/d', '/s', '/c', launcher], timeoutMs });
   }
 
   async listTools(pluginId: string, sessionId: string, timeoutMs?: number): Promise<McpToolList> {
