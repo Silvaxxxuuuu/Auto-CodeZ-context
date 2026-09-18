@@ -5468,3 +5468,356 @@ Performance:
 - estado de cena e checkpoints visuais para loops iterativos;
 - nenhum bypass para filesystem/terminal/processos.
 
+------------------------------------------------------------
+24.36. MCP MODE SIMPLES + RUNTIME GERENCIADO + HARDENING WINDOWS — VALIDADO
+------------------------------------------------------------
+
+BASELINE FUNCIONAL VALIDADO
+
+Baseline funcional:
+1a48e1a5fcb2647fd2d3fd438362eb3063562f6c
+test(visual): reject native button chrome in MCP timeline
+
+Workflows exatos:
+- Validate Auto CodeZ run #3900 / id 35401161862: SUCCESS.
+- Visual Auto CodeZ run #779 / id 35401161872: SUCCESS.
+- Artifact visual: auto-codez-visual-35401161872.
+- Artifact ID: 10570646637.
+- Tamanho: 5.035.410 bytes.
+- Digest: sha256:d41cb0b47feaa2126a8c675553f4cc29412173d16b1e12cd8721ffd6bedd5cd2.
+
+Validate:
+- TypeScript: SUCCESS.
+- Core tests: 929/929 PASS, 0 FAIL.
+- ESLint: SUCCESS.
+- Electron Forge package: SUCCESS.
+- Electron startup smoke: SUCCESS.
+
+Visual:
+- Electron empacotado Windows x64.
+- Capture visual flow: SUCCESS.
+- unified local AI: SUCCESS.
+- unavailable local runtime recovery: SUCCESS.
+- secure local runtime settings: SUCCESS.
+- LM Studio chat: SUCCESS.
+- upload screenshots: SUCCESS.
+- manifest principal: 19/19 passed.
+- pageErrors=[].
+- consoleErrors=[].
+
+OBJETIVO DE UX
+
+A configuração MCP deixou de exigir que o usuário entenda PATH, arquitetura, ZIP, porta, Bearer, Doctor ou localização do tunnel-client.
+
+Primeira experiência:
+1. tela central: "O modo MCP não está ativado.";
+2. botão único "Ativar MCP";
+3. Auto CodeZ prepara e valida o núcleo MCP local;
+4. tela "Onde você quer usar o Auto CodeZ?";
+5. seleção múltipla de clientes;
+6. instruções somente dos clientes escolhidos;
+7. "Finalizar";
+8. MCP Mode operacional.
+
+Clientes atualmente apresentados:
+- ChatGPT;
+- ChatGPT Codex;
+- Claude Desktop;
+- Claude Code;
+- Cursor;
+- Outro cliente MCP.
+
+A seleção persiste localmente.
+ChatGPT inicia selecionado por padrão na primeira configuração.
+A UI aceita múltiplos clientes.
+
+DEPENDÊNCIAS POR CLIENTE
+
+"Ativar MCP" prepara somente o núcleo local.
+
+O tunnel-client é necessário para o fluxo ChatGPT por Secure MCP Tunnel e é preparado quando ChatGPT está entre os clientes escolhidos.
+
+Clientes MCP locais não devem pagar o custo/risco de instalar o componente de Tunnel sem necessidade.
+
+RUNTIME MCP GERENCIADO
+
+Novo:
+src/mcp-gateway/runtime-installer.ts
+
+Auto CodeZ agora detecta:
+- win32 x64;
+- win32 arm64;
+- darwin x64;
+- darwin arm64;
+- linux x64;
+- linux arm64.
+
+Baseline de runtime atual:
+tunnel-client 0.0.14.
+
+Local gerenciado:
+<userData>/runtime/mcp/tunnel-client/0.0.14/
+
+Fluxo:
+1. procura runtime gerenciado válido;
+2. aceita runtime PATH compatível quando disponível;
+3. quando necessário, baixa o asset oficial exato da release;
+4. baixa SHA256SUMS.txt;
+5. valida o digest fixado do próprio manifesto da release;
+6. encontra o checksum exato do asset selecionado;
+7. valida SHA256 do arquivo baixado;
+8. extrai em diretório temporário;
+9. valida tunnel-client --version;
+10. instala no diretório gerenciado;
+11. valida novamente o executável instalado;
+12. remove temporários.
+
+Nenhum PATH manual é exigido do usuário.
+
+SUPPLY-CHAIN / FAIL-CLOSED
+
+A instalação automática não executa bytes baixados antes das verificações.
+
+Boundary:
+- HTTPS;
+- hosts finais esperados do GitHub/release assets;
+- manifesto SHA256 oficial;
+- digest do manifesto fixado para a release validada;
+- SHA256 do archive;
+- limites de tamanho;
+- versão do executável;
+- arquitetura/plataforma suportada.
+
+Testes provam:
+- arquitetura não suportada falha fechado;
+- instalação Windows amd64 correta;
+- checksum de archive incompatível é rejeitado;
+- manifesto de checksum adulterado é rejeitado antes do download do archive.
+
+ONBOARDING CHATGPT
+
+Fluxo exibido ao usuário:
+- ativar Developer Mode;
+- abrir Plugins;
+- clicar +;
+- criar Auto CodeZ;
+- escolher conexão por Tunnel;
+- concluir a autorização que pertence à conta do usuário.
+
+Configuração avançada fica oculta por padrão.
+
+O Auto CodeZ não inventa plugin_asdk_app.
+Esse identificador só deve entrar na configuração final após a conexão real ser criada no ChatGPT.
+
+PLUGIN PORTÁTIL — SCAFFOLD
+
+Criado:
+integrations/openai-plugin/auto-codez/plugin.json
+
+Skill:
+integrations/openai-plugin/auto-codez/skills/auto-codez-workspace/SKILL.md
+
+Documentação:
+docs/MCP_MODE.md
+docs/CHATGPT_PLUGIN.md
+
+A skill orienta o cliente a:
+- inspecionar antes de editar;
+- reutilizar contexto de sessão;
+- manter escopo;
+- preferir mutações focadas;
+- respeitar waiting_approval;
+- aguardar aprovação local;
+- consultar operation_status;
+- validar mudanças;
+- nunca contornar policies/AgentRuntime/PluginToolCatalog.
+
+O package ainda NÃO possui connection ID OpenAI inventado.
+
+MCP MODE OPERACIONAL LIMPO
+
+O MCP Mode agora mostra somente atividade realmente ligada a clientes MCP externos.
+
+Antes de conexão:
+- header "Nenhuma sessão conectada";
+- sidebar "Nenhuma IA conectada ainda";
+- summary "MCP ativo e protegido";
+- zero approval antigo;
+- zero evento de chat interno;
+- zero run_command antigo.
+
+Depois da conexão:
+- eventos são ligados causalmente ao cliente externo;
+- sidebar agrupa ações pelo chat MCP estável do cliente;
+- várias tool calls do mesmo cliente permanecem uma sessão contínua;
+- approvals pertencentes àquela atividade aparecem;
+- artifacts e metadata continuam disponíveis;
+- detalhes técnicos ficam em "Avançado".
+
+MCP Mode continua SEM composer.
+
+SEGREDO EFÊMERO DO TUNNEL
+
+Foi detectada uma condição de corrida entre:
+- usuário digitando a chave;
+- refresh/evento do ledger;
+- render() reconstruindo a UI.
+
+Correção:
+- tunnel key draft existe somente em memória volátil enquanto o usuário edita;
+- pode sobreviver a renders automáticos não destrutivos;
+- NÃO vai para localStorage;
+- NÃO vai para ledger;
+- NÃO vai para disco;
+- refresh manual limpa;
+- sair do MCP Mode limpa;
+- Doctor limpa;
+- Connect limpa.
+
+O payload do Doctor/Connect é capturado antes da limpeza do input.
+
+Preload/Main também usam IPC com argumentos primitivos separados para:
+- tunnelId;
+- controlPlaneApiKey.
+
+Main revalida ambos.
+
+E2E prova:
+- segredo entra no input password;
+- sobrevive a render não destrutivo;
+- Doctor recebe a sessão;
+- depois é apagado.
+
+DOCTOR / EXTERNAL MCP CONTINUA VALIDADO
+
+No Visual final o fluxo empacotado passou:
+- onboarding MCP;
+- ChatGPT + Codex selecionados;
+- Finalizar;
+- Gateway ativo;
+- preflight;
+- Doctor;
+- tools/list;
+- tools/call write;
+- waiting_approval;
+- Aceitar local;
+- operation_status;
+- success.
+
+Nenhum Bearer aparece no ledger.
+
+COMMAND RUNTIME — CANCELAMENTO WINDOWS ENDURECIDO
+
+Uma execução de CI revelou que o teste:
+command runtime aborts a running process tree
+
+podia aguardar aproximadamente 30s no Windows quando taskkill era disparado de forma fire-and-forget e o ChildProcess não emitia close rapidamente.
+
+Correção:
+- taskkill.exe /PID <pid> /T /F agora é aguardado com timeout bounded;
+- observa exit real do child;
+- espera close por janela curta;
+- fallback SIGKILL quando necessário;
+- encerramento possui limite total;
+- AbortError é resolvido/rejeitado sem esperar o comando natural de 30s;
+- POSIX mantém SIGTERM de process group com escalada bounded.
+
+Resultado no baseline final:
+929/929 core tests PASS.
+
+TUNNEL TEMP CLEANUP WINDOWS
+
+Outra corrida de Windows apareceu ao remover diretório temporário imediatamente depois do child exit.
+
+Correção:
+removeTemporaryTree()
+
+Usa fs.rm recursive/force com:
+- maxRetries bounded;
+- retryDelay curto;
+- tolerância a lock transitório.
+
+A mesma disciplina foi aplicada ao cleanup do fixture de testes.
+
+MCP UI — NATIVE BUTTON CHROME REMOVIDO
+
+O screenshot do primeiro Visual verde do fluxo revelou que elementos button da timeline/filtros/sidebar herdavam aparência nativa cinza.
+
+Correção:
+- mcp-event-toggle agora é explicitamente transparent/borderless;
+- filtros inativos explicitamente transparentes;
+- session items explicitamente transparentes;
+- botões técnicos possuem backgrounds deliberados;
+- approvals possuem background deliberado.
+
+O E2E agora consulta computed styles e falha se:
+- timeline toggle ganhar background nativo;
+- timeline toggle ganhar border nativo;
+- filtro inativo ganhar background nativo.
+
+Screenshot final funcional-mcp-mode-ledger.png foi revisado:
+- cards escuros coerentes;
+- sem blocos cinza nativos;
+- timeline legível;
+- estado waiting/success/running preservado;
+- metadata expandida preservada.
+
+SCREENSHOTS MCP DO ARTIFACT FINAL
+
+Incluem:
+- funcional-mcp-onboarding-ativacao.png;
+- funcional-mcp-onboarding-clientes.png;
+- funcional-mcp-onboarding-instrucoes.png;
+- funcional-mcp-operacional-limpo.png;
+- funcional-mcp-mode-ledger.png.
+
+PR #9
+
+- OPEN.
+- DRAFT.
+- NÃO MESCLADO.
+- Não fazer merge sem autorização explícita.
+
+PRÓXIMA ETAPA REAL
+
+A fundação automática/onboarding está pronta para teste real na máquina/conta.
+
+Próxima prova:
+ChatGPT real
+→ Secure MCP Tunnel oficial
+→ Auto CodeZ MCP Gateway
+→ tools/list
+→ read
+→ write
+→ waiting_approval local
+→ Accept
+→ operation_status success.
+
+O usuário não deve precisar:
+- instalar tunnel-client manualmente;
+- criar C:\Tools;
+- editar PATH;
+- escolher amd64/arm64;
+- baixar ZIP;
+- extrair binário.
+
+Auto CodeZ deve fazer isso automaticamente.
+
+Depois da prova ChatGPT real:
+- repetir chat normal;
+- Work;
+- Roblox Studio Manager real;
+- Session Capsule/handoff;
+- multimodal bridge;
+- Blender 3D Automation.
+
+BLENDER CONTINUA SOB O MESMO CONTRATO
+
+AgentRuntime/policies
+→ PluginToolCatalog
+→ Blender plugin
+→ Blender Python API.
+
+Sem bypass para filesystem/terminal/processos.
+Background/headless e checkpoints visuais continuam como estratégia de performance.
+
