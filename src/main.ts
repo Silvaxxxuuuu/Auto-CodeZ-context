@@ -56,6 +56,8 @@ import type { AIProviderConfig, AIStreamEvent } from './ai/types';
 import { operationalLedger, type OperationalLedgerQuery, type OperationalLedgerState } from './operational-ledger';
 import { OperationalLedgerPersistence, OperationalLedgerStore } from './operational-ledger-store';
 import { OperationalLedgerRetrieval, type OperationalLedgerScope } from './operational-ledger-retrieval';
+import { McpGatewayProtocol } from './mcp-gateway/protocol';
+import { McpGatewayHttpServer } from './mcp-gateway/http-server';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -92,6 +94,8 @@ const executionTimelinePersistence = new ExecutionTimelinePersistence(executionT
 const operationalLedgerStore = new OperationalLedgerStore(storage);
 const operationalLedgerPersistence = new OperationalLedgerPersistence(operationalLedgerStore);
 const operationalLedgerRetrieval = new OperationalLedgerRetrieval(operationalLedger);
+const mcpGatewayProtocol = new McpGatewayProtocol(operationalLedgerRetrieval);
+const mcpGatewayServer = new McpGatewayHttpServer(mcpGatewayProtocol);
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
 const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
@@ -643,6 +647,37 @@ ipcMain.handle('agent:list-approvals', async (_event, filters?: { chatId?: strin
 ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatId === undefined ? executionManager.list() : executionManager.get(requireIdentifier(chatId, 'Chat')) ?? null);
 ipcMain.handle('agent:list-operational-ledger', async (_event, query: OperationalLedgerQuery | undefined) => operationalLedger.query(query ?? {}));
 
+ipcMain.handle('mcp-gateway:status', async () => mcpGatewayServer.status());
+ipcMain.handle('mcp-gateway:start', async (_event, input: unknown) => {
+  const value = input === undefined ? {} : requireObject(input, 'Configuração do MCP Gateway');
+  const port = value.port === undefined ? undefined : Number(value.port);
+  if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) throw new Error('Porta do MCP Gateway inválida.');
+  const info = await mcpGatewayServer.start(port === undefined ? {} : { port });
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'MCP Gateway local iniciado.',
+    clientId: 'autocodez-mcp-gateway',
+    details: { host: info.host, port: info.port, protocol: '2026-07-28' },
+  });
+  return info;
+});
+ipcMain.handle('mcp-gateway:stop', async () => {
+  const stopped = await mcpGatewayServer.stop();
+  if (stopped) {
+    operationalLedger.record({
+      actor: 'runtime',
+      category: 'system',
+      state: 'cancelled',
+      summary: 'MCP Gateway local encerrado.',
+      clientId: 'autocodez-mcp-gateway',
+    });
+  }
+  return { stopped };
+});
+
+
 function requireOperationalLedgerScope(input: unknown): OperationalLedgerScope {
   if (input === undefined) return {};
   const value = requireObject(input, 'Escopo do ledger operacional');
@@ -1047,4 +1082,5 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
+app.on('before-quit', () => { void mcpGatewayServer.stop(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
