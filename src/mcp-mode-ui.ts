@@ -52,6 +52,7 @@ let filter: ModeFilter = 'all';
 let selectedArtifactId = '';
 const expandedEvents = new Set<string>();
 let unsubscribeLedger: (() => void) | undefined;
+let unsubscribeTunnel: (() => void) | undefined;
 let gatewayStatus: GatewayStatus = { running: false, host: '127.0.0.1', port: 0, endpoint: '' };
 let gatewayToken = '';
 let tunnelStatus: TunnelStatus = { running: false, ready: false, credentialAvailable: false };
@@ -569,7 +570,15 @@ function install(): void {
     render();
   });
 
-  window.addEventListener('beforeunload', () => unsubscribeLedger?.(), { once: true });
+  unsubscribeTunnel = window.autoCodez.onMcpTunnelStatus((status) => {
+    tunnelStatus = status as TunnelStatus;
+    if (active) render();
+  });
+
+  window.addEventListener('beforeunload', () => {
+    unsubscribeLedger?.();
+    unsubscribeTunnel?.();
+  }, { once: true });
 }
 
 install();
