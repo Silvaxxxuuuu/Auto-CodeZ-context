@@ -102,9 +102,14 @@ export class PluginMcpStdioRuntime {
   }
 
   async listTools(pluginId: string, sessionId: string, timeoutMs?: number): Promise<McpToolList> {
-    const result = await this.request(this.requireSession(pluginId, sessionId), 'tools/list', {}, timeout(timeoutMs));
-    if (!result || typeof result !== 'object' || !Array.isArray((result as { tools?: unknown }).tools)) throw new Error('Servidor MCP retornou catálogo de tools inválido.');
-    const tools = (result as { tools: unknown[] }).tools.map((item) => {
+    const session = this.requireSession(pluginId, sessionId);
+    const tools: McpToolDescriptor[] = [];
+    let cursor: string | undefined;
+    const seen = new Set<string>();
+    for (let page = 0; page < 64; page += 1) {
+      const result = await this.request(session, 'tools/list', cursor ? { cursor } : {}, timeout(timeoutMs));
+      if (!result || typeof result !== 'object' || !Array.isArray((result as { tools?: unknown }).tools)) throw new Error('Servidor MCP retornou catálogo de tools inválido.');
+      const pageTools = (result as { tools: unknown[] }).tools.map((item) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Servidor MCP retornou tool inválida.');
       const value = item as Record<string, unknown>;
       if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 256) throw new Error('Servidor MCP retornou tool inválida.');
@@ -113,8 +118,18 @@ export class PluginMcpStdioRuntime {
         ...(typeof value.description === 'string' ? { description: value.description.slice(0, 4096) } : {}),
         ...(Object.prototype.hasOwnProperty.call(value, 'inputSchema') ? { inputSchema: value.inputSchema } : {}),
       };
-    });
-    return { tools };
+      });
+      for (const tool of pageTools) {
+        if (seen.has(tool.name)) throw new Error(`Servidor MCP retornou tool duplicada: '${tool.name}'.`);
+        seen.add(tool.name);
+        tools.push(tool);
+      }
+      const next = (result as { nextCursor?: unknown }).nextCursor;
+      if (next === undefined || next === null || next === '') return { tools };
+      if (typeof next !== 'string' || next.length > 4096) throw new Error('Servidor MCP retornou cursor de paginação inválido.');
+      cursor = next;
+    }
+    throw new Error('Servidor MCP excedeu o limite de paginação de tools.');
   }
 
   callTool(pluginId: string, sessionId: string, name: string, input: unknown, timeoutMs?: number): Promise<unknown> {
