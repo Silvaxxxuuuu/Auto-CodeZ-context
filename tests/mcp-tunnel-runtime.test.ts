@@ -304,3 +304,28 @@ test('Secure MCP Tunnel stop waits for bounded child termination before resolvin
     await f.cleanup();
   }
 });
+
+
+test('Secure MCP Tunnel keeps recent sanitized diagnostics after large child logs', async () => {
+  const f = fixture();
+  try {
+    const runtime = await f.create({ CONTROL_PLANE_API_KEY: 'sk-control-test' });
+    await runtime.start({
+      tunnelId: 'tunnel_' + '3'.repeat(32),
+      localEndpoint: 'http://127.0.0.1:7003/mcp',
+      localBearerToken: 'local-bearer-value-1234567890',
+    });
+    const run = f.records.find((record) => record.args[0] === 'run');
+    assert.ok(run);
+    (run.child.stderr as PassThrough).write('old-log '.repeat(3000));
+    (run.child.stderr as PassThrough).write('recent-tail-marker token=super-secret-tail');
+    run.child.emit('exit', 23, null);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const status = runtime.status();
+    assert.match(status.error ?? '', /recent-tail-marker/);
+    assert.equal(JSON.stringify(status).includes('super-secret-tail'), false);
+  } finally {
+    await f.cleanup();
+  }
+});
