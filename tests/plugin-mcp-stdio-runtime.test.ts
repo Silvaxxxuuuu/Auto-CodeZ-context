@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { PluginMcpStdioRuntime, resolveRobloxStudioMcpCommand, type McpSpawn } from '../src/plugins/plugin-mcp-stdio-runtime';
+import { PluginMcpStdioRuntime, buildRobloxStudioLaunchPlan, resolveRobloxStudioMcpCommand, type McpSpawn } from '../src/plugins/plugin-mcp-stdio-runtime';
 
 type FakeServer = {
   child: ChildProcessWithoutNullStreams;
