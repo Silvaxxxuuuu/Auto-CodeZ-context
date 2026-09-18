@@ -43,11 +43,13 @@ export class PluginSandboxCallRouter {
     });
   }
 
-  async call(pluginId: string, method: string, input?: unknown): Promise<unknown> {
+  async call(pluginId: string, method: string, input?: unknown, invocationId: string = crypto.randomUUID()): Promise<unknown> {
     assertSize(input, MAX_INPUT_BYTES, 'Entrada da tool de plugin');
     const target = this.target;
     if (!target || target.isDestroyed()) throw new Error('Renderer da Plugin Platform não está registrado.');
-    const id = crypto.randomUUID();
+    const id = invocationId.trim();
+    if (!id || id.length > 128 || /[\\u0000-\\u001f\\u007f]/.test(id)) throw new Error('ID da invocação do plugin inválido.');
+    if (this.pending.has(id)) throw new Error('ID da invocação do plugin já está em uso.');
     const payload: PluginSandboxCall = { id, pluginId, method, ...(input !== undefined ? { input } : {}) };
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
