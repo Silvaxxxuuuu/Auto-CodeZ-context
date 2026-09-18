@@ -43,7 +43,7 @@ type GatewayPreflight = { ok: true; protocolVersion: string; toolCount: number; 
 type TunnelStatus = { running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean };
 type McpRuntimeStatus = { platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string };
 type OnboardingStep = 'activation' | 'clients' | 'instructions' | 'operational';
-type McpClientId = 'chatgpt' | 'codex' | 'claude' | 'claude-code' | 'cursor' | 'windsurf';
+type McpClientId = 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other';
 
 const MAX_RENDERED_EVENTS = 250;
 const rootId = 'mcp-mode-root';
@@ -73,16 +73,26 @@ let onboardingStep: OnboardingStep = (() => {
 let activationBusy = false;
 let activationMessage = '';
 let activationError = '';
-let selectedClients = new Set<McpClientId>(['chatgpt']);
+let selectedClients = (() => {
+  try {
+    const stored = JSON.parse(localStorage.getItem('auto-codez:mcp-clients') || '[]') as unknown;
+    if (Array.isArray(stored)) {
+      const allowed = new Set<McpClientId>(['chatgpt', 'codex', 'claude-desktop', 'claude-code', 'cursor', 'other']);
+      const valid = stored.filter((value): value is McpClientId => typeof value === 'string' && allowed.has(value as McpClientId));
+      if (valid.length) return new Set<McpClientId>(valid);
+    }
+  } catch {}
+  return new Set<McpClientId>(['chatgpt']);
+})();
 let showAdvanced = false;
 
 const MCP_CLIENTS: Array<{ id: McpClientId; name: string; detail: string; badge: string }> = [
   { id: 'chatgpt', name: 'ChatGPT', detail: 'Plugin com Secure MCP Tunnel', badge: 'Configuração guiada' },
   { id: 'codex', name: 'ChatGPT Codex', detail: 'MCP local no app, CLI ou extensão', badge: 'Conexão local' },
-  { id: 'claude', name: 'Claude', detail: 'Conexão MCP compatível com o cliente', badge: 'Configuração guiada' },
+  { id: 'claude-desktop', name: 'Claude Desktop', detail: 'Integração local MCP no aplicativo', badge: 'Configuração guiada' },
   { id: 'claude-code', name: 'Claude Code', detail: 'MCP local pelo ambiente de desenvolvimento', badge: 'Conexão local' },
   { id: 'cursor', name: 'Cursor', detail: 'Servidor MCP no editor', badge: 'Conexão local' },
-  { id: 'windsurf', name: 'Windsurf', detail: 'Servidor MCP no editor', badge: 'Conexão local' },
+  { id: 'other', name: 'Outro cliente MCP', detail: 'Use com clientes compatíveis com MCP', badge: 'Configuração manual' },
 ];
 
 function escapeHtml(value: unknown): string {
@@ -292,8 +302,15 @@ function renderEvent(event: LedgerEvent): string {
 }
 
 
+function persistClientSelection(): void {
+  try { localStorage.setItem('auto-codez:mcp-clients', JSON.stringify([...selectedClients])); } catch {}
+}
+
 function persistOnboardingComplete(): void {
-  try { localStorage.setItem('auto-codez:mcp-onboarding', 'complete'); } catch {}
+  try {
+    localStorage.setItem('auto-codez:mcp-onboarding', 'complete');
+    persistClientSelection();
+  } catch {}
 }
 
 function renderClientInstructions(client: McpClientId): string {
@@ -316,16 +333,16 @@ function renderClientInstructions(client: McpClientId): string {
       <div class="mcp-copy-line"><code>Use o MCP do Auto CodeZ para trabalhar neste projeto.</code><button data-mcp-copy-text="Use o MCP do Auto CodeZ para trabalhar neste projeto.">Copiar</button></div>
     </article>`;
   }
+  if (client === 'claude-desktop') {
+    return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">A</span><div><strong>Claude Desktop</strong><small>Aplicativo desktop · MCP local</small></div></div><p>Abra as configurações de integrações/extensões do Claude Desktop e adicione o Auto CodeZ como servidor MCP local. O Auto CodeZ manterá os dados técnicos em <b>Configuração avançada</b>.</p><div class="mcp-guide-note">A configuração exata varia conforme a versão do Claude Desktop. O Auto CodeZ não altera sua conta nem instala extensões sem sua confirmação.</div></article>`;
+  }
   if (client === 'claude-code') {
     return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">CC</span><div><strong>Claude Code</strong><small>MCP local</small></div></div><p>Adicione o servidor MCP do Auto CodeZ nas configurações MCP do Claude Code. Depois peça:</p><div class="mcp-copy-line"><code>Conecte-se ao MCP do Auto CodeZ e use as ferramentas disponíveis.</code><button data-mcp-copy-text="Conecte-se ao MCP do Auto CodeZ e use as ferramentas disponíveis.">Copiar</button></div></article>`;
-  }
-  if (client === 'claude') {
-    return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">A</span><div><strong>Claude</strong><small>Configuração MCP guiada</small></div></div><p>Abra a área de integrações/MCP do seu cliente Claude e adicione o Auto CodeZ usando os dados de conexão mostrados em <b>Configuração avançada</b>.</p></article>`;
   }
   if (client === 'cursor') {
     return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">⌁</span><div><strong>Cursor</strong><small>Servidor MCP no editor</small></div></div><p>Abra as configurações MCP do Cursor, adicione <b>Auto CodeZ</b> e use a conexão local mostrada em <b>Configuração avançada</b>.</p></article>`;
   }
-  return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">W</span><div><strong>Windsurf</strong><small>Servidor MCP no editor</small></div></div><p>Abra as configurações MCP do Windsurf, adicione <b>Auto CodeZ</b> e use a conexão local mostrada em <b>Configuração avançada</b>.</p></article>`;
+  return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">M</span><div><strong>Outro cliente MCP</strong><small>Configuração manual</small></div></div><p>Adicione um servidor MCP usando os dados de conexão local mostrados em <b>Configuração avançada</b>. Se o seu cliente exigir um formato específico, consulte a documentação dele.</p></article>`;
 }
 
 function renderOnboarding(root: HTMLElement): void {
@@ -621,6 +638,7 @@ function install(): void {
     const client = target.closest<HTMLElement>('[data-mcp-client]')?.dataset.mcpClient as McpClientId | undefined;
     if (client) {
       if (selectedClients.has(client)) selectedClients.delete(client); else selectedClients.add(client);
+      persistClientSelection();
       render();
       return;
     }
