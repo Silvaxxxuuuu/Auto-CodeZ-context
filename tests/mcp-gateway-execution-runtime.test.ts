@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { AIToolResult } from '../src/ai/types';
 import type { AgentRuntime } from '../src/agent/agent-runtime';
 import { McpGatewayExecutionRuntime } from '../src/mcp-gateway/execution-runtime';
+import { OperationalLedger } from '../src/operational-ledger';
 import { PluginToolCatalog } from '../src/plugins/plugin-tool-catalog';
 
 function catalog() {
@@ -156,4 +157,44 @@ test('MCP Gateway execution rejects missing tools and stale approvals', async ()
   await assert.rejects(() => runtime.execute('roblox_missing', {}), /not found/);
   await assert.rejects(() => runtime.approve('missing-approval'), /not found/);
   assert.throws(() => runtime.deny('missing-approval'), /not found/);
+});
+
+
+test('MCP Gateway execution writes authoritative external client context to the ledger', async () => {
+  const fixture = fakeAgent();
+  const ledger = new OperationalLedger();
+  const runtime = new McpGatewayExecutionRuntime(fixture.agent, catalog(), ledger);
+
+  const operation = await runtime.execute('roblox_inspect_game', { studioId: 'studio-a' }, { clientId: 'ChatGPT' });
+  const events = ledger.query({ runId: operation.runId }).events;
+
+  assert.equal(events.length, 2);
+  assert.equal(events[0].actor, 'external');
+  assert.equal(events[0].clientId, 'ChatGPT');
+  assert.equal(events[0].chatId, 'mcp:ChatGPT');
+  assert.equal(events[0].toolName, 'roblox_inspect_game');
+  assert.equal(events[0].causationId, operation.operationId);
+  assert.equal(events[0].state, 'running');
+  assert.equal(events[1].state, 'success');
+  assert.equal(events[1].causationId, operation.operationId);
+});
+
+test('MCP Gateway execution keeps approval decision events on the same operation causation chain', async () => {
+  const fixture = fakeAgent();
+  fixture.setNext({
+    toolCallId: 'gateway-call',
+    ok: false,
+    pendingApproval: true,
+    approvalId: 'approval-ledger',
+  });
+  const ledger = new OperationalLedger();
+  const runtime = new McpGatewayExecutionRuntime(fixture.agent, catalog(), ledger);
+
+  const pending = await runtime.execute('roblox_run_playtest', { studioId: 'studio-a' }, { clientId: 'ChatGPT' });
+  await runtime.approve('approval-ledger');
+
+  const events = ledger.query({ runId: pending.runId }).events;
+  assert.equal(events.every((event) => event.causationId === pending.operationId), true);
+  assert.equal(events.some((event) => event.state === 'waiting'), true);
+  assert.equal(events.at(-1)?.state, 'success');
 });
