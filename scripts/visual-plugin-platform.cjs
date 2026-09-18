@@ -55,6 +55,12 @@ async function runTest() {
   if (await mcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer após expansão de evento.');
   const ledgerDiagnostic = await page.evaluate(async () => { const page = await window.autoCodez.listOperationalLedger({ limit: 250, direction: 'backward' }); return { count: page.events.length, categories: [...new Set(page.events.map((event) => event.category))], hasPlugin: page.events.some((event) => event.pluginId === 'visual.plugin') }; });
   if (!ledgerDiagnostic.count || !ledgerDiagnostic.hasPlugin) throw new Error(`MCP Mode não recebeu eventos autoritativos do plugin: ${JSON.stringify(ledgerDiagnostic)}`);
+  const gatewayToggle = mcpMode.locator('[data-mcp-gateway-toggle]'); await gatewayToggle.getByText('Iniciar Gateway', { exact: true }).waitFor({ state: 'visible' }); await gatewayToggle.click();
+  await mcpMode.getByText('Ativo somente em localhost', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  const gatewayText = await mcpMode.locator('.mcp-gateway-card').innerText(); if (!gatewayText.includes('127.0.0.1') || !gatewayText.includes('MCP 2026-07-28') || !gatewayText.includes('Bearer ')) throw new Error(`Gateway local não expôs conexão efêmera esperada: ${gatewayText}`);
+  const leakedBearer = await page.evaluate(async () => { const page = await window.autoCodez.listOperationalLedger({ limit: 250, direction: 'backward' }); return JSON.stringify(page.events).includes('Bearer '); }); if (leakedBearer) throw new Error('Token efêmero do MCP Gateway vazou para o Operational Ledger.');
+  await gatewayToggle.getByText('Parar Gateway', { exact: true }).click(); await mcpMode.getByText('Desligado', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  if ((await mcpMode.locator('.mcp-gateway-card').innerText()).includes('Bearer ')) throw new Error('Token efêmero permaneceu visível após parar o MCP Gateway.');
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-mode-ledger.png'), animations: 'disabled' });
   if (pageErrors.length || consoleErrors.length) throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
 }
