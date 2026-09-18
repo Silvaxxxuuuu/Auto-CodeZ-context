@@ -1,0 +1,36 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "auto-codez",
+  "version": "0.1.0",
+  "description": "Use Auto CodeZ to inspect, edit, run and verify local software projects with controlled approvals.",
+  "author": {
+    "name": "Auto CodeZ"
+  },
+  "license": "MIT",
+  "keywords": [
+    "coding",
+    "development",
+    "mcp",
+    "workspace",
+    "automation"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Auto CodeZ",
+        "shortDescription": "Work on local projects through Auto CodeZ.",
+        "longDescription": "Connect ChatGPT and Codex to the Auto CodeZ local execution platform for scoped project inspection, edits, commands, tests and plugin tools with local approval for sensitive actions.",
+        "developerName": "Auto CodeZ",
+        "category": "developer-tools",
+        "capabilities": [
+          "mcp",
+          "coding",
+          "workspace",
+          "automation"
+        ],
+        "brandColor": "#3478D5",
+        "defaultPrompt": "Use Auto CodeZ to inspect this project, make the requested changes within scope, verify the result, and report what changed."
+      }
+    }
+  }
+}
