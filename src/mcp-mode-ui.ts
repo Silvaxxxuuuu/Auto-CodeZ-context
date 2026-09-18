@@ -39,6 +39,7 @@ type Approval = {
 
 type ModeFilter = 'all' | 'activity' | 'errors' | 'artifacts';
 type GatewayStatus = { running: boolean; host: string; port: number; endpoint: string };
+type GatewayPreflight = { ok: true; protocolVersion: string; toolCount: number; writeToolCount: number };
 type TunnelStatus = { running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean };
 
 const MAX_RENDERED_EVENTS = 250;
@@ -55,6 +56,8 @@ let unsubscribeLedger: (() => void) | undefined;
 let unsubscribeTunnel: (() => void) | undefined;
 let gatewayStatus: GatewayStatus = { running: false, host: '127.0.0.1', port: 0, endpoint: '' };
 let gatewayToken = '';
+let gatewayPreflight: GatewayPreflight | undefined;
+let gatewayPreflightError = '';
 let tunnelStatus: TunnelStatus = { running: false, ready: false, credentialAvailable: false };
 let tunnelDoctorResult = '';
 let tunnelError = '';
@@ -307,8 +310,11 @@ function render(): void {
           <strong>${gatewayStatus.running ? 'Ativo somente em localhost' : 'Desligado'}</strong>
           <span>${gatewayStatus.running ? `${escapeHtml(gatewayStatus.endpoint)} · MCP 2026-07-28` : 'Nenhuma porta local é aberta até você iniciar explicitamente.'}</span>
           ${gatewayStatus.running && gatewayToken ? `<code>Bearer ${escapeHtml(gatewayToken)}</code>` : gatewayStatus.running ? '<small>Token não é persistido. Reinicie o Gateway para gerar e revelar uma nova credencial.</small>' : ''}
+          ${gatewayPreflight ? `<small class="mcp-gateway-preflight-ok">Preflight OK · MCP ${escapeHtml(gatewayPreflight.protocolVersion)} · ${gatewayPreflight.toolCount} tools · ${gatewayPreflight.writeToolCount} write</small>` : ''}
+          ${gatewayPreflightError ? `<div class="mcp-gateway-preflight-error">${escapeHtml(gatewayPreflightError)}</div>` : ''}
         </div>
         <div class="mcp-gateway-actions">
+          ${gatewayStatus.running ? '<button data-mcp-gateway-preflight>Preflight</button>' : ''}
           ${gatewayStatus.running && gatewayToken ? '<button data-mcp-copy-gateway>Copiar conexão</button>' : ''}
           <button class="${gatewayStatus.running ? 'danger' : 'primary'}" data-mcp-gateway-toggle>${gatewayStatus.running ? 'Parar Gateway' : 'Iniciar Gateway'}</button>
         </div>
@@ -357,7 +363,11 @@ async function refresh(): Promise<void> {
     approvals = nextApprovals as Approval[];
     gatewayStatus = nextGatewayStatus as GatewayStatus;
     tunnelStatus = nextTunnelStatus as TunnelStatus;
-    if (!gatewayStatus.running) gatewayToken = '';
+    if (!gatewayStatus.running) {
+      gatewayToken = '';
+      gatewayPreflight = undefined;
+      gatewayPreflightError = '';
+    }
     if (selectedScope && !events.some((event) => scopeKey(event) === selectedScope)) selectedScope = '';
   } finally {
     if (token === refreshSequence) {
@@ -395,7 +405,7 @@ function installStyles(): void {
     .body{position:relative}.mcp-mode-sidebar{min-width:0;border-right:1px solid #1b222c;background:#0c1016;padding:17px 10px;overflow:auto}.mcp-mode-sidebar-head{padding:0 9px 12px;display:flex;flex-direction:column;gap:4px}.mcp-mode-sidebar-head strong{font-size:13px}.mcp-mode-kicker,.mcp-section-label{font-size:8px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#657181}
     .mcp-session-list{margin-top:3px}.mcp-session-item{width:100%;display:grid;grid-template-columns:8px minmax(0,1fr);gap:9px;align-items:center;text-align:left;padding:9px;border:1px solid transparent;border-radius:8px;color:#9ba6b5}.mcp-session-item:hover,.mcp-session-item.active{background:#141a22;border-color:#232c38;color:#e9edf3}.mcp-session-item strong,.mcp-session-item small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mcp-session-item strong{font-size:10px;font-weight:600}.mcp-session-item small{margin-top:3px;font-size:8px;color:#687486}.mcp-session-led,.mcp-live-dot{display:block;border-radius:50%;background:#566273}.mcp-session-led{width:6px;height:6px}.mcp-live-dot{width:7px;height:7px}.state-running{--mcp-state:#69a7ff}.state-success{--mcp-state:#6fd49a}.state-failed{--mcp-state:#e87f87}.state-waiting,.state-pending{--mcp-state:#ddb86c}.state-cancelled{--mcp-state:#778191}.mcp-session-led[class*="state-"],.mcp-live-dot[class*="state-"]{background:var(--mcp-state,#566273)}
     .mcp-mode-main{min-width:0;display:flex;flex-direction:column;overflow:hidden}.mcp-mode-header{height:69px;flex:none;padding:0 26px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1b222c;background:#0a0e13}.mcp-mode-title-row{display:flex;align-items:center;gap:8px}.mcp-mode-title-row h1{margin:0;font-size:14px;font-weight:650}.mcp-header-state{padding:4px 7px;border:1px solid #283343;border-radius:999px;color:#8d99aa;font-size:8px}.mcp-mode-subtitle{margin-top:5px;color:#667283;font-size:8px}.mcp-header-actions{display:flex;gap:7px}.mcp-refresh-button,.mcp-stop-button{height:30px;padding:0 10px;border:1px solid #293341;border-radius:7px;color:#9ca8b8;font-size:9px;background:#11161d}.mcp-refresh-button:hover{color:#eef2f7;border-color:#3b4859}.mcp-stop-button{border-color:#57333a;color:#d58a91;background:#1b1013}.mcp-stop-button:hover{border-color:#7b454f;color:#f0a8af}
-    .mcp-mode-toolbar{height:47px;flex:none;padding:0 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #171e27}.mcp-gateway-card{flex:none;margin:12px 24px 0;padding:11px 12px;display:flex;align-items:center;justify-content:space-between;gap:18px;border:1px solid #24303d;border-radius:9px;background:#0d131a}.mcp-gateway-card.running{border-color:#2e493d;background:#0e1714}.mcp-gateway-copy{min-width:0}.mcp-gateway-copy strong,.mcp-gateway-copy span,.mcp-gateway-copy code,.mcp-gateway-copy small{display:block}.mcp-gateway-copy strong{margin-top:4px;font-size:10px}.mcp-gateway-copy span,.mcp-gateway-copy small{margin-top:3px;color:#6e7a8a;font-size:8px}.mcp-gateway-copy code{margin-top:6px;max-width:640px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#90a8bf;font:8px/1.4 Consolas,monospace}.mcp-gateway-actions{display:flex;gap:6px;flex:none}.mcp-gateway-actions button{height:29px;padding:0 9px;border:1px solid #304052;border-radius:6px;color:#9bacbf;font-size:8px}.mcp-gateway-actions button.primary{border-color:#365b49;color:#9dd3b4;background:#102019}.mcp-gateway-actions button.danger{border-color:#59343a;color:#d28c93;background:#1a1012}.mcp-tunnel-card{flex:none;margin:8px 24px 0;padding:11px 12px;display:flex;align-items:center;justify-content:space-between;gap:18px;border:1px solid #202a36;border-radius:9px;background:#0c1117}.mcp-tunnel-card.running,.mcp-tunnel-card.ready{border-color:#34485b}.mcp-tunnel-card.ready{background:#0d1715;border-color:#315142}.mcp-tunnel-copy{min-width:0;flex:1}.mcp-tunnel-copy strong,.mcp-tunnel-copy span,.mcp-tunnel-copy small{display:block}.mcp-tunnel-copy strong{margin-top:4px;font-size:10px}.mcp-tunnel-copy span,.mcp-tunnel-copy small{margin-top:3px;color:#6e7a8a;font-size:8px}.mcp-tunnel-error{margin-top:6px;color:#d58a91;font-size:8px}.mcp-tunnel-controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;max-width:58%}.mcp-tunnel-controls input{height:29px;min-width:132px;padding:0 8px;border:1px solid #293746;border-radius:6px;background:#0a0f15;color:#aab5c4;font-size:8px;outline:none}.mcp-tunnel-controls input:focus{border-color:#45627f}.mcp-tunnel-controls button{height:29px;padding:0 9px;border:1px solid #304052;border-radius:6px;color:#9bacbf;font-size:8px}.mcp-tunnel-controls button.primary{border-color:#365b49;color:#9dd3b4;background:#102019}.mcp-tunnel-controls button.danger{border-color:#59343a;color:#d28c93;background:#1a1012}.mcp-tunnel-controls button:disabled{opacity:.45;cursor:not-allowed}.mcp-filter-group{display:flex;gap:4px}.mcp-filter{padding:6px 9px;border-radius:6px;color:#6d7888;font-size:9px}.mcp-filter:hover,.mcp-filter.active{background:#151b23;color:#dce3ec}.mcp-mode-count{font-size:8px;color:#5d6877}
+    .mcp-mode-toolbar{height:47px;flex:none;padding:0 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #171e27}.mcp-gateway-card{flex:none;margin:12px 24px 0;padding:11px 12px;display:flex;align-items:center;justify-content:space-between;gap:18px;border:1px solid #24303d;border-radius:9px;background:#0d131a}.mcp-gateway-card.running{border-color:#2e493d;background:#0e1714}.mcp-gateway-copy{min-width:0}.mcp-gateway-copy strong,.mcp-gateway-copy span,.mcp-gateway-copy code,.mcp-gateway-copy small{display:block}.mcp-gateway-preflight-ok{color:#79b997!important}.mcp-gateway-preflight-error{margin-top:6px;color:#d58a91;font-size:8px}.mcp-gateway-copy strong{margin-top:4px;font-size:10px}.mcp-gateway-copy span,.mcp-gateway-copy small{margin-top:3px;color:#6e7a8a;font-size:8px}.mcp-gateway-copy code{margin-top:6px;max-width:640px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#90a8bf;font:8px/1.4 Consolas,monospace}.mcp-gateway-actions{display:flex;gap:6px;flex:none}.mcp-gateway-actions button{height:29px;padding:0 9px;border:1px solid #304052;border-radius:6px;color:#9bacbf;font-size:8px}.mcp-gateway-actions button.primary{border-color:#365b49;color:#9dd3b4;background:#102019}.mcp-gateway-actions button.danger{border-color:#59343a;color:#d28c93;background:#1a1012}.mcp-tunnel-card{flex:none;margin:8px 24px 0;padding:11px 12px;display:flex;align-items:center;justify-content:space-between;gap:18px;border:1px solid #202a36;border-radius:9px;background:#0c1117}.mcp-tunnel-card.running,.mcp-tunnel-card.ready{border-color:#34485b}.mcp-tunnel-card.ready{background:#0d1715;border-color:#315142}.mcp-tunnel-copy{min-width:0;flex:1}.mcp-tunnel-copy strong,.mcp-tunnel-copy span,.mcp-tunnel-copy small{display:block}.mcp-tunnel-copy strong{margin-top:4px;font-size:10px}.mcp-tunnel-copy span,.mcp-tunnel-copy small{margin-top:3px;color:#6e7a8a;font-size:8px}.mcp-tunnel-error{margin-top:6px;color:#d58a91;font-size:8px}.mcp-tunnel-controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;max-width:58%}.mcp-tunnel-controls input{height:29px;min-width:132px;padding:0 8px;border:1px solid #293746;border-radius:6px;background:#0a0f15;color:#aab5c4;font-size:8px;outline:none}.mcp-tunnel-controls input:focus{border-color:#45627f}.mcp-tunnel-controls button{height:29px;padding:0 9px;border:1px solid #304052;border-radius:6px;color:#9bacbf;font-size:8px}.mcp-tunnel-controls button.primary{border-color:#365b49;color:#9dd3b4;background:#102019}.mcp-tunnel-controls button.danger{border-color:#59343a;color:#d28c93;background:#1a1012}.mcp-tunnel-controls button:disabled{opacity:.45;cursor:not-allowed}.mcp-filter-group{display:flex;gap:4px}.mcp-filter{padding:6px 9px;border-radius:6px;color:#6d7888;font-size:9px}.mcp-filter:hover,.mcp-filter.active{background:#151b23;color:#dce3ec}.mcp-mode-count{font-size:8px;color:#5d6877}
     .mcp-approval-stack,.mcp-artifact-strip{flex:none;padding:13px 24px;border-bottom:1px solid #171e27}.mcp-approval-stack{display:flex;flex-direction:column;gap:7px}.mcp-approval-card{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 11px;border:1px solid #594b2b;border-radius:8px;background:#18150d}.mcp-approval-card strong,.mcp-approval-card span{display:block}.mcp-approval-card strong{font-size:10px}.mcp-approval-card span{margin-top:3px;color:#93866a;font-size:8px}.mcp-approval-card>div:last-child{display:flex;gap:5px}.mcp-approval-card button{padding:6px 9px;border:1px solid #3a3426;border-radius:6px;color:#b3a88d;font-size:8px}.mcp-approval-card button.primary{background:#6e5722;border-color:#8d7132;color:#fff2c9}
     .mcp-artifact-strip{display:flex;flex-direction:column;gap:8px}.mcp-artifact-row{display:flex;gap:6px;overflow:auto}.mcp-artifact-chip{display:grid;grid-template-columns:8px auto;grid-template-rows:auto auto;column-gap:6px;flex:none;padding:7px 9px;border:1px solid #263141;border-radius:7px;color:#8794a6;background:#10151c;text-align:left}.mcp-artifact-chip.active{border-color:#496584;background:#131d28}.mcp-artifact-chip span{grid-row:1/3;width:8px;height:8px;margin-top:2px;border-radius:2px;background:#53657b}.mcp-artifact-chip b{font-size:8px;font-weight:600;color:#a8b4c4}.mcp-artifact-chip small{font:7px/1.2 Consolas,monospace;color:#617084}
     .mcp-timeline{min-height:0;flex:1;overflow:auto;padding:20px 24px 50px}.mcp-event{position:relative;margin:0 0 8px;padding:0 12px 10px 20px;border:1px solid #1c2530;border-radius:8px;background:#0e1319}.mcp-event-toggle{display:block;width:100%;padding:10px 0 0;text-align:left;color:inherit}.mcp-event.expanded{border-color:#2d3948;background:#10161e}.mcp-event:before{content:"";position:absolute;left:9px;top:14px;bottom:-14px;width:1px;background:#1c2631}.mcp-event:last-child:before{display:none}.mcp-event-line{display:flex;align-items:center;gap:8px;min-width:0}.mcp-event-dot{position:absolute;left:6px;top:13px;width:7px;height:7px;border-radius:50%;background:var(--mcp-state,#536071);box-shadow:0 0 0 3px #0e1319}.mcp-event-time{font:8px/1 Consolas,monospace;color:#596474}.mcp-event-meta{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#748194;font-size:8px}.mcp-event-state{font-size:8px;color:var(--mcp-state,#718096)}.mcp-event-summary{margin-top:7px;color:#d7dde6;font-size:10px;line-height:1.45}.mcp-event-details{display:flex;gap:7px;flex-wrap:wrap;margin-top:6px}.mcp-event-details span{padding:3px 5px;border-radius:4px;background:#151c24;color:#788597;font-size:8px}.mcp-event-details .mcp-diff{color:#92b7a1}.mcp-event-error{margin-top:7px;padding:7px 8px;border-left:2px solid #a8525a;background:#1a1013;color:#d79096;font:8px/1.5 Consolas,monospace}.mcp-event-expanded{margin:9px 0 0;padding:8px 0 0;border-top:1px solid #1d2732;display:grid;gap:5px}.mcp-event-expanded div{display:grid;grid-template-columns:95px minmax(0,1fr);gap:9px}.mcp-event-expanded span{font-size:7px;color:#596678;text-transform:uppercase;letter-spacing:.08em}.mcp-event-expanded code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8f9daf;font:8px/1.4 Consolas,monospace}.mcp-empty{padding:60px 20px;text-align:center;color:#606b79;font-size:9px}
@@ -493,6 +503,8 @@ function install(): void {
           tunnelId,
           ...(controlPlaneApiKey.trim() ? { controlPlaneApiKey } : {}),
         });
+        gatewayPreflight = result.gateway;
+        gatewayPreflightError = '';
         const diagnosticTail = result.diagnostics
           .split(/\r?\n/)
           .map((line) => line.trim())
@@ -539,14 +551,34 @@ function install(): void {
       await refresh();
       return;
     }
+    if (target.closest('[data-mcp-gateway-preflight]')) {
+      gatewayPreflightError = '';
+      try {
+        gatewayPreflight = await window.autoCodez.preflightMcpGateway();
+      } catch (error) {
+        gatewayPreflight = undefined;
+        gatewayPreflightError = error instanceof Error ? error.message : String(error);
+      }
+      render();
+      return;
+    }
     if (target.closest('[data-mcp-gateway-toggle]')) {
       if (gatewayStatus.running) {
         await window.autoCodez.stopMcpGateway();
         gatewayToken = '';
+        gatewayPreflight = undefined;
+        gatewayPreflightError = '';
       } else {
         const started = await window.autoCodez.startMcpGateway();
         gatewayStatus = { running: true, host: started.host, port: started.port, endpoint: started.endpoint };
         gatewayToken = started.bearerToken;
+        gatewayPreflightError = '';
+        try {
+          gatewayPreflight = await window.autoCodez.preflightMcpGateway();
+        } catch (error) {
+          gatewayPreflight = undefined;
+          gatewayPreflightError = error instanceof Error ? error.message : String(error);
+        }
       }
       await refresh();
       return;
