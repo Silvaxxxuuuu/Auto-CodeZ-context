@@ -123,6 +123,10 @@ export class PluginCapabilityBroker {
     this.mcp.disconnectPlugin(pluginId);
   }
 
+  private requireRobloxStudioManager(pluginId: string): void {
+    if (pluginId !== 'autocodez.roblox-studio-manager') throw new Error('Esta capability é reservada ao Roblox Studio Manager integrado.');
+  }
+
   private registerBuiltins(): void {
     this.register('settings.list', undefined, async (pluginId) => this.settings.list(pluginId));
     this.register('settings.get', undefined, async (pluginId, input) => {
@@ -180,6 +184,7 @@ export class PluginCapabilityBroker {
       return this.localBridge.request(value as unknown as PluginBridgeRequest);
     });
     this.register('mcp.connect-roblox-studio', 'terminal:execute', async (pluginId, input) => {
+      this.requireRobloxStudioManager(pluginId);
       const value = input === undefined ? {} : requireRecord(input);
       return this.mcp.connectRobloxStudio(pluginId, optionalNumber(value.timeoutMs, 'Timeout'));
     });
