@@ -121,11 +121,11 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
 
   const api = {
     activity: {
-      async publish() {},
-      async clear() {},
+      async publish() { return undefined; },
+      async clear() { return undefined; },
     },
     settings: {
-      async set() {},
+      async set() { return undefined; },
     },
     tools: {
       async register(tools: RegisteredTool[]) {
