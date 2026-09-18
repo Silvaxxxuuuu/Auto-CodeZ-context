@@ -142,18 +142,54 @@ function createChildEnvironment(
   return env;
 }
 
-function processTreeKill(child: ChildProcessWithoutNullStreams): void {
-  if (child.killed) return;
+function waitForChildExit(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (exited: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('exit', onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    child.once('exit', onExit);
+  });
+}
+
+async function processTreeKill(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null) return;
+  const exited = waitForChildExit(child, 3_000);
   if (process.platform === 'win32' && child.pid) {
-    const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
-      windowsHide: true,
-      stdio: 'ignore',
-      shell: false,
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+        shell: false,
+      });
+      const timer = setTimeout(() => {
+        if (!killer.killed) killer.kill();
+        finish();
+      }, 3_000);
+      killer.once('error', finish);
+      killer.once('exit', finish);
     });
-    killer.unref();
-    return;
+  } else if (!child.killed) {
+    child.kill('SIGTERM');
   }
-  child.kill('SIGTERM');
+
+  if (await exited) return;
+  if (!child.killed) child.kill('SIGKILL');
+  await waitForChildExit(child, 1_000);
 }
 
 async function readHealthUrl(file: string): Promise<string | undefined> {
@@ -281,7 +317,7 @@ export class McpTunnelRuntime {
     this.active = undefined;
     this.lastStatus = { ...active.status, running: false, ready: false };
     this.publishStatus();
-    processTreeKill(active.child);
+    await processTreeKill(active.child);
     await fs.rm(path.dirname(active.healthFile), { recursive: true, force: true }).catch((): undefined => undefined);
     return true;
   }
@@ -310,7 +346,7 @@ export class McpTunnelRuntime {
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        processTreeKill(child);
+        void processTreeKill(child);
         reject(new Error('tunnel-client --version excedeu o tempo limite.'));
       }, 5_000);
       child.stdout.setEncoding('utf8');
