@@ -144,6 +144,10 @@ const attachObservationArtifacts = async (api, jobId, observation) => {
   }
 };
 
+const collectArtifactIds = (...observations) => [...new Set(
+  observations.flatMap((observation) => (observation?.artifacts || []).map((artifact) => artifact.id)),
+)];
+
 const buildPlaytestInteractionSchema = (catalog) => {
   const definitions = [
     ['keyboard', 'user_keyboard_input', 'keyboardInput'],
@@ -323,8 +327,17 @@ autoCodez.register({
         await api.jobs.update(job.id, { progress: 0.92, activity: 'Encerrando Play...' });
         stopAttempted = true;
         await api.mcp.callTool(sessionId, playTool.name, withStudioId(rawInput.stopInput || {}, studioId), 30000);
+        const artifactIds = collectArtifactIds(...checkpoints, viewport, consoleOutput);
         await api.jobs.complete(job.id, 'Playtest concluído.');
-        return { playStarted: true, checkpoints, viewport, console: consoleOutput };
+        return {
+          status: 'completed',
+          studioId,
+          playStarted: true,
+          artifactIds,
+          checkpoints,
+          viewport,
+          console: consoleOutput,
+        };
       } catch (error) {
         let failure = error instanceof Error ? error.message : String(error);
         if (started && !stopAttempted) {
