@@ -64,6 +64,17 @@ const activeSandboxIds = new Set<string>();
 const activities = new Map<string, PluginActivity>();
 const jobs = new Map<string, PluginJob>();
 const pluginPublicStatus = new Map<string, Record<string, unknown>>();
+const publicStatusSequence = new Map<string, number>();
+
+async function refreshPublicStatus(pluginId: string): Promise<void> {
+  if (!bridge || pluginId !== 'autocodez.roblox-studio-manager') return;
+  const sequence = (publicStatusSequence.get(pluginId) ?? 0) + 1;
+  publicStatusSequence.set(pluginId, sequence);
+  const status = await bridge.publicStatus(pluginId).catch(() => ({}));
+  if (publicStatusSequence.get(pluginId) !== sequence) return;
+  pluginPublicStatus.set(pluginId, status);
+  render();
+}
 
 function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!)); }
 function isPluginPanel(): boolean { const panel = document.querySelector<HTMLElement>('#nav-panel'); return Boolean(panel && panel.querySelector('.panel-title')?.textContent?.includes('Plugins')); }
@@ -196,8 +207,8 @@ function installStyles(): void {
 export function initializePluginPlatformUi(): void {
   if (!bridge) return; installStyles();
   bridge.onSandboxCall((call) => { void handleSandboxCall(call); });
-  bridge.onActivity((activity) => { activities.set(activity.pluginId, activity); render(); });
-  bridge.onJob((job) => { jobs.set(job.id, job); render(); });
+  bridge.onActivity((activity) => { activities.set(activity.pluginId, activity); render(); void refreshPublicStatus(activity.pluginId); });
+  bridge.onJob((job) => { jobs.set(job.id, job); render(); void refreshPublicStatus(job.pluginId); });
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLElement>('[data-plugin-install],[data-plugin-refresh],[data-plugin-open],[data-plugin-back],[data-plugin-enable],[data-plugin-disable],[data-plugin-permissions],[data-plugin-uninstall],[data-plugin-modal-close],[data-plugin-save-permissions]'); if (!button) return;
