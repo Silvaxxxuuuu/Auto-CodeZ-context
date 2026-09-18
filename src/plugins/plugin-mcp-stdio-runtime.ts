@@ -15,6 +15,7 @@ const DEFAULT_TIMEOUT = 30_000;
 const MAX_LINE_BYTES = 4 * 1024 * 1024;
 const MAX_SESSIONS = 4;
 const MAX_SERVER_TOOL_CATALOG = 256;
+const HANDSHAKE_PROTOCOL_VERSIONS = new Set(['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25']);
 
 export function resolveRobloxStudioMcpCommand(platform = process.platform, env: NodeJS.ProcessEnv = process.env): string {
   if (platform === 'win32') {
@@ -90,7 +91,9 @@ export class PluginMcpStdioRuntime {
         capabilities: {},
         clientInfo: { name: 'Auto CodeZ', version: '2.0.0-alpha.1' },
       }, timeout(input?.timeoutMs)) as { protocolVersion?: unknown; serverInfo?: { name?: unknown; version?: unknown } };
-      if (!result?.protocolVersion || typeof result.protocolVersion !== 'string' || result.protocolVersion.length > 128) throw new Error('Servidor MCP retornou protocolVersion inválida.');
+      if (!result?.protocolVersion || typeof result.protocolVersion !== 'string' || !HANDSHAKE_PROTOCOL_VERSIONS.has(result.protocolVersion)) {
+        throw new Error('Servidor MCP retornou protocolVersion incompatível com o transporte stdio legado.');
+      }
       session.protocolVersion = result.protocolVersion;
       if (typeof result?.serverInfo?.name === 'string') session.serverName = result.serverInfo.name;
       if (typeof result?.serverInfo?.version === 'string') session.serverVersion = result.serverInfo.version;
