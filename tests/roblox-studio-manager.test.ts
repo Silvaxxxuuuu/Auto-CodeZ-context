@@ -75,7 +75,37 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
           properties: {
             level: { type: 'string', enum: ['all', 'error'] },
           },
-          required: [],
+          required: [] as string[],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'user_keyboard_input',
+        description: 'Send keyboard input.',
+        inputSchema: {
+          type: 'object',
+          properties: { key: { type: 'string' } },
+          required: ['key'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'user_mouse_input',
+        description: 'Send mouse input.',
+        inputSchema: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'character_navigation',
+        description: 'Navigate the character.',
+        inputSchema: {
+          type: 'object',
+          properties: { direction: { type: 'string' } },
+          required: ['direction'],
           additionalProperties: false,
         },
       },
