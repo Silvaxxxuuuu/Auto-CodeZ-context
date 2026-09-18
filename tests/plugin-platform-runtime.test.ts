@@ -117,6 +117,18 @@ test('plugin jobs attach only artifacts owned by the same plugin', async () => {
   assert.deepEqual((duplicate.value as { artifactIds?: string[] }).artifactIds, [artifact.id]);
 });
 
+test('plugin job artifact snapshots are defensively cloned', () => {
+  const jobs = new PluginJobRuntime();
+  const opened = jobs.open('test.plugin', 'Artifact isolation');
+  const attached = jobs.attachArtifact('test.plugin', opened.id, 'artifact-a');
+  attached.artifactIds?.push('mutated-outside');
+  assert.deepEqual(jobs.get('test.plugin', opened.id)?.artifactIds, ['artifact-a']);
+
+  const listed = jobs.list('test.plugin');
+  listed[0].artifactIds?.push('mutated-list');
+  assert.deepEqual(jobs.get('test.plugin', opened.id)?.artifactIds, ['artifact-a']);
+});
+
 test('local plugin bridge rejects non-loopback destinations and redirects', async () => {
   assert.equal(validatePluginLocalBridgeUrl('http://127.0.0.1:4567/api'), 'http://127.0.0.1:4567/api');
   assert.throws(() => validatePluginLocalBridgeUrl('http://192.168.1.10:4567/api'), /loopback/);
