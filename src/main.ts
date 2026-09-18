@@ -58,6 +58,8 @@ import { OperationalLedgerPersistence, OperationalLedgerStore } from './operatio
 import { OperationalLedgerRetrieval, type OperationalLedgerScope } from './operational-ledger-retrieval';
 import { McpGatewayProtocol } from './mcp-gateway/protocol';
 import { McpGatewayHttpServer } from './mcp-gateway/http-server';
+import { McpGatewayExecutionRuntime } from './mcp-gateway/execution-runtime';
+import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -94,7 +96,8 @@ const executionTimelinePersistence = new ExecutionTimelinePersistence(executionT
 const operationalLedgerStore = new OperationalLedgerStore(storage);
 const operationalLedgerPersistence = new OperationalLedgerPersistence(operationalLedgerStore);
 const operationalLedgerRetrieval = new OperationalLedgerRetrieval(operationalLedger);
-const mcpGatewayProtocol = new McpGatewayProtocol(operationalLedgerRetrieval);
+const mcpGatewayExecutionRuntime = new McpGatewayExecutionRuntime(agentRuntime, pluginToolCatalog);
+const mcpGatewayProtocol = new McpGatewayProtocol(operationalLedgerRetrieval, mcpGatewayExecutionRuntime);
 const mcpGatewayServer = new McpGatewayHttpServer(mcpGatewayProtocol);
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
@@ -863,6 +866,17 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
   const runIdFilter = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
   const approval = toolRuntime.listApprovals({ chatId: chatIdFilter, runId: runIdFilter }).find((item) => item.id === id);
   if (!approval?.chatId || !approval.runId) throw new Error('Aprovação não pertence ao contexto informado.');
+  if (mcpGatewayExecutionRuntime.ownsApproval(id)) {
+    const decisionAt = Date.now();
+    const operation = await mcpGatewayExecutionRuntime.approve(id);
+    recordConsumedApprovalDecision(approval, 'approved', decisionAt);
+    return {
+      chatId: approval.chatId,
+      pendingApprovalIds: operation.state === 'waiting_approval' && operation.approvalId ? [operation.approvalId] : [],
+      messages: [],
+      operation,
+    };
+  }
   const chatId = approval.chatId;
   const runId = agentRuntime.getPendingRunId(id);
   if (runId !== approval.runId) throw new Error('A aprovação não corresponde mais à execução que a criou.');
@@ -905,6 +919,12 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
   const runIdFilter = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
   const approval = toolRuntime.listApprovals({ chatId: chatIdFilter, runId: runIdFilter }).find((item) => item.id === id);
   if (!approval?.chatId || !approval.runId) throw new Error('Aprovação não pertence ao contexto informado.');
+  if (mcpGatewayExecutionRuntime.ownsApproval(id)) {
+    const decisionAt = Date.now();
+    const operation = mcpGatewayExecutionRuntime.deny(id);
+    recordConsumedApprovalDecision(approval, 'denied', decisionAt);
+    return { chatId: approval.chatId, pendingApprovalIds: [], messages: [], operation };
+  }
   const chatId = approval.chatId;
   const runId = agentRuntime.getPendingRunId(id);
   if (runId !== approval.runId) throw new Error('A aprovação não corresponde mais à execução que a criou.');
