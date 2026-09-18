@@ -75,6 +75,48 @@ test('plugin jobs publish progress, complete and isolate listener failures', asy
   assert.equal(final?.activity, 'Metade concluída');
 });
 
+test('plugin jobs attach only artifacts owned by the same plugin', async () => {
+  const storage = new MemoryStorage();
+  const settings = new PluginSettingsStore(storage);
+  await settings.init();
+  const registry = enabledRegistry(['background:run']);
+  const broker = new PluginCapabilityBroker(registry, settings);
+
+  const opened = await broker.invoke('test.plugin', {
+    id: 'job-open',
+    method: 'jobs.begin',
+    input: { label: 'Visual playtest' },
+  });
+  assert.equal(opened.ok, true);
+  const jobId = (opened.value as { id: string }).id;
+
+  const artifact = broker.getArtifactRuntime().storeText('test.plugin', 'console output');
+  const attached = await broker.invoke('test.plugin', {
+    id: 'job-artifact',
+    method: 'jobs.attach-artifact',
+    input: { jobId, artifactId: artifact.id },
+  });
+  assert.equal(attached.ok, true);
+  assert.deepEqual((attached.value as { artifactIds?: string[] }).artifactIds, [artifact.id]);
+
+  const foreign = broker.getArtifactRuntime().storeText('other.plugin', 'private output');
+  const denied = await broker.invoke('test.plugin', {
+    id: 'job-foreign-artifact',
+    method: 'jobs.attach-artifact',
+    input: { jobId, artifactId: foreign.id },
+  });
+  assert.equal(denied.ok, false);
+  assert.match(denied.error ?? '', /não encontrado/);
+
+  const duplicate = await broker.invoke('test.plugin', {
+    id: 'job-artifact-duplicate',
+    method: 'jobs.attach-artifact',
+    input: { jobId, artifactId: artifact.id },
+  });
+  assert.equal(duplicate.ok, true);
+  assert.deepEqual((duplicate.value as { artifactIds?: string[] }).artifactIds, [artifact.id]);
+});
+
 test('local plugin bridge rejects non-loopback destinations and redirects', async () => {
   assert.equal(validatePluginLocalBridgeUrl('http://127.0.0.1:4567/api'), 'http://127.0.0.1:4567/api');
   assert.throws(() => validatePluginLocalBridgeUrl('http://192.168.1.10:4567/api'), /loopback/);
