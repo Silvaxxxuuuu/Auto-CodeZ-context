@@ -3,6 +3,7 @@ import type { AIToolResult, PermissionLevel, ToolName } from '../ai/types';
 import type { AgentRuntime } from '../agent/agent-runtime';
 import { SYSTEM_PROJECT_ID } from '../agent/command-runtime';
 import type { PluginToolCatalog, PluginToolDescriptor } from '../plugins/plugin-tool-catalog';
+import type { OperationalLedger } from '../operational-ledger';
 
 export type McpGatewayOperationState = 'running' | 'waiting_approval' | 'success' | 'failed' | 'denied';
 
@@ -53,6 +54,11 @@ function cloneResult(result: AIToolResult | undefined): AIToolResult | undefined
   return result ? structuredClone(result) : undefined;
 }
 
+function normalizeClientId(value: string | undefined): string {
+  const normalized = (value ?? 'mcp-external').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 80);
+  return normalized || 'mcp-external';
+}
+
 function cloneOperation(operation: McpGatewayOperation): McpGatewayOperation {
   return { ...operation, result: cloneResult(operation.result) };
 }
@@ -64,6 +70,7 @@ export class McpGatewayExecutionRuntime {
   constructor(
     private readonly agentRuntime: AgentRuntime,
     private readonly pluginCatalog: PluginToolCatalog,
+    private readonly ledger?: OperationalLedger,
   ) {}
 
   listTools(): McpGatewayPluginTool[] {
@@ -118,7 +125,7 @@ export class McpGatewayExecutionRuntime {
     if (!descriptor) throw new Error('Plugin tool disappeared before execution.');
 
     const operationId = crypto.randomUUID();
-    const clientId = options.clientId?.trim() || 'mcp-external';
+    const clientId = normalizeClientId(options.clientId);
     const chatId = `mcp:${clientId}`;
     const runId = `mcp:${operationId}`;
     const projectId = options.projectId?.trim() || SYSTEM_PROJECT_ID;
@@ -139,6 +146,20 @@ export class McpGatewayExecutionRuntime {
       updatedAt: now,
     };
     this.operations.set(operationId, operation);
+    this.ledger?.record({
+      actor: 'external',
+      category: 'execution',
+      state: 'running',
+      summary: `Cliente MCP iniciou ${externalToolName}.`,
+      chatId,
+      runId,
+      projectId,
+      clientId,
+      pluginId: descriptor.pluginId,
+      toolName: externalToolName,
+      causationId: operationId,
+      details: { permission },
+    });
 
     const call = {
       id: `mcp_gateway_${operationId}`,
@@ -167,6 +188,26 @@ export class McpGatewayExecutionRuntime {
       operation.state = result.ok ? 'success' : 'failed';
     }
 
+    this.ledger?.record({
+      actor: 'external',
+      category: 'execution',
+      state: operation.state === 'waiting_approval' ? 'waiting' : operation.state === 'success' ? 'success' : 'failed',
+      summary: operation.state === 'waiting_approval'
+        ? `Cliente MCP aguarda aprovação para ${externalToolName}.`
+        : operation.state === 'success'
+          ? `Cliente MCP concluiu ${externalToolName}.`
+          : `Cliente MCP falhou em ${externalToolName}.`,
+      chatId,
+      runId,
+      projectId,
+      clientId,
+      pluginId: descriptor.pluginId,
+      toolName: externalToolName,
+      causationId: operationId,
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.approvalId ? { details: { approvalId: result.approvalId } } : {}),
+    });
+
     this.prune();
     return cloneOperation(operation);
   }
@@ -191,6 +232,20 @@ export class McpGatewayExecutionRuntime {
       operation.approvalId = undefined;
       operation.state = result.ok ? 'success' : 'failed';
     }
+    this.ledger?.record({
+      actor: 'external',
+      category: 'execution',
+      state: operation.state === 'success' ? 'success' : operation.state === 'waiting_approval' ? 'waiting' : 'failed',
+      summary: operation.state === 'success' ? `Operação MCP aprovada e concluída: ${operation.externalToolName}.` : `Operação MCP atualizada após aprovação: ${operation.externalToolName}.`,
+      chatId: operation.chatId,
+      runId: operation.runId,
+      projectId: operation.projectId,
+      clientId: operation.chatId.slice('mcp:'.length),
+      pluginId: operation.pluginId,
+      toolName: operation.externalToolName,
+      causationId: operation.operationId,
+      ...(result.error ? { error: result.error } : {}),
+    });
     return cloneOperation(operation);
   }
 
@@ -211,6 +266,20 @@ export class McpGatewayExecutionRuntime {
       ok: false,
       error: 'Operation denied by the user in Auto CodeZ.',
     };
+    this.ledger?.record({
+      actor: 'external',
+      category: 'execution',
+      state: 'failed',
+      summary: `Operação MCP recusada: ${operation.externalToolName}.`,
+      chatId: operation.chatId,
+      runId: operation.runId,
+      projectId: operation.projectId,
+      clientId: operation.chatId.slice('mcp:'.length),
+      pluginId: operation.pluginId,
+      toolName: operation.externalToolName,
+      causationId: operation.operationId,
+      error: 'Operation denied by the user in Auto CodeZ.',
+    });
     return cloneOperation(operation);
   }
 
