@@ -180,3 +180,24 @@ test('MCP Gateway trusted tunnel binding exposes the ephemeral credential only w
   }
   assert.throws(() => server.trustedTunnelBinding(), /não está em execução/);
 });
+
+
+test('MCP Gateway preflight validates discovery and tools through authenticated HTTP without exposing bearer', async () => {
+  const server = gateway();
+  const info = await server.start({ bearerToken: 'p'.repeat(48) });
+  try {
+    const result = await server.preflight();
+    assert.equal(result.ok, true);
+    assert.equal(result.protocolVersion, '2026-07-28');
+    assert.equal(result.toolCount, 6);
+    assert.equal(result.writeToolCount, 0);
+    assert.equal(JSON.stringify(result).includes(info.bearerToken), false);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('MCP Gateway preflight fails closed while the server is stopped', async () => {
+  const server = gateway();
+  await assert.rejects(() => server.preflight(), /não está em execução/);
+});
