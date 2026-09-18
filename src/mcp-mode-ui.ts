@@ -511,7 +511,7 @@ function install(): void {
           .filter(Boolean)
           .slice(-2)
           .join(' · ');
-        tunnelDoctorResult = `Doctor OK · ${result.executable} · v${result.version}${diagnosticTail ? ` · ${diagnosticTail}` : ''}`;
+        tunnelDoctorResult = `Gateway OK · MCP ${result.gateway.protocolVersion} · ${result.gateway.toolCount} tools/${result.gateway.writeToolCount} write · Tunnel Doctor OK · ${result.executable} · v${result.version}${diagnosticTail ? ` · ${diagnosticTail}` : ''}`;
       } catch (error) {
         tunnelDoctorResult = '';
         tunnelError = error instanceof Error ? error.message : String(error);
