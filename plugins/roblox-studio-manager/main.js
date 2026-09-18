@@ -103,6 +103,8 @@ const buildPlaytestInteractionSchema = (catalog) => {
     ['keyboard', 'user_keyboard_input', 'keyboardInput'],
     ['mouse', 'user_mouse_input', 'mouseInput'],
     ['navigate', 'character_navigation', 'navigationInput'],
+    ['capture', 'screen_capture', 'captureInput'],
+    ['console', 'get_console_output', 'consoleInput'],
   ].filter(([, toolName]) => catalog.tools.some((tool) => tool.name === toolName));
   if (definitions.length === 0) return null;
   const properties = {
@@ -236,10 +238,13 @@ autoCodez.register({
         const interactions = Array.isArray(rawInput.interactions) ? rawInput.interactions : [];
         if (interactions.length > MAX_PLAYTEST_INTERACTIONS) throw new Error('O playtest excedeu o limite de 24 interações.');
         const interactionTools = {
-          keyboard: { tool: [...studioTools.values()].find((tool) => tool.name === 'user_keyboard_input'), key: 'keyboardInput' },
-          mouse: { tool: [...studioTools.values()].find((tool) => tool.name === 'user_mouse_input'), key: 'mouseInput' },
-          navigate: { tool: [...studioTools.values()].find((tool) => tool.name === 'character_navigation'), key: 'navigationInput' },
+          keyboard: { tool: [...studioTools.values()].find((tool) => tool.name === 'user_keyboard_input'), key: 'keyboardInput', checkpoint: false },
+          mouse: { tool: [...studioTools.values()].find((tool) => tool.name === 'user_mouse_input'), key: 'mouseInput', checkpoint: false },
+          navigate: { tool: [...studioTools.values()].find((tool) => tool.name === 'character_navigation'), key: 'navigationInput', checkpoint: false },
+          capture: { tool: captureTool, key: 'captureInput', checkpoint: true },
+          console: { tool: consoleTool, key: 'consoleInput', checkpoint: true },
         };
+        const checkpoints = [];
         for (let index = 0; index < interactions.length; index += 1) {
           const step = interactions[index];
           if (!step || typeof step !== 'object' || Array.isArray(step)) throw new Error('Interação de playtest inválida.');
@@ -251,7 +256,8 @@ autoCodez.register({
           if (unexpected.length > 0) throw new Error('Interação de playtest contém payload incompatível com a operação selecionada.');
           const progress = 0.2 + ((index + 1) / Math.max(interactions.length, 1)) * 0.35;
           await api.jobs.update(job.id, { progress, activity: 'Executando interação ' + (index + 1) + ' de ' + interactions.length + '...' });
-          await api.mcp.callTool(sessionId, definition.tool.name, input, 60000);
+          const result = await api.mcp.callTool(sessionId, definition.tool.name, input, 60000);
+          if (definition.checkpoint) checkpoints.push({ index, operation: step.operation, result });
         }
         await api.jobs.update(job.id, { progress: 0.65, activity: 'Capturando viewport...' });
         const viewport = await api.mcp.callTool(sessionId, captureTool.name, rawInput.captureInput || {}, 60000);
@@ -261,7 +267,7 @@ autoCodez.register({
         stopAttempted = true;
         await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000);
         await api.jobs.complete(job.id, 'Playtest concluído.');
-        return { play, viewport, console: consoleOutput };
+        return { play, checkpoints, viewport, console: consoleOutput };
       } catch (error) {
         let failure = error instanceof Error ? error.message : String(error);
         if (started && !stopAttempted) {
