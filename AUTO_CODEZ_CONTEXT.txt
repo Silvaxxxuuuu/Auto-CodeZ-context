@@ -3625,3 +3625,518 @@ PRÓXIMA ORDEM
 8. ponte multimodal controlada para artifacts visuais.
 
 MCP Mode continua SEM composer próprio. O cérebro/conversa permanece no cliente externo; Auto CodeZ mostra execução, observabilidade, aprovações e resultados.
+
+
+------------------------------------------------------------
+24.31. MCP MODE + AUTO CODEZ MCP GATEWAY — PRIMEIRO FLUXO EXTERNO VALIDADO
+------------------------------------------------------------
+
+BASELINE DE CÓDIGO VALIDADO
+
+Baseline funcional:
+41d49efb35d1ada7084195823d7f99c58363771c
+fix(mcp-mode): refresh approvals when external runs start waiting
+
+Workflows exatos:
+- Validate Auto CodeZ #35375906370: SUCCESS.
+- Visual Auto CodeZ #35375906355: SUCCESS.
+- Artifact visual: auto-codez-visual-35375906355
+- Artifact ID: 10559863882
+- Artifact size: 3.883.012 bytes.
+
+No Validate deste HEAD:
+- TypeScript: SUCCESS;
+- Core tests: SUCCESS;
+- ESLint: SUCCESS;
+- Electron Forge package build: SUCCESS;
+- Electron startup smoke: SUCCESS.
+
+No Visual deste HEAD:
+- package Electron: SUCCESS;
+- Capture visual flow: SUCCESS;
+- unified local AI: SUCCESS;
+- unavailable local runtime recovery: SUCCESS;
+- secure local runtime settings: SUCCESS;
+- LM Studio chat: SUCCESS;
+- upload de screenshots: SUCCESS.
+
+PR #9:
+- OPEN;
+- DRAFT;
+- mergeable;
+- NÃO MESCLADO.
+Nunca fazer merge sem autorização explícita.
+
+MCP MODE — IMPLEMENTADO
+
+Novo módulo:
+src/mcp-mode-ui.ts
+
+MCP Mode é uma projeção operacional do OperationalLedger.
+Ele NÃO possui composer próprio.
+
+A superfície atual contém:
+- lista de sessões/escopos;
+- live run header;
+- cliente/provider/projeto/run quando autoritativamente conhecidos;
+- estado running/waiting/success/failed/cancelled;
+- timeline operacional;
+- filtros Tudo / Atividade / Erros / Artifacts;
+- tools/jobs/plugins/testes/web;
+- duração/progresso;
+- resources;
+- diff stats;
+- source refs;
+- erros sanitizados;
+- Artifact Strip;
+- progressive disclosure por evento;
+- IDs/cadeia causal em detalhes;
+- approvals inline Aceitar/Rejeitar;
+- botão Parar apenas para runs locais autocodez-chat que realmente podem ser interrompidas pelo runtime.
+
+Progressive disclosure mostra somente metadata autoritativa e bounded:
+- eventId;
+- sequence;
+- actor;
+- chatId;
+- runId;
+- sessionId;
+- projectId;
+- providerId;
+- clientId;
+- pluginId;
+- toolCallId;
+- toolName;
+- jobId;
+- causationId;
+- resources;
+- artifactIds;
+- sourceRefs;
+- details pequenos.
+
+O primeiro teste visual de progressive disclosure falhou apenas porque CSS text-transform uppercase alterava a representação de eventId/sequence.
+O teste foi corrigido para validar conteúdo semanticamente, sem depender de capitalização visual.
+
+APPROVALS REATIVOS
+
+Foi detectada uma falha real durante o E2E externo:
+- operação MCP entrava corretamente em waiting_approval;
+- OperationalLedger atualizava a timeline;
+- mas approvals no MCP Mode permaneciam no snapshot antigo até refresh manual.
+
+Correção em 41d49ef:
+- evento do ledger com state=waiting ou category=approval dispara refresh autoritativo;
+- refresh busca novamente ledger + approvals + gateway status;
+- write externa agora faz o cartão Aceitar/Rejeitar aparecer automaticamente.
+
+AUTO CODEZ MCP GATEWAY — FUNDAÇÃO IMPLEMENTADA
+
+Arquivos principais:
+- src/mcp-gateway/protocol.ts
+- src/mcp-gateway/http-server.ts
+- src/mcp-gateway/execution-runtime.ts
+
+O Gateway é a entrada de clientes MCP externos.
+
+Arquitetura:
+External AI/MCP client
+→ Auto CodeZ MCP Gateway
+→ AgentRuntime
+→ PermissionRuntime / ApprovalRuntime
+→ plugin_call
+→ PluginToolCatalog
+→ plugin
+→ aplicação alvo.
+
+Para Roblox:
+ChatGPT/Claude/etc
+→ Auto CodeZ MCP Gateway
+→ AgentRuntime/policies
+→ Roblox Studio Manager
+→ MCP oficial do Roblox Studio
+→ Roblox Studio.
+
+IMPORTANTE:
+O Gateway NÃO chama PluginToolCatalog diretamente para executar ações externas.
+As execuções passam por AgentRuntime.executeExternalTool() e pelo mesmo caminho de permission/approval existente.
+
+EXPOSIÇÃO INICIAL DE TOOLS
+
+Neste estágio, o Gateway expõe:
+1. retrieval tools do ledger;
+2. operation_status;
+3. tools registradas por plugins ativos.
+
+Filesystem/terminal arbitrários NÃO foram publicados como tools externas do Gateway nesta fase.
+
+Retrieval tools:
+- session_summary
+- session_recent_events
+- session_changes
+- session_errors
+- session_artifacts
+- session_sources
+
+Tool:
+- operation_status
+
+Dynamic plugin tools são derivadas do PluginToolCatalog ativo.
+
+Naming:
+- Roblox Studio Manager recebe nomes amigáveis:
+  roblox_<toolId>
+- outros plugins recebem nome estável com plugin id + hash + tool id.
+
+Exemplos conceituais quando registrados:
+- roblox_inspect_game
+- roblox_execute_luau
+- roblox_run_playtest
+- roblox_capture_viewport
+- roblox_read_console
+
+As tools somente existem se o plugin correspondente estiver realmente ativo/registrado.
+
+O main e plugin-main-bootstrap pertencem ao mesmo bundle/processo Electron e importam o MESMO singleton pluginToolCatalog.
+Portanto o Gateway enxerga o catálogo realmente registrado pela Plugin Platform, não uma cópia separada.
+
+POLÍTICA DE EXECUÇÃO EXTERNA
+
+McpGatewayExecutionRuntime:
+- cria operationId próprio;
+- cria runId MCP próprio;
+- usa chatId mcp:<client>;
+- default permission = ask;
+- converte tool MCP externa em plugin_call interno;
+- usa AgentRuntime;
+- preserva PluginToolCatalog validation;
+- mantém operação em memória com TTL/limite;
+- associa approvalId à operationId;
+- suporta approve/deny;
+- operation_status recupera o estado posterior.
+
+Estados:
+- running;
+- waiting_approval;
+- success;
+- failed;
+- denied.
+
+WRITE TOOLS
+
+Para write/sensitive:
+- cliente chama tools/call;
+- Auto CodeZ aplica policies;
+- se necessário, retorna operation com state=waiting_approval;
+- UI local mostra Aceitar/Rejeitar;
+- após decisão, cliente consulta operation_status(operationId).
+
+Descrição das write tools explica explicitamente esse lifecycle para o cliente MCP.
+
+APROVAÇÃO EXTERNA É SEPARADA DA TIMELINE DO CHAT
+
+Foi corrigida uma fronteira arquitetural:
+- aprovação de operação MCP externa NÃO é registrada na ExecutionTimeline de chats internos;
+- ela é registrada no OperationalLedger;
+- mantém operationId como causationId;
+- não cria uma falsa run conversacional.
+
+ExecutionTimeline continua sendo lifecycle de chats/runs internos.
+OperationalLedger é a fonte geral de fatos operacionais.
+
+IDENTIDADE E CAUSALIDADE DE CLIENTE EXTERNO
+
+O Gateway registra contexto externo autoritativo:
+- actor=external;
+- clientId;
+- chatId mcp:<client>;
+- runId único;
+- projectId;
+- pluginId;
+- external tool name;
+- operationId como causationId;
+- permission.
+
+Exemplo da cadeia:
+external client
+→ operationId
+→ external runId
+→ AgentRuntime toolCall
+→ plugin_call
+→ host invocationId
+→ sandbox capability
+→ job/artifact/activity
+→ approval
+→ resultado.
+
+clientId é sanitizado e bounded.
+No teste visual foi usado:
+Visual MCP Client
+
+PROTOCOLO MCP
+
+GatewayProtocol é assíncrono e stateless no core.
+
+Versão moderna reservada:
+2026-07-28
+
+Lifecycle moderno usado nesta fundação:
+- server/discover;
+- tools/list;
+- tools/call.
+
+Compatibilidade legacy de initialize permanece separada para:
+- 2024-11-05
+- 2025-03-26
+- 2025-06-18
+- 2025-11-25
+
+Não aceitar 2026-07-28 fingindo lifecycle initialize legado.
+
+Antes da integração real com ChatGPT/Tunnel, revalidar a documentação MCP/OpenAI atual para confirmar o lifecycle/headers exatos do cliente atual.
+
+HTTP GATEWAY
+
+McpGatewayHttpServer:
+- bind SOMENTE 127.0.0.1;
+- desligado por padrão;
+- nenhuma porta abre silenciosamente;
+- start explícito;
+- stop explícito;
+- endpoint /mcp;
+- /health não contém segredo;
+- Bearer token criptograficamente aleatório por start;
+- token não persiste;
+- status não devolve token;
+- token não entra no OperationalLedger;
+- comparação do token usa timingSafeEqual;
+- body máximo 1 MB;
+- argumentos de tool máximo 128 KB no protocolo;
+- request ID string máximo 160;
+- method máximo 128;
+- numeric request ID precisa ser safe integer;
+- controles inválidos são rejeitados;
+- request timeout 15s;
+- headers timeout 10s;
+- keep-alive 5s;
+- maxConnections 32;
+- client errors fecham conexão;
+- content-type JSON obrigatório para /mcp;
+- endpoint diferente retorna 404;
+- método diferente de POST em /mcp retorna 405.
+
+A UI MCP Mode mostra:
+- Gateway desligado/ativo;
+- localhost endpoint;
+- protocolo;
+- token efêmero somente quando iniciado naquela sessão da UI;
+- Copiar conexão;
+- Iniciar Gateway;
+- Parar Gateway.
+
+Se renderer/UI recarregar com Gateway ainda ativo:
+- status pode mostrar que está ativo;
+- token NÃO é recuperado;
+- usuário deve reiniciar o Gateway para gerar/revelar nova credencial.
+
+Isso evita endpoint de status virar API de exfiltração do segredo.
+
+E2E EXTERNO — VALIDADO
+
+O visual-plugin-platform agora testa no Electron EMPACOTADO:
+
+1. Plugin fixture real é descoberto.
+2. Plugin é ativado e registra uma write tool.
+3. MCP Mode abre.
+4. Confirma que MCP Mode não possui composer.
+5. Evento é expandido e metadata estrutural é validada.
+6. Gateway é iniciado pela UI.
+7. Endpoint localhost + MCP version + token efêmero aparecem.
+8. Cliente de teste faz HTTP MCP autenticado.
+9. tools/list retorna a dynamic write tool real.
+10. Tool é identificada por contrato estável:
+    - nome termina em _external_action;
+    - readOnlyHint=false;
+    - destructiveHint=true.
+11. tools/call executa a write tool.
+12. Resultado inicial precisa ser waiting_approval + operationId + approvalId.
+13. MCP Mode atualiza approvals automaticamente.
+14. Cartão Aceitar/Rejeitar aparece.
+15. Teste clica Aceitar.
+16. Plugin executa realmente.
+17. operation_status(operationId) precisa virar success.
+18. Output precisa conter o target enviado.
+19. OperationalLedger precisa conter clientId do cliente externo e evento success.
+20. Teste confirma que nenhuma string Bearer foi parar no ledger.
+21. Gateway é parado.
+22. Token some da UI.
+23. Screenshot é feita somente DEPOIS da credencial desaparecer.
+
+Este fluxo passou integralmente no Visual #35375906355.
+
+CHATGPT / PLUGINS — ESTADO MAIS ATUAL DO PRODUTO
+
+Observação empírica da conta Plus do usuário:
+- Developer Mode pode ser ativado no desktop/web em Configurações → Segurança e login;
+- aba Plugins possui botão +;
+- “Novo plugin” oferece conexão por URL do servidor ou Túnel;
+- usuário relata conseguir marcar plugins também em chat normal, não apenas Work;
+- Developer Mode não aparece no celular do usuário, embora plugins possam aparecer/ser usados em superfícies compatíveis.
+
+Implicação para teste:
+- NÃO assumir que Work é obrigatório;
+- quando o túnel estiver pronto, testar primeiro plugin pessoal Auto CodeZ;
+- testar em chat normal com @Auto CodeZ;
+- testar também em ChatGPT Work;
+- comparar comportamento real de read e write tools.
+
+IMPORTANTE:
+Ainda NÃO considerar comprovado que ChatGPT Free possui write MCP personalizado.
+Também NÃO transformar a disponibilidade visual do Developer Mode em promessa de que todo plano executará toda write tool.
+A compatibilidade real do Plus do usuário com write tools deve ser comprovada empiricamente pelo Auto CodeZ Gateway + Tunnel.
+
+Meta desejada:
+ChatGPT oficial
+→ plugin pessoal Auto CodeZ
+→ Secure MCP Tunnel
+→ Gateway localhost
+→ AgentRuntime/policies
+→ Roblox Studio Manager
+→ MCP oficial Roblox.
+
+BLENDER 3D AUTOMATION — DIREÇÃO ATUAL
+
+Ainda NÃO implementado nesta fase.
+
+A arquitetura nova torna Blender Automation um futuro plugin do mesmo ecossistema:
+ChatGPT/Claude/Auto CodeZ AI
+→ MCP Gateway / AgentRuntime
+→ Blender 3D Automation plugin
+→ Blender Python API / tools estruturadas
+→ Blender.
+
+Objetivo NÃO é limitar Blender a conversão simples 2D→3D.
+
+Tools planejadas conceitualmente:
+- blender.inspect_scene
+- blender.inspect_object
+- blender.create_mesh
+- blender.edit_mesh
+- blender.apply_modifier
+- blender.create_material
+- blender.edit_geometry_nodes
+- blender.create_armature
+- blender.rig_object
+- blender.set_keyframes
+- blender.create_animation
+- blender.render_preview
+- blender.capture_viewport
+- blender.run_visual_test
+- blender.execute_python
+
+Princípio:
+- preferir tools estruturadas;
+- execute_python como fallback avançado/sensitive;
+- mesmas policies/approvals do AgentRuntime;
+- visual loop por artifacts/screenshots/renders;
+- modelar → observar → corrigir → repetir.
+
+Potencial:
+- modelos hard-surface;
+- low-poly;
+- props;
+- veículos;
+- ambientes;
+- procedural/Geometry Nodes;
+- materiais;
+- UVs;
+- rigs;
+- armatures;
+- constraints;
+- keyframes;
+- animações;
+- renders;
+- personagens/animais moderadamente complexos por construção iterativa.
+
+Exemplo de meta futura:
+dinossauro game-ready/semi-realista
+→ blockout anatômico
+→ refinamento de mesh
+→ topologia
+→ armature (coluna/pescoço/mandíbula/cauda/membros)
+→ skinning
+→ poses
+→ walk/run/attack/roar
+→ preview
+→ análise/correção iterativa.
+
+Não prometer automaticamente qualidade AAA perfeita, principalmente em:
+- anatomia orgânica fina;
+- edge flow profissional;
+- sculpt de altíssima densidade;
+- cabelo;
+- rig facial complexo;
+- acabamento artístico especializado.
+
+BACKGROUND / PERFORMANCE DO BLENDER
+
+Minimizar a janela NÃO significa GPU zero.
+Operações pesadas continuam consumindo CPU/GPU mesmo com Blender invisível.
+
+Direção correta:
+- background/headless quando a tarefa não exige viewport;
+- viewport visual apenas em checkpoints;
+- previews pequenos;
+- Eevee/preview barato quando suficiente;
+- Cycles/final pesado somente quando necessário;
+- evitar redraw contínuo da viewport;
+- operações caras adiadas/agendadas quando possível.
+
+Perfis planejados:
+- Eco;
+- Balanced;
+- Maximum.
+
+Esses perfis podem controlar:
+- threads;
+- render samples;
+- resolução de preview;
+- subdivisão temporária;
+- frequência de screenshots;
+- frequência de visual tests;
+- prioridade de tarefas pesadas.
+
+Objetivo de UX:
+Blender pode permanecer aberto/minimizado ou headless em partes do fluxo;
+Auto CodeZ continua trabalhando em segundo plano;
+usuário pode continuar usando o PC;
+tarefas realmente pesadas ainda competem pelos recursos da máquina.
+
+PRÓXIMA ORDEM TÉCNICA
+
+1. Congelar este baseline MCP Mode/Gateway validado.
+2. Atualizar contexto — este checkpoint.
+3. Revalidar documentação atual de ChatGPT Plugins/MCP/Secure MCP Tunnel antes de codificar integração específica.
+4. Implementar fluxo de Tunnel/connection sem expor segredo publicamente.
+5. Testar plugin pessoal Auto CodeZ na conta Plus do usuário:
+   - chat normal;
+   - Work.
+6. Confirmar tools/list.
+7. Confirmar read tool real.
+8. Confirmar write tool real com approval local.
+9. Testar Roblox Studio Manager pelo cliente ChatGPT real.
+10. Depois: Session Capsule/handoff/retrieval refinado.
+11. Depois: ponte multimodal controlada para artifacts visuais.
+12. Blender 3D Automation entra como plugin de alto valor depois da fundação Gateway/Roblox estar estável.
+
+SEGURANÇA / REGRAS QUE CONTINUAM
+
+- sem merge do PR #9 sem autorização explícita;
+- Allowed Paths continua autoritativo;
+- nenhuma write externa deve bypassar AgentRuntime;
+- nenhuma tool sensível deve ser publicada diretamente só porque existe internamente;
+- attached-folder write continua boundary mais forte com aprovação obrigatória;
+- screenshots/base64 não entram crus no histórico;
+- segredos/tokens não entram no ledger;
+- plugin/tool desaparecendo deve falhar fechado;
+- não confundir aprovação do cliente externo com aprovação interna Auto CodeZ;
+- MCP Mode é observabilidade/controle, não um segundo chat/composer.
