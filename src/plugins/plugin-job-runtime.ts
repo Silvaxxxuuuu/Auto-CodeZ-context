@@ -31,7 +31,10 @@ function boundedText(value: string, maxLength: number, field: string): string {
 
 function clone(job: InternalJob): PluginJobSnapshot {
   const { controller: _controller, ...snapshot } = job;
-  return { ...snapshot };
+  return {
+    ...snapshot,
+    ...(snapshot.artifactIds ? { artifactIds: [...snapshot.artifactIds] } : {}),
+  };
 }
 
 export class PluginJobRuntime {
