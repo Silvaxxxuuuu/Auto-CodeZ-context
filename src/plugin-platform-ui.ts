@@ -20,7 +20,7 @@ type PluginSummary = {
 };
 type PluginSnapshot = { plugins: PluginSummary[]; failures: Array<{ directory: string; reason: string }> };
 type PluginActivity = { pluginId: string; message: string; status: string; updatedAt: number };
-type PluginJob = { id: string; pluginId: string; label: string; state: string; progress?: number; activity?: string; error?: string; updatedAt: number };
+type PluginJob = { id: string; pluginId: string; label: string; state: string; progress?: number; activity?: string; error?: string; artifactIds?: string[]; updatedAt: number };
 type SandboxCall = { id: string; pluginId: string; method: string; input?: unknown };
 type PluginBridge = {
   snapshot(): Promise<PluginSnapshot>;
@@ -91,7 +91,7 @@ function detailView(plugin: PluginSummary): string {
   const runtime = plugin.hasMain ? 'Sandbox isolado' : 'Declarativo';
   const isRobloxManager = plugin.id === 'autocodez.roblox-studio-manager';
   const robloxServer = isRobloxManager ? plugin.health.message : undefined;
-  const robloxStatus = isRobloxManager ? pluginPublicStatus.get(plugin.id)?.studioStatus as { connected?: boolean; tools?: number; instanceCount?: number } | undefined : undefined;
+  const robloxStatus = isRobloxManager ? pluginPublicStatus.get(plugin.id) as { connected?: boolean; tools?: number; instanceCount?: number } | undefined : undefined;
   const publisher = plugin.publisher || 'Autor não informado';
   return `<section class="plugin-detail-overlay" data-plugin-detail="${escapeHtml(plugin.id)}" aria-label="Detalhes de ${escapeHtml(plugin.name)}">
     <div class="plugin-detail-page">
