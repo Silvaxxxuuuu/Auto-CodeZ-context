@@ -19,7 +19,7 @@ type SpawnRecord = {
   child: ChildProcessWithoutNullStreams;
 };
 
-function fakeChild(): ChildProcessWithoutNullStreams {
+function fakeChild(killDelayMs = 0): ChildProcessWithoutNullStreams {
   const emitter = new EventEmitter() as ChildProcessWithoutNullStreams;
   const stdin = new PassThrough();
   const stdout = new PassThrough();
@@ -32,18 +32,19 @@ function fakeChild(): ChildProcessWithoutNullStreams {
     killed: false,
     kill: () => {
       Object.defineProperty(emitter, 'killed', { value: true, configurable: true, writable: true });
-      queueMicrotask(() => emitter.emit('exit', 0, null));
+      if (killDelayMs > 0) setTimeout(() => emitter.emit('exit', 0, null), killDelayMs);
+      else queueMicrotask(() => emitter.emit('exit', 0, null));
       return true;
     },
   });
   return emitter;
 }
 
-function fixture(options: { version?: string; ready?: boolean } = {}) {
+function fixture(options: { version?: string; ready?: boolean; killDelayMs?: number } = {}) {
   const records: SpawnRecord[] = [];
   const rootPromise = fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-tunnel-test-'));
   const spawnProcess: McpTunnelSpawn = ((command, args, spawnOptions) => {
-    const child = fakeChild();
+    const child = fakeChild(options.killDelayMs ?? 0);
     records.push({ command, args: [...args], env: { ...spawnOptions.env }, child });
     if (args.includes('--version')) {
       queueMicrotask(() => {
@@ -276,6 +277,29 @@ test('Secure MCP Tunnel redacts exact session secrets before child logs are reta
     assert.equal(serialized.includes('sk-exact-control-secret'), false);
     assert.equal(serialized.includes('exact-local-bearer-secret-value'), false);
     assert.match(status.error ?? '', /REDACTED/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+
+test('Secure MCP Tunnel stop waits for bounded child termination before resolving', async () => {
+  const f = fixture({ killDelayMs: 80 });
+  try {
+    const runtime = await f.create({ CONTROL_PLANE_API_KEY: 'sk-control-test' });
+    await runtime.start({
+      tunnelId: 'tunnel_' + '2'.repeat(32),
+      localEndpoint: 'http://127.0.0.1:7002/mcp',
+      localBearerToken: 'local-bearer-value-1234567890',
+    });
+    const run = f.records.find((record) => record.args[0] === 'run');
+    assert.ok(run);
+    let exited = false;
+    run.child.once('exit', () => { exited = true; });
+
+    assert.equal(await runtime.stop(), true);
+    assert.equal(exited, true);
+    assert.equal(runtime.status().running, false);
   } finally {
     await f.cleanup();
   }
