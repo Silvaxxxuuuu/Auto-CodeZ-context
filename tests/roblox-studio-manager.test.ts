@@ -63,7 +63,7 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
           properties: {
             format: { type: 'string', enum: ['png'] },
           },
-          required: [],
+          required: [] as string[],
           additionalProperties: false,
         },
       },
