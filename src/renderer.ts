@@ -27,6 +27,8 @@ declare global {
       stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
       mcpTunnelStatus: () => Promise<{ running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean }>;
+      onMcpTunnelStatus: (listener: (event: { running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean }) => void) => () => void;
+
       doctorMcpTunnel: () => Promise<{ executable: string; version: string; supported: true }>;
       startMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => Promise<{ running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string }>;
       stopMcpTunnel: () => Promise<{ stopped: boolean }>;
