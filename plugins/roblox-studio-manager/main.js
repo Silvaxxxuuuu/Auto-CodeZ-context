@@ -21,12 +21,59 @@ let sessionId = null;
 let studioTools = new Map();
 let studioState = { connected: false, server: null, tools: 0, instanceCount: 0 };
 
-const normalizeToolId = (name) => 'studio_' + name.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40);
-const toStrictSchema = (schema) => {
-  if (!schema || typeof schema !== 'object' || Array.isArray(schema) || schema.type !== 'object' || !schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)) {
-    return { type: 'object', properties: {}, required: [], additionalProperties: false };
+const hash = (value) => {
+  let result = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    result ^= value.charCodeAt(index);
+    result = Math.imul(result, 16777619);
   }
-  return { ...schema, additionalProperties: false };
+  return (result >>> 0).toString(36).padStart(7, '0').slice(0, 7);
+};
+
+const normalizeToolId = (name, used) => {
+  const normalized = name.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/^[^a-z]+/, '').replace(/_+/g, '_') || 'tool';
+  let id = ('studio_' + normalized).slice(0, 48);
+  if (!used.has(id)) {
+    used.add(id);
+    return id;
+  }
+  const suffix = '_' + hash(name);
+  id = ('studio_' + normalized).slice(0, 48 - suffix.length) + suffix;
+  let salt = 1;
+  while (used.has(id)) {
+    const nextSuffix = '_' + hash(name + ':' + salt);
+    id = ('studio_' + normalized).slice(0, 48 - nextSuffix.length) + nextSuffix;
+    salt += 1;
+  }
+  used.add(id);
+  return id;
+};
+
+const sanitizeSchemaNode = (schema, depth = 0) => {
+  if (depth > 8 || !schema || typeof schema !== 'object' || Array.isArray(schema)) return { type: 'string' };
+  const supported = new Set(['object', 'string', 'number', 'integer', 'boolean', 'array']);
+  const type = typeof schema.type === 'string' && supported.has(schema.type) ? schema.type : 'string';
+  const result = { type };
+  if (Array.isArray(schema.enum) && schema.enum.length > 0 && schema.enum.length <= 128) {
+    const values = schema.enum.filter((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item));
+    if (values.length === schema.enum.length && new Set(values.map((item) => JSON.stringify(item))).size === values.length) result.enum = values;
+  }
+  if (type === 'object') {
+    const source = schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties) ? schema.properties : {};
+    const entries = Object.entries(source).filter(([key]) => key && key.length <= 128).slice(0, 64);
+    result.properties = Object.fromEntries(entries.map(([key, child]) => [key, sanitizeSchemaNode(child, depth + 1)]));
+    const keys = new Set(Object.keys(result.properties));
+    result.required = Array.isArray(schema.required) ? [...new Set(schema.required.filter((key) => typeof key === 'string' && keys.has(key)))] : [];
+    result.additionalProperties = false;
+  } else if (type === 'array') {
+    result.items = sanitizeSchemaNode(schema.items, depth + 1);
+  }
+  return result;
+};
+
+const toStrictSchema = (schema) => {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema) || schema.type !== 'object') return { type: 'object', properties: {}, required: [], additionalProperties: false };
+  return sanitizeSchemaNode(schema);
 };
 
 async function connect(api) {
@@ -35,14 +82,18 @@ async function connect(api) {
   const connected = await api.mcp.connectRobloxStudio(15000);
   sessionId = connected.sessionId;
   const catalog = await api.mcp.listTools(sessionId, 15000);
-  studioTools = new Map(catalog.tools.map((tool) => [normalizeToolId(tool.name), tool]));
-  const tools = catalog.tools.map((tool) => ({
-    id: normalizeToolId(tool.name),
-    title: tool.name,
-    description: tool.description || ('Executa ' + tool.name + ' no Roblox Studio conectado.'),
-    risk: TOOL_RISK[tool.name] || 'sensitive',
-    inputSchema: toStrictSchema(tool.inputSchema),
-  }));
+  const usedToolIds = new Set();
+  const tools = catalog.tools.map((tool) => {
+    const id = normalizeToolId(tool.name, usedToolIds);
+    studioTools.set(id, tool);
+    return {
+      id,
+      title: tool.name,
+      description: tool.description || ('Executa ' + tool.name + ' no Roblox Studio conectado.'),
+      risk: TOOL_RISK[tool.name] || 'sensitive',
+      parameters: toStrictSchema(tool.inputSchema),
+    };
+  });
   await api.tools.register(tools);
   studioState = {
     connected: true,
