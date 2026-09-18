@@ -250,6 +250,28 @@ test('Roblox Studio Manager derives guarded playtest schemas from the live MCP c
   assert.deepEqual(parameters.properties.interactions.items.properties.consoleInput.properties.level.enum, ['all', 'error']);
 });
 
+test('Roblox Studio Manager promotes live required observation inputs to the composed schema', async () => {
+  const plugin = await loadPlugin();
+  const fixture = createApi();
+  const originalListTools = fixture.api.mcp.listTools;
+  fixture.api.mcp.listTools = async () => {
+    const catalog = plain(await originalListTools());
+    const capture = catalog.tools.find((tool) => tool.name === 'screen_capture');
+    const consoleTool = catalog.tools.find((tool) => tool.name === 'get_console_output');
+    assert.ok(capture);
+    assert.ok(consoleTool);
+    capture.inputSchema.required = ['studio_id', 'format'];
+    consoleTool.inputSchema.required = ['studio_id', 'level'];
+    return catalog;
+  };
+
+  await plugin.activate(fixture.api);
+  const playtest = fixture.registeredTools.find((tool) => tool.id === 'run_playtest');
+  assert.ok(playtest);
+  const parameters = plain(playtest.parameters) as { required: string[] };
+  assert.deepEqual(parameters.required, ['studioId', 'playInput', 'stopInput', 'captureInput', 'consoleInput']);
+});
+
 test('Roblox Studio Manager runs Play capture console Stop in order', async () => {
   const plugin = await loadPlugin();
   const fixture = createApi();
