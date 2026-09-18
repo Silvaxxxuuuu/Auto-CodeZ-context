@@ -140,3 +140,26 @@ test('MCP Gateway HTTP server stop is idempotent', async () => {
   assert.equal(await server.stop(), false);
   assert.equal(server.status().running, false);
 });
+
+
+test('MCP Gateway HTTP server rejects oversized request ids and method names before dispatch', async () => {
+  const server = gateway();
+  const info = await server.start({ bearerToken: 'h'.repeat(48) });
+  try {
+    const longId = await post(info.endpoint, info.bearerToken, {
+      jsonrpc: '2.0',
+      id: 'x'.repeat(161),
+      method: 'tools/list',
+    });
+    assert.equal(longId.status, 400);
+
+    const longMethod = await post(info.endpoint, info.bearerToken, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'm'.repeat(129),
+    });
+    assert.equal(longMethod.status, 400);
+  } finally {
+    await server.stop();
+  }
+});
