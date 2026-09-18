@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { AIMessage, AIProviderConfig, AIResponse, AIStreamEvent, AIToolCall, ApprovalRequest, ChatRecord, PermissionLevel } from '../ai/types';
+import type { AIMessage, AIProviderConfig, AIResponse, AIStreamEvent, AIToolCall, AIToolDefinition, AIToolResult, ApprovalRequest, ChatRecord, PermissionLevel } from '../ai/types';
 import { ActivityRuntime } from './activity-runtime';
 import { ToolRuntime } from './tool-runtime';
 import { SYSTEM_PROJECT_ID } from './command-runtime';
@@ -148,6 +148,34 @@ export class AgentRuntime {
 
   listRecoverableRuns(): Array<{ runId: string; chatId: string; toolRounds: number }> {
     return [...this.recoverableRuns.values()].map((run) => ({ runId: run.runId, chatId: run.chat.id, toolRounds: run.toolRounds }));
+  }
+
+  listExternalToolDefinitions(): AIToolDefinition[] {
+    return this.tools.listDefinitions();
+  }
+
+  listExternalApprovals(filters?: { chatId?: string; runId?: string }): ApprovalRequest[] {
+    return this.tools.listApprovals(filters);
+  }
+
+  async executeExternalTool(input: {
+    chatId: string;
+    projectId: string;
+    runId: string;
+    permission: PermissionLevel;
+    call: AIToolCall;
+  }): Promise<AIToolResult> {
+    const result = await this.tools.execute(input.chatId, input.projectId, input.permission, input.call, input.runId);
+    this.emitToolActivity(input.runId, input.chatId, input.call, result);
+    return result;
+  }
+
+  async approveExternalTool(approvalId: string): Promise<AIToolResult> {
+    return this.tools.approve(approvalId);
+  }
+
+  denyExternalTool(approvalId: string): boolean {
+    return this.tools.deny(approvalId);
   }
 
   getPendingRunId(approvalId: string): string {
