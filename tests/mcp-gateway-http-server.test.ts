@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OperationalLedger } from '../src/operational-ledger';
 import { OperationalLedgerRetrieval } from '../src/operational-ledger-retrieval';
+import type { AgentRuntime } from '../src/agent/agent-runtime';
+import { McpGatewayExecutionRuntime } from '../src/mcp-gateway/execution-runtime';
 import { McpGatewayProtocol } from '../src/mcp-gateway/protocol';
+import { PluginToolCatalog } from '../src/plugins/plugin-tool-catalog';
 import { McpGatewayHttpServer } from '../src/mcp-gateway/http-server';
 
 function gateway() {
@@ -17,6 +20,28 @@ function gateway() {
     timestamp: 1000,
   });
   const protocol = new McpGatewayProtocol(new OperationalLedgerRetrieval(ledger));
+  return new McpGatewayHttpServer(protocol);
+}
+
+function gatewayWithPluginTools() {
+  const ledger = new OperationalLedger();
+  const catalog = new PluginToolCatalog();
+  catalog.register('test.plugin', [
+    {
+      id: 'inspect',
+      description: 'Inspect test state.',
+      risk: 'read',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+    {
+      id: 'mutate',
+      description: 'Mutate test state.',
+      risk: 'write',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  ]);
+  const execution = new McpGatewayExecutionRuntime({} as AgentRuntime, catalog);
+  const protocol = new McpGatewayProtocol(new OperationalLedgerRetrieval(ledger), execution);
   return new McpGatewayHttpServer(protocol);
 }
 
@@ -200,4 +225,19 @@ test('MCP Gateway preflight validates discovery and tools through authenticated 
 test('MCP Gateway preflight fails closed while the server is stopped', async () => {
   const server = gateway();
   await assert.rejects(() => server.preflight(), /não está em execução/);
+});
+
+
+test('MCP Gateway preflight counts dynamic plugin tools and write annotations', async () => {
+  const server = gatewayWithPluginTools();
+  await server.start({ bearerToken: 'q'.repeat(48) });
+  try {
+    const result = await server.preflight();
+    assert.equal(result.ok, true);
+    assert.equal(result.protocolVersion, '2026-07-28');
+    assert.equal(result.toolCount, 9);
+    assert.equal(result.writeToolCount, 1);
+  } finally {
+    await server.stop();
+  }
 });
