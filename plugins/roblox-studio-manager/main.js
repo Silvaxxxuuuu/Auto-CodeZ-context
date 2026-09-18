@@ -77,7 +77,14 @@ const toStrictSchema = (schema) => {
 };
 
 async function connect(api) {
-  if (sessionId) return;
+  if (sessionId) {
+    const status = await api.mcp.status(sessionId);
+    if (status && status.connected) return;
+    sessionId = null;
+    studioTools.clear();
+    studioState = { connected: false, server: null, tools: 0, instanceCount: 0 };
+    await api.settings.set('studioStatus', studioState);
+  }
   await api.activity.publish('Conectando ao Roblox Studio...', 'running');
   const connected = await api.mcp.connectRobloxStudio(15000);
   sessionId = connected.sessionId;
@@ -131,7 +138,7 @@ autoCodez.register({
   },
 
   async invoke(method, payload, api) {
-    if (!sessionId) await connect(api);
+    await connect(api);
     const tool = studioTools.get(method);
     if (!tool) throw new Error('A operação solicitada não está disponível no Roblox Studio conectado.');
     const input = payload && typeof payload === 'object' && payload.input && typeof payload.input === 'object'
