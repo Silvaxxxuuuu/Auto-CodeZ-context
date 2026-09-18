@@ -55,6 +55,7 @@ import { requireIdentifier, requireNonEmptyString, requireObject } from './core/
 import type { AIProviderConfig, AIStreamEvent } from './ai/types';
 import { operationalLedger, type OperationalLedgerQuery, type OperationalLedgerState } from './operational-ledger';
 import { OperationalLedgerPersistence, OperationalLedgerStore } from './operational-ledger-store';
+import { OperationalLedgerRetrieval, type OperationalLedgerScope } from './operational-ledger-retrieval';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -90,6 +91,7 @@ const executionTimelineStore = new ExecutionTimelineStore(storage);
 const executionTimelinePersistence = new ExecutionTimelinePersistence(executionTimelineStore);
 const operationalLedgerStore = new OperationalLedgerStore(storage);
 const operationalLedgerPersistence = new OperationalLedgerPersistence(operationalLedgerStore);
+const operationalLedgerRetrieval = new OperationalLedgerRetrieval(operationalLedger);
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
 const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
@@ -640,6 +642,58 @@ ipcMain.handle('agent:list-approvals', async (_event, filters?: { chatId?: strin
 });
 ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatId === undefined ? executionManager.list() : executionManager.get(requireIdentifier(chatId, 'Chat')) ?? null);
 ipcMain.handle('agent:list-operational-ledger', async (_event, query: OperationalLedgerQuery | undefined) => operationalLedger.query(query ?? {}));
+
+function requireOperationalLedgerScope(input: unknown): OperationalLedgerScope {
+  if (input === undefined) return {};
+  const value = requireObject(input, 'Escopo do ledger operacional');
+  return {
+    ...(value.chatId === undefined ? {} : { chatId: requireIdentifier(value.chatId, 'Chat') }),
+    ...(value.runId === undefined ? {} : { runId: requireIdentifier(value.runId, 'Execução') }),
+    ...(value.projectId === undefined ? {} : { projectId: requireIdentifier(value.projectId, 'Projeto') }),
+    ...(value.sessionId === undefined ? {} : { sessionId: requireIdentifier(value.sessionId, 'Sessão') }),
+    ...(value.pluginId === undefined ? {} : { pluginId: requireIdentifier(value.pluginId, 'Plugin') }),
+  };
+}
+
+function optionalLedgerNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new Error(`${label} inválido.`);
+  return value;
+}
+
+function requireLedgerRetrievalInput(input: unknown): { scope: OperationalLedgerScope; limit?: number; beforeSequence?: number } {
+  if (input === undefined) return { scope: {} };
+  const value = requireObject(input, 'Consulta do ledger operacional');
+  const scope = requireOperationalLedgerScope(value.scope);
+  return {
+    scope,
+    ...(value.limit === undefined ? {} : { limit: optionalLedgerNumber(value.limit, 'Limite') }),
+    ...(value.beforeSequence === undefined ? {} : { beforeSequence: optionalLedgerNumber(value.beforeSequence, 'Cursor') }),
+  };
+}
+
+ipcMain.handle('agent:operational-session-summary', async (_event, input: unknown) => operationalLedgerRetrieval.sessionSummary(requireOperationalLedgerScope(input)));
+ipcMain.handle('agent:operational-session-recent-events', async (_event, input: unknown) => {
+  const value = requireLedgerRetrievalInput(input);
+  return operationalLedgerRetrieval.recentEvents(value.scope, value.limit, value.beforeSequence);
+});
+ipcMain.handle('agent:operational-session-changes', async (_event, input: unknown) => {
+  const value = requireLedgerRetrievalInput(input);
+  return operationalLedgerRetrieval.changes(value.scope, value.limit, value.beforeSequence);
+});
+ipcMain.handle('agent:operational-session-errors', async (_event, input: unknown) => {
+  const value = requireLedgerRetrievalInput(input);
+  return operationalLedgerRetrieval.errors(value.scope, value.limit, value.beforeSequence);
+});
+ipcMain.handle('agent:operational-session-artifacts', async (_event, input: unknown) => {
+  const value = requireLedgerRetrievalInput(input);
+  return operationalLedgerRetrieval.artifacts(value.scope, value.limit, value.beforeSequence);
+});
+ipcMain.handle('agent:operational-session-sources', async (_event, input: unknown) => {
+  const value = requireLedgerRetrievalInput(input);
+  return operationalLedgerRetrieval.sources(value.scope, value.limit, value.beforeSequence);
+});
+
 ipcMain.handle('agent:list-execution-timeline', async (_event, filters?: { chatId?: string; runId?: string }) => {
   if (filters === undefined) return executionTimeline.list();
   const value = requireObject(filters, 'Filtro da timeline de execução');
