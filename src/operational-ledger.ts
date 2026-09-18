@@ -44,8 +44,12 @@ export type OperationalLedgerQuery = {
   beforeSequence?: number;
   chatId?: string;
   runId?: string;
+  projectId?: string;
+  sessionId?: string;
   pluginId?: string;
+  toolCallId?: string;
   jobId?: string;
+  artifactId?: string;
   category?: OperationalLedgerCategory;
   state?: OperationalLedgerState;
   limit?: number;
@@ -292,8 +296,12 @@ export class OperationalLedger {
       if (query.beforeSequence !== undefined && event.sequence >= query.beforeSequence) return false;
       if (query.chatId !== undefined && event.chatId !== query.chatId) return false;
       if (query.runId !== undefined && event.runId !== query.runId) return false;
+      if (query.projectId !== undefined && event.projectId !== query.projectId) return false;
+      if (query.sessionId !== undefined && event.sessionId !== query.sessionId) return false;
       if (query.pluginId !== undefined && event.pluginId !== query.pluginId) return false;
+      if (query.toolCallId !== undefined && event.toolCallId !== query.toolCallId) return false;
       if (query.jobId !== undefined && event.jobId !== query.jobId) return false;
+      if (query.artifactId !== undefined && !event.artifactIds?.includes(query.artifactId)) return false;
       if (query.category !== undefined && event.category !== query.category) return false;
       if (query.state !== undefined && event.state !== query.state) return false;
       return true;
