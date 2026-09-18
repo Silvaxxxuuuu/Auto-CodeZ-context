@@ -26,6 +26,9 @@ declare global {
       streamChat: (input: { chatId: string; content: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
       stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
+      mcpGatewayStatus: () => Promise<{ running: boolean; host: string; port: number; endpoint: string }>;
+      startMcpGateway: (input?: { port?: number }) => Promise<{ host: string; port: number; endpoint: string; bearerToken: string }>;
+      stopMcpGateway: () => Promise<{ stopped: boolean }>;
       listOperationalLedger: (query?: {
         afterSequence?: number;
         beforeSequence?: number;
