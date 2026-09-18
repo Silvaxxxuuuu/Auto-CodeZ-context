@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
-type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number };
+type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number; closed: boolean };
 export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: number };
 export type McpToolDescriptor = { name: string; description?: string; inputSchema?: unknown };
 export type McpToolList = { tools: McpToolDescriptor[] };
@@ -73,7 +73,7 @@ export class PluginMcpStdioRuntime {
     const requestedArgs = args(input?.args);
     const child = this.spawnProcess(requestedCommand, requestedArgs, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     const sessionId = crypto.randomUUID();
-    const session: Session = { child, pending: new Map(), buffer: '', nextId: 1 };
+    const session: Session = { child, pending: new Map(), buffer: '', nextId: 1, closed: false };
     owned.set(sessionId, session);
     this.sessions.set(pluginId, owned);
     this.bind(pluginId, sessionId, session);
@@ -149,6 +149,7 @@ export class PluginMcpStdioRuntime {
       pending.reject(new Error('Sessão MCP encerrada.'));
     }
     session.pending.clear();
+    session.closed = true;
     session.child.kill();
     return true;
   }
@@ -166,6 +167,8 @@ export class PluginMcpStdioRuntime {
     session.child.stderr.setEncoding('utf8');
     session.child.stderr.on('data', (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
     const close = (reason: string) => {
+      if (session.closed) return;
+      session.closed = true;
       for (const pending of session.pending.values()) {
         clearTimeout(pending.timer);
         pending.reject(new Error(stderr.trim() || reason));
@@ -180,14 +183,12 @@ export class PluginMcpStdioRuntime {
 
   private consume(session: Session, chunk: string): void {
     session.buffer += chunk;
-    if (Buffer.byteLength(session.buffer, 'utf8') > MAX_LINE_BYTES) {
-      session.child.kill();
-      return;
-    }
     let newline = session.buffer.indexOf('\n');
     while (newline >= 0) {
-      const line = session.buffer.slice(0, newline).trim();
+      const rawLine = session.buffer.slice(0, newline);
       session.buffer = session.buffer.slice(newline + 1);
+      if (Buffer.byteLength(rawLine, 'utf8') > MAX_LINE_BYTES) { session.child.kill(); return; }
+      const line = rawLine.trim();
       if (line) {
         try {
           const message = JSON.parse(line) as { jsonrpc?: unknown; id?: unknown; result?: unknown; error?: { message?: unknown } };
@@ -207,9 +208,11 @@ export class PluginMcpStdioRuntime {
       }
       newline = session.buffer.indexOf('\n');
     }
+    if (Buffer.byteLength(session.buffer, 'utf8') > MAX_LINE_BYTES) session.child.kill();
   }
 
   private request(session: Session, method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+    if (session.closed) return Promise.reject(new Error('Sessão MCP encerrada.'));
     const id = session.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
