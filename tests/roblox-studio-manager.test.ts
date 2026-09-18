@@ -137,6 +137,10 @@ function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) 
       async update(_jobId: string, value: unknown) {
         jobEvents.push({ type: 'update', value });
       },
+      async attachArtifact(jobId: string, artifactId: string) {
+        jobEvents.push({ type: 'artifact', value: { jobId, artifactId } });
+        return { id: jobId, artifactIds: [artifactId] };
+      },
       async complete(_jobId: string, value: unknown) {
         jobEvents.push({ type: 'complete', value });
       },
@@ -247,6 +251,7 @@ test('Roblox Studio Manager runs Play capture console Stop in order', async () =
     { name: 'get_console_output', input: { level: 'all' } },
     { name: 'start_stop_play', input: { mode: 'stop' } },
   ]);
+  assert.equal(fixture.jobEvents.some((event) => event.type === 'artifact' && (event.value as { artifactId?: string }).artifactId === 'image-1'), true);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'complete'), true);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'fail'), false);
   assert.deepEqual(result, {
@@ -413,6 +418,7 @@ test('Roblox Studio Manager returns visual and console checkpoints in timeline o
     { name: 'get_console_output', input: { level: 'all' } },
     { name: 'start_stop_play', input: { mode: 'stop' } },
   ]);
+  assert.equal(fixture.jobEvents.filter((event) => event.type === 'artifact').length, 2);
   assert.deepEqual(result.checkpoints, [
     {
       index: 1,
