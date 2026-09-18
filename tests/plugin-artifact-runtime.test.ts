@@ -101,3 +101,15 @@ test('plugin artifact runtime rejects excessive observed content item counts', (
     /itens demais/,
   );
 });
+
+
+test('plugin artifact runtime publishes creation snapshots and isolates listener failures', () => {
+  const runtime = new PluginArtifactRuntime();
+  const observed: Array<{ id: string; pluginId: string; kind: string }> = [];
+  runtime.subscribe(() => { throw new Error('listener failure'); });
+  runtime.subscribe((artifact) => observed.push({ id: artifact.id, pluginId: artifact.pluginId, kind: artifact.kind }));
+
+  const created = runtime.storeText('test.plugin', 'artifact text');
+
+  assert.deepEqual(observed, [{ id: created.id, pluginId: 'test.plugin', kind: 'text' }]);
+});
