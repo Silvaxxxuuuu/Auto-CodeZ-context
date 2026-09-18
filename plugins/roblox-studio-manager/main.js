@@ -113,12 +113,11 @@ const summarizeObservation = (operation, result) => {
     .filter((item) => item && item.type === 'text' && typeof item.text === 'string')
     .map((item) => item.text)
     .join('\n')
-    .slice(0, 16000);
+    .slice(0, 2048);
   return {
     operation,
     artifacts,
     ...(text ? { text } : {}),
-    raw: result,
   };
 };
 
@@ -257,7 +256,7 @@ autoCodez.register({
       let stopAttempted = false;
       try {
         await api.jobs.update(job.id, { progress: 0.1, activity: 'Iniciando Play...' });
-        const play = await api.mcp.callTool(sessionId, playTool.name, rawInput.playInput || {}, 60000);
+        await api.mcp.callTool(sessionId, playTool.name, rawInput.playInput || {}, 60000);
         started = true;
         const interactions = Array.isArray(rawInput.interactions) ? rawInput.interactions : [];
         if (interactions.length > MAX_PLAYTEST_INTERACTIONS) throw new Error('O playtest excedeu o limite de 24 interações.');
@@ -293,7 +292,7 @@ autoCodez.register({
         stopAttempted = true;
         await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000);
         await api.jobs.complete(job.id, 'Playtest concluído.');
-        return { play, checkpoints, viewport, console: consoleOutput };
+        return { playStarted: true, checkpoints, viewport, console: consoleOutput };
       } catch (error) {
         let failure = error instanceof Error ? error.message : String(error);
         if (started && !stopAttempted) {
