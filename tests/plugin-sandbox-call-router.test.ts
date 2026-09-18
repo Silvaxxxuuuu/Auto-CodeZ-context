@@ -52,3 +52,51 @@ test('sandbox router rejects all pending calls when its renderer is destroyed', 
   fake.destroy();
   await assert.rejects(pending, /renderer da plugin platform foi encerrado/i);
 });
+
+
+test('sandbox router preserves an explicit host invocation id on the outbound call', async () => {
+  const router = new PluginSandboxCallRouter();
+  const fake = fakeTarget();
+  router.bind(fake.target as never);
+
+  const pending = router.call('plugin.a', 'write_scene', { value: 1 }, 'invocation-host-1');
+  assert.equal(fake.sent.length, 1);
+  assert.equal(fake.sent[0].payload.id, 'invocation-host-1');
+
+  assert.equal(
+    router.resolve({ sender: { id: 41 } } as never, { id: 'invocation-host-1', value: { ok: true } }),
+    true,
+  );
+  assert.deepEqual(await pending, { ok: true });
+});
+
+test('sandbox router rejects duplicate active invocation ids without disturbing the original call', async () => {
+  const router = new PluginSandboxCallRouter();
+  const fake = fakeTarget();
+  router.bind(fake.target as never);
+
+  const first = router.call('plugin.a', 'write_scene', { value: 1 }, 'same-invocation');
+  await assert.rejects(
+    () => router.call('plugin.a', 'read_scene', { value: 2 }, 'same-invocation'),
+    /já está em uso/,
+  );
+
+  assert.equal(fake.sent.length, 1);
+  assert.equal(
+    router.resolve({ sender: { id: 41 } } as never, { id: 'same-invocation', value: { ok: true } }),
+    true,
+  );
+  assert.deepEqual(await first, { ok: true });
+});
+
+test('sandbox router rejects malformed explicit invocation ids before dispatch', async () => {
+  const router = new PluginSandboxCallRouter();
+  const fake = fakeTarget();
+  router.bind(fake.target as never);
+
+  await assert.rejects(
+    () => router.call('plugin.a', 'write_scene', {}, 'bad\ninvocation'),
+    /ID da invocação do plugin inválido/,
+  );
+  assert.equal(fake.sent.length, 0);
+});
