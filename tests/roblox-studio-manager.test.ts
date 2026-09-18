@@ -37,7 +37,7 @@ async function loadPlugin(): Promise<PluginRegistration> {
   return registration;
 }
 
-function createApi(options: { failCapture?: boolean } = {}) {
+function createApi(options: { failCapture?: boolean; failStop?: boolean } = {}) {
   const registeredTools: RegisteredTool[] = [];
   const calls: McpCall[] = [];
   const jobEvents: Array<{ type: string; value?: unknown }> = [];
@@ -128,6 +128,7 @@ function createApi(options: { failCapture?: boolean } = {}) {
       async callTool(_sessionId: string, name: string, input: unknown) {
         calls.push({ name, input });
         if (name === 'screen_capture' && options.failCapture) throw new Error('capture failed');
+        if (name === 'start_stop_play' && options.failStop && (input as { mode?: string } | undefined)?.mode === 'stop') throw new Error('stop failed');
         if (name === 'screen_capture') return { content: [{ type: 'image', data: 'fake' }] };
         if (name === 'get_console_output') return { content: [{ type: 'text', text: 'ok' }] };
         return { ok: true };
@@ -216,6 +217,31 @@ test('Roblox Studio Manager guarantees Stop when a playtest observation fails', 
   assert.deepEqual(fixture.calls, [
     { name: 'start_stop_play', input: { mode: 'play' } },
     { name: 'screen_capture', input: { format: 'png' } },
+    { name: 'start_stop_play', input: { mode: 'stop' } },
+  ]);
+  assert.equal(fixture.jobEvents.some((event) => event.type === 'fail'), true);
+  assert.equal(fixture.jobEvents.some((event) => event.type === 'complete'), false);
+});
+
+
+test('Roblox Studio Manager does not complete a playtest when Stop fails', async () => {
+  const plugin = await loadPlugin();
+  const fixture = createApi({ failStop: true });
+  await plugin.activate(fixture.api);
+
+  await assert.rejects(() => plugin.invoke('run_playtest', {
+    input: {
+      playInput: { mode: 'play' },
+      captureInput: { format: 'png' },
+      consoleInput: { level: 'all' },
+      stopInput: { mode: 'stop' },
+    },
+  }, fixture.api), /stop failed/);
+
+  assert.deepEqual(fixture.calls, [
+    { name: 'start_stop_play', input: { mode: 'play' } },
+    { name: 'screen_capture', input: { format: 'png' } },
+    { name: 'get_console_output', input: { level: 'all' } },
     { name: 'start_stop_play', input: { mode: 'stop' } },
   ]);
   assert.equal(fixture.jobEvents.some((event) => event.type === 'fail'), true);
