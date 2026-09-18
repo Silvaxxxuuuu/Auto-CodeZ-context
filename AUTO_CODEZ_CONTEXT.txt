@@ -2851,3 +2851,39 @@ O pop-up não substitui o Auto CodeZ principal.
 O pop-up deve compartilhar a mesma infraestrutura real de AgentRuntime, sessões, Inteligência, anexos, jobs e approvals. Não criar um segundo runtime paralelo.
 
 PR #9 continua open, draft e não mesclado. Não fazer merge sem autorização explícita do usuário.
+
+
+------------------------------------------------------------
+24.26. ROBLOX STUDIO MANAGER — BUILT-IN VALIDADO E MCP CONFIÁVEL ISOLADO
+------------------------------------------------------------
+
+Baseline built-in confirmado:
+- a7cabcc89bb6c2d0624297589e107feb44f0b6cd
+- Validate Auto CodeZ #3302: SUCCESS
+- Visual Auto CodeZ #481: SUCCESS
+
+UX de plugin integrado confirmada depois:
+- a755fa579cbe0bcd3d5316cefa6774f5fc1aa7d8
+- Validate #3306: SUCCESS
+- Visual #483: SUCCESS
+
+O Roblox Studio Manager agora é distribuído como recurso built-in pelo Electron Forge:
+- forge.config.ts usa extraResource: ['plugins']
+- desenvolvimento lê app.getAppPath()/plugins
+- pacote lê process.resourcesPath/plugins
+- PluginService descobre built-ins e plugins gerenciados do usuário como fontes separadas
+- PluginSummary possui builtIn
+- built-in não pode ser desinstalado
+- UI mostra PLUGIN INTEGRADO e não oferece Desinstalar
+- E2E abre o Electron empacotado e exige autocodez.roblox-studio-manager, builtIn=true e hasMain=true.
+
+Hardening adicional iniciado após esse baseline:
+- capability mcp.connect-roblox-studio foi reservada explicitamente ao ID autocodez.roblox-studio-manager;
+- um plugin genérico, mesmo com terminal:execute, deve receber falha antes de alcançar o launcher confiável;
+- foi adicionado teste de propriedade dessa capability;
+- o override mcpCommand foi removido do Roblox Studio Manager. O plugin integrado não pode trocar silenciosamente o launcher oficial por comando arbitrário.
+- mcp.connect genérico continua separado e sem modo batch privilegiado.
+
+Decisão: o caminho oficial/confiável do Roblox Studio deve permanecer core-owned. Qualquer futura opção de servidor customizado precisa ser desenhada como funcionalidade explicitamente separada e não pode reutilizar a identidade de conexão confiável do built-in.
+
+PR #9 permanece draft/open/unmerged.
