@@ -718,12 +718,11 @@ ipcMain.handle('mcp-tunnel:status', async () => ({
   ...mcpTunnelRuntime.status(),
   credentialAvailable: Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()),
 }));
-ipcMain.handle('mcp-tunnel:doctor', async (_event, input: unknown) => {
-  const value = requireObject(input, 'Diagnóstico do Secure MCP Tunnel');
-  const tunnelId = requireIdentifier(value.tunnelId, 'Tunnel ID');
-  const controlPlaneApiKey = value.controlPlaneApiKey === undefined
+ipcMain.handle('mcp-tunnel:doctor', async (_event, tunnelIdInput: unknown, controlPlaneApiKeyInput: unknown) => {
+  const tunnelId = requireIdentifier(tunnelIdInput, 'Tunnel ID');
+  const controlPlaneApiKey = controlPlaneApiKeyInput === undefined
     ? undefined
-    : requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane');
+    : requireNonEmptyString(controlPlaneApiKeyInput, 'Chave do control plane');
   const runtime = await mcpRuntimeInstaller.prepare();
   if (!runtime.executable) throw new Error('Runtime MCP indisponível.');
   const gateway = await mcpGatewayServer.preflight();
@@ -751,12 +750,11 @@ ipcMain.handle('mcp-tunnel:doctor', async (_event, input: unknown) => {
   });
   return { ...result, gateway };
 });
-ipcMain.handle('mcp-tunnel:start', async (_event, input: unknown) => {
-  const value = requireObject(input, 'Configuração do Secure MCP Tunnel');
-  const tunnelId = requireIdentifier(value.tunnelId, 'Tunnel ID');
-  const controlPlaneApiKey = value.controlPlaneApiKey === undefined
+ipcMain.handle('mcp-tunnel:start', async (_event, tunnelIdInput: unknown, controlPlaneApiKeyInput: unknown) => {
+  const tunnelId = requireIdentifier(tunnelIdInput, 'Tunnel ID');
+  const controlPlaneApiKey = controlPlaneApiKeyInput === undefined
     ? undefined
-    : requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane');
+    : requireNonEmptyString(controlPlaneApiKeyInput, 'Chave do control plane');
   const runtime = await mcpRuntimeInstaller.prepare();
   if (!runtime.executable) throw new Error('Runtime MCP indisponível.');
   await mcpGatewayServer.preflight();
