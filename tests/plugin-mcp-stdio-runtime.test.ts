@@ -133,6 +133,30 @@ test('MCP stdio sessions are isolated by plugin and fail closed after server exi
   await assert.rejects(runtime.listTools('plugin.a', connected.sessionId), /não encontrada/i);
 });
 
+test('MCP stdio runtime reports authoritative live session status and clears it on exit', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'Roblox Studio', version: '2.1' } });
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  assert.deepEqual(runtime.status('test.plugin', connected.sessionId), {
+    connected: true,
+    protocolVersion: '2025-06-18',
+    serverName: 'Roblox Studio',
+    serverVersion: '2.1',
+  });
+  fixture.server.exit(0);
+  assert.deepEqual(runtime.status('test.plugin', connected.sessionId), { connected: false });
+});
+
+test('MCP stdio runtime rejects invalid initialize protocol versions', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') reply({ protocolVersion: null, serverInfo: { name: 'broken' } });
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  await assert.rejects(() => runtime.connect('test.plugin', { command: 'fake' }), /protocolVersion inválida/);
+});
+
 test('MCP stdio runtime rejects malformed JSON and closes the session', async () => {
   const fixture = fakeServer((message, reply) => {
     if (message.method === 'initialize') reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
