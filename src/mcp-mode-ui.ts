@@ -403,7 +403,7 @@ function render(): void {
           <div class="mcp-mode-title-row"><span class="mcp-live-dot state-${escapeHtml(header.state)}"></span><h1>${escapeHtml(header.title)}</h1><span class="mcp-header-state">${escapeHtml(stateLabel(header.state))}</span></div>
           <div class="mcp-mode-subtitle">${escapeHtml(header.subtitle)}${header.project ? ` · Projeto ${escapeHtml(header.project)}` : ''}${header.run ? ` · ${escapeHtml(header.run.slice(0, 16))}` : ''}</div>
         </div>
-        <div class="mcp-header-actions">${header.clientId === 'autocodez-chat' && header.chatId && (header.state === 'running' || header.state === 'waiting' || header.state === 'pending') ? `<button class="mcp-stop-button" type="button" data-mcp-stop="${escapeHtml(header.chatId)}">■ Parar</button>` : ''}<button class="mcp-refresh-button" type="button" data-mcp-advanced>${showAdvanced ? 'Ocultar técnico' : 'Avançado'}</button><button class="mcp-refresh-button" type="button" data-mcp-refresh>Atualizar</button></div>
+        <div class="mcp-header-actions">${header.clientId === 'autocodez-chat' && header.chatId && (header.state === 'running' || header.state === 'waiting' || header.state === 'pending') ? `<button class="mcp-stop-button" type="button" data-mcp-stop="${escapeHtml(header.chatId)}">■ Parar</button>` : ''}<button class="mcp-refresh-button" type="button" data-mcp-clients>Clientes</button><button class="mcp-refresh-button" type="button" data-mcp-advanced>${showAdvanced ? 'Ocultar técnico' : 'Avançado'}</button><button class="mcp-refresh-button" type="button" data-mcp-refresh>Atualizar</button></div>
       </header>
       <div class="mcp-mode-toolbar">
         <div class="mcp-filter-group">
@@ -458,6 +458,25 @@ function render(): void {
     </section>`;
 }
 
+async function ensureOperationalRuntime(): Promise<void> {
+  if (!active || onboardingStep !== 'operational' || gatewayStatus.running || activationBusy) return;
+  activationBusy = true;
+  gatewayPreflightError = '';
+  try {
+    runtimeStatus = await window.autoCodez.prepareMcpRuntime() as McpRuntimeStatus;
+    const started = await window.autoCodez.startMcpGateway();
+    gatewayStatus = { running: true, host: started.host, port: started.port, endpoint: started.endpoint };
+    gatewayToken = started.bearerToken;
+    gatewayPreflight = await window.autoCodez.preflightMcpGateway();
+  } catch (error) {
+    gatewayPreflight = undefined;
+    gatewayPreflightError = error instanceof Error ? error.message : String(error);
+  } finally {
+    activationBusy = false;
+    if (active) render();
+  }
+}
+
 async function refresh(): Promise<void> {
   if (!active) return;
   const token = ++refreshSequence;
@@ -497,7 +516,7 @@ function show(): void {
   document.querySelectorAll('.rail-button').forEach((button) => button.classList.toggle('active', button.hasAttribute('data-mcp-mode')));
   const root = document.getElementById(rootId);
   if (root) root.hidden = false;
-  void refresh();
+  void refresh().then(() => ensureOperationalRuntime());
 }
 
 function hide(): void {
@@ -609,6 +628,7 @@ function install(): void {
     if (target.closest('[data-mcp-onboarding-back]')) { onboardingStep = 'activation'; render(); return; }
     if (target.closest('[data-mcp-onboarding-clients]')) { onboardingStep = 'clients'; render(); return; }
     if (target.closest('[data-mcp-onboarding-finish]')) { persistOnboardingComplete(); onboardingStep = 'operational'; render(); return; }
+    if (target.closest('[data-mcp-clients]')) { onboardingStep = 'clients'; showAdvanced = false; render(); return; }
     if (target.closest('[data-mcp-advanced]')) { showAdvanced = !showAdvanced; render(); return; }
     const copyText = target.closest<HTMLElement>('[data-mcp-copy-text]')?.dataset.mcpCopyText;
     if (copyText) { await navigator.clipboard.writeText(copyText).catch((): undefined => undefined); return; }
