@@ -917,15 +917,47 @@ app.whenReady().then(async () => {
   });
   activityRuntime.subscribe((event) => {
     sendActivity(event);
+    const changes = event.changes ?? event.diffPlan?.changes ?? [];
+    const resources = [...new Set(changes.map((change) => change.path))];
+    const diff = changes.length
+      ? {
+          files: changes.length,
+          addedLines: changes.reduce((total, change) => total + change.addedLines, 0),
+          removedLines: changes.reduce((total, change) => total + change.removedLines, 0),
+        }
+      : undefined;
+    const sourceRefs = [...new Set((event.sources ?? []).map((source) => source.url))];
+    const details: Record<string, string | number | boolean | null> = {};
+    if (event.commandResult) {
+      details.exitCode = event.commandResult.exitCode;
+      details.timedOut = event.commandResult.timedOut;
+      details.durationMs = event.commandResult.durationMs;
+    }
+    if (event.gitResult) {
+      details.gitOperation = event.gitResult.operation;
+      details.branch = event.gitResult.branch;
+    }
+    if (sourceRefs.length) details.sourceCount = sourceRefs.length;
+
     operationalLedger.record({
       actor: 'agent',
-      category: event.type === 'test' || event.type === 'build' ? 'test' : 'tool',
+      category: event.toolName === 'web_search' || event.toolName === 'web_fetch'
+        ? 'web'
+        : event.type === 'test' || event.type === 'build'
+          ? 'test'
+          : (event.type === 'complete' || event.type === 'error') && !event.toolName
+            ? 'execution'
+            : 'tool',
       state: event.status === 'pending' ? 'pending' : event.status === 'running' ? 'running' : event.status === 'failed' ? 'failed' : 'success',
       summary: event.message,
       chatId: event.chatId,
       runId: event.runId,
       toolCallId: event.toolCallId,
       toolName: event.toolName,
+      resources,
+      sourceRefs,
+      diff,
+      ...(Object.keys(details).length ? { details } : {}),
       error: event.error,
       timestamp: event.createdAt,
     });
