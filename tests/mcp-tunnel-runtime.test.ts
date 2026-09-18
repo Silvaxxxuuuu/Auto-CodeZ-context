@@ -24,16 +24,21 @@ function fakeChild(killDelayMs = 0): ChildProcessWithoutNullStreams {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
+  const emitExit = () => {
+    Object.defineProperty(emitter, 'exitCode', { value: 0, configurable: true, writable: true });
+    emitter.emit('exit', 0, null);
+  };
   Object.assign(emitter, {
     stdin,
     stdout,
     stderr,
     pid: undefined,
     killed: false,
+    exitCode: null,
     kill: () => {
       Object.defineProperty(emitter, 'killed', { value: true, configurable: true, writable: true });
-      if (killDelayMs > 0) setTimeout(() => emitter.emit('exit', 0, null), killDelayMs);
-      else queueMicrotask(() => emitter.emit('exit', 0, null));
+      if (killDelayMs > 0) setTimeout(emitExit, killDelayMs);
+      else queueMicrotask(emitExit);
       return true;
     },
   });
