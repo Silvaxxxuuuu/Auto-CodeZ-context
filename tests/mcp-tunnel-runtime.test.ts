@@ -83,7 +83,7 @@ function fixture(options: { version?: string; ready?: boolean; killDelayMs?: num
     records,
     rootPromise,
     create: async (env: NodeJS.ProcessEnv = {}) => new McpTunnelRuntime(spawnProcess, env, await rootPromise, fetchImpl),
-    cleanup: async () => fs.rm(await rootPromise, { recursive: true, force: true }),
+    cleanup: async () => fs.rm(await rootPromise, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 6 : 2, retryDelay: 50 }),
   };
 }
 
