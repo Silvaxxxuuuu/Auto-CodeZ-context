@@ -98,6 +98,34 @@ test('MCP runtime installer downloads, verifies and installs the exact Windows a
   }
 });
 
+test('MCP runtime installer rejects a tampered checksum manifest before downloading an archive', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-runtime-installer-'));
+  const manifest = `${'a'.repeat(64)}  tunnel-client-v0.0.14-windows-amd64.zip\n`;
+  const requested: string[] = [];
+  const fetchImpl = (async (input: URL | RequestInfo) => {
+    const url = String(input);
+    requested.push(url);
+    return new Response(manifest, { status: 200 });
+  }) as typeof fetch;
+  const missingPathSpawn = ((command: string) => {
+    const child = fakeChild();
+    queueMicrotask(() => {
+      Object.defineProperty(child, 'exitCode', { value: command === 'tunnel-client' ? 1 : 0, configurable: true });
+      child.emit('exit', command === 'tunnel-client' ? 1 : 0, null);
+    });
+    return child;
+  }) as never;
+  try {
+    const installer = new McpRuntimeInstaller(() => root, fetchImpl, missingPathSpawn, 'win32', 'x64', 'f'.repeat(64));
+    await assert.rejects(() => installer.prepare(), /manifesto oficial de checksums/i);
+    assert.deepEqual(requested, [
+      'https://github.com/openai/tunnel-client/releases/download/v0.0.14/SHA256SUMS.txt',
+    ]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('MCP runtime installer rejects a release archive with a checksum mismatch', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-runtime-installer-'));
   const archive = Buffer.alloc(100_001, 9);
