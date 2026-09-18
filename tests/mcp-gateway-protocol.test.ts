@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OperationalLedger } from '../src/operational-ledger';
 import { OperationalLedgerRetrieval } from '../src/operational-ledger-retrieval';
+import type { AgentRuntime } from '../src/agent/agent-runtime';
+import { McpGatewayExecutionRuntime } from '../src/mcp-gateway/execution-runtime';
 import { MCP_GATEWAY_PROTOCOL_VERSION, McpGatewayProtocol } from '../src/mcp-gateway/protocol';
+import { PluginToolCatalog } from '../src/plugins/plugin-tool-catalog';
 
 function fixture() {
   const ledger = new OperationalLedger();
@@ -139,4 +142,103 @@ test('MCP gateway ignores initialized notifications and rejects unsupported meth
   assert.equal(protocol.handle({ jsonrpc: '2.0', method: 'notifications/initialized' }), undefined);
   const unsupported = protocol.handle({ jsonrpc: '2.0', id: 6, method: 'resources/list' });
   assert.equal(unsupported?.error?.code, -32601);
+});
+
+
+function executableProtocol(nextResult: { pendingApproval?: boolean; approvalId?: string; ok: boolean; output?: string; error?: string } = { ok: true, output: 'done' }) {
+  const ledger = new OperationalLedger();
+  const retrieval = new OperationalLedgerRetrieval(ledger);
+  const catalog = new PluginToolCatalog();
+  catalog.register('autocodez.roblox-studio-manager', [{
+    id: 'run_playtest',
+    description: 'Run a guarded Roblox Studio playtest.',
+    risk: 'write',
+    parameters: {
+      type: 'object',
+      properties: { studioId: { type: 'string', maxLength: 128 } },
+      required: ['studioId'],
+      additionalProperties: false,
+    },
+  }]);
+
+  const calls: Array<Record<string, unknown>> = [];
+  const agent = {
+    async executeExternalTool(input: Record<string, unknown>) {
+      calls.push(structuredClone(input));
+      return { toolCallId: 'gateway-call', ...nextResult };
+    },
+    async approveExternalTool() {
+      return { toolCallId: 'gateway-call', ok: true, output: 'approved' };
+    },
+    denyExternalTool() {
+      return true;
+    },
+  } as unknown as AgentRuntime;
+
+  const execution = new McpGatewayExecutionRuntime(agent, catalog);
+  return { protocol: new McpGatewayProtocol(retrieval, execution), execution, calls };
+}
+
+test('MCP gateway lists dynamic plugin tools with write annotations and operation_status', () => {
+  const fixture = executableProtocol();
+  const response = fixture.protocol.handle({ jsonrpc: '2.0', id: 10, method: 'tools/list' });
+  const tools = (response?.result as { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }> }).tools;
+
+  const playtest = tools.find((tool) => tool.name === 'roblox_run_playtest');
+  assert.ok(playtest);
+  assert.equal(playtest.annotations?.readOnlyHint, false);
+  assert.equal(playtest.annotations?.destructiveHint, true);
+  assert.ok(tools.some((tool) => tool.name === 'operation_status'));
+});
+
+test('MCP gateway executes dynamic plugin tools through the external execution runtime', async () => {
+  const fixture = executableProtocol();
+  const response = await fixture.protocol.handle({
+    jsonrpc: '2.0',
+    id: 11,
+    method: 'tools/call',
+    params: {
+      name: 'roblox_run_playtest',
+      arguments: { studioId: 'studio-a' },
+      _meta: {
+        'io.modelcontextprotocol/clientInfo': { name: 'ChatGPT', version: 'test' },
+      },
+    },
+  });
+
+  const result = response?.result as { structuredContent?: { state?: string; chatId?: string; operationId?: string } };
+  assert.equal(result.structuredContent?.state, 'success');
+  assert.equal(result.structuredContent?.chatId, 'mcp:ChatGPT');
+  assert.ok(result.structuredContent?.operationId);
+  assert.equal(fixture.calls.length, 1);
+});
+
+test('MCP gateway returns waiting approval and exposes operation status for external writes', async () => {
+  const fixture = executableProtocol({ ok: false, pendingApproval: true, approvalId: 'approval-a', error: 'waiting' });
+  const call = await fixture.protocol.handle({
+    jsonrpc: '2.0',
+    id: 12,
+    method: 'tools/call',
+    params: {
+      name: 'roblox_run_playtest',
+      arguments: { studioId: 'studio-a' },
+    },
+  });
+  const operation = (call?.result as { structuredContent?: { operationId?: string; state?: string; approvalId?: string } }).structuredContent;
+  assert.equal(operation?.state, 'waiting_approval');
+  assert.equal(operation?.approvalId, 'approval-a');
+  assert.ok(operation?.operationId);
+
+  const status = fixture.protocol.handle({
+    jsonrpc: '2.0',
+    id: 13,
+    method: 'tools/call',
+    params: {
+      name: 'operation_status',
+      arguments: { operationId: operation?.operationId },
+    },
+  });
+  const statusOperation = (status?.result as { structuredContent?: { state?: string; approvalId?: string } }).structuredContent;
+  assert.equal(statusOperation?.state, 'waiting_approval');
+  assert.equal(statusOperation?.approvalId, 'approval-a');
 });
