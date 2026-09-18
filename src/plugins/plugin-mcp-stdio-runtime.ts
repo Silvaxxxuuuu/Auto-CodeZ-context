@@ -272,6 +272,14 @@ export class PluginMcpStdioRuntime {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         session.pending.delete(id);
+        if (method !== 'initialize') {
+          try {
+            this.notify(session, 'notifications/cancelled', {
+              requestId: id,
+              reason: `Auto CodeZ timeout: ${method}`,
+            });
+          } catch {}
+        }
         reject(new Error(`Solicitação MCP '${method}' excedeu o tempo limite.`));
       }, timeoutMs);
       session.pending.set(id, { resolve, reject, timer });
