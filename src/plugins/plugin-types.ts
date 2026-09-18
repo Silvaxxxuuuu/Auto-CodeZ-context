@@ -78,6 +78,7 @@ export type PluginJobSnapshot = {
   progress?: number;
   activity?: string;
   error?: string;
+  artifactIds?: string[];
   createdAt: number;
   updatedAt: number;
 };
