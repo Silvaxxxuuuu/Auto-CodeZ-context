@@ -68,3 +68,36 @@ test('plugin artifact runtime rejects malformed base64 and prunes by plugin memo
   assert.equal(runtime.get('test.plugin', ids[0]), undefined);
   assert.ok(runtime.list('test.plugin').length <= 16);
 });
+
+
+test('plugin artifact runtime bounds aggregate inline text and externalizes large structured content', () => {
+  const runtime = new PluginArtifactRuntime();
+  const result = runtime.externalizeMcpResult('test.plugin', {
+    content: [
+      { type: 'text', text: 'a'.repeat(10 * 1024) },
+      { type: 'text', text: 'b'.repeat(10 * 1024) },
+    ],
+    structuredContent: { payload: 'z'.repeat(20 * 1024) },
+    _meta: { secret: 'must-not-cross-observed-boundary' },
+  }) as {
+    content: Array<Record<string, unknown>>;
+    structuredContentArtifact?: { id: string; kind: string; mimeType: string };
+    _meta?: unknown;
+  };
+
+  assert.equal(result.content[0].type, 'text');
+  assert.equal(result.content[1].type, 'artifact');
+  assert.equal(result.structuredContentArtifact?.kind, 'text');
+  assert.equal(result.structuredContentArtifact?.mimeType, 'application/json');
+  assert.equal(result._meta, undefined);
+});
+
+test('plugin artifact runtime rejects excessive observed content item counts', () => {
+  const runtime = new PluginArtifactRuntime();
+  assert.throws(
+    () => runtime.externalizeMcpResult('test.plugin', {
+      content: Array.from({ length: 129 }, () => ({ type: 'text', text: 'x' })),
+    }),
+    /itens demais/,
+  );
+});
