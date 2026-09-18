@@ -293,7 +293,13 @@ export class McpTunnelRuntime {
       input?.controlPlaneApiKey ?? this.parentEnvironment.CONTROL_PLANE_API_KEY ?? this.parentEnvironment.OPENAI_API_KEY,
       'Chave do control plane do Secure MCP Tunnel',
     );
-    const doctor = await this.doctor(input?.executable);
+    const doctor = await this.diagnose({
+      tunnelId,
+      localEndpoint,
+      localBearerToken,
+      controlPlaneApiKey,
+      ...(input?.executable ? { executable: input.executable } : {}),
+    });
 
     const healthDir = await fs.mkdtemp(path.join(this.tempRoot, 'auto-codez-mcp-tunnel-'));
     const healthFile = path.join(healthDir, 'health-url.txt');
