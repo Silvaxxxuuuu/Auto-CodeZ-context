@@ -233,7 +233,7 @@ export class McpGatewayProtocol {
     ];
   }
 
-  handle(request: McpJsonRpcRequest, context: McpGatewayClientContext = {}): McpJsonRpcResponse | undefined {
+  async handle(request: McpJsonRpcRequest, context: McpGatewayClientContext = {}): Promise<McpJsonRpcResponse | undefined> {
     const id = request.id ?? null;
     if (request.jsonrpc !== '2.0' || typeof request.method !== 'string' || !request.method) return rpcError(id, -32600, 'Invalid Request');
 
