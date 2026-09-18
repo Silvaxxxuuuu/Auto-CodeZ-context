@@ -19,6 +19,8 @@ type InternalArtifact = PluginArtifactSnapshot & {
 const MAX_ARTIFACTS = 256;
 const MAX_ARTIFACTS_PER_PLUGIN = 64;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
+const MAX_PLUGIN_BYTES = 16 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 const MAX_INLINE_TEXT_BYTES = 16 * 1024;
 
 function byteLength(value: string, encoding: BufferEncoding): number {
@@ -36,12 +38,8 @@ export class PluginArtifactRuntime {
   storeImage(pluginId: string, data: string, mimeType = 'image/png', now = Date.now()): PluginArtifactSnapshot {
     if (typeof data !== 'string' || !data) throw new Error('Imagem do artifact inválida.');
     if (typeof mimeType !== 'string' || !/^image\/[a-z0-9.+-]{1,64}$/i.test(mimeType)) throw new Error('MIME type do artifact inválido.');
-    let bytes: number;
-    try {
-      bytes = Buffer.from(data, 'base64').byteLength;
-    } catch {
-      throw new Error('Imagem do artifact não está em base64 válido.');
-    }
+    if (data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw new Error('Imagem do artifact não está em base64 válido.');
+    const bytes = Buffer.from(data, 'base64').byteLength;
     if (bytes <= 0 || bytes > MAX_ARTIFACT_BYTES) throw new Error('Artifact excede o limite de 2 MB.');
     return this.store({
       pluginId,
@@ -128,24 +126,31 @@ export class PluginArtifactRuntime {
   }
 
   private store(input: Omit<InternalArtifact, 'id'>): PluginArtifactSnapshot {
-    this.prune(input.pluginId);
+    this.prune(input.pluginId, input.bytes);
     const id = crypto.randomUUID();
     const artifact: InternalArtifact = { id, ...input };
     this.artifacts.set(id, artifact);
     return cloneSnapshot(artifact);
   }
 
-  private prune(pluginId: string): void {
+  private prune(pluginId: string, incomingBytes: number): void {
     const pluginArtifacts = [...this.artifacts.values()]
       .filter((artifact) => artifact.pluginId === pluginId)
       .sort((a, b) => a.createdAt - b.createdAt);
-    while (pluginArtifacts.length >= MAX_ARTIFACTS_PER_PLUGIN) {
+    let pluginBytes = pluginArtifacts.reduce((total, artifact) => total + artifact.bytes, 0);
+    while (pluginArtifacts.length >= MAX_ARTIFACTS_PER_PLUGIN || pluginBytes + incomingBytes > MAX_PLUGIN_BYTES) {
       const oldest = pluginArtifacts.shift();
-      if (oldest) this.artifacts.delete(oldest.id);
+      if (!oldest) break;
+      this.artifacts.delete(oldest.id);
+      pluginBytes -= oldest.bytes;
     }
 
-    if (this.artifacts.size < MAX_ARTIFACTS) return;
-    const oldest = [...this.artifacts.values()].sort((a, b) => a.createdAt - b.createdAt)[0];
-    if (oldest) this.artifacts.delete(oldest.id);
+    let totalBytes = [...this.artifacts.values()].reduce((total, artifact) => total + artifact.bytes, 0);
+    while (this.artifacts.size >= MAX_ARTIFACTS || totalBytes + incomingBytes > MAX_TOTAL_BYTES) {
+      const oldest = [...this.artifacts.values()].sort((a, b) => a.createdAt - b.createdAt)[0];
+      if (!oldest) break;
+      this.artifacts.delete(oldest.id);
+      totalBytes -= oldest.bytes;
+    }
   }
 }
