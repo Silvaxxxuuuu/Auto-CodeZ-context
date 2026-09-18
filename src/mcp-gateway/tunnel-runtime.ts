@@ -103,20 +103,24 @@ function requireSecret(value: unknown, label: string): string {
   return normalized;
 }
 
-function sanitizedError(value: unknown): string {
-  return (value instanceof Error ? value.message : String(value))
+function redactText(value: string, redactions: string[] = []): string {
+  let sanitized = value
     .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
     .replace(/\b(?:sk|sess|proj)-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED]')
-    .replace(/\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, '[REDACTED]')
-    .slice(0, 2048);
+    .replace(/\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, '[REDACTED]');
+  for (const secret of redactions) {
+    if (secret) sanitized = sanitized.split(secret).join('[REDACTED]');
+  }
+  return sanitized;
+}
+
+function sanitizedError(value: unknown): string {
+  return redactText(value instanceof Error ? value.message : String(value)).slice(0, 2048);
 }
 
 function appendLog(current: string, chunk: Buffer | string, redactions: string[] = []): string {
-  let value = current + (typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
-  for (const secret of redactions) {
-    if (secret) value = value.split(secret).join('[REDACTED]');
-  }
-  return sanitizedError(value).slice(-MAX_LOG_CHARS);
+  const value = current + (typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+  return redactText(value, redactions).slice(-MAX_LOG_CHARS);
 }
 
 function createChildEnvironment(
