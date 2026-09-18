@@ -1,17 +1,28 @@
+import crypto from 'node:crypto';
 import path from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { LocalStorage } from '../core/storage';
 import { PluginService } from './plugin-service';
 import { PluginSettingsStore } from './plugin-settings-store';
 import { PluginStateStore } from './plugin-state-store';
 import { PluginSandboxCallRouter } from './plugin-sandbox-call-router';
-import { pluginToolCatalog } from './plugin-tool-catalog';
+import { pluginToolCatalog, type PluginToolExecutionContext } from './plugin-tool-catalog';
 import type { PluginCapabilityRequest, PluginCapabilityResponse } from './plugin-capability-broker';
 import type { PluginPermission } from './plugin-types';
 import { operationalLedger } from '../operational-ledger';
 
+type ActivePluginInvocation = {
+  invocationId: string;
+  pluginId: string;
+  toolId: string;
+  context: PluginToolExecutionContext;
+};
+
 let servicePromise: Promise<PluginService> | undefined;
 const sandboxCalls = new PluginSandboxCallRouter();
+const activePluginInvocations = new Map<string, ActivePluginInvocation>();
+const capabilityInvocationStorage = new AsyncLocalStorage<ActivePluginInvocation>();
 
 function requirePluginId(value: unknown): string {
   if (typeof value !== 'string' || !/^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/.test(value)) {
@@ -29,10 +40,14 @@ function requireCapabilityRequest(value: unknown): PluginCapabilityRequest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Solicitação de capability inválida.');
   const record = value as Record<string, unknown>;
   if (typeof record.id !== 'string' || typeof record.method !== 'string') throw new Error('Solicitação de capability inválida.');
+  if (record.invocationId !== undefined && (typeof record.invocationId !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(record.invocationId))) {
+    throw new Error('ID da invocação do plugin inválido.');
+  }
   return {
     id: record.id,
     method: record.method,
     ...(Object.prototype.hasOwnProperty.call(record, 'input') ? { input: record.input } : {}),
+    ...(typeof record.invocationId === 'string' ? { invocationId: record.invocationId } : {}),
   };
 }
 
@@ -55,18 +70,27 @@ async function createPluginService(): Promise<PluginService> {
   const broker = service.getBroker();
   broker.getActivityRuntime().subscribe((activity) => {
     broadcast('plugins:activity', activity);
+    const invocation = capabilityInvocationStorage.getStore();
     operationalLedger.record({
       actor: 'plugin',
       category: 'plugin',
       state: activity.status === 'completed' ? 'success' : activity.status === 'failed' ? 'failed' : activity.status === 'waiting' ? 'waiting' : 'running',
       summary: activity.message,
       pluginId: activity.pluginId,
+      ...(invocation ? {
+        chatId: invocation.context.chatId,
+        runId: invocation.context.runId,
+        projectId: invocation.context.projectId,
+        toolCallId: invocation.context.toolCallId,
+        causationId: invocation.invocationId,
+      } : {}),
       timestamp: activity.updatedAt,
     });
   });
 
   broker.getJobRuntime().subscribe((job) => {
     broadcast('plugins:job', job);
+    const invocation = capabilityInvocationStorage.getStore();
     operationalLedger.record({
       actor: 'plugin',
       category: 'job',
@@ -77,11 +101,19 @@ async function createPluginService(): Promise<PluginService> {
       artifactIds: job.artifactIds,
       progress: job.progress,
       error: job.error,
+      ...(invocation ? {
+        chatId: invocation.context.chatId,
+        runId: invocation.context.runId,
+        projectId: invocation.context.projectId,
+        toolCallId: invocation.context.toolCallId,
+        causationId: invocation.invocationId,
+      } : {}),
       timestamp: job.updatedAt,
     });
   });
 
   broker.getArtifactRuntime().subscribe((artifact) => {
+    const invocation = capabilityInvocationStorage.getStore();
     operationalLedger.record({
       actor: 'plugin',
       category: 'artifact',
@@ -89,6 +121,13 @@ async function createPluginService(): Promise<PluginService> {
       summary: `Artifact ${artifact.kind} produzido.`,
       pluginId: artifact.pluginId,
       artifactIds: [artifact.id],
+      ...(invocation ? {
+        chatId: invocation.context.chatId,
+        runId: invocation.context.runId,
+        projectId: invocation.context.projectId,
+        toolCallId: invocation.context.toolCallId,
+        causationId: invocation.invocationId,
+      } : {}),
       details: {
         kind: artifact.kind,
         mimeType: artifact.mimeType,
@@ -115,8 +154,11 @@ async function createPluginService(): Promise<PluginService> {
       causationId: context.toolCallId,
       timestamp: startedAt,
     });
+    const invocationId = crypto.randomUUID();
+    const invocation: ActivePluginInvocation = { invocationId, pluginId, toolId, context: { ...context } };
+    activePluginInvocations.set(invocationId, invocation);
     try {
-      const value = await sandboxCalls.call(pluginId, toolId, { input, context });
+      const value = await sandboxCalls.call(pluginId, toolId, { input, context }, invocationId);
       operationalLedger.record({
         actor: 'plugin',
         category: 'tool',
@@ -150,6 +192,8 @@ async function createPluginService(): Promise<PluginService> {
         error: message,
       });
       throw error;
+    } finally {
+      activePluginInvocations.delete(invocationId);
     }
   });
   return service;
@@ -204,7 +248,14 @@ ipcMain.handle('plugins:revoke', async (_event, pluginId: unknown, permission: u
 });
 ipcMain.handle('plugins:source', async (_event, pluginId: unknown) => (await pluginService()).readMainSource(requirePluginId(pluginId)));
 ipcMain.handle('plugins:invoke', async (_event, pluginId: unknown, request: unknown): Promise<PluginCapabilityResponse> => {
-  return (await pluginService()).invoke(requirePluginId(pluginId), requireCapabilityRequest(request));
+  const id = requirePluginId(pluginId);
+  const capability = requireCapabilityRequest(request);
+  if (!capability.invocationId) return (await pluginService()).invoke(id, capability);
+  const invocation = activePluginInvocations.get(capability.invocationId);
+  if (!invocation || invocation.pluginId !== id) {
+    return { id: capability.id, ok: false, error: 'Invocação do plugin não está mais ativa ou não pertence a este plugin.' };
+  }
+  return capabilityInvocationStorage.run(invocation, async () => (await pluginService()).invoke(id, capability));
 });
 ipcMain.handle('plugins:healthy', async (_event, pluginId: unknown, message: unknown) => {
   const normalized = typeof message === 'string' ? message.slice(0, 512) : undefined;
