@@ -120,17 +120,19 @@ contextBridge.exposeInMainWorld('autoCodez', {
 
   doctorMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => {
     const value = requireObject(input, 'Diagnóstico do Secure MCP Tunnel');
-    return invoke('mcp-tunnel:doctor', {
-      tunnelId: requireIdentifier(value.tunnelId, 'Tunnel ID'),
-      ...(value.controlPlaneApiKey === undefined ? {} : { controlPlaneApiKey: requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane') }),
-    });
+    const tunnelId = requireIdentifier(value.tunnelId, 'Tunnel ID');
+    const controlPlaneApiKey = value.controlPlaneApiKey === undefined
+      ? undefined
+      : requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane');
+    return invoke('mcp-tunnel:doctor', tunnelId, controlPlaneApiKey);
   },
   startMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => {
     const value = requireObject(input, 'Configuração do Secure MCP Tunnel');
-    return invoke('mcp-tunnel:start', {
-      tunnelId: requireIdentifier(value.tunnelId, 'Tunnel ID'),
-      ...(value.controlPlaneApiKey === undefined ? {} : { controlPlaneApiKey: requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane') }),
-    });
+    const tunnelId = requireIdentifier(value.tunnelId, 'Tunnel ID');
+    const controlPlaneApiKey = value.controlPlaneApiKey === undefined
+      ? undefined
+      : requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane');
+    return invoke('mcp-tunnel:start', tunnelId, controlPlaneApiKey);
   },
   stopMcpTunnel: () => invoke('mcp-tunnel:stop'),
   mcpGatewayStatus: () => invoke('mcp-gateway:status'),
