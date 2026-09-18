@@ -98,6 +98,30 @@ const toStrictSchema = (schema) => {
   return sanitizeSchemaNode(schema);
 };
 
+const OBSERVED_TOOL_NAMES = new Set(['screen_capture', 'get_console_output']);
+
+const callStudioTool = (api, tool, input, timeoutMs = 60000) => OBSERVED_TOOL_NAMES.has(tool.name)
+  ? api.mcp.callToolObserved(sessionId, tool.name, input, timeoutMs)
+  : api.mcp.callTool(sessionId, tool.name, input, timeoutMs);
+
+const summarizeObservation = (operation, result) => {
+  const content = result && typeof result === 'object' && Array.isArray(result.content) ? result.content : [];
+  const artifacts = content
+    .filter((item) => item && item.type === 'artifact' && item.artifact && typeof item.artifact.id === 'string')
+    .map((item) => item.artifact);
+  const text = content
+    .filter((item) => item && item.type === 'text' && typeof item.text === 'string')
+    .map((item) => item.text)
+    .join('\n')
+    .slice(0, 16000);
+  return {
+    operation,
+    artifacts,
+    ...(text ? { text } : {}),
+    raw: result,
+  };
+};
+
 const buildPlaytestInteractionSchema = (catalog) => {
   const definitions = [
     ['keyboard', 'user_keyboard_input', 'keyboardInput'],
@@ -256,13 +280,15 @@ autoCodez.register({
           if (unexpected.length > 0) throw new Error('Interação de playtest contém payload incompatível com a operação selecionada.');
           const progress = 0.2 + ((index + 1) / Math.max(interactions.length, 1)) * 0.35;
           await api.jobs.update(job.id, { progress, activity: 'Executando interação ' + (index + 1) + ' de ' + interactions.length + '...' });
-          const result = await api.mcp.callTool(sessionId, definition.tool.name, input, 60000);
-          if (definition.checkpoint) checkpoints.push({ index, operation: step.operation, result });
+          const result = await callStudioTool(api, definition.tool, input, 60000);
+          if (definition.checkpoint) checkpoints.push({ index, ...summarizeObservation(step.operation, result) });
         }
         await api.jobs.update(job.id, { progress: 0.65, activity: 'Capturando viewport...' });
-        const viewport = await api.mcp.callTool(sessionId, captureTool.name, rawInput.captureInput || {}, 60000);
+        const viewportResult = await callStudioTool(api, captureTool, rawInput.captureInput || {}, 60000);
+        const viewport = summarizeObservation('capture', viewportResult);
         await api.jobs.update(job.id, { progress: 0.8, activity: 'Lendo console...' });
-        const consoleOutput = await api.mcp.callTool(sessionId, consoleTool.name, rawInput.consoleInput || {}, 60000);
+        const consoleResult = await callStudioTool(api, consoleTool, rawInput.consoleInput || {}, 60000);
+        const consoleOutput = summarizeObservation('console', consoleResult);
         await api.jobs.update(job.id, { progress: 0.92, activity: 'Encerrando Play...' });
         stopAttempted = true;
         await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000);
@@ -284,7 +310,7 @@ autoCodez.register({
     }
     const tool = studioTools.get(method);
     if (!tool) throw new Error('A operação solicitada não está disponível no Roblox Studio conectado.');
-    return api.mcp.callTool(sessionId, tool.name, rawInput, 60000);
+    return callStudioTool(api, tool, rawInput, 60000);
   },
 
   async deactivate(api) {
