@@ -201,6 +201,11 @@ export class PluginMcpStdioRuntime {
     session.child.once('exit', (code) => close(`Servidor MCP encerrou com código ${code ?? 'desconhecido'}.`));
   }
 
+  private writeMessage(session: Session, message: unknown): void {
+    if (session.closed || session.child.stdin.destroyed || !session.child.stdin.writable) return;
+    try { session.child.stdin.write(JSON.stringify(message) + '\n'); } catch {}
+  }
+
   private consume(session: Session, chunk: string): void {
     session.buffer += chunk;
     let newline = session.buffer.indexOf('\n');
@@ -211,9 +216,14 @@ export class PluginMcpStdioRuntime {
       const line = rawLine.trim();
       if (line) {
         try {
-          const message = JSON.parse(line) as { jsonrpc?: unknown; id?: unknown; result?: unknown; error?: { message?: unknown } };
+          const message = JSON.parse(line) as { jsonrpc?: unknown; id?: unknown; method?: unknown; result?: unknown; error?: { message?: unknown } };
           if (message.jsonrpc !== '2.0') { session.child.kill(); return; }
-          if (typeof message.id === 'number') {
+          if (typeof message.method === 'string') {
+            if (message.id !== undefined) {
+              if (typeof message.id !== 'number' && typeof message.id !== 'string') { session.child.kill(); return; }
+              this.writeMessage(session, { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Method not found' } });
+            }
+          } else if (typeof message.id === 'number') {
             const pending = session.pending.get(message.id);
             if (pending) {
               session.pending.delete(message.id);
