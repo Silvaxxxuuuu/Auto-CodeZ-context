@@ -85,7 +85,18 @@ async function runTest() {
   const externalCall = await mcpPost({ jsonrpc: '2.0', id: 101, method: 'tools/call', params: { name: externalTool.name, arguments: { target: 'gateway-visual' }, _meta: { 'io.modelcontextprotocol/clientInfo': { name: 'Visual MCP Client', version: '1.0' } } } }); const operation = externalCall.result?.structuredContent; if (!operation?.operationId || operation.state !== 'waiting_approval' || !operation.approvalId) throw new Error('Write MCP não entrou em waiting_approval: ' + JSON.stringify(externalCall));
   await mcpMode.getByText('Visual MCP Client', { exact: true }).first().waitFor({ state: 'visible', timeout: 10000 });
   await page.waitForFunction(() => document.querySelectorAll('#mcp-mode-root .mcp-event').length > 0);
-  const firstEvent = mcpMode.locator('.mcp-event').first(); await firstEvent.locator('[data-mcp-expand]').click(); await firstEvent.locator('.mcp-event-expanded').waitFor({ state: 'visible', timeout: 5000 });
+  const firstEvent = mcpMode.locator('.mcp-event').first();
+  const chrome = await mcpMode.evaluate(() => {
+    const toggle = document.querySelector('.mcp-event-toggle');
+    const inactiveFilter = [...document.querySelectorAll('.mcp-filter')].find((element) => !element.classList.contains('active'));
+    return {
+      toggleBackground: toggle ? getComputedStyle(toggle).backgroundColor : '',
+      toggleBorder: toggle ? getComputedStyle(toggle).borderTopWidth : '',
+      inactiveFilterBackground: inactiveFilter ? getComputedStyle(inactiveFilter).backgroundColor : '',
+    };
+  });
+  if (chrome.toggleBackground !== 'rgba(0, 0, 0, 0)' || chrome.toggleBorder !== '0px' || chrome.inactiveFilterBackground !== 'rgba(0, 0, 0, 0)') throw new Error('MCP Mode herdou chrome nativo de button na timeline/filtros: ' + JSON.stringify(chrome));
+  await firstEvent.locator('[data-mcp-expand]').click(); await firstEvent.locator('.mcp-event-expanded').waitFor({ state: 'visible', timeout: 5000 });
   const expandedText = (await firstEvent.locator('.mcp-event-expanded').textContent() || '').toLowerCase(); if (!expandedText.includes('eventid') || !expandedText.includes('sequence')) throw new Error(`Progressive disclosure do MCP Mode incompleto: ${expandedText}`);
   if (await mcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer após expansão de evento.');
   await mcpMode.getByText('Aguardando aprovação', { exact: true }).waitFor({ state: 'visible', timeout: 10000 }); const approvalCard = mcpMode.locator('.mcp-approval-card').filter({ hasText: 'plugin_call' }).first(); await approvalCard.waitFor({ state: 'visible', timeout: 10000 }); await approvalCard.getByRole('button', { name: 'Aceitar' }).click();
