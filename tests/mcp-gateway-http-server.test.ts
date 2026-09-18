@@ -163,3 +163,20 @@ test('MCP Gateway HTTP server rejects oversized request ids and method names bef
     await server.stop();
   }
 });
+
+
+test('MCP Gateway trusted tunnel binding exposes the ephemeral credential only while running', async () => {
+  const server = gateway();
+  assert.throws(() => server.trustedTunnelBinding(), /não está em execução/);
+  const info = await server.start({ bearerToken: 'z'.repeat(48) });
+  try {
+    assert.deepEqual(server.trustedTunnelBinding(), {
+      endpoint: info.endpoint,
+      bearerToken: 'z'.repeat(48),
+    });
+    assert.equal('bearerToken' in server.status(), false);
+  } finally {
+    await server.stop();
+  }
+  assert.throws(() => server.trustedTunnelBinding(), /não está em execução/);
+});
