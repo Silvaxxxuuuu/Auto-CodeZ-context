@@ -184,7 +184,7 @@ export class McpRuntimeInstaller {
       this.lastError = error instanceof Error ? error.message : String(error);
       throw error;
     } finally {
-      await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
+      await fs.rm(tempRoot, { recursive: true, force: true }).catch((): undefined => undefined);
     }
   }
 
