@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('autoCodezPlugins', {
   snapshot: () => ipcRenderer.invoke('plugins:snapshot'),
+  settings: (pluginId: string) => ipcRenderer.invoke('plugins:settings', pluginId),
   refresh: () => ipcRenderer.invoke('plugins:refresh'),
   installFromFolder: () => ipcRenderer.invoke('plugins:install-folder'),
   uninstall: (pluginId: string) => ipcRenderer.invoke('plugins:uninstall', pluginId),
