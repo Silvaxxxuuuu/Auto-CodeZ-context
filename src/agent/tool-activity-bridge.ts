@@ -66,6 +66,7 @@ export function toActivityInput(snapshot: ToolActivitySnapshot): Omit<ActivityEv
     ...(result.gitResult ? { gitResult: result.gitResult } : {}),
     ...(result.changes ? { changes: result.changes } : {}),
     ...(result.diffPlan ? { diffPlan: result.diffPlan } : {}),
+    ...(result.sources ? { sources: result.sources } : {}),
     ...(result.error ? { error: result.error } : {}),
   };
 }
