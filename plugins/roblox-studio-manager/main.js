@@ -72,6 +72,7 @@ const sanitizeSchemaNode = (schema, depth = 0) => {
 };
 
 const MAX_AGENT_TOOLS = 32;
+const MAX_PLAYTEST_INTERACTIONS = 24;
 const HIGH_LEVEL_OPERATIONS = {
   inspect_game: 'search_game_tree',
   inspect_instance: 'inspect_instance',
@@ -95,6 +96,31 @@ const PLAYTEST_TOOL_ID = 'run_playtest';
 const toStrictSchema = (schema) => {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || schema.type !== 'object') return { type: 'object', properties: {}, required: [], additionalProperties: false };
   return sanitizeSchemaNode(schema);
+};
+
+const buildPlaytestInteractionSchema = (catalog) => {
+  const definitions = [
+    ['keyboard', 'user_keyboard_input', 'keyboardInput'],
+    ['mouse', 'user_mouse_input', 'mouseInput'],
+    ['navigate', 'character_navigation', 'navigationInput'],
+  ].filter(([, toolName]) => catalog.tools.some((tool) => tool.name === toolName));
+  if (definitions.length === 0) return null;
+  const properties = {
+    operation: { type: 'string', enum: definitions.map(([operation]) => operation) },
+  };
+  for (const [, toolName, inputKey] of definitions) {
+    const tool = catalog.tools.find((candidate) => candidate.name === toolName);
+    properties[inputKey] = toStrictSchema(tool.inputSchema);
+  }
+  return {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties,
+      required: ['operation'],
+      additionalProperties: false,
+    },
+  };
 };
 
 async function connect(api) {
@@ -133,6 +159,14 @@ async function connect(api) {
     const captureTool = catalog.tools.find((tool) => tool.name === 'screen_capture');
     const consoleTool = catalog.tools.find((tool) => tool.name === 'get_console_output');
     const playSchema = toStrictSchema(playTool.inputSchema);
+    const interactionSchema = buildPlaytestInteractionSchema(catalog);
+    const playtestProperties = {
+      playInput: playSchema,
+      captureInput: toStrictSchema(captureTool.inputSchema),
+      consoleInput: toStrictSchema(consoleTool.inputSchema),
+      stopInput: playSchema,
+    };
+    if (interactionSchema) playtestProperties.interactions = interactionSchema;
     tools.push({
       id: PLAYTEST_TOOL_ID,
       title: 'Run Playtest',
@@ -140,12 +174,7 @@ async function connect(api) {
       risk: 'write',
       parameters: {
         type: 'object',
-        properties: {
-          playInput: playSchema,
-          captureInput: toStrictSchema(captureTool.inputSchema),
-          consoleInput: toStrictSchema(consoleTool.inputSchema),
-          stopInput: playSchema,
-        },
+        properties: playtestProperties,
         required: ['playInput', 'stopInput'],
         additionalProperties: false,
       },
@@ -204,11 +233,31 @@ autoCodez.register({
         await api.jobs.update(job.id, { progress: 0.1, activity: 'Iniciando Play...' });
         const play = await api.mcp.callTool(sessionId, playTool.name, rawInput.playInput || {}, 60000);
         started = true;
-        await api.jobs.update(job.id, { progress: 0.45, activity: 'Capturando viewport...' });
+        const interactions = Array.isArray(rawInput.interactions) ? rawInput.interactions : [];
+        if (interactions.length > MAX_PLAYTEST_INTERACTIONS) throw new Error('O playtest excedeu o limite de 24 interações.');
+        const interactionTools = {
+          keyboard: { tool: [...studioTools.values()].find((tool) => tool.name === 'user_keyboard_input'), key: 'keyboardInput' },
+          mouse: { tool: [...studioTools.values()].find((tool) => tool.name === 'user_mouse_input'), key: 'mouseInput' },
+          navigate: { tool: [...studioTools.values()].find((tool) => tool.name === 'character_navigation'), key: 'navigationInput' },
+        };
+        for (let index = 0; index < interactions.length; index += 1) {
+          const step = interactions[index];
+          if (!step || typeof step !== 'object' || Array.isArray(step)) throw new Error('Interação de playtest inválida.');
+          const definition = interactionTools[step.operation];
+          if (!definition || !definition.tool) throw new Error('Interação de playtest não disponível no Roblox Studio conectado.');
+          const input = step[definition.key];
+          if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Payload da interação de playtest inválido.');
+          const unexpected = Object.keys(step).filter((key) => key !== 'operation' && key !== definition.key);
+          if (unexpected.length > 0) throw new Error('Interação de playtest contém payload incompatível com a operação selecionada.');
+          const progress = 0.2 + ((index + 1) / Math.max(interactions.length, 1)) * 0.35;
+          await api.jobs.update(job.id, { progress, activity: 'Executando interação ' + (index + 1) + ' de ' + interactions.length + '...' });
+          await api.mcp.callTool(sessionId, definition.tool.name, input, 60000);
+        }
+        await api.jobs.update(job.id, { progress: 0.65, activity: 'Capturando viewport...' });
         const viewport = await api.mcp.callTool(sessionId, captureTool.name, rawInput.captureInput || {}, 60000);
-        await api.jobs.update(job.id, { progress: 0.75, activity: 'Lendo console...' });
+        await api.jobs.update(job.id, { progress: 0.8, activity: 'Lendo console...' });
         const consoleOutput = await api.mcp.callTool(sessionId, consoleTool.name, rawInput.consoleInput || {}, 60000);
-        await api.jobs.update(job.id, { progress: 0.9, activity: 'Encerrando Play...' });
+        await api.jobs.update(job.id, { progress: 0.92, activity: 'Encerrando Play...' });
         stopAttempted = true;
         await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000);
         await api.jobs.complete(job.id, 'Playtest concluído.');
