@@ -6,6 +6,7 @@ import path from 'node:path';
 import { isSupportedTunnelClientVersion } from './tunnel-runtime';
 
 const TUNNEL_VERSION = '0.0.14';
+const CHECKSUM_MANIFEST_SHA256 = '3c09650be77841e72747951f415b7be32b01be46ca7f534d873fe162c1fb6887';
 const RELEASE_BASE = `https://github.com/openai/tunnel-client/releases/download/v${TUNNEL_VERSION}`;
 
 export type McpRuntimeStatus = {
@@ -99,6 +100,7 @@ export class McpRuntimeInstaller {
     private readonly spawnProcess: SpawnLike = spawn as SpawnLike,
     private readonly platform: NodeJS.Platform = process.platform,
     private readonly arch: string = process.arch,
+    private readonly checksumManifestSha256: string = CHECKSUM_MANIFEST_SHA256,
   ) {}
 
   status(): McpRuntimeStatus {
@@ -152,7 +154,10 @@ export class McpRuntimeInstaller {
       if (checksumFinalUrl.protocol !== 'https:' || !['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'].includes(checksumFinalUrl.hostname)) {
         throw new Error('Origem inesperada ao baixar checksums do tunnel-client.');
       }
-      const checksumText = await checksumResponse.text();
+      const checksumBytes = new Uint8Array(await checksumResponse.arrayBuffer());
+      const checksumDigest = createHash('sha256').update(checksumBytes).digest('hex');
+      if (checksumDigest !== this.checksumManifestSha256) throw new Error('Manifesto oficial de checksums do tunnel-client não passou na verificação de integridade.');
+      const checksumText = Buffer.from(checksumBytes).toString('utf8');
       const checksumLine = checksumText.split(/\r?\n/).find((line) => line.trim().endsWith(asset.archive));
       const checksumMatch = checksumLine?.match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/);
       if (!checksumMatch || checksumMatch[2].trim() !== asset.archive) throw new Error('Checksum oficial do pacote tunnel-client não foi encontrado.');
