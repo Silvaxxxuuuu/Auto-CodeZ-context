@@ -25,6 +25,28 @@ declare global {
       updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
       streamChat: (input: { chatId: string; content: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
+      listOperationalLedger: (query?: {
+        afterSequence?: number;
+        beforeSequence?: number;
+        chatId?: string;
+        runId?: string;
+        projectId?: string;
+        sessionId?: string;
+        pluginId?: string;
+        toolCallId?: string;
+        jobId?: string;
+        artifactId?: string;
+        category?: string;
+        state?: string;
+        limit?: number;
+        direction?: 'forward' | 'backward';
+      }) => Promise<{
+        events: Array<Record<string, unknown>>;
+        firstSequence?: number;
+        lastSequence?: number;
+        hasMore: boolean;
+      }>;
+      onOperationalLedgerEvent: (listener: (event: unknown) => void) => () => void;
       listApprovals: (filters?: { chatId?: string; runId?: string }) => Promise<Approval[]>;
       approveTool: (approvalId: string, filters?: { chatId?: string; runId?: string }) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
       denyTool: (approvalId: string, filters?: { chatId?: string; runId?: string }) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
