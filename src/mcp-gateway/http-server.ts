@@ -15,6 +15,13 @@ export type McpGatewayServerInfo = {
   bearerToken: string;
 };
 
+export type McpGatewayPreflightResult = {
+  ok: true;
+  protocolVersion: string;
+  toolCount: number;
+  writeToolCount: number;
+};
+
 function json(response: ServerResponse, status: number, value: unknown): void {
   const body = JSON.stringify(value);
   response.writeHead(status, {
@@ -124,6 +131,57 @@ export class McpGatewayHttpServer {
   trustedTunnelBinding(): { endpoint: string; bearerToken: string } {
     if (!this.info || !this.server) throw new Error('MCP Gateway local não está em execução.');
     return { endpoint: this.info.endpoint, bearerToken: this.info.bearerToken };
+  }
+
+  async preflight(): Promise<McpGatewayPreflightResult> {
+    const binding = this.trustedTunnelBinding();
+    const call = async (id: string, method: string): Promise<Record<string, unknown>> => {
+      const response = await fetch(binding.endpoint, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${binding.bearerToken}`,
+          'mcp-protocol-version': MCP_GATEWAY_PROTOCOL_VERSION,
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id, method, params: {} }),
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!response.ok) throw new Error(`MCP Gateway preflight ${method} retornou HTTP ${response.status}.`);
+      const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+      if (!contentType.startsWith('application/json')) throw new Error(`MCP Gateway preflight ${method} retornou Content-Type incompatível.`);
+      const payload = await response.json() as unknown;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(`MCP Gateway preflight ${method} retornou JSON-RPC inválido.`);
+      const record = payload as Record<string, unknown>;
+      if (record.error) throw new Error(`MCP Gateway preflight ${method} retornou erro JSON-RPC.`);
+      if (!record.result || typeof record.result !== 'object' || Array.isArray(record.result)) throw new Error(`MCP Gateway preflight ${method} não retornou result válido.`);
+      return record.result as Record<string, unknown>;
+    };
+
+    const discovery = await call('autocodez-preflight-discover', 'server/discover');
+    if (discovery.protocolVersion !== MCP_GATEWAY_PROTOCOL_VERSION) {
+      throw new Error('MCP Gateway preflight recebeu versão de protocolo inesperada.');
+    }
+
+    const listed = await call('autocodez-preflight-tools', 'tools/list');
+    if (!Array.isArray(listed.tools)) throw new Error('MCP Gateway preflight tools/list não retornou catálogo válido.');
+    let writeToolCount = 0;
+    for (const rawTool of listed.tools) {
+      if (!rawTool || typeof rawTool !== 'object' || Array.isArray(rawTool)) throw new Error('MCP Gateway preflight encontrou tool inválida.');
+      const tool = rawTool as Record<string, unknown>;
+      if (typeof tool.name !== 'string' || !tool.name) throw new Error('MCP Gateway preflight encontrou tool sem nome.');
+      const annotations = tool.annotations;
+      if (annotations && typeof annotations === 'object' && !Array.isArray(annotations)) {
+        const values = annotations as Record<string, unknown>;
+        if (values.readOnlyHint === false || values.destructiveHint === true) writeToolCount += 1;
+      }
+    }
+
+    return {
+      ok: true,
+      protocolVersion: MCP_GATEWAY_PROTOCOL_VERSION,
+      toolCount: listed.tools.length,
+      writeToolCount,
+    };
   }
 
   async stop(): Promise<boolean> {
