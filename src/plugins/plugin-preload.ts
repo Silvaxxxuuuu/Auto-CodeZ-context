@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('autoCodezPlugins', {
   disable: (pluginId: string) => ipcRenderer.invoke('plugins:disable', pluginId),
   revoke: (pluginId: string, permission: string) => ipcRenderer.invoke('plugins:revoke', pluginId, permission),
   source: (pluginId: string) => ipcRenderer.invoke('plugins:source', pluginId),
-  invoke: (pluginId: string, request: { id: string; method: string; input?: unknown }) => ipcRenderer.invoke('plugins:invoke', pluginId, request),
+  invoke: (pluginId: string, request: { id: string; method: string; input?: unknown; invocationId?: string }) => ipcRenderer.invoke('plugins:invoke', pluginId, request),
   markHealthy: (pluginId: string, message?: string) => ipcRenderer.invoke('plugins:healthy', pluginId, message),
   markFailed: (pluginId: string, reason: string) => ipcRenderer.invoke('plugins:failed', pluginId, reason),
   respondSandboxCall: (result: { id: string; value?: unknown; error?: string }) => ipcRenderer.invoke('plugins:sandbox-call-result', result),
