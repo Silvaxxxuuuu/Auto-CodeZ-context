@@ -62,6 +62,9 @@ async function runTest() {
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-instrucoes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Finalizar' }).click();
   await mcpMode.getByText('MCP MODE', { exact: true }).waitFor({ state: 'visible' }); await mcpMode.getByText('Sessões', { exact: true }).waitFor({ state: 'visible' });
+  await mcpMode.getByText('MCP ativo e protegido', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-operacional-limpo.png'), animations: 'disabled' });
+  await mcpMode.getByRole('button', { name: 'Avançado' }).click();
   await mcpMode.getByText('Secure MCP Tunnel', { exact: true }).waitFor({ state: 'visible', timeout: 10000 }); const tunnelIdInput = mcpMode.locator('[data-mcp-tunnel-id]'); const tunnelKey = mcpMode.locator('[data-mcp-tunnel-key]'); if (await tunnelKey.getAttribute('type') !== 'password' || await tunnelKey.inputValue() !== '') throw new Error('Campo de credencial do Secure MCP Tunnel não está protegido e vazio.'); const tunnelDoctor = mcpMode.locator('[data-mcp-tunnel-doctor]'); const tunnelConnect = mcpMode.locator('[data-mcp-tunnel-start]'); if (await tunnelDoctor.isDisabled()) throw new Error('Secure MCP Tunnel Doctor permaneceu bloqueado após ativação automática do MCP.'); if (await tunnelConnect.isDisabled()) throw new Error('Secure MCP Tunnel permaneceu bloqueado após ativação automática do MCP.'); const visualTunnelId = 'tunnel_' + 'a'.repeat(32); await tunnelIdInput.fill(visualTunnelId); await tunnelKey.fill('sk-visual-session-only-secret'); await mcpMode.locator('[data-mcp-refresh]').click(); await page.waitForFunction((id) => document.querySelector('[data-mcp-tunnel-id]')?.value === id, visualTunnelId); if (await mcpMode.locator('[data-mcp-tunnel-key]').inputValue() !== '') throw new Error('Credencial de sessão do Secure MCP Tunnel sobreviveu a um re-render da UI.');
   if (await mcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer próprio.');
   await page.waitForFunction(() => document.querySelectorAll('#mcp-mode-root .mcp-event').length > 0);
@@ -86,6 +89,7 @@ async function runTest() {
   const leakedBearer = await page.evaluate(async () => { const page = await window.autoCodez.listOperationalLedger({ limit: 250, direction: 'backward' }); return JSON.stringify(page.events).includes('Bearer '); }); if (leakedBearer) throw new Error('Token efêmero do MCP Gateway vazou para o Operational Ledger.');
   await gatewayToggle.getByText('Parar Gateway', { exact: true }).click(); await mcpMode.getByText('Desligado', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   if ((await mcpMode.locator('.mcp-gateway-card').innerText()).includes('Bearer ')) throw new Error('Token efêmero permaneceu visível após parar o MCP Gateway.');
+  await mcpMode.getByRole('button', { name: 'Ocultar técnico' }).click();
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-mode-ledger.png'), animations: 'disabled' });
   if (pageErrors.length || consoleErrors.length) throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
 }
