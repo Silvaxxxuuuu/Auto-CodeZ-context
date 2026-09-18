@@ -241,3 +241,40 @@ test('MCP Gateway preflight counts dynamic plugin tools and write annotations', 
     await server.stop();
   }
 });
+
+
+test('MCP Gateway preflight fails closed on an unexpected discovery protocol version', async () => {
+  const protocol = {
+    async handle(request: { id?: string | number | null; method: string }) {
+      if (request.method === 'server/discover') {
+        return { jsonrpc: '2.0', id: request.id ?? null, result: { protocolVersion: '2099-01-01' } };
+      }
+      return { jsonrpc: '2.0', id: request.id ?? null, result: { tools: [] } };
+    },
+  } as unknown as McpGatewayProtocol;
+  const server = new McpGatewayHttpServer(protocol);
+  await server.start({ bearerToken: 'r'.repeat(48) });
+  try {
+    await assert.rejects(() => server.preflight(), /versão de protocolo inesperada/);
+  } finally {
+    await server.stop();
+  }
+});
+
+test('MCP Gateway preflight fails closed on a malformed tools catalog', async () => {
+  const protocol = {
+    async handle(request: { id?: string | number | null; method: string }) {
+      if (request.method === 'server/discover') {
+        return { jsonrpc: '2.0', id: request.id ?? null, result: { protocolVersion: '2026-07-28' } };
+      }
+      return { jsonrpc: '2.0', id: request.id ?? null, result: { tools: [{ description: 'missing name' }] } };
+    },
+  } as unknown as McpGatewayProtocol;
+  const server = new McpGatewayHttpServer(protocol);
+  await server.start({ bearerToken: 's'.repeat(48) });
+  try {
+    await assert.rejects(() => server.preflight(), /tool sem nome/);
+  } finally {
+    await server.stop();
+  }
+});
