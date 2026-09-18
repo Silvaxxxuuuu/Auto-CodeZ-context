@@ -125,6 +125,14 @@ contextBridge.exposeInMainWorld('autoCodez', {
     limit?: number;
     direction?: 'forward' | 'backward';
   }) => invoke('agent:list-operational-ledger', query),
+
+  operationalSessionSummary: (scope?: { chatId?: string; runId?: string; projectId?: string; sessionId?: string; pluginId?: string }) => invoke('agent:operational-session-summary', scope),
+  operationalSessionRecentEvents: (input?: { scope?: { chatId?: string; runId?: string; projectId?: string; sessionId?: string; pluginId?: string }; limit?: number; beforeSequence?: number }) => invoke('agent:operational-session-recent-events', input),
+  operationalSessionChanges: (input?: { scope?: { chatId?: string; runId?: string; projectId?: string; sessionId?: string; pluginId?: string }; limit?: number; beforeSequence?: number }) => invoke('agent:operational-session-changes', input),
+  operationalSessionErrors: (input?: { scope?: { chatId?: string; runId?: string; projectId?: string; sessionId?: string; pluginId?: string }; limit?: number; beforeSequence?: number }) => invoke('agent:operational-session-errors', input),
+  operationalSessionArtifacts: (input?: { scope?: { chatId?: string; runId?: string; projectId?: string; sessionId?: string; pluginId?: string }; limit?: number; beforeSequence?: number }) => invoke('agent:operational-session-artifacts', input),
+  operationalSessionSources: (input?: { scope?: { chatId?: string; runId?: string; projectId?: string; sessionId?: string; pluginId?: string }; limit?: number; beforeSequence?: number }) => invoke('agent:operational-session-sources', input),
+
   onOperationalLedgerEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('operational-ledger:event', handler);
