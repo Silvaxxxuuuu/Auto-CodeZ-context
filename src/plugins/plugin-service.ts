@@ -101,6 +101,12 @@ export class PluginService {
     return this.snapshot();
   }
 
+  settings(pluginId: string): Record<string, unknown> {
+    this.requireInitialized();
+    if (!this.registry.get(pluginId)) throw new Error(`Plugin '${pluginId}' não está registrado.`);
+    return this.settingsStore?.list(pluginId) ?? {};
+  }
+
   snapshot(): PluginDiscoverySnapshot {
     this.requireInitialized();
     return {
