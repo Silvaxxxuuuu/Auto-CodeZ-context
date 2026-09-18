@@ -144,10 +144,26 @@ export class PluginMcpStdioRuntime {
     throw new Error('Servidor MCP excedeu o limite de paginação de tools.');
   }
 
-  callTool(pluginId: string, sessionId: string, name: string, input: unknown, timeoutMs?: number): Promise<unknown> {
+  async callTool(pluginId: string, sessionId: string, name: string, input: unknown, timeoutMs?: number): Promise<unknown> {
     if (typeof name !== 'string' || !name.trim() || name.length > 256) throw new Error('Tool MCP inválida.');
     const toolInput = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-    return this.request(this.requireSession(pluginId, sessionId), 'tools/call', { name: name.trim(), arguments: toolInput }, timeout(timeoutMs));
+    const result = await this.request(
+      this.requireSession(pluginId, sessionId),
+      'tools/call',
+      { name: name.trim(), arguments: toolInput },
+      timeout(timeoutMs),
+    );
+    if (result && typeof result === 'object' && !Array.isArray(result) && (result as { isError?: unknown }).isError === true) {
+      const content = Array.isArray((result as { content?: unknown }).content) ? (result as { content: unknown[] }).content : [];
+      const detail = content
+        .filter((item): item is { type: string; text: string } => Boolean(item && typeof item === 'object' && !Array.isArray(item) && (item as { type?: unknown }).type === 'text' && typeof (item as { text?: unknown }).text === 'string'))
+        .map((item) => item.text)
+        .join('\n')
+        .trim()
+        .slice(0, 2048);
+      throw new Error(detail || `Tool MCP '${name.trim()}' retornou erro.`);
+    }
+    return result;
   }
 
   status(pluginId: string, sessionId: string): McpSessionStatus {
