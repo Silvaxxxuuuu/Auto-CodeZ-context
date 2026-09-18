@@ -44,6 +44,7 @@ function inactiveHealth(pluginId: string, now = Date.now()): PluginHealth {
 export class PluginService {
   private readonly registry = new PluginRegistry();
   private readonly packages = new Map<string, DiscoveredPluginPackage>();
+  private readonly builtInIds = new Set<string>();
   private readonly health = new Map<string, PluginHealth>();
   private readonly broker?: PluginCapabilityBroker;
   private readonly installer: PluginPackageInstaller;
@@ -73,6 +74,7 @@ export class PluginService {
     this.broker?.getJobRuntime().list().forEach((job) => this.broker?.cancelPluginWork(job.pluginId));
     for (const plugin of this.registry.list()) this.registry.unregister(plugin.manifest.id);
     this.packages.clear();
+    this.builtInIds.clear();
     this.health.clear();
     await this.discover();
     return this.snapshot();
@@ -86,6 +88,7 @@ export class PluginService {
 
   async uninstall(pluginId: string): Promise<PluginDiscoverySnapshot> {
     this.requireInitialized();
+    if (this.builtInIds.has(pluginId)) throw new Error('Plugins integrados ao Auto CodeZ não podem ser desinstalados.');
     this.broker?.cancelPluginWork(pluginId);
     const existing = this.registry.get(pluginId);
     if (existing) this.registry.unregister(pluginId);
@@ -205,6 +208,7 @@ export class PluginService {
           if (this.packages.has(discovered.manifest.id)) throw new Error(`Plugin '${discovered.manifest.id}' está duplicado entre fontes.`);
           this.registry.register(discovered.manifest);
           this.packages.set(discovered.manifest.id, discovered);
+          if (source.builtIn) this.builtInIds.add(discovered.manifest.id);
           this.health.set(discovered.manifest.id, inactiveHealth(discovered.manifest.id));
         } catch (error) {
           this.failures.push({
