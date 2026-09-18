@@ -103,10 +103,18 @@ export class PluginService {
     return this.snapshot();
   }
 
-  settings(pluginId: string): Record<string, unknown> {
+  publicStatus(pluginId: string): Record<string, unknown> {
     this.requireInitialized();
     if (!this.registry.get(pluginId)) throw new Error(`Plugin '${pluginId}' não está registrado.`);
-    return this.settingsStore?.list(pluginId) ?? {};
+    if (pluginId !== 'autocodez.roblox-studio-manager') return {};
+    const status = this.settingsStore?.get(pluginId, 'studioStatus');
+    if (!status || typeof status !== 'object' || Array.isArray(status)) return {};
+    const value = status as Record<string, unknown>;
+    return {
+      connected: value.connected === true,
+      tools: typeof value.tools === 'number' && Number.isFinite(value.tools) ? Math.max(0, Math.min(32, Math.floor(value.tools))) : 0,
+      instanceCount: typeof value.instanceCount === 'number' && Number.isFinite(value.instanceCount) ? Math.max(0, Math.min(100, Math.floor(value.instanceCount))) : 0,
+    };
   }
 
   snapshot(): PluginDiscoverySnapshot {
