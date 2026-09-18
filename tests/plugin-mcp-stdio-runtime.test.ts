@@ -149,6 +149,37 @@ test('MCP stdio sessions are isolated by plugin and fail closed after server exi
   await assert.rejects(runtime.listTools('plugin.a', connected.sessionId), /não encontrada/i);
 });
 
+test('MCP stdio runtime ignores server notifications and rejects unsupported server requests', async () => {
+  const fixture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+  });
+  const runtime = new PluginMcpStdioRuntime(fixture.spawn);
+  const connected = await runtime.connect('test.plugin', { command: 'fake' });
+  (fixture.server.child.stdout as PassThrough).write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }) + '\n');
+  (fixture.server.child.stdout as PassThrough).write(JSON.stringify({ jsonrpc: '2.0', id: 'server-1', method: 'roots/list', params: {} }) + '\n');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(runtime.status('test.plugin', connected.sessionId).connected, true);
+  const response = fixture.server.requests.find((message) => message.id === undefined && message.method === undefined);
+  assert.equal(response, undefined);
+  const rawWrites: string[] = [];
+  const capture = fakeServer((message, reply) => {
+    if (message.method === 'initialize') reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'fake' } });
+  });
+  let raw = '';
+  capture.server.child.stdin.on('data', (chunk) => { raw += String(chunk); });
+  const second = new PluginMcpStdioRuntime(capture.spawn);
+  const secondConnected = await second.connect('test.plugin', { command: 'fake' });
+  (capture.server.child.stdout as PassThrough).write(JSON.stringify({ jsonrpc: '2.0', id: 'server-2', method: 'roots/list' }) + '\n');
+  await new Promise((resolve) => setImmediate(resolve));
+  for (const line of raw.split('\n')) if (line.trim()) rawWrites.push(line);
+  assert.ok(rawWrites.some((line) => {
+    const message = JSON.parse(line) as { id?: unknown; error?: { code?: number } };
+    return message.id === 'server-2' && message.error?.code === -32601;
+  }));
+  runtime.disconnectPlugin('test.plugin');
+  second.disconnectPlugin('test.plugin');
+});
+
 test('MCP stdio runtime reports authoritative live session status and clears it on exit', async () => {
   const fixture = fakeServer((message, reply) => {
     if (message.method === 'initialize') reply({ protocolVersion: '2025-06-18', serverInfo: { name: 'Roblox Studio', version: '2.1' } });
