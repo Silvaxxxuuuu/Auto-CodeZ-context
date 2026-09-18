@@ -692,6 +692,7 @@ ipcMain.handle('mcp-tunnel:doctor', async (_event, input: unknown) => {
   const controlPlaneApiKey = value.controlPlaneApiKey === undefined
     ? undefined
     : requireNonEmptyString(value.controlPlaneApiKey, 'Chave do control plane');
+  const gateway = await mcpGatewayServer.preflight();
   const binding = mcpGatewayServer.trustedTunnelBinding();
   const result = await mcpTunnelRuntime.diagnose({
     tunnelId,
@@ -703,11 +704,17 @@ ipcMain.handle('mcp-tunnel:doctor', async (_event, input: unknown) => {
     actor: 'runtime',
     category: 'system',
     state: 'success',
-    summary: 'Secure MCP Tunnel Doctor validou configuração e conectividade.',
+    summary: 'Secure MCP Tunnel Doctor validou Gateway local e transporte.',
     clientId: 'autocodez-secure-mcp-tunnel',
-    details: { tunnelId, version: result.version },
+    details: {
+      tunnelId,
+      version: result.version,
+      protocolVersion: gateway.protocolVersion,
+      toolCount: gateway.toolCount,
+      writeToolCount: gateway.writeToolCount,
+    },
   });
-  return result;
+  return { ...result, gateway };
 });
 ipcMain.handle('mcp-tunnel:start', async (_event, input: unknown) => {
   const value = requireObject(input, 'Configuração do Secure MCP Tunnel');
