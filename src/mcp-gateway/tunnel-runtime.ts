@@ -225,6 +225,15 @@ async function readHealthUrl(file: string): Promise<string | undefined> {
   }
 }
 
+async function removeTemporaryTree(directory: string): Promise<void> {
+  await fs.rm(directory, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === 'win32' ? 6 : 2,
+    retryDelay: 50,
+  }).catch((): undefined => undefined);
+}
+
 export class McpTunnelRuntime {
   private active?: ActiveTunnel;
   private lastStatus: McpTunnelStatus = { running: false, ready: false };
@@ -325,7 +334,7 @@ export class McpTunnelRuntime {
         env,
       });
     } catch (error) {
-      await fs.rm(healthDir, { recursive: true, force: true });
+      await removeTemporaryTree(healthDir);
       throw new Error(`Não foi possível iniciar o Secure MCP Tunnel: ${sanitizedError(error)}`);
     }
 
@@ -372,7 +381,7 @@ export class McpTunnelRuntime {
     this.lastStatus = { ...active.status, running: false, ready: false };
     this.publishStatus();
     await processTreeKill(active.child);
-    await fs.rm(path.dirname(active.healthFile), { recursive: true, force: true }).catch((): undefined => undefined);
+    await removeTemporaryTree(path.dirname(active.healthFile));
     return true;
   }
 
@@ -507,7 +516,7 @@ export class McpTunnelRuntime {
     this.lastStatus = { ...active.status };
     this.active = undefined;
     this.publishStatus();
-    void fs.rm(path.dirname(active.healthFile), { recursive: true, force: true }).catch((): undefined => undefined);
+    void removeTemporaryTree(path.dirname(active.healthFile));
   }
 
   private publishStatus(): void {
