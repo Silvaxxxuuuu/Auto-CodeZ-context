@@ -472,3 +472,49 @@ test('Roblox Studio Manager keeps maximum checkpoint output below the agent tool
 
   assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') < 64 * 1024);
 });
+
+
+test('Roblox Studio Manager rejects a composed playtest without an explicit Studio id', async () => {
+  const plugin = await loadPlugin();
+  const fixture = createApi();
+  await plugin.activate(fixture.api);
+
+  await assert.rejects(() => plugin.invoke('run_playtest', {
+    input: {
+      playInput: { mode: 'play' },
+      captureInput: { format: 'png' },
+      consoleInput: { level: 'all' },
+      stopInput: { mode: 'stop' },
+    },
+  }, fixture.api), /studioId do playtest inválido/);
+
+  assert.equal(fixture.calls.length, 0);
+  assert.equal(fixture.jobEvents.length, 0);
+});
+
+test('Roblox Studio Manager externalizes direct viewport captures through observed MCP calls', async () => {
+  const plugin = await loadPlugin();
+  const fixture = createApi();
+  await plugin.activate(fixture.api);
+
+  const result = plain(await plugin.invoke('capture_viewport', {
+    input: { format: 'png', studio_id: 'studio-a' },
+  }, fixture.api));
+
+  assert.deepEqual(fixture.calls, [
+    { name: 'screen_capture', input: { format: 'png', studio_id: 'studio-a' } },
+  ]);
+  assert.deepEqual(result, {
+    content: [{
+      type: 'artifact',
+      artifact: {
+        id: 'image-1',
+        pluginId: 'autocodez.roblox-studio-manager',
+        kind: 'image',
+        mimeType: 'image/png',
+        bytes: 128,
+        createdAt: 1,
+      },
+    }],
+  });
+});
