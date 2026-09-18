@@ -8,6 +8,7 @@ export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: nu
 export type McpToolDescriptor = { name: string; description?: string; inputSchema?: unknown };
 export type McpToolList = { tools: McpToolDescriptor[] };
 export type McpSpawn = (command: string, args: string[], options: { windowsHide: boolean; stdio: ['pipe', 'pipe', 'pipe'] }) => ChildProcessWithoutNullStreams;
+export type RobloxStudioLaunchPlan = { command: string; args: string[] };
 
 const DEFAULT_TIMEOUT = 30_000;
 const MAX_LINE_BYTES = 4 * 1024 * 1024;
@@ -27,6 +28,15 @@ export function resolveRobloxStudioMcpCommand(platform = process.platform, env: 
     return candidate;
   }
   throw new Error('O MCP oficial do Roblox Studio é suportado pelo Auto CodeZ apenas no Windows e macOS.');
+}
+
+export function buildRobloxStudioLaunchPlan(
+  platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  launcher = resolveRobloxStudioMcpCommand(platform, env),
+): RobloxStudioLaunchPlan {
+  if (platform === 'win32') return { command: env.ComSpec?.trim() || 'cmd.exe', args: ['/d', '/s', '/c', launcher] };
+  return { command: launcher, args: [] };
 }
 
 function timeout(value?: number): number {
@@ -87,10 +97,8 @@ export class PluginMcpStdioRuntime {
   }
 
   async connectRobloxStudio(pluginId: string, timeoutMs?: number): Promise<{ sessionId: string; protocolVersion?: string; serverName?: string; serverVersion?: string }> {
-    const launcher = resolveRobloxStudioMcpCommand();
-    if (process.platform !== 'win32') return this.connect(pluginId, { command: launcher, timeoutMs });
-    const comspec = process.env.ComSpec || 'cmd.exe';
-    return this.connect(pluginId, { command: comspec, args: ['/d', '/s', '/c', launcher], timeoutMs });
+    const plan = buildRobloxStudioLaunchPlan();
+    return this.connect(pluginId, { ...plan, timeoutMs });
   }
 
   async listTools(pluginId: string, sessionId: string, timeoutMs?: number): Promise<McpToolList> {
