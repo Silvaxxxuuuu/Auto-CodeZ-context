@@ -98,6 +98,19 @@ const toStrictSchema = (schema) => {
   return sanitizeSchemaNode(schema);
 };
 
+const withoutStudioId = (schema) => {
+  const strict = toStrictSchema(schema);
+  const properties = { ...strict.properties };
+  delete properties.studio_id;
+  return {
+    ...strict,
+    properties,
+    required: strict.required.filter((key) => key !== 'studio_id'),
+  };
+};
+
+const withStudioId = (input, studioId) => ({ ...input, studio_id: studioId });
+
 const OBSERVED_TOOL_NAMES = new Set(['screen_capture', 'get_console_output']);
 
 const callStudioTool = (api, tool, input, timeoutMs = 60000) => OBSERVED_TOOL_NAMES.has(tool.name)
@@ -141,7 +154,7 @@ const buildPlaytestInteractionSchema = (catalog) => {
   };
   for (const [, toolName, inputKey] of definitions) {
     const tool = catalog.tools.find((candidate) => candidate.name === toolName);
-    properties[inputKey] = toStrictSchema(tool.inputSchema);
+    properties[inputKey] = withoutStudioId(tool.inputSchema);
   }
   return {
     type: 'array',
@@ -189,12 +202,13 @@ async function connect(api) {
     const playTool = catalog.tools.find((tool) => tool.name === 'start_stop_play');
     const captureTool = catalog.tools.find((tool) => tool.name === 'screen_capture');
     const consoleTool = catalog.tools.find((tool) => tool.name === 'get_console_output');
-    const playSchema = toStrictSchema(playTool.inputSchema);
+    const playSchema = withoutStudioId(playTool.inputSchema);
     const interactionSchema = buildPlaytestInteractionSchema(catalog);
     const playtestProperties = {
       playInput: playSchema,
-      captureInput: toStrictSchema(captureTool.inputSchema),
-      consoleInput: toStrictSchema(consoleTool.inputSchema),
+      studioId: { type: 'string' },
+      captureInput: withoutStudioId(captureTool.inputSchema),
+      consoleInput: withoutStudioId(consoleTool.inputSchema),
       stopInput: playSchema,
     };
     if (interactionSchema) playtestProperties.interactions = interactionSchema;
@@ -206,7 +220,7 @@ async function connect(api) {
       parameters: {
         type: 'object',
         properties: playtestProperties,
-        required: ['playInput', 'stopInput'],
+        required: ['studioId', 'playInput', 'stopInput'],
         additionalProperties: false,
       },
     });
@@ -257,12 +271,14 @@ autoCodez.register({
       const captureTool = [...studioTools.values()].find((tool) => tool.name === 'screen_capture');
       const consoleTool = [...studioTools.values()].find((tool) => tool.name === 'get_console_output');
       if (!playTool || !captureTool || !consoleTool) throw new Error('O Roblox Studio conectado não oferece todas as operações necessárias para playtest.');
+      const studioId = typeof rawInput.studioId === 'string' ? rawInput.studioId.trim() : '';
+      if (!studioId || studioId.length > 128) throw new Error('studioId do playtest inválido.');
       const job = await api.jobs.begin('Playtest do Roblox Studio');
       let started = false;
       let stopAttempted = false;
       try {
         await api.jobs.update(job.id, { progress: 0.1, activity: 'Iniciando Play...' });
-        await api.mcp.callTool(sessionId, playTool.name, rawInput.playInput || {}, 60000);
+        await api.mcp.callTool(sessionId, playTool.name, withStudioId(rawInput.playInput || {}, studioId), 60000);
         started = true;
         const interactions = Array.isArray(rawInput.interactions) ? rawInput.interactions : [];
         if (interactions.length > MAX_PLAYTEST_INTERACTIONS) throw new Error('O playtest excedeu o limite de 24 interações.');
@@ -285,7 +301,7 @@ autoCodez.register({
           if (unexpected.length > 0) throw new Error('Interação de playtest contém payload incompatível com a operação selecionada.');
           const progress = 0.2 + ((index + 1) / Math.max(interactions.length, 1)) * 0.35;
           await api.jobs.update(job.id, { progress, activity: 'Executando interação ' + (index + 1) + ' de ' + interactions.length + '...' });
-          const result = await callStudioTool(api, definition.tool, input, 60000);
+          const result = await callStudioTool(api, definition.tool, withStudioId(input, studioId), 60000);
           if (definition.checkpoint) {
             const observation = summarizeObservation(step.operation, result);
             await attachObservationArtifacts(api, job.id, observation);
@@ -293,16 +309,16 @@ autoCodez.register({
           }
         }
         await api.jobs.update(job.id, { progress: 0.65, activity: 'Capturando viewport...' });
-        const viewportResult = await callStudioTool(api, captureTool, rawInput.captureInput || {}, 60000);
+        const viewportResult = await callStudioTool(api, captureTool, withStudioId(rawInput.captureInput || {}, studioId), 60000);
         const viewport = summarizeObservation('capture', viewportResult);
         await attachObservationArtifacts(api, job.id, viewport);
         await api.jobs.update(job.id, { progress: 0.8, activity: 'Lendo console...' });
-        const consoleResult = await callStudioTool(api, consoleTool, rawInput.consoleInput || {}, 60000);
+        const consoleResult = await callStudioTool(api, consoleTool, withStudioId(rawInput.consoleInput || {}, studioId), 60000);
         const consoleOutput = summarizeObservation('console', consoleResult);
         await attachObservationArtifacts(api, job.id, consoleOutput);
         await api.jobs.update(job.id, { progress: 0.92, activity: 'Encerrando Play...' });
         stopAttempted = true;
-        await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000);
+        await api.mcp.callTool(sessionId, playTool.name, withStudioId(rawInput.stopInput || {}, studioId), 30000);
         await api.jobs.complete(job.id, 'Playtest concluído.');
         return { playStarted: true, checkpoints, viewport, console: consoleOutput };
       } catch (error) {
@@ -310,7 +326,7 @@ autoCodez.register({
         if (started && !stopAttempted) {
           stopAttempted = true;
           try {
-            await api.mcp.callTool(sessionId, playTool.name, rawInput.stopInput || {}, 30000);
+            await api.mcp.callTool(sessionId, playTool.name, withStudioId(rawInput.stopInput || {}, studioId), 30000);
           } catch (stopError) {
             failure += '; também não foi possível encerrar Play: ' + (stopError instanceof Error ? stopError.message : String(stopError));
           }
