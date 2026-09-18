@@ -111,8 +111,12 @@ function sanitizedError(value: unknown): string {
     .slice(0, 2048);
 }
 
-function appendLog(current: string, chunk: Buffer | string): string {
-  return (current + (typeof chunk === 'string' ? chunk : chunk.toString('utf8'))).slice(-MAX_LOG_CHARS);
+function appendLog(current: string, chunk: Buffer | string, redactions: string[] = []): string {
+  let value = current + (typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+  for (const secret of redactions) {
+    if (secret) value = value.split(secret).join('[REDACTED]');
+  }
+  return sanitizedError(value).slice(-MAX_LOG_CHARS);
 }
 
 function createChildEnvironment(
@@ -253,8 +257,9 @@ export class McpTunnelRuntime {
     this.publishStatus();
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => { active.stdout = appendLog(active.stdout, chunk); });
-    child.stderr.on('data', (chunk: string) => { active.stderr = appendLog(active.stderr, chunk); });
+    const logRedactions = [controlPlaneApiKey, localBearerToken, `Bearer ${localBearerToken}`];
+    child.stdout.on('data', (chunk: string) => { active.stdout = appendLog(active.stdout, chunk, logRedactions); });
+    child.stderr.on('data', (chunk: string) => { active.stderr = appendLog(active.stderr, chunk, logRedactions); });
     child.once('error', (error) => this.finishActive(active, sanitizedError(error)));
     child.once('exit', (code) => this.finishActive(active, active.stderr.trim() || `tunnel-client encerrou com código ${code ?? 'desconhecido'}.`));
 
