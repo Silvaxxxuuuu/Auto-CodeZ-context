@@ -152,7 +152,7 @@ function createChildEnvironment(
 }
 
 function waitForChildExit(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null) return Promise.resolve(true);
+  if (child.exitCode !== null && child.exitCode !== undefined) return Promise.resolve(true);
   return new Promise((resolve) => {
     let settled = false;
     const finish = (exited: boolean) => {
@@ -169,7 +169,7 @@ function waitForChildExit(child: ChildProcessWithoutNullStreams, timeoutMs: numb
 }
 
 async function processTreeKill(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.exitCode !== null) return;
+  if (child.exitCode !== null && child.exitCode !== undefined) return;
   const exited = waitForChildExit(child, 3_000);
   if (process.platform === 'win32' && child.pid) {
     await new Promise<void>((resolve) => {
