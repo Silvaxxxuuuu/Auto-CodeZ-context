@@ -447,7 +447,7 @@ function render(): void {
     <section class="mcp-mode-main">
       <header class="mcp-mode-header">
         <div>
-          <div class="mcp-mode-title-row"><span class="mcp-live-dot state-${escapeHtml(header.state)}"></span><h1>${escapeHtml(header.title)}</h1><span class="mcp-header-state">${escapeHtml(stateLabel(header.state))}</span></div>
+          <div class="mcp-mode-title-row"><span class="mcp-live-dot state-${escapeHtml(header.state)}"></span><h1>${escapeHtml(header.title)}</h1>${mcpActivityEvents().length ? `<span class="mcp-header-state">${escapeHtml(stateLabel(header.state))}</span>` : ''}</div>
           <div class="mcp-mode-subtitle">${escapeHtml(header.subtitle)}${header.project ? ` · Projeto ${escapeHtml(header.project)}` : ''}${header.run ? ` · ${escapeHtml(header.run.slice(0, 16))}` : ''}</div>
         </div>
         <div class="mcp-header-actions">${header.clientId === 'autocodez-chat' && header.chatId && (header.state === 'running' || header.state === 'waiting' || header.state === 'pending') ? `<button class="mcp-stop-button" type="button" data-mcp-stop="${escapeHtml(header.chatId)}">■ Parar</button>` : ''}<button class="mcp-refresh-button" type="button" data-mcp-clients>Clientes</button><button class="mcp-refresh-button" type="button" data-mcp-advanced>${showAdvanced ? 'Ocultar técnico' : 'Avançado'}</button><button class="mcp-refresh-button" type="button" data-mcp-refresh>Atualizar</button></div>
@@ -740,13 +740,14 @@ function install(): void {
       const keyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
       const tunnelId = (tunnelIdInput?.value ?? tunnelIdDraft).trim();
       tunnelIdDraft = tunnelId;
-      let controlPlaneApiKey = keyInput?.value ?? '';
+      const controlPlaneApiKey = (keyInput?.value ?? '').trim();
+      const request = {
+        tunnelId,
+        ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
+      };
       if (keyInput) keyInput.value = '';
       try {
-        const result = await window.autoCodez.doctorMcpTunnel({
-          tunnelId,
-          ...(controlPlaneApiKey.trim() ? { controlPlaneApiKey } : {}),
-        });
+        const result = await window.autoCodez.doctorMcpTunnel(request);
         gatewayPreflight = result.gateway;
         gatewayPreflightError = '';
         const diagnosticTail = result.diagnostics
@@ -759,8 +760,6 @@ function install(): void {
       } catch (error) {
         tunnelDoctorResult = '';
         tunnelError = error instanceof Error ? error.message : String(error);
-      } finally {
-        controlPlaneApiKey = '';
       }
       render();
       return;
@@ -771,18 +770,17 @@ function install(): void {
       const keyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
       const tunnelId = (tunnelIdInput?.value ?? tunnelIdDraft).trim();
       tunnelIdDraft = tunnelId;
-      let controlPlaneApiKey = keyInput?.value ?? '';
+      const controlPlaneApiKey = (keyInput?.value ?? '').trim();
+      const request = {
+        tunnelId,
+        ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
+      };
       if (keyInput) keyInput.value = '';
       try {
-        await window.autoCodez.startMcpTunnel({
-          tunnelId,
-          ...(controlPlaneApiKey.trim() ? { controlPlaneApiKey } : {}),
-        });
+        await window.autoCodez.startMcpTunnel(request);
         tunnelDoctorResult = '';
       } catch (error) {
         tunnelError = error instanceof Error ? error.message : String(error);
-      } finally {
-        controlPlaneApiKey = '';
       }
       await refresh();
       return;
