@@ -1187,8 +1187,16 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on('before-quit', () => {
-  void mcpTunnelRuntime.stop();
-  void mcpGatewayServer.stop();
+let shutdownCleanupStarted = false;
+
+app.on('before-quit', (event) => {
+  if (shutdownCleanupStarted) return;
+  shutdownCleanupStarted = true;
+  event.preventDefault();
+  void (async () => {
+    await mcpTunnelRuntime.stop().catch((): undefined => undefined);
+    await mcpGatewayServer.stop().catch((): undefined => undefined);
+    app.quit();
+  })();
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
