@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 type Pending = { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout };
-type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number; closed: boolean };
+type Session = { child: ChildProcessWithoutNullStreams; pending: Map<number, Pending>; buffer: string; nextId: number; closed: boolean; closeReason?: string };
 export type McpConnectInput = { command: string; args?: string[]; timeoutMs?: number };
 export type McpToolDescriptor = { name: string; description?: string; inputSchema?: unknown };
 export type McpToolList = { tools: McpToolDescriptor[] };
@@ -150,6 +150,7 @@ export class PluginMcpStdioRuntime {
     }
     session.pending.clear();
     session.closed = true;
+    session.closeReason = 'Sessão MCP encerrada.';
     session.child.kill();
     return true;
   }
@@ -169,6 +170,7 @@ export class PluginMcpStdioRuntime {
     const close = (reason: string) => {
       if (session.closed) return;
       session.closed = true;
+      session.closeReason = stderr.trim() || reason;
       for (const pending of session.pending.values()) {
         clearTimeout(pending.timer);
         pending.reject(new Error(stderr.trim() || reason));
@@ -212,7 +214,7 @@ export class PluginMcpStdioRuntime {
   }
 
   private request(session: Session, method: string, params: unknown, timeoutMs: number): Promise<unknown> {
-    if (session.closed) return Promise.reject(new Error('Sessão MCP encerrada.'));
+    if (session.closed) return Promise.reject(new Error(session.closeReason || 'Sessão MCP encerrada.'));
     const id = session.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
