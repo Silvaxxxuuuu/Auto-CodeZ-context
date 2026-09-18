@@ -488,7 +488,12 @@ function install(): void {
     events = [...events.filter((item) => item.eventId !== event.eventId), event]
       .sort((left, right) => left.sequence - right.sequence)
       .slice(-MAX_RENDERED_EVENTS);
-    if (active) render();
+    if (!active) return;
+    if (event.state === 'waiting' || event.category === 'approval') {
+      void refresh();
+      return;
+    }
+    render();
   });
 
   window.addEventListener('beforeunload', () => unsubscribeLedger?.(), { once: true });
