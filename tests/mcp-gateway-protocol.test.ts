@@ -49,9 +49,9 @@ function fixture() {
   return new McpGatewayProtocol(new OperationalLedgerRetrieval(ledger));
 }
 
-test('MCP gateway advertises only bounded read-only retrieval tools in phase one', () => {
+test('MCP gateway advertises only bounded read-only retrieval tools in phase one', async () => {
   const protocol = fixture();
-  const listed = protocol.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+  const listed = await protocol.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
   assert.ok(listed?.result);
   const tools = (listed.result as { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }> }).tools;
   assert.deepEqual(tools.map((tool) => tool.name), [
@@ -65,9 +65,9 @@ test('MCP gateway advertises only bounded read-only retrieval tools in phase one
   assert.equal(tools.every((tool) => tool.annotations?.readOnlyHint === true && tool.annotations?.destructiveHint === false), true);
 });
 
-test('MCP gateway supports modern stateless server discovery', () => {
+test('MCP gateway supports modern stateless server discovery', async () => {
   const protocol = fixture();
-  const response = protocol.handle({ jsonrpc: '2.0', id: 'discover', method: 'server/discover', params: {} });
+  const response = await protocol.handle({ jsonrpc: '2.0', id: 'discover', method: 'server/discover', params: {} });
   assert.deepEqual(response, {
     jsonrpc: '2.0',
     id: 'discover',
@@ -79,9 +79,9 @@ test('MCP gateway supports modern stateless server discovery', () => {
   });
 });
 
-test('MCP gateway keeps legacy Streamable HTTP initialization compatible without mixing modern lifecycle', () => {
+test('MCP gateway keeps legacy Streamable HTTP initialization compatible without mixing modern lifecycle', async () => {
   const protocol = fixture();
-  const legacy = protocol.handle({
+  const legacy = await protocol.handle({
     jsonrpc: '2.0',
     id: 1,
     method: 'initialize',
@@ -89,7 +89,7 @@ test('MCP gateway keeps legacy Streamable HTTP initialization compatible without
   });
   assert.equal((legacy?.result as { protocolVersion?: string }).protocolVersion, '2025-11-25');
 
-  const modernOverInitialize = protocol.handle({
+  const modernOverInitialize = await protocol.handle({
     jsonrpc: '2.0',
     id: 2,
     method: 'initialize',
@@ -118,9 +118,9 @@ test('MCP gateway executes session retrieval tools and preserves structured cont
   assert.equal(result.content[0].type, 'text');
 });
 
-test('MCP gateway rejects unknown tools and malformed bounded arguments', () => {
+test('MCP gateway rejects unknown tools and malformed bounded arguments', async () => {
   const protocol = fixture();
-  const unknown = protocol.handle({
+  const unknown = await protocol.handle({
     jsonrpc: '2.0',
     id: 4,
     method: 'tools/call',
@@ -128,7 +128,7 @@ test('MCP gateway rejects unknown tools and malformed bounded arguments', () => 
   });
   assert.equal(unknown?.error?.code, -32602);
 
-  const invalidScope = protocol.handle({
+  const invalidScope = await protocol.handle({
     jsonrpc: '2.0',
     id: 5,
     method: 'tools/call',
@@ -137,10 +137,10 @@ test('MCP gateway rejects unknown tools and malformed bounded arguments', () => 
   assert.equal(invalidScope?.error?.code, -32602);
 });
 
-test('MCP gateway ignores initialized notifications and rejects unsupported methods', () => {
+test('MCP gateway ignores initialized notifications and rejects unsupported methods', async () => {
   const protocol = fixture();
-  assert.equal(protocol.handle({ jsonrpc: '2.0', method: 'notifications/initialized' }), undefined);
-  const unsupported = protocol.handle({ jsonrpc: '2.0', id: 6, method: 'resources/list' });
+  assert.equal(await protocol.handle({ jsonrpc: '2.0', method: 'notifications/initialized' }), undefined);
+  const unsupported = await protocol.handle({ jsonrpc: '2.0', id: 6, method: 'resources/list' });
   assert.equal(unsupported?.error?.code, -32601);
 });
 
@@ -179,9 +179,9 @@ function executableProtocol(nextResult: { pendingApproval?: boolean; approvalId?
   return { protocol: new McpGatewayProtocol(retrieval, execution), execution, calls };
 }
 
-test('MCP gateway lists dynamic plugin tools with write annotations and operation_status', () => {
+test('MCP gateway lists dynamic plugin tools with write annotations and operation_status', async () => {
   const fixture = executableProtocol();
-  const response = fixture.protocol.handle({ jsonrpc: '2.0', id: 10, method: 'tools/list' });
+  const response = await fixture.protocol.handle({ jsonrpc: '2.0', id: 10, method: 'tools/list' });
   const tools = (response?.result as { tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }> }).tools;
 
   const playtest = tools.find((tool) => tool.name === 'roblox_run_playtest');
@@ -229,7 +229,7 @@ test('MCP gateway returns waiting approval and exposes operation status for exte
   assert.equal(operation?.approvalId, 'approval-a');
   assert.ok(operation?.operationId);
 
-  const status = fixture.protocol.handle({
+  const status = await fixture.protocol.handle({
     jsonrpc: '2.0',
     id: 13,
     method: 'tools/call',
