@@ -107,6 +107,18 @@ test('MCP stdio transport rejects unsafe command and bounded input before spawni
 });
 
 
+
+test('trusted Roblox Studio launch plan owns Windows cmd invocation', () => {
+  assert.deepEqual(buildRobloxStudioLaunchPlan('win32', { ComSpec: 'C:\\Windows\\System32\\cmd.exe' }, 'C:\\Users\\User\\AppData\\Local\\Roblox\\mcp.bat'), {
+    command: 'C:\\Windows\\System32\\cmd.exe',
+    args: ['/d', '/s', '/c', 'C:\\Users\\User\\AppData\\Local\\Roblox\\mcp.bat'],
+  });
+  assert.deepEqual(buildRobloxStudioLaunchPlan('darwin', {}, '/Applications/RobloxStudio.app/Contents/MacOS/StudioMCP'), {
+    command: '/Applications/RobloxStudio.app/Contents/MacOS/StudioMCP',
+    args: [],
+  });
+});
+
 test('Roblox Studio MCP resolver fails clearly when Windows discovery prerequisites are missing', () => {
   assert.throws(() => resolveRobloxStudioMcpCommand('win32', {}), /LOCALAPPDATA/);
   assert.throws(() => resolveRobloxStudioMcpCommand('linux', {}), /apenas no Windows e macOS/);
