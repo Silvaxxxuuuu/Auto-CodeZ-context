@@ -179,6 +179,25 @@ const buildPlaytestInteractionSchema = (catalog) => {
   };
 };
 
+const parseStudioInstances = (listed) => {
+  if (!listed || typeof listed !== 'object' || Array.isArray(listed)) return [];
+  const structured = listed.structuredContent;
+  if (Array.isArray(structured)) return structured;
+  if (structured && typeof structured === 'object' && Array.isArray(structured.studios)) return structured.studios;
+  const content = Array.isArray(listed.content) ? listed.content : [];
+  const text = content
+    .filter((item) => item && item.type === 'text' && typeof item.text === 'string')
+    .map((item) => item.text)
+    .join('\n');
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.studios)) return parsed.studios;
+  } catch {}
+  return [];
+};
+
 async function connect(api) {
   if (sessionId) {
     const status = await api.mcp.status(sessionId);
@@ -188,76 +207,97 @@ async function connect(api) {
     studioState = { connected: false, server: null, tools: 0, instanceCount: 0 };
     await api.settings.set('studioStatus', studioState);
   }
+
   await api.activity.publish('Conectando ao Roblox Studio...', 'running');
   const connected = await api.mcp.connectRobloxStudio(15000);
-  sessionId = connected.sessionId;
-  const catalog = await api.mcp.listTools(sessionId, 15000);
-  const requiredPlaytestTools = ['start_stop_play', 'screen_capture', 'get_console_output'];
-  const canRunPlaytest = requiredPlaytestTools.every((name) => catalog.tools.some((tool) => tool.name === name));
-  if (catalog.tools.length + (canRunPlaytest ? 1 : 0) > MAX_AGENT_TOOLS) throw new Error('O Roblox Studio expôs operações demais para o catálogo seguro do Auto CodeZ.');
-  const usedToolIds = new Set();
-  const preferredIds = new Map(Object.entries(HIGH_LEVEL_OPERATIONS).map(([id, name]) => [name, id]));
-  const tools = catalog.tools.map((tool) => {
-    const preferred = preferredIds.get(tool.name);
-    const id = preferred && !usedToolIds.has(preferred) ? preferred : normalizeToolId(tool.name, usedToolIds);
-    if (preferred) usedToolIds.add(id);
-    studioTools.set(id, tool);
-    return {
-      id,
-      title: tool.name,
-      description: tool.description || ('Executa ' + tool.name + ' no Roblox Studio conectado.'),
-      risk: TOOL_RISK[tool.name] || 'sensitive',
-      parameters: toStrictSchema(tool.inputSchema),
-    };
-  });
-  if (canRunPlaytest) {
-    const playTool = catalog.tools.find((tool) => tool.name === 'start_stop_play');
-    const captureTool = catalog.tools.find((tool) => tool.name === 'screen_capture');
-    const consoleTool = catalog.tools.find((tool) => tool.name === 'get_console_output');
-    const playSchema = withoutStudioId(playTool.inputSchema);
-    const interactionSchema = buildPlaytestInteractionSchema(catalog);
-    const playtestProperties = {
-      playInput: playSchema,
-      studioId: { type: 'string', maxLength: 128 },
-      captureInput: withoutStudioId(captureTool.inputSchema),
-      consoleInput: withoutStudioId(consoleTool.inputSchema),
-      stopInput: playSchema,
-    };
-    if (interactionSchema) playtestProperties.interactions = interactionSchema;
-    tools.push({
-      id: PLAYTEST_TOOL_ID,
-      title: 'Run Playtest',
-      description: 'Executa um ciclo de playtest no Roblox Studio, captura a viewport, lê o console e garante Stop ao finalizar.',
-      risk: 'write',
-      parameters: {
-        type: 'object',
-        properties: playtestProperties,
-        required: ['studioId', 'playInput', 'stopInput'],
-        additionalProperties: false,
-      },
+  const candidateSessionId = connected.sessionId;
+  sessionId = candidateSessionId;
+
+  try {
+    const catalog = await api.mcp.listTools(candidateSessionId, 15000);
+    const requiredPlaytestTools = ['start_stop_play', 'screen_capture', 'get_console_output'];
+    const canRunPlaytest = requiredPlaytestTools.every((name) => catalog.tools.some((tool) => tool.name === name));
+    if (catalog.tools.length + (canRunPlaytest ? 1 : 0) > MAX_AGENT_TOOLS) {
+      throw new Error('O Roblox Studio expôs operações demais para o catálogo seguro do Auto CodeZ.');
+    }
+
+    const usedToolIds = new Set();
+    const preferredIds = new Map(Object.entries(HIGH_LEVEL_OPERATIONS).map(([id, name]) => [name, id]));
+    const tools = catalog.tools.map((tool) => {
+      const preferred = preferredIds.get(tool.name);
+      const id = preferred && !usedToolIds.has(preferred) ? preferred : normalizeToolId(tool.name, usedToolIds);
+      if (preferred) usedToolIds.add(id);
+      studioTools.set(id, tool);
+      return {
+        id,
+        title: tool.name,
+        description: tool.description || ('Executa ' + tool.name + ' no Roblox Studio conectado.'),
+        risk: TOOL_RISK[tool.name] || 'sensitive',
+        parameters: toStrictSchema(tool.inputSchema),
+      };
     });
+
+    if (canRunPlaytest) {
+      const playTool = catalog.tools.find((tool) => tool.name === 'start_stop_play');
+      const captureTool = catalog.tools.find((tool) => tool.name === 'screen_capture');
+      const consoleTool = catalog.tools.find((tool) => tool.name === 'get_console_output');
+      const playSchema = withoutStudioId(playTool.inputSchema);
+      const interactionSchema = buildPlaytestInteractionSchema(catalog);
+      const playtestProperties = {
+        playInput: playSchema,
+        studioId: { type: 'string', maxLength: 128 },
+        captureInput: withoutStudioId(captureTool.inputSchema),
+        consoleInput: withoutStudioId(consoleTool.inputSchema),
+        stopInput: playSchema,
+      };
+      if (interactionSchema) playtestProperties.interactions = interactionSchema;
+      tools.push({
+        id: PLAYTEST_TOOL_ID,
+        title: 'Run Playtest',
+        description: 'Executa um ciclo de playtest no Roblox Studio, captura a viewport, lê o console e garante Stop ao finalizar.',
+        risk: 'write',
+        parameters: {
+          type: 'object',
+          properties: playtestProperties,
+          required: ['studioId', 'playInput', 'stopInput'],
+          additionalProperties: false,
+        },
+      });
+    }
+
+    studioState = {
+      connected: true,
+      server: {
+        name: connected.serverName || 'Roblox Studio',
+        version: connected.serverVersion || null,
+        protocolVersion: connected.protocolVersion || null,
+      },
+      tools: tools.length,
+      instanceCount: 0,
+    };
+
+    const listStudios = catalog.tools.find((tool) => tool.name === 'list_roblox_studios');
+    if (listStudios) {
+      try {
+        const listed = await api.mcp.callTool(candidateSessionId, listStudios.name, {}, 15000);
+        studioState.instanceCount = Math.min(parseStudioInstances(listed).length, 100);
+      } catch {}
+    }
+
+    await api.settings.set('lastServer', studioState.server);
+    await api.settings.set('studioStatus', studioState);
+    await api.tools.register(tools);
+    await api.activity.publish('Roblox Studio conectado.', 'completed');
+  } catch (error) {
+    if (sessionId === candidateSessionId) sessionId = null;
+    studioTools.clear();
+    studioState = { connected: false, server: null, tools: 0, instanceCount: 0 };
+    try { await api.settings.set('studioStatus', studioState); } catch {}
+    try { await api.settings.remove('lastServer'); } catch {}
+    try { await api.tools.register([]); } catch {}
+    try { await api.mcp.disconnect(candidateSessionId); } catch {}
+    throw error;
   }
-  await api.tools.register(tools);
-  studioState = {
-    connected: true,
-    server: { name: connected.serverName || 'Roblox Studio', version: connected.serverVersion || null, protocolVersion: connected.protocolVersion || null },
-    tools: tools.length,
-    instanceCount: 0,
-  };
-  const listStudios = catalog.tools.find((tool) => tool.name === 'list_roblox_studios');
-  if (listStudios) {
-    try {
-      const listed = await api.mcp.callTool(sessionId, listStudios.name, {}, 15000);
-      const content = listed && typeof listed === 'object' && Array.isArray(listed.content) ? listed.content : [];
-      const text = content.filter((item) => item && item.type === 'text' && typeof item.text === 'string').map((item) => item.text).join('\n');
-      const parsed = text ? JSON.parse(text) : null;
-      const instances = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.studios) ? parsed.studios : []);
-      studioState.instanceCount = Math.min(instances.length, 100);
-    } catch {}
-  }
-  await api.settings.set('lastServer', studioState.server);
-  await api.settings.set('studioStatus', studioState);
-  await api.activity.publish('Roblox Studio conectado.', 'completed');
 }
 
 autoCodez.register({
