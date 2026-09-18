@@ -132,6 +132,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   stopMcpTunnel: () => invoke('mcp-tunnel:stop'),
   mcpGatewayStatus: () => invoke('mcp-gateway:status'),
+  preflightMcpGateway: () => invoke('mcp-gateway:preflight'),
   startMcpGateway: (input?: { port?: number }) => invoke('mcp-gateway:start', input),
   stopMcpGateway: () => invoke('mcp-gateway:stop'),
   listOperationalLedger: (query?: {
