@@ -80,7 +80,9 @@ test('MCP runtime installer downloads, verifies and installs the exact Windows a
   }) as never;
 
   try {
-    const installer = new McpRuntimeInstaller(() => root, fetchImpl, spawnProcess, 'win32', 'x64');
+    const manifest = `${checksum}  tunnel-client-v0.0.14-windows-amd64.zip\n`;
+    const manifestDigest = createHash('sha256').update(manifest).digest('hex');
+    const installer = new McpRuntimeInstaller(() => root, fetchImpl, spawnProcess, 'win32', 'x64', manifestDigest);
     const result = await installer.prepare();
     assert.equal(result.ready, true);
     assert.equal(result.managed, true);
@@ -107,7 +109,9 @@ test('MCP runtime installer rejects a release archive with a checksum mismatch',
     return new Response(archive, { status: 200 });
   }) as typeof fetch;
   try {
-    const installer = new McpRuntimeInstaller(() => root, fetchImpl, undefined, 'win32', 'x64');
+    const mismatchManifest = `${'0'.repeat(64)}  tunnel-client-v0.0.14-windows-amd64.zip\n`;
+    const mismatchManifestDigest = createHash('sha256').update(mismatchManifest).digest('hex');
+    const installer = new McpRuntimeInstaller(() => root, fetchImpl, undefined, 'win32', 'x64', mismatchManifestDigest);
     await assert.rejects(() => installer.prepare(), /integridade/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
