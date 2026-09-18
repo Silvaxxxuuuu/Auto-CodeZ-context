@@ -65,6 +65,7 @@ let tunnelStatus: TunnelStatus = { running: false, ready: false, credentialAvail
 let tunnelDoctorResult = '';
 let tunnelError = '';
 let tunnelIdDraft = '';
+let tunnelKeyDraft = '';
 let refreshSequence = 0;
 let runtimeStatus: McpRuntimeStatus = { platform: '', arch: '', supported: true, ready: false, version: '0.0.14', managed: false };
 let onboardingStep: OnboardingStep = (() => {
@@ -503,6 +504,8 @@ function render(): void {
         ${loading ? '<div class="mcp-empty">Carregando sessões MCP…</div>' : timeline.length ? timeline.map(renderEvent).join('') : mcpActivityEvents().length ? '<div class="mcp-empty">Nenhum evento corresponde a este filtro.</div>' : '<div class="mcp-empty mcp-empty-session"><strong>Nenhuma sessão conectada.</strong><span>Quando ChatGPT, Codex ou outro cliente usar o Auto CodeZ, cada ação aparecerá aqui em tempo real.</span></div>'}
       </section>
     </section>`;
+  const tunnelKeyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
+  if (tunnelKeyInput && tunnelKeyDraft) tunnelKeyInput.value = tunnelKeyDraft;
 }
 
 async function ensureOperationalRuntime(): Promise<void> {
@@ -568,11 +571,15 @@ function show(): void {
 
 function hide(): void {
   if (!active) return;
+  tunnelKeyDraft = '';
+  const root = document.getElementById(rootId);
+  const tunnelKeyInput = root?.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
+  if (tunnelKeyInput) tunnelKeyInput.value = '';
   active = false;
   refreshSequence += 1;
   document.body.classList.remove('mcp-mode-active');
-  const root = document.getElementById(rootId);
-  if (root) root.hidden = true;
+  const rootAfterHide = document.getElementById(rootId);
+  if (rootAfterHide) rootAfterHide.hidden = true;
 }
 
 function installStyles(): void {
@@ -633,6 +640,7 @@ function install(): void {
   root.addEventListener('input', (event) => {
     const target = event.target as HTMLInputElement;
     if (target.matches('[data-mcp-tunnel-id]')) tunnelIdDraft = target.value;
+    if (target.matches('[data-mcp-tunnel-key]')) tunnelKeyDraft = target.value;
   });
 
   root.addEventListener('click', async (event) => {
@@ -740,11 +748,12 @@ function install(): void {
       const keyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
       const tunnelId = (tunnelIdInput?.value ?? tunnelIdDraft).trim();
       tunnelIdDraft = tunnelId;
-      const controlPlaneApiKey = (keyInput?.value ?? '').trim();
+      const controlPlaneApiKey = (keyInput?.value ?? tunnelKeyDraft).trim();
       const request = {
         tunnelId,
         ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
       };
+      tunnelKeyDraft = '';
       if (keyInput) keyInput.value = '';
       try {
         const result = await window.autoCodez.doctorMcpTunnel(request);
@@ -770,11 +779,12 @@ function install(): void {
       const keyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
       const tunnelId = (tunnelIdInput?.value ?? tunnelIdDraft).trim();
       tunnelIdDraft = tunnelId;
-      const controlPlaneApiKey = (keyInput?.value ?? '').trim();
+      const controlPlaneApiKey = (keyInput?.value ?? tunnelKeyDraft).trim();
       const request = {
         tunnelId,
         ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
       };
+      tunnelKeyDraft = '';
       if (keyInput) keyInput.value = '';
       try {
         await window.autoCodez.startMcpTunnel(request);
@@ -831,6 +841,9 @@ function install(): void {
       return;
     }
     if (target.closest('[data-mcp-refresh]')) {
+      tunnelKeyDraft = '';
+      const tunnelKeyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
+      if (tunnelKeyInput) tunnelKeyInput.value = '';
       await refresh();
       return;
     }
