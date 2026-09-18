@@ -196,6 +196,10 @@ export class PluginCapabilityBroker {
         ...(typeof value.timeoutMs === 'number' ? { timeoutMs: value.timeoutMs } : {}),
       });
     });
+    this.register('mcp.status', 'terminal:execute', async (pluginId, input) => {
+      const value = requireRecord(input);
+      return this.mcp.status(pluginId, requireString(value.sessionId, 'Sessão MCP', 128));
+    });
     this.register('mcp.list-tools', 'terminal:execute', async (pluginId, input) => {
       const value = requireRecord(input);
       return this.mcp.listTools(pluginId, requireString(value.sessionId, 'Sessão MCP', 128), optionalNumber(value.timeoutMs, 'Timeout'));
