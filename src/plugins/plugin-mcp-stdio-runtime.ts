@@ -83,6 +83,7 @@ export class PluginMcpStdioRuntime {
         capabilities: {},
         clientInfo: { name: 'Auto CodeZ', version: '2.0.0-alpha.1' },
       }, timeout(input?.timeoutMs)) as { protocolVersion?: unknown; serverInfo?: { name?: unknown; version?: unknown } };
+      if (!result?.protocolVersion || typeof result.protocolVersion !== 'string' || result.protocolVersion.length > 128) throw new Error('Servidor MCP retornou protocolVersion inválida.');
       this.notify(session, 'notifications/initialized', {});
       return {
         sessionId,
@@ -194,7 +195,8 @@ export class PluginMcpStdioRuntime {
       if (line) {
         try {
           const message = JSON.parse(line) as { jsonrpc?: unknown; id?: unknown; result?: unknown; error?: { message?: unknown } };
-          if (message.jsonrpc === '2.0' && typeof message.id === 'number') {
+          if (message.jsonrpc !== '2.0') { session.child.kill(); return; }
+          if (typeof message.id === 'number') {
             const pending = session.pending.get(message.id);
             if (pending) {
               session.pending.delete(message.id);
@@ -222,11 +224,25 @@ export class PluginMcpStdioRuntime {
         reject(new Error(`Solicitação MCP '${method}' excedeu o tempo limite.`));
       }, timeoutMs);
       session.pending.set(id, { resolve, reject, timer });
-      session.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+      try {
+        session.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n', (error) => {
+          if (!error) return;
+          const pending = session.pending.get(id);
+          if (!pending) return;
+          session.pending.delete(id);
+          clearTimeout(pending.timer);
+          pending.reject(error);
+        });
+      } catch (error) {
+        session.pending.delete(id);
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
   private notify(session: Session, method: string, params: unknown): void {
+    if (session.closed) throw new Error(session.closeReason || 'Sessão MCP encerrada.');
     session.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n');
   }
 
