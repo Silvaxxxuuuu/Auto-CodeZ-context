@@ -25,6 +25,7 @@ export type PluginToolExecutionContext = {
   chatId: string;
   projectId: string;
   runId?: string;
+  toolCallId?: string;
   permission: PermissionLevel;
 };
 
