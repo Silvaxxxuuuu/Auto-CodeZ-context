@@ -86,6 +86,7 @@ const api = Object.freeze({
   mcp: Object.freeze({
     connectRobloxStudio: (timeoutMs) => request('mcp.connect-roblox-studio', { timeoutMs }),
     connect: (input) => request('mcp.connect', input),
+    status: (sessionId) => request('mcp.status', { sessionId }),
     listTools: (sessionId, timeoutMs) => request('mcp.list-tools', { sessionId, timeoutMs }),
     callTool: (sessionId, name, args, timeoutMs) => request('mcp.call-tool', { sessionId, name, arguments: args, timeoutMs }),
     disconnect: (sessionId) => request('mcp.disconnect', { sessionId }),
