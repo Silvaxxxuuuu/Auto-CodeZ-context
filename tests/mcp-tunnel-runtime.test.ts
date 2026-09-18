@@ -228,3 +228,29 @@ test('Secure MCP Tunnel preserves a sanitized failure status after unexpected ch
     await f.cleanup();
   }
 });
+
+
+test('Secure MCP Tunnel publishes reactive status changes and isolates listener failures', async () => {
+  const f = fixture();
+  try {
+    const runtime = await f.create({ CONTROL_PLANE_API_KEY: 'sk-control-test' });
+    const observed: Array<{ running: boolean; ready: boolean; error?: string }> = [];
+    runtime.subscribe(() => { throw new Error('listener failure'); });
+    runtime.subscribe((status) => observed.push({ running: status.running, ready: status.ready, ...(status.error ? { error: status.error } : {}) }));
+
+    await runtime.start({
+      tunnelId: 'tunnel_' + 'f'.repeat(32),
+      localEndpoint: 'http://127.0.0.1:6123/mcp',
+      localBearerToken: 'local-bearer-value-1234567890',
+    });
+
+    assert.equal(observed.some((status) => status.running && !status.ready), true);
+    assert.equal(observed.some((status) => status.running && status.ready), true);
+
+    await runtime.stop();
+    assert.equal(observed.at(-1)?.running, false);
+    assert.equal(observed.at(-1)?.ready, false);
+  } finally {
+    await f.cleanup();
+  }
+});
