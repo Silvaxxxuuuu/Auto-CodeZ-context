@@ -19,6 +19,8 @@ export type McpTunnelStatus = {
   error?: string;
 };
 
+export type McpTunnelListener = (status: McpTunnelStatus) => void;
+
 export type McpTunnelStartInput = {
   tunnelId: string;
   localEndpoint: string;
@@ -164,6 +166,7 @@ async function readHealthUrl(file: string): Promise<string | undefined> {
 export class McpTunnelRuntime {
   private active?: ActiveTunnel;
   private lastStatus: McpTunnelStatus = { running: false, ready: false };
+  private readonly listeners = new Set<McpTunnelListener>();
 
   constructor(
     private readonly spawnProcess: McpTunnelSpawn = spawn as McpTunnelSpawn,
@@ -174,6 +177,11 @@ export class McpTunnelRuntime {
 
   status(): McpTunnelStatus {
     return this.active ? { ...this.active.status } : { ...this.lastStatus };
+  }
+
+  subscribe(listener: McpTunnelListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   async doctor(executable?: string): Promise<{ executable: string; version: string; supported: true }> {
@@ -242,6 +250,7 @@ export class McpTunnelRuntime {
     };
     this.active = active;
     this.lastStatus = { ...active.status };
+    this.publishStatus();
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => { active.stdout = appendLog(active.stdout, chunk); });
@@ -252,6 +261,7 @@ export class McpTunnelRuntime {
     try {
       await this.waitUntilReady(active);
       this.lastStatus = { ...active.status };
+      this.publishStatus();
       return { ...active.status };
     } catch (error) {
       const message = sanitizedError(error);
@@ -265,6 +275,7 @@ export class McpTunnelRuntime {
     if (!active) return false;
     this.active = undefined;
     this.lastStatus = { ...active.status, running: false, ready: false };
+    this.publishStatus();
     processTreeKill(active.child);
     await fs.rm(path.dirname(active.healthFile), { recursive: true, force: true }).catch((): undefined => undefined);
     return true;
@@ -348,6 +359,17 @@ export class McpTunnelRuntime {
     };
     this.lastStatus = { ...active.status };
     this.active = undefined;
+    this.publishStatus();
     void fs.rm(path.dirname(active.healthFile), { recursive: true, force: true }).catch((): undefined => undefined);
+  }
+
+  private publishStatus(): void {
+    const status = this.status();
+    for (const listener of this.listeners) {
+      try {
+        listener({ ...status });
+      } catch {
+      }
+    }
   }
 }
