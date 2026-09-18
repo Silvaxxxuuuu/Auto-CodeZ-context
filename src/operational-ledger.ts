@@ -53,6 +53,7 @@ export type OperationalLedgerQuery = {
   category?: OperationalLedgerCategory;
   state?: OperationalLedgerState;
   limit?: number;
+  direction?: 'forward' | 'backward';
 };
 
 export type OperationalLedgerPage = {
@@ -307,11 +308,12 @@ export class OperationalLedger {
       return true;
     });
 
-    const events = filtered.slice(0, limit).map(cloneEvent);
+    const ordered = query.direction === 'backward' ? [...filtered].reverse() : filtered;
+    const events = ordered.slice(0, limit).map(cloneEvent);
     return {
       events,
       ...(events.length ? { firstSequence: events[0].sequence, lastSequence: events[events.length - 1].sequence } : {}),
-      hasMore: filtered.length > events.length,
+      hasMore: ordered.length > events.length,
     };
   }
 
