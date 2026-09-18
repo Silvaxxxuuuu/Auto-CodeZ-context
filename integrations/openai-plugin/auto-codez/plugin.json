@@ -29,7 +29,10 @@
           "automation"
         ],
         "brandColor": "#3478D5",
-        "defaultPrompt": "Use Auto CodeZ to inspect this project, make the requested changes within scope, verify the result, and report what changed."
+        "defaultPrompt": [
+          "Use Auto CodeZ to inspect this project, make the requested changes within scope, verify the result, and report what changed.",
+          "Use Auto CodeZ to continue the current local project task from the existing session context."
+        ]
       }
     }
   }
