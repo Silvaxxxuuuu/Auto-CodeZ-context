@@ -43,26 +43,42 @@ export class OperationalLedgerStore {
 
 export class OperationalLedgerPersistence {
   private pending: Promise<void> = Promise.resolve();
+  private queued: OperationalLedgerEvent[] | undefined;
+  private draining = false;
   private lastError: Error | undefined;
 
   constructor(private readonly store: OperationalLedgerStore) {}
 
   schedule(events: OperationalLedgerEvent[]): void {
-    const snapshot = events.map(cloneEvent);
-    this.pending = this.pending
-      .catch((): void => {})
-      .then(async (): Promise<void> => {
+    this.queued = events.map(cloneEvent);
+    if (this.draining) return;
+    this.draining = true;
+    this.pending = this.drain();
+  }
+
+  async flush(): Promise<void> {
+    await this.pending;
+    if (this.lastError) throw this.lastError;
+  }
+
+  private async drain(): Promise<void> {
+    try {
+      while (this.queued) {
+        const snapshot = this.queued;
+        this.queued = undefined;
         try {
           await this.store.save(snapshot);
           this.lastError = undefined;
         } catch (error) {
           this.lastError = error instanceof Error ? error : new Error(String(error));
         }
-      });
-  }
-
-  async flush(): Promise<void> {
-    await this.pending;
-    if (this.lastError) throw this.lastError;
+      }
+    } finally {
+      this.draining = false;
+      if (this.queued) {
+        this.draining = true;
+        this.pending = this.drain();
+      }
+    }
   }
 }
