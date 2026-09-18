@@ -73,7 +73,12 @@ export class PluginMcpStdioRuntime {
     if (owned.size >= MAX_SESSIONS) throw new Error('Plugin excedeu o limite de sessões MCP.');
     const requestedCommand = command(input?.command);
     const requestedArgs = args(input?.args);
-    const child = this.spawnProcess(requestedCommand, requestedArgs, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = this.spawnProcess(requestedCommand, requestedArgs, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    } catch (error) {
+      throw new Error(`Não foi possível iniciar o servidor MCP: ${error instanceof Error ? error.message : String(error)}`);
+    }
     const sessionId = crypto.randomUUID();
     const session: Session = { child, pending: new Map(), buffer: '', nextId: 1, closed: false };
     owned.set(sessionId, session);
@@ -169,7 +174,7 @@ export class PluginMcpStdioRuntime {
     session.pending.clear();
     session.closed = true;
     session.closeReason = 'Sessão MCP encerrada.';
-    session.child.kill();
+    if (!session.child.killed) session.child.kill();
     return true;
   }
 
