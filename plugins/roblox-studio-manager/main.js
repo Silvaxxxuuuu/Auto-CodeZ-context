@@ -166,6 +166,7 @@ const buildPlaytestInteractionSchema = (catalog) => {
   }
   return {
     type: 'array',
+    maxItems: MAX_PLAYTEST_INTERACTIONS,
     items: {
       type: 'object',
       properties,
@@ -214,7 +215,7 @@ async function connect(api) {
     const interactionSchema = buildPlaytestInteractionSchema(catalog);
     const playtestProperties = {
       playInput: playSchema,
-      studioId: { type: 'string' },
+      studioId: { type: 'string', maxLength: 128 },
       captureInput: withoutStudioId(captureTool.inputSchema),
       consoleInput: withoutStudioId(consoleTool.inputSchema),
       stopInput: playSchema,
