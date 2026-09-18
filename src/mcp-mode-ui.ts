@@ -120,12 +120,39 @@ function scopeKey(event: LedgerEvent): string {
   return 'global';
 }
 
+function isExternalMcpClientId(value: string | undefined): value is string {
+  return Boolean(value && value !== 'autocodez-chat' && !value.startsWith('autocodez-'));
+}
+
+function mcpActivityEvents(): LedgerEvent[] {
+  const direct = events.filter((event) => isExternalMcpClientId(event.clientId));
+  if (!direct.length) return [];
+
+  const runIds = new Set(direct.map((event) => event.runId).filter((value): value is string => Boolean(value)));
+  const chatIds = new Set(direct.map((event) => event.chatId).filter((value): value is string => Boolean(value)));
+  const sessionIds = new Set(direct.map((event) => event.sessionId).filter((value): value is string => Boolean(value)));
+  const causationIds = new Set(direct.map((event) => event.causationId).filter((value): value is string => Boolean(value)));
+  const toolCallIds = new Set(direct.map((event) => event.toolCallId).filter((value): value is string => Boolean(value)));
+
+  return events.filter((event) =>
+    isExternalMcpClientId(event.clientId)
+    || Boolean(event.runId && runIds.has(event.runId))
+    || Boolean(event.chatId && chatIds.has(event.chatId))
+    || Boolean(event.sessionId && sessionIds.has(event.sessionId))
+    || Boolean(event.causationId && causationIds.has(event.causationId))
+    || Boolean(event.toolCallId && toolCallIds.has(event.toolCallId))
+  );
+}
+
 function scopeLabel(event: LedgerEvent): string {
-  if (event.clientId && event.clientId !== 'autocodez-chat') return event.clientId;
+  if (isExternalMcpClientId(event.clientId)) return event.clientId;
+  const key = scopeKey(event);
+  const external = [...events].reverse().find((item) => scopeKey(item) === key && isExternalMcpClientId(item.clientId));
+  if (external?.clientId) return external.clientId;
   if (event.pluginId === 'autocodez.roblox-studio-manager') return 'Roblox Studio';
   if (event.providerId) return event.providerId;
-  if (event.runId) return 'Execução';
-  return 'Sistema';
+  if (event.runId) return 'Execução MCP';
+  return 'MCP';
 }
 
 function stateLabel(state: LedgerState): string {
@@ -166,7 +193,8 @@ function formatDuration(value: number | undefined): string {
 }
 
 function visibleEvents(): LedgerEvent[] {
-  let scoped = selectedScope ? events.filter((event) => scopeKey(event) === selectedScope) : events;
+  const mcpEvents = mcpActivityEvents();
+  let scoped = selectedScope ? mcpEvents.filter((event) => scopeKey(event) === selectedScope) : mcpEvents;
   if (selectedArtifactId) scoped = scoped.filter((event) => event.artifactIds?.includes(selectedArtifactId));
   if (filter === 'errors') return scoped.filter((event) => event.state === 'failed' || Boolean(event.error));
   if (filter === 'artifacts') return scoped.filter((event) => Boolean(event.artifactIds?.length));
@@ -176,7 +204,7 @@ function visibleEvents(): LedgerEvent[] {
 
 function sessionEntries(): Array<{ key: string; latest: LedgerEvent; count: number }> {
   const grouped = new Map<string, { latest: LedgerEvent; count: number }>();
-  for (const event of events) {
+  for (const event of mcpActivityEvents()) {
     const key = scopeKey(event);
     const current = grouped.get(key);
     if (!current) grouped.set(key, { latest: event, count: 1 });
@@ -192,15 +220,16 @@ function sessionEntries(): Array<{ key: string; latest: LedgerEvent; count: numb
 }
 
 function currentEvents(): LedgerEvent[] {
-  return selectedScope ? events.filter((event) => scopeKey(event) === selectedScope) : events;
+  const mcpEvents = mcpActivityEvents();
+  return selectedScope ? mcpEvents.filter((event) => scopeKey(event) === selectedScope) : mcpEvents;
 }
 
 function currentHeader(): { title: string; subtitle: string; state: LedgerState; provider?: string; project?: string; run?: string; chatId?: string; clientId?: string } {
   const scoped = currentEvents();
-  const latest = scoped.at(-1) ?? events.at(-1);
+  const latest = scoped.at(-1);
   const context = [...scoped].reverse().find((event) => event.providerId || event.projectId || event.clientId) ?? latest;
   if (!latest) {
-    return { title: 'MCP Mode', subtitle: 'Nenhuma atividade operacional registrada.', state: 'success' };
+    return { title: 'Nenhuma sessão conectada', subtitle: 'O MCP está pronto. Conecte uma IA para acompanhar a atividade aqui.', state: 'success' };
   }
   return {
     title: selectedScope ? scopeLabel(context ?? latest) : 'MCP Mode',
@@ -225,9 +254,7 @@ function artifacts(): string[] {
 }
 
 function relevantApprovals(): Approval[] {
-  const scoped = selectedScope
-    ? currentEvents()
-    : events.filter((event) => Boolean(event.clientId && event.clientId !== 'autocodez-chat'));
+  const scoped = currentEvents();
   const runIds = new Set(scoped.map((event) => event.runId).filter((value): value is string => Boolean(value)));
   const chatIds = new Set(scoped.map((event) => event.chatId).filter((value): value is string => Boolean(value)));
   if (!runIds.size && !chatIds.size) return [];
@@ -281,7 +308,7 @@ function expandedEventDetails(event: LedgerEvent): string {
 }
 
 function artifactMetadata(id: string): { label: string; meta: string } {
-  const event = [...events].reverse().find((item) => item.artifactIds?.includes(id));
+  const event = [...mcpActivityEvents()].reverse().find((item) => item.artifactIds?.includes(id));
   const kind = event?.details?.kind ? String(event.details.kind) : 'artifact';
   const mime = event?.details?.mimeType ? String(event.details.mimeType) : '';
   const bytes = typeof event?.details?.bytes === 'number' ? `${event.details.bytes} B` : '';
@@ -406,15 +433,15 @@ function render(): void {
   root.innerHTML = `
     <aside class="mcp-mode-sidebar">
       <div class="mcp-mode-sidebar-head"><span class="mcp-mode-kicker">MCP MODE</span><strong>Sessões</strong></div>
-      <button class="mcp-session-item ${selectedScope === '' ? 'active' : ''}" data-mcp-scope="">
-        <span class="mcp-session-led"></span><span><strong>Todas as atividades</strong><small>${events.length} eventos</small></span>
+      ${sessions.length ? `<button class="mcp-session-item ${selectedScope === '' ? 'active' : ''}" data-mcp-scope="">
+        <span class="mcp-session-led"></span><span><strong>Todas as sessões</strong><small>${mcpActivityEvents().length} eventos MCP</small></span>
       </button>
       <div class="mcp-session-list">
         ${sessions.map(({ key, latest, count }) => `<button class="mcp-session-item ${selectedScope === key ? 'active' : ''}" data-mcp-scope="${escapeHtml(key)}">
           <span class="mcp-session-led state-${escapeHtml(latest.state)}"></span>
-          <span><strong>${escapeHtml(scopeLabel(latest))}</strong><small>${escapeHtml(latest.runId ? latest.runId.slice(0, 12) : latest.sessionId ? latest.sessionId.slice(0, 12) : 'atividade global')} · ${count}</small></span>
+          <span><strong>${escapeHtml(scopeLabel(latest))}</strong><small>${escapeHtml(latest.runId ? latest.runId.slice(0, 12) : latest.sessionId ? latest.sessionId.slice(0, 12) : 'sessão externa')} · ${count}</small></span>
         </button>`).join('')}
-      </div>
+      </div>` : '<div class="mcp-sidebar-empty">Nenhuma IA conectada ainda.</div>'}
     </aside>
     <section class="mcp-mode-main">
       <header class="mcp-mode-header">
@@ -472,7 +499,7 @@ function render(): void {
       ${pending.length ? `<section class="mcp-approval-stack"><div class="mcp-section-label">Aguardando aprovação</div>${pending.map((approval) => `<div class="mcp-approval-card"><div><strong>${escapeHtml(approval.toolCall.name)}</strong><span>A execução está pausada até sua decisão.</span></div><div><button data-mcp-deny="${escapeHtml(approval.id)}">Rejeitar</button><button class="primary" data-mcp-approve="${escapeHtml(approval.id)}">Aceitar</button></div></div>`).join('')}</section>` : ''}
       ${artifactIds.length ? `<section class="mcp-artifact-strip"><div class="mcp-section-label">Artifacts</div><div class="mcp-artifact-row">${artifactIds.map((id) => { const info = artifactMetadata(id); return `<button class="mcp-artifact-chip ${selectedArtifactId === id ? 'active' : ''}" data-mcp-artifact="${escapeHtml(id)}"><span></span><b>${escapeHtml(info.label)}</b><small>${escapeHtml(info.meta || id.slice(0, 14))}</small></button>`; }).join('')}</div></section>` : ''}
       <section class="mcp-timeline">
-        ${loading ? '<div class="mcp-empty">Carregando ledger operacional…</div>' : timeline.length ? timeline.map(renderEvent).join('') : '<div class="mcp-empty">Nenhum evento corresponde a este filtro.</div>'}
+        ${loading ? '<div class="mcp-empty">Carregando sessões MCP…</div>' : timeline.length ? timeline.map(renderEvent).join('') : mcpActivityEvents().length ? '<div class="mcp-empty">Nenhum evento corresponde a este filtro.</div>' : '<div class="mcp-empty mcp-empty-session"><strong>Nenhuma sessão conectada.</strong><span>Quando ChatGPT, Codex ou outro cliente usar o Auto CodeZ, cada ação aparecerá aqui em tempo real.</span></div>'}
       </section>
     </section>`;
 }
@@ -556,7 +583,7 @@ function installStyles(): void {
     .rail-button[data-mcp-mode]:before{mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M4 5h16v3H4V5Zm0 5.5h11V14H4v-3.5ZM4 16.5h16V20H4v-3.5Z'/%3E%3C/svg%3E")}
     #${rootId}[hidden]{display:none!important}#${rootId}{position:absolute;inset:0 0 0 58px;z-index:70;display:grid;grid-template-columns:282px minmax(0,1fr);background:#090c11;color:#dce3ec}
     .body{position:relative}.mcp-mode-sidebar{min-width:0;border-right:1px solid #1b222c;background:#0c1016;padding:17px 10px;overflow:auto}.mcp-mode-sidebar-head{padding:0 9px 12px;display:flex;flex-direction:column;gap:4px}.mcp-mode-sidebar-head strong{font-size:13px}.mcp-mode-kicker,.mcp-section-label{font-size:8px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#657181}
-    .mcp-session-list{margin-top:3px}.mcp-session-item{width:100%;display:grid;grid-template-columns:8px minmax(0,1fr);gap:9px;align-items:center;text-align:left;padding:9px;border:1px solid transparent;border-radius:8px;color:#9ba6b5}.mcp-session-item:hover,.mcp-session-item.active{background:#141a22;border-color:#232c38;color:#e9edf3}.mcp-session-item strong,.mcp-session-item small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mcp-session-item strong{font-size:10px;font-weight:600}.mcp-session-item small{margin-top:3px;font-size:8px;color:#687486}.mcp-session-led,.mcp-live-dot{display:block;border-radius:50%;background:#566273}.mcp-session-led{width:6px;height:6px}.mcp-live-dot{width:7px;height:7px}.state-running{--mcp-state:#69a7ff}.state-success{--mcp-state:#6fd49a}.state-failed{--mcp-state:#e87f87}.state-waiting,.state-pending{--mcp-state:#ddb86c}.state-cancelled{--mcp-state:#778191}.mcp-session-led[class*="state-"],.mcp-live-dot[class*="state-"]{background:var(--mcp-state,#566273)}
+    .mcp-sidebar-empty{margin:12px 8px;padding:12px;border:1px dashed #202b38;border-radius:9px;color:#5e6b7b;font-size:9px;line-height:1.5}.mcp-empty-session strong,.mcp-empty-session span{display:block}.mcp-empty-session strong{font-size:12px;color:#9eabba}.mcp-empty-session span{max-width:420px;margin:7px auto 0;color:#657284;font-size:9px;line-height:1.6}.mcp-session-list{margin-top:3px}.mcp-session-item{width:100%;display:grid;grid-template-columns:8px minmax(0,1fr);gap:9px;align-items:center;text-align:left;padding:9px;border:1px solid transparent;border-radius:8px;color:#9ba6b5}.mcp-session-item:hover,.mcp-session-item.active{background:#141a22;border-color:#232c38;color:#e9edf3}.mcp-session-item strong,.mcp-session-item small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mcp-session-item strong{font-size:10px;font-weight:600}.mcp-session-item small{margin-top:3px;font-size:8px;color:#687486}.mcp-session-led,.mcp-live-dot{display:block;border-radius:50%;background:#566273}.mcp-session-led{width:6px;height:6px}.mcp-live-dot{width:7px;height:7px}.state-running{--mcp-state:#69a7ff}.state-success{--mcp-state:#6fd49a}.state-failed{--mcp-state:#e87f87}.state-waiting,.state-pending{--mcp-state:#ddb86c}.state-cancelled{--mcp-state:#778191}.mcp-session-led[class*="state-"],.mcp-live-dot[class*="state-"]{background:var(--mcp-state,#566273)}
     .mcp-mode-main{min-width:0;display:flex;flex-direction:column;overflow:hidden}.mcp-mode-header{height:69px;flex:none;padding:0 26px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1b222c;background:#0a0e13}.mcp-mode-title-row{display:flex;align-items:center;gap:8px}.mcp-mode-title-row h1{margin:0;font-size:14px;font-weight:650}.mcp-header-state{padding:4px 7px;border:1px solid #283343;border-radius:999px;color:#8d99aa;font-size:8px}.mcp-mode-subtitle{margin-top:5px;color:#667283;font-size:8px}.mcp-header-actions{display:flex;gap:7px}.mcp-refresh-button,.mcp-stop-button{height:30px;padding:0 10px;border:1px solid #293341;border-radius:7px;color:#9ca8b8;font-size:9px;background:#11161d}.mcp-refresh-button:hover{color:#eef2f7;border-color:#3b4859}.mcp-stop-button{border-color:#57333a;color:#d58a91;background:#1b1013}.mcp-stop-button:hover{border-color:#7b454f;color:#f0a8af}
     .mcp-mode-toolbar{height:47px;flex:none;padding:0 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #171e27}.mcp-connection-summary{flex:none;margin:12px 24px 0;padding:12px 14px;display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid #213043;border-radius:10px;background:linear-gradient(145deg,#0e151e,#0b1118)}.mcp-connection-dot{width:7px;height:7px;border-radius:50%;background:#667181}.mcp-connection-dot.ready{background:#66d091;box-shadow:0 0 0 4px #66d09112}.mcp-connection-summary strong,.mcp-connection-summary small{display:block}.mcp-connection-summary strong{font-size:10px;color:#dce4ee}.mcp-connection-summary small{margin-top:3px;color:#687688;font-size:8px}.mcp-connection-client{padding:5px 8px;border:1px solid #293849;border-radius:999px;color:#7f8fa3;font-size:8px}.mcp-gateway-card,.mcp-tunnel-card{display:none!important}#${rootId}.show-advanced .mcp-gateway-card,#${rootId}.show-advanced .mcp-tunnel-card{display:flex!important}.mcp-gateway-card{flex:none;margin:12px 24px 0;padding:11px 12px;display:flex;align-items:center;justify-content:space-between;gap:18px;border:1px solid #24303d;border-radius:9px;background:#0d131a}.mcp-gateway-card.running{border-color:#2e493d;background:#0e1714}.mcp-gateway-copy{min-width:0}.mcp-gateway-copy strong,.mcp-gateway-copy span,.mcp-gateway-copy code,.mcp-gateway-copy small{display:block}.mcp-gateway-preflight-ok{color:#79b997!important}.mcp-gateway-preflight-error{margin-top:6px;color:#d58a91;font-size:8px}.mcp-gateway-copy strong{margin-top:4px;font-size:10px}.mcp-gateway-copy span,.mcp-gateway-copy small{margin-top:3px;color:#6e7a8a;font-size:8px}.mcp-gateway-copy code{margin-top:6px;max-width:640px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#90a8bf;font:8px/1.4 Consolas,monospace}.mcp-gateway-actions{display:flex;gap:6px;flex:none}.mcp-gateway-actions button{height:29px;padding:0 9px;border:1px solid #304052;border-radius:6px;color:#9bacbf;font-size:8px}.mcp-gateway-actions button.primary{border-color:#365b49;color:#9dd3b4;background:#102019}.mcp-gateway-actions button.danger{border-color:#59343a;color:#d28c93;background:#1a1012}.mcp-tunnel-card{flex:none;margin:8px 24px 0;padding:11px 12px;display:flex;align-items:center;justify-content:space-between;gap:18px;border:1px solid #202a36;border-radius:9px;background:#0c1117}.mcp-tunnel-card.running,.mcp-tunnel-card.ready{border-color:#34485b}.mcp-tunnel-card.ready{background:#0d1715;border-color:#315142}.mcp-tunnel-copy{min-width:0;flex:1}.mcp-tunnel-copy strong,.mcp-tunnel-copy span,.mcp-tunnel-copy small{display:block}.mcp-tunnel-copy strong{margin-top:4px;font-size:10px}.mcp-tunnel-copy span,.mcp-tunnel-copy small{margin-top:3px;color:#6e7a8a;font-size:8px}.mcp-tunnel-error{margin-top:6px;color:#d58a91;font-size:8px}.mcp-tunnel-controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;max-width:58%}.mcp-tunnel-controls input{height:29px;min-width:132px;padding:0 8px;border:1px solid #293746;border-radius:6px;background:#0a0f15;color:#aab5c4;font-size:8px;outline:none}.mcp-tunnel-controls input:focus{border-color:#45627f}.mcp-tunnel-controls button{height:29px;padding:0 9px;border:1px solid #304052;border-radius:6px;color:#9bacbf;font-size:8px}.mcp-tunnel-controls button.primary{border-color:#365b49;color:#9dd3b4;background:#102019}.mcp-tunnel-controls button.danger{border-color:#59343a;color:#d28c93;background:#1a1012}.mcp-tunnel-controls button:disabled{opacity:.45;cursor:not-allowed}.mcp-filter-group{display:flex;gap:4px}.mcp-filter{padding:6px 9px;border-radius:6px;color:#6d7888;font-size:9px}.mcp-filter:hover,.mcp-filter.active{background:#151b23;color:#dce3ec}.mcp-mode-count{font-size:8px;color:#5d6877}
     .mcp-approval-stack,.mcp-artifact-strip{flex:none;padding:13px 24px;border-bottom:1px solid #171e27}.mcp-approval-stack{display:flex;flex-direction:column;gap:7px}.mcp-approval-card{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 11px;border:1px solid #594b2b;border-radius:8px;background:#18150d}.mcp-approval-card strong,.mcp-approval-card span{display:block}.mcp-approval-card strong{font-size:10px}.mcp-approval-card span{margin-top:3px;color:#93866a;font-size:8px}.mcp-approval-card>div:last-child{display:flex;gap:5px}.mcp-approval-card button{padding:6px 9px;border:1px solid #3a3426;border-radius:6px;color:#b3a88d;font-size:8px}.mcp-approval-card button.primary{background:#6e5722;border-color:#8d7132;color:#fff2c9}
