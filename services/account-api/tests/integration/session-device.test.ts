@@ -247,3 +247,49 @@ test('desktop auth flow enforces PKCE, state, nonce and one-time exchange', asyn
     await database.close();
   }
 });
+
+
+test('session revoke requires refresh-token proof and invalidates later refreshes', async () => {
+  const env = environment();
+  const database = new Database(env);
+  try {
+    const schema = await fs.readFile(
+      new URL('migrations/001_desktop_account.sql', new URL('file://' + process.cwd().replace(/\\/g, '/') + '/')),
+      'utf8',
+    );
+    await database.pool.query(schema);
+    await reset(database);
+
+    const sessions = new DesktopSessionService(database, env, () => 1_800_000_000_000);
+    const grant = await sessions.issue({
+      user: {
+        id: 'user-revoke-1',
+        email: 'revoke@example.com',
+        name: 'Revoke User',
+      },
+      provider: 'microsoft',
+      deviceId: 'device-revoke-1',
+    });
+
+    await assert.rejects(
+      sessions.revoke({
+        sessionId: grant.session.id,
+        deviceId: 'device-revoke-1',
+      }),
+      /invalid_grant/,
+    );
+
+    await sessions.revoke({
+      sessionId: grant.session.id,
+      deviceId: 'device-revoke-1',
+      refreshToken: grant.refreshToken,
+    });
+
+    await assert.rejects(
+      sessions.refresh(grant.refreshToken, 'device-revoke-1'),
+      /invalid_grant/,
+    );
+  } finally {
+    await database.close();
+  }
+});
