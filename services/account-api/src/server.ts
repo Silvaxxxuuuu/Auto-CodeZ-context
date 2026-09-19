@@ -121,6 +121,16 @@ app.get('/healthz', async (_request, response) => {
   }
 });
 
+app.post('/v1/auth/configuration', (_request, response) => {
+  const methods: Array<'magic_link' | 'github' | 'google' | 'microsoft' | 'passkey'> = [];
+  if (email.configured) methods.push('magic_link');
+  if (environment.github) methods.push('github');
+  if (environment.google) methods.push('google');
+  if (environment.microsoft) methods.push('microsoft');
+  methods.push('passkey');
+  response.json({ methods });
+});
+
 app.post('/v1/auth/oauth/begin', async (request, response) => {
   try {
     const body = requireObject(request.body, 'body');
