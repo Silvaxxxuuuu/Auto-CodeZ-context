@@ -186,10 +186,18 @@ async function verifyLocalChatInstallFlow() {
   if (await ai.locator('option[value="provider:lm-studio"]').count()) throw new Error('LM Studio voltou a aparecer como IA separada.');
   if (await ai.locator('option[value="provider:auto-codez-local"]').count()) throw new Error('Auto CodeZ Local vazou como provider separado em vez da opção unificada.');
   await ai.selectOption('local:unified');
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#chat-local-model-state');
+    const model = document.querySelector('#chat-model');
+    return root instanceof HTMLElement
+      && root.dataset.localUnifiedReady === 'true'
+      && model instanceof HTMLSelectElement
+      && model.options.length > 1;
+  }, null, { timeout: 20_000 });
 
   const model = page.locator('#chat-model');
   const gemma = model.locator('option').filter({ hasText: 'Gemma 3 1B' });
-  await gemma.waitFor({ state: 'attached', timeout: 15_000 });
+  await gemma.waitFor({ state: 'attached', timeout: 5_000 });
   const logicalModelId = await gemma.getAttribute('value');
   if (!logicalModelId) throw new Error('Modelo Gemma 3 1B unificado ficou sem identificador.');
   await model.selectOption(logicalModelId);
