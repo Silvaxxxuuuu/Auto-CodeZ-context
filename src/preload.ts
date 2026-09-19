@@ -29,6 +29,11 @@ contextBridge.exposeInMainWorld('autoCodez', {
   accountState: () => invoke('account:get-state'),
   logoutAccount: () => invoke('account:logout'),
   renameAccountDevice: (name: string) => invoke('account:rename-device', requireNonEmptyString(name, 'Nome do dispositivo')),
+  onAccountState: (listener: (state: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+    ipcRenderer.on('account:event', handler);
+    return () => ipcRenderer.removeListener('account:event', handler);
+  },
   listModels: (providerId: string) => invoke('providers:list-models', requireIdentifier(providerId, 'Provider')),
   listModelsForApiKey: (keyId: string) => invoke('providers:list-models-for-key', requireIdentifier(keyId, 'API key')),
   listApiKeys: () => invoke('providers:list-keys'),
