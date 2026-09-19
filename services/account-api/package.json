@@ -1,0 +1,30 @@
+{
+  "name": "@auto-codez/account-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build:browser": "esbuild src/passkey-client.ts --bundle --format=iife --platform=browser --target=es2022 --outfile=dist/public/passkey-client.js --minify",
+    "build:server": "tsc -p tsconfig.json",
+    "build": "npm run build:browser && npm run build:server",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@azure/communication-email": "1.0.0",
+    "@better-auth/passkey": "1.6.23",
+    "better-auth": "1.6.23",
+    "express": "5.1.0",
+    "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.3",
+    "@types/node": "24.10.1",
+    "@types/pg": "8.15.6",
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3"
+  }
+}
