@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAccountAuthAdapter } from '../src/account/auth-adapter-factory';
+import { createAccountAuthAdapter, resolveAccountAuthConfiguration } from '../src/account/auth-adapter-factory';
 import { UnavailableAuthAdapter } from '../src/account/auth-adapter';
 import { HttpAuthAdapter } from '../src/account/http-auth-adapter';
 import { HttpDeviceRegistryAdapter } from '../src/account/http-device-registry-adapter';
@@ -38,4 +38,33 @@ test('account auth factory fails closed without blocking local app on invalid co
   assert.match(result.configuration.configurationError ?? '', /HTTPS/);
   assert.ok(result.adapter instanceof UnavailableAuthAdapter);
   assert.ok(result.deviceRegistry instanceof UnavailableDeviceRegistryAdapter);
+});
+
+
+test('account auth discovery disables blocking login when configured backend is unavailable', async () => {
+  const result = createAccountAuthAdapter('https://accounts.autocodez.example');
+  result.adapter.configuration = async () => {
+    throw new Error('backend offline');
+  };
+
+  assert.deepEqual(
+    await resolveAccountAuthConfiguration(result),
+    {
+      configured: false,
+      methods: [],
+      configurationError: 'backend offline',
+    },
+  );
+});
+
+test('visual auth discovery may use configured capabilities without weakening production fallback', async () => {
+  const result = createAccountAuthAdapter('https://accounts.autocodez.example');
+  result.adapter.configuration = async () => {
+    throw new Error('visual backend intentionally absent');
+  };
+
+  const configuration = await resolveAccountAuthConfiguration(result, true);
+  assert.equal(configuration.configured, true);
+  assert.deepEqual(configuration.methods, ['magic_link', 'github', 'google', 'microsoft', 'passkey']);
+  assert.equal(configuration.configurationError, 'visual backend intentionally absent');
 });

@@ -170,7 +170,7 @@ export class HttpAuthAdapter implements AuthAdapter {
     if (parsed.protocol !== 'https:') {
       throw new Error('O serviço de autenticação precisa usar HTTPS.');
     }
-    if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
       throw new Error('URL do serviço de autenticação inválida.');
     }
     this.origin = parsed.origin;

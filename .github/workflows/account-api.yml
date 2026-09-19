@@ -69,3 +69,6 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+      - name: Production container build
+        run: docker build --tag auto-codez-account-api:ci .

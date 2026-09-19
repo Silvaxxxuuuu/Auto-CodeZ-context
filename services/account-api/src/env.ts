@@ -37,8 +37,8 @@ function pair(idName: string, secretName: string): { clientId: string; clientSec
 export function loadEnvironment(): AccountApiEnvironment {
   const publicUrl = new URL(required('ACCOUNT_PUBLIC_URL'));
   if (publicUrl.protocol !== 'https:') throw new Error('ACCOUNT_PUBLIC_URL must use HTTPS.');
-  if (publicUrl.username || publicUrl.password || publicUrl.search || publicUrl.hash) {
-    throw new Error('ACCOUNT_PUBLIC_URL must not contain credentials, query or fragment.');
+  if (publicUrl.username || publicUrl.password || publicUrl.search || publicUrl.hash || publicUrl.pathname !== '/') {
+    throw new Error('ACCOUNT_PUBLIC_URL must be an HTTPS origin without credentials, path, query or fragment.');
   }
 
   const port = Number.parseInt(process.env.PORT?.trim() || '8080', 10);

@@ -114,11 +114,21 @@ export class AccountSessionRuntime {
       device = await this.deviceIdentity.rename(suggestDeviceName(grant.account.displayName));
     }
 
-    await this.credentials.set(REFRESH_TOKEN_CREDENTIAL, grant.refreshToken);
-    await this.storage.write<StoredAccountState>(STATE_FILE, {
-      account: cloneProfile(grant.account),
-      session: cloneSession(grant.session),
-    });
+    try {
+      await this.credentials.set(REFRESH_TOKEN_CREDENTIAL, grant.refreshToken);
+      await this.storage.write<StoredAccountState>(STATE_FILE, {
+        account: cloneProfile(grant.account),
+        session: cloneSession(grant.session),
+      });
+    } catch (error) {
+      await Promise.allSettled([
+        this.credentials.remove(REFRESH_TOKEN_CREDENTIAL),
+        this.storage.remove(STATE_FILE),
+      ]);
+      this.accessToken = null;
+      this.setState({ state: 'signed_out', device });
+      throw error;
+    }
 
     this.accessToken = grant.accessToken;
     return this.setState({

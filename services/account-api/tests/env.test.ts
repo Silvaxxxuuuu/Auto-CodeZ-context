@@ -72,3 +72,14 @@ test('Account API accepts independent 32-byte-or-longer secrets', () => {
     assert.equal(environment.publicUrl, 'https://accounts.example.test');
   });
 });
+
+
+test('Account API rejects non-origin public URLs', () => {
+  withEnvironment({ ACCOUNT_PUBLIC_URL: 'https://accounts.example.test/account-api' }, () => {
+    assert.throws(() => loadEnvironment(), /HTTPS origin/);
+  });
+
+  withEnvironment({ ACCOUNT_PUBLIC_URL: 'https://accounts.example.test?tenant=x' }, () => {
+    assert.throws(() => loadEnvironment(), /HTTPS origin/);
+  });
+});

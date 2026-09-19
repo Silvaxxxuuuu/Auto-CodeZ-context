@@ -52,13 +52,8 @@ type RegistrySnapshot = {
   lastError?: string;
 };
 
-type AuthConfiguration = {
-  configured: boolean;
-};
-
 type Bridge = {
   accountState: () => Promise<AccountSnapshot>;
-  accountAuthConfiguration: () => Promise<AuthConfiguration>;
   accountDeviceRegistryState: () => Promise<RegistrySnapshot>;
   refreshAccountDeviceRegistry: () => Promise<RegistrySnapshot>;
   revokeAccountDevice: (deviceId: string) => Promise<RegistrySnapshot>;
@@ -71,7 +66,6 @@ type Bridge = {
 const bridge = (window as unknown as { autoCodez?: Bridge }).autoCodez;
 let account: AccountSnapshot | undefined;
 let registry: RegistrySnapshot | undefined;
-let configured = false;
 let confirmingAction = '';
 let unsubscribeAccount: (() => void) | undefined;
 let unsubscribeRegistry: (() => void) | undefined;
@@ -207,7 +201,7 @@ function panelMarkup(): string {
 
 function enhanceProfile(): void {
   document.querySelectorAll<HTMLElement>('[data-account-cloud-panel]').forEach((element) => element.remove());
-  if (!configured || !account?.account) return;
+  if (!account?.account) return;
   const content = document.querySelector<HTMLElement>('.profile-overlay .profile-content');
   if (!content) return;
 
@@ -293,12 +287,10 @@ observer.observe(document.documentElement, { subtree: true, childList: true });
 
 async function initialize(): Promise<void> {
   if (!bridge) return;
-  const [config, currentAccount, currentRegistry] = await Promise.all([
-    bridge.accountAuthConfiguration(),
+  const [currentAccount, currentRegistry] = await Promise.all([
     bridge.accountState(),
     bridge.accountDeviceRegistryState(),
   ]);
-  configured = config.configured;
   account = currentAccount;
   registry = currentRegistry;
 

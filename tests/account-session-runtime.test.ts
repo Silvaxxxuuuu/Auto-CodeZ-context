@@ -10,6 +10,7 @@ import type { AccountProfile, AccountSession } from '../src/account/types';
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
+  failAccountSessionWrites = false;
 
   async read<T>(name: string, fallback: T): Promise<T> {
     const value = this.values.get(name);
@@ -17,6 +18,9 @@ class MemoryStorage {
   }
 
   async write<T>(name: string, value: T): Promise<void> {
+    if (this.failAccountSessionWrites && name === 'account-session.json') {
+      throw new Error('Falha simulada ao persistir sessão.');
+    }
     this.values.set(name, JSON.stringify(value));
   }
 
@@ -447,4 +451,52 @@ test('DeviceIdentityStore falls back to ephemeral identity when protected storag
     ),
     true,
   );
+});
+
+
+test('AccountSessionRuntime fails closed when session metadata persistence fails after refresh-token storage', async () => {
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => 100,
+    },
+  );
+  const device = await devices.getOrCreate();
+  const adapter: SessionAuthAdapter = {
+    async refresh(): Promise<AuthGrant> {
+      throw new Error('refresh não deveria ser chamado neste teste');
+    },
+    async revoke(): Promise<void> {
+      return;
+    },
+  };
+  const runtime = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+
+  storage.failAccountSessionWrites = true;
+  await assert.rejects(
+    runtime.establish({
+      account: profile(),
+      session: session(device.id),
+      accessToken: 'access-secret',
+      refreshToken: 'refresh-secret',
+    }),
+    /Falha simulada/,
+  );
+
+  assert.equal(runtime.snapshot().state, 'signed_out');
+  assert.equal(runtime.getAccessToken(), null);
+  assert.equal(credentials.values.has('account.session.refresh-token'), false);
+  assert.equal(storage.values.has('account-session.json'), false);
 });

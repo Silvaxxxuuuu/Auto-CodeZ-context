@@ -59,3 +59,40 @@ export function createAccountAuthAdapter(
     };
   }
 }
+
+
+export async function resolveAccountAuthConfiguration(
+  result: AccountAuthAdapterFactoryResult,
+  allowConfiguredFallback = false,
+): Promise<AccountAuthConfigurationSnapshot> {
+  if (!result.configuration.configured) {
+    return {
+      ...result.configuration,
+      methods: [...result.configuration.methods],
+    };
+  }
+
+  try {
+    const discovered = await result.adapter.configuration();
+    return {
+      configured: true,
+      methods: [...discovered.methods],
+    };
+  } catch (error) {
+    const configurationError = error instanceof Error
+      ? error.message
+      : 'Serviço de autenticação indisponível.';
+    if (allowConfiguredFallback) {
+      return {
+        ...result.configuration,
+        methods: [...result.configuration.methods],
+        configurationError,
+      };
+    }
+    return {
+      configured: false,
+      methods: [],
+      configurationError,
+    };
+  }
+}

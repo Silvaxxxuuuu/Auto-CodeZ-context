@@ -40,6 +40,7 @@ test('HttpAuthAdapter requires HTTPS and rejects URL credentials/query fragments
   assert.throws(() => new HttpAuthAdapter('https://user:pass@accounts.example.com'), /inválida/);
   assert.throws(() => new HttpAuthAdapter('https://accounts.example.com?token=x'), /inválida/);
   assert.throws(() => new HttpAuthAdapter('https://accounts.example.com#fragment'), /inválida/);
+  assert.throws(() => new HttpAuthAdapter('https://accounts.example.com/account-api'), /inválida/);
 });
 
 test('HttpAuthAdapter sends refresh token only in POST JSON body', async () => {

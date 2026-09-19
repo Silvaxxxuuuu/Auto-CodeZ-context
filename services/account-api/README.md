@@ -19,7 +19,7 @@ O serviço **não** executa terminal, filesystem, Roblox, Blender ou qualquer to
 
 1. Copie `.env.example` para `.env` fora de qualquer commit.
 2. Configure PostgreSQL e os providers que serão usados.
-3. Rode `npm install`.
+3. Rode `npm ci`.
 4. Rode `npm run migrate`.
 5. Rode `npm run build`.
 6. Rode `npm start`.
@@ -31,7 +31,7 @@ O desktop recebe a URL HTTPS por `AUTO_CODEZ_ACCOUNT_API_BASE_URL`.
 `npm run migrate` aplica:
 
 1. o schema oficial do Better Auth, incluindo plugins;
-2. `migrations/001_desktop_account.sql`, com tabelas específicas do desktop.
+2. todas as migrations SQL numeradas em `migrations/`, em ordem lexicográfica, incluindo o schema desktop e hardenings posteriores.
 
 Migrations não são executadas automaticamente durante o startup do servidor.
 
@@ -52,6 +52,10 @@ Auto CodeZ Desktop
 ```
 
 Segredos permanentes nunca trafegam em query string. O deep link recebe apenas código/token de uso único com TTL curto, protegido pela troca PKCE.
+
+## Passkeys
+
+O login por Passkey usa o navegador HTTPS do RP configurado. Depois de uma autenticação web válida, `/desktop/passkey/enroll` permite adicionar a primeira Passkey à conta usando a sessão Better Auth do navegador. O desktop nunca recebe a credencial WebAuthn bruta.
 
 ## Azure
 
