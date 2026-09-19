@@ -18,6 +18,14 @@ function required(name: string): string {
   return value;
 }
 
+function secret(name: string): string {
+  const value = required(name);
+  if (Buffer.byteLength(value, 'utf8') < 32) {
+    throw new Error(`${name} must contain at least 32 bytes.`);
+  }
+  return value;
+}
+
 function pair(idName: string, secretName: string): { clientId: string; clientSecret: string } | undefined {
   const clientId = process.env[idName]?.trim();
   const clientSecret = process.env[secretName]?.trim();
@@ -53,8 +61,8 @@ export function loadEnvironment(): AccountApiEnvironment {
     publicUrl: publicUrl.origin,
     port,
     databaseUrl: required('DATABASE_URL'),
-    betterAuthSecret: required('BETTER_AUTH_SECRET'),
-    accessTokenSecret: required('ACCOUNT_ACCESS_TOKEN_SECRET'),
+    betterAuthSecret: secret('BETTER_AUTH_SECRET'),
+    accessTokenSecret: secret('ACCOUNT_ACCESS_TOKEN_SECRET'),
     ...(github ? { github } : {}),
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
