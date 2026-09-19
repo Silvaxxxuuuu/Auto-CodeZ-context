@@ -208,6 +208,7 @@ app.post('/v1/auth/magic-link/begin', async (request, response) => {
     );
 
     await auth.api.signInMagicLink({
+      headers: requestHeaders(request),
       body: {
         email: emailAddress,
         callbackURL,
