@@ -119,40 +119,42 @@ async function playBrandReveal(root: HTMLElement): Promise<void> {
 
   root.dataset.stage = 'brand';
   root.classList.add('is-branding');
+  word.style.clipPath = 'inset(0 0 0 100%)';
+  word.style.opacity = '0';
+  word.style.transform = 'translate3d(8px,-50%,0)';
   await delay(30);
 
   const markAnimation = mark.animate(
     [
       { transform: 'translate3d(0,0,0) scale(1)' },
-      { transform: 'translate3d(8px,0,0) scale(1)', offset: .16 },
-      { transform: `translate3d(${(finalZOffset * .82).toFixed(3)}px,0,0) scale(.9)`, offset: .76 },
+      { transform: `translate3d(${(finalZOffset * .18).toFixed(3)}px,0,0) scale(.985)`, offset: .24 },
+      { transform: `translate3d(${(finalZOffset * .72).toFixed(3)}px,0,0) scale(.91)`, offset: .72 },
       { transform: `translate3d(${finalZOffset.toFixed(3)}px,0,0) scale(.86)` },
     ],
     {
-      duration: 920,
-      easing: 'cubic-bezier(.58,.02,.18,1)',
+      duration: 820,
+      easing: 'cubic-bezier(.22,.72,.18,1)',
       fill: 'forwards',
     },
   );
+
+  await markAnimation.finished.catch((): void => undefined);
+  await delay(35);
 
   const wordAnimation = word.animate(
     [
-      { clipPath: 'inset(0 100% 0 0)', opacity: 0, transform: 'translate3d(7px,-50%,0)' },
-      { clipPath: 'inset(0 100% 0 0)', opacity: 0, transform: 'translate3d(7px,-50%,0)', offset: .16 },
-      { clipPath: 'inset(0 0 0 0)', opacity: 1, transform: 'translate3d(0,-50%,0)', offset: .84 },
+      { clipPath: 'inset(0 0 0 100%)', opacity: 0, transform: 'translate3d(8px,-50%,0)' },
+      { clipPath: 'inset(0 0 0 42%)', opacity: .72, transform: 'translate3d(3px,-50%,0)', offset: .58 },
       { clipPath: 'inset(0 0 0 0)', opacity: 1, transform: 'translate3d(0,-50%,0)' },
     ],
     {
-      duration: 920,
-      easing: 'cubic-bezier(.2,.72,.18,1)',
+      duration: 360,
+      easing: 'cubic-bezier(.2,.78,.2,1)',
       fill: 'forwards',
     },
   );
 
-  await Promise.all([
-    markAnimation.finished.catch((): void => undefined),
-    wordAnimation.finished.catch((): void => undefined),
-  ]);
+  await wordAnimation.finished.catch((): void => undefined);
 }
 
 async function finishSplash(): Promise<void> {
