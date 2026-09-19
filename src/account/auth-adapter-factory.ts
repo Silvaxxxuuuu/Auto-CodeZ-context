@@ -1,6 +1,9 @@
 import type { AuthAdapter } from './auth-adapter';
 import { UnavailableAuthAdapter } from './auth-adapter';
 import { HttpAuthAdapter } from './http-auth-adapter';
+import type { DeviceRegistryAdapter } from './device-registry-adapter';
+import { UnavailableDeviceRegistryAdapter } from './device-registry-adapter';
+import { HttpDeviceRegistryAdapter } from './http-device-registry-adapter';
 
 export interface AccountAuthConfigurationSnapshot {
   configured: boolean;
@@ -10,6 +13,7 @@ export interface AccountAuthConfigurationSnapshot {
 
 export interface AccountAuthAdapterFactoryResult {
   adapter: AuthAdapter;
+  deviceRegistry: DeviceRegistryAdapter;
   configuration: AccountAuthConfigurationSnapshot;
 }
 
@@ -20,6 +24,7 @@ export function createAccountAuthAdapter(
   if (!value) {
     return {
       adapter: new UnavailableAuthAdapter(),
+      deviceRegistry: new UnavailableDeviceRegistryAdapter(),
       configuration: {
         configured: false,
         methods: [],
@@ -30,6 +35,7 @@ export function createAccountAuthAdapter(
   try {
     return {
       adapter: new HttpAuthAdapter(value),
+      deviceRegistry: new HttpDeviceRegistryAdapter(value),
       configuration: {
         configured: true,
         methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'],
@@ -38,6 +44,7 @@ export function createAccountAuthAdapter(
   } catch (error) {
     return {
       adapter: new UnavailableAuthAdapter(),
+      deviceRegistry: new UnavailableDeviceRegistryAdapter(),
       configuration: {
         configured: false,
         methods: [],
