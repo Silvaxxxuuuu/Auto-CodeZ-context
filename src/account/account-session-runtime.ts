@@ -142,6 +142,15 @@ export class AccountSessionRuntime {
     return this.accessToken;
   }
 
+  async renameDevice(name: string): Promise<AccountRuntimeSnapshot> {
+    const current = this.state ?? await this.hydrate();
+    const device = await this.deviceIdentity.rename(name);
+    return this.setState({
+      ...current,
+      device,
+    });
+  }
+
   async logout(): Promise<AccountRuntimeSnapshot> {
     const current = this.state ?? await this.hydrate();
     const refreshToken = await this.credentials.get(REFRESH_TOKEN_CREDENTIAL);
