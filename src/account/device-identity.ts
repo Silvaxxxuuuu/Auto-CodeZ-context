@@ -37,6 +37,8 @@ function generateIdentity(): { publicKey: string; privateKey: string } {
 
 export class DeviceIdentityStore {
   private readonly platform: NodeJS.Platform;
+  private ephemeralIdentity?: StoredDeviceIdentity;
+  private ephemeralPrivateKey?: string;
   private readonly arch: string;
   private readonly appVersion: string;
   private readonly defaultName: string;
@@ -56,22 +58,38 @@ export class DeviceIdentityStore {
 
   async getOrCreate(): Promise<DeviceRecord> {
     const now = this.now();
+
+    if (this.ephemeralIdentity && this.ephemeralPrivateKey) {
+      return this.toRecord(this.ephemeralIdentity, now, 'ephemeral');
+    }
+
     let stored = await this.storage.read<StoredDeviceIdentity | null>(STORAGE_FILE, null);
     const privateKey = await this.credentials.get(PRIVATE_KEY_CREDENTIAL);
 
-    if (!stored || !privateKey) {
-      const keys = generateIdentity();
-      stored = {
-        id: crypto.randomUUID(),
-        name: this.defaultName,
-        publicKey: keys.publicKey,
-        createdAt: now,
-      };
-      await this.credentials.set(PRIVATE_KEY_CREDENTIAL, keys.privateKey);
-      await this.storage.write(STORAGE_FILE, stored);
+    if (stored && privateKey) {
+      return this.toRecord(stored, now, 'protected');
     }
 
-    return this.toRecord(stored, now);
+    const keys = generateIdentity();
+    const generated: StoredDeviceIdentity = {
+      id: crypto.randomUUID(),
+      name: this.defaultName,
+      publicKey: keys.publicKey,
+      createdAt: now,
+    };
+
+    try {
+      await this.credentials.set(PRIVATE_KEY_CREDENTIAL, keys.privateKey);
+      await this.storage.write(STORAGE_FILE, generated);
+      stored = generated;
+      return this.toRecord(stored, now, 'protected');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/armazenamento seguro indisponível/i.test(message)) throw error;
+      this.ephemeralIdentity = generated;
+      this.ephemeralPrivateKey = keys.privateKey;
+      return this.toRecord(generated, now, 'ephemeral');
+    }
   }
 
   async rename(name: string): Promise<DeviceRecord> {
@@ -82,22 +100,34 @@ export class DeviceIdentityStore {
       publicKey: current.publicKey,
       createdAt: current.createdAt,
     };
+
+    if (current.credentialPersistence === 'ephemeral') {
+      this.ephemeralIdentity = stored;
+      return this.toRecord(stored, this.now(), 'ephemeral');
+    }
+
     await this.storage.write(STORAGE_FILE, stored);
-    return this.toRecord(stored, this.now());
+    return this.toRecord(stored, this.now(), 'protected');
   }
 
   async signChallenge(challenge: string): Promise<string> {
     const value = challenge.trim();
     if (!value || value.length > 16_384) throw new Error('Desafio do dispositivo inválido.');
 
-    await this.getOrCreate();
-    const privateKey = await this.credentials.get(PRIVATE_KEY_CREDENTIAL);
+    const device = await this.getOrCreate();
+    const privateKey = device.credentialPersistence === 'ephemeral'
+      ? this.ephemeralPrivateKey
+      : await this.credentials.get(PRIVATE_KEY_CREDENTIAL);
     if (!privateKey) throw new Error('Credencial privada do dispositivo indisponível.');
 
     return crypto.sign(null, Buffer.from(value, 'utf8'), privateKey).toString('base64');
   }
 
-  private toRecord(identity: StoredDeviceIdentity, now: number): DeviceRecord {
+  private toRecord(
+    identity: StoredDeviceIdentity,
+    now: number,
+    credentialPersistence: DeviceRecord['credentialPersistence'],
+  ): DeviceRecord {
     return {
       id: identity.id,
       name: identity.name,
@@ -105,6 +135,7 @@ export class DeviceIdentityStore {
       arch: this.arch,
       appVersion: this.appVersion,
       publicKey: identity.publicKey,
+      credentialPersistence,
       createdAt: identity.createdAt,
       lastSeenAt: now,
       isCurrent: true,
