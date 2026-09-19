@@ -80,12 +80,15 @@ function waitForCoreReady(): Promise<void> {
 }
 
 async function initializeEnhancements(): Promise<void> {
-  for (const enhancement of criticalEnhancements) await loadEnhancement(enhancement);
-  await waitForCoreReady();
+  const coreReady = waitForCoreReady();
+
+  const criticalLoads = criticalEnhancements.map((enhancement) => loadEnhancement(enhancement));
+  await coreReady;
 
   document.documentElement.dataset.autoCodezBootstrapReady = 'true';
   window.dispatchEvent(new CustomEvent('auto-codez-bootstrap-ready'));
 
+  await Promise.all(criticalLoads);
   for (const enhancement of secondaryEnhancements) void loadEnhancement(enhancement);
 }
 
