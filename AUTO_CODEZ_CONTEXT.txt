@@ -8126,3 +8126,87 @@ Ainda NÃO marcar CLOSED até:
 
 PR #9 continua sem merge.
 
+------------------------------------------------------------
+24.46. LOGIN VISUAL REFINEMENT FINAL — MANUAL RECHECK
+------------------------------------------------------------
+
+Checkpoint registrado em 19/09/2026 após interrupção de conexão do usuário.
+
+HEAD DE IMPLEMENTAÇÃO VALIDADO:
+8daef44cafa5a23f1c312deaabf6da535e1034e9
+polish(account): use current gradient Google G
+
+Commits desde o refinamento inicial:
+- a60a4e357114835a5278ad6cd0cff256c86eef19
+  polish(account): refine auth icons and startup branding
+- ea90476ba267216cf52fe2cefafc399e2415d1b9
+  test(startup): guard Z-first brand reveal sequencing
+- 58f6d25b42cd5f268ba46db5ddee2948c814d698
+  docs(context): record login visual refinement
+- 8daef44cafa5a23f1c312deaabf6da535e1034e9
+  polish(account): use current gradient Google G
+
+CI DO HEAD 8daef44:
+- Validate Auto CodeZ #4234 / run 35476582648: SUCCESS;
+- Validate Auto CodeZ push #4233 / run 35476580774: SUCCESS;
+- Validate Account API #84 / run 35476582697: SUCCESS;
+- Visual Auto CodeZ #939 / run 35476582605: SUCCESS.
+
+Artifact Visual #939:
+- artifact id 10595100028;
+- name auto-codez-visual-35476582605;
+- funcional-account-login.png revisado;
+- pageErrors=[];
+- consoleErrors=[].
+
+LOGIN ICONS FINAL
+
+GitHub:
+- logo SVG real;
+- inline/local;
+- sem fetch externo em runtime.
+
+Google:
+- G multicolorido/gradiente atualizado;
+- render confirmado no artifact empacotado.
+
+Microsoft:
+- quadrantes com cores oficiais;
+- render confirmado.
+
+Passkey:
+- Key outline no estilo Lucide;
+- ícone decorativo;
+- nome acessível continua “Entrar com passkey”.
+
+STARTUP BRANDING FINAL
+
+Problema original relatado:
+“Auto Code” aparecia antes de o Z terminar de passar e o Z ficava por cima.
+
+Sequência final:
+1. >_;
+2. morph para A;
+3. morph para Z;
+4. Z se desloca completamente;
+5. stage brand-z-settled;
+6. nesse stage o texto ainda precisa estar opacity <= .05;
+7. somente depois começa reveal de “Auto Code”;
+8. resultado final Auto CodeZ;
+9. splash sai.
+
+Visual E2E protege explicitamente essa ordem.
+
+ESTADO DO ACCOUNT CORE
+
+- implementação automática continua verde;
+- UI refinada conforme feedback do usuário;
+- Account Core V1 ainda NÃO está CLOSED;
+- aguarda nova avaliação manual do usuário;
+- depois da aprovação visual, conectar Account API HTTPS real e executar login real;
+- só após aprovação real iniciar Azure Foundry Test Lab / GPT-5.6 Luna.
+
+PR #9:
+- permanece OPEN;
+- DRAFT;
+- sem merge.
