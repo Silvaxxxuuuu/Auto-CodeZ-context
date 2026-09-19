@@ -26,6 +26,9 @@ function requireTerminalDimension(value: unknown, label: string): number {
 
 contextBridge.exposeInMainWorld('autoCodez', {
   getState: () => invoke<{ providers: unknown[]; chats: unknown[]; projects: unknown[] }>('app:get-state'),
+  accountState: () => invoke('account:get-state'),
+  logoutAccount: () => invoke('account:logout'),
+  renameAccountDevice: (name: string) => invoke('account:rename-device', requireNonEmptyString(name, 'Nome do dispositivo')),
   listModels: (providerId: string) => invoke('providers:list-models', requireIdentifier(providerId, 'Provider')),
   listModelsForApiKey: (keyId: string) => invoke('providers:list-models-for-key', requireIdentifier(keyId, 'API key')),
   listApiKeys: () => invoke('providers:list-keys'),
