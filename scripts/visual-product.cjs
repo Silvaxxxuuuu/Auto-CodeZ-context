@@ -181,27 +181,54 @@ async function captureStartupIdentity() {
         && getComputedStyle(cursor).animationName.includes('ac-startup-cursor');
     }, undefined, { timeout: 2_000, polling: 'raf' });
 
+    await page.evaluate(() => {
+      const root = document.querySelector('#auto-codez-startup');
+      if (!root) return;
+      const snapshots = [];
+      const capture = () => {
+        const current = document.querySelector('#auto-codez-startup');
+        if (!current) return;
+        const lines = Array.from(current.querySelectorAll('[data-splash-segment]')).map((line) => ({
+          x1: Number(line.getAttribute('x1')),
+          y1: Number(line.getAttribute('y1')),
+          x2: Number(line.getAttribute('x2')),
+          y2: Number(line.getAttribute('y2')),
+        }));
+        const word = current.querySelector('.ac-startup-word');
+        snapshots.push({
+          stage: current.getAttribute('data-stage') || 'unknown',
+          lines,
+          wordOpacity: word ? Number(getComputedStyle(word).opacity) : -1,
+        });
+      };
+      window.__autoCodezStartupSnapshots = snapshots;
+      capture();
+      const observer = new MutationObserver(capture);
+      observer.observe(root, { attributes: true, attributeFilter: ['data-stage'] });
+    });
+
     const terminal = await readState();
     assertGlyph(terminal, [[28,25,44,40],[44,40,28,55],[52,57,72,57]], '>_');
     if (terminal.wordOpacity > .05) throw new Error('O nome apareceu antes do morph inicial.');
     if (!terminal.cursorAnimation.includes('ac-startup-cursor')) throw new Error('O cursor "_" não está piscando no estado inicial.');
     await page.screenshot({ path: path.join(outputDir, 'startup-terminal.png') });
 
-    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.getAttribute('data-stage') === 'a', undefined, { timeout: 5_000, polling: 'raf' });
-    const aState = await readState();
+    await splash.waitFor({ state: 'detached', timeout: 8_000 });
+
+    const snapshots = await page.evaluate(() => window.__autoCodezStartupSnapshots || []);
+    const findStage = (stage) => snapshots.find((snapshot) => snapshot.stage === stage);
+    const aState = findStage('a');
+    const zState = findStage('z');
+    const finalState = findStage('final');
+
+    if (!aState) throw new Error('O estágio A não foi observado durante o morph.');
+    if (!zState) throw new Error('O estágio Z não foi observado durante o morph.');
+    if (!finalState) throw new Error('O estágio final Auto CodeZ não foi observado.');
+
     assertGlyph(aState, [[28,56,44,22],[44,22,60,56],[35,43,53,43]], 'A');
-    await page.screenshot({ path: path.join(outputDir, 'startup-a.png') });
-
-    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.getAttribute('data-stage') === 'z', undefined, { timeout: 5_000, polling: 'raf' });
-    const zState = await readState();
     assertGlyph(zState, [[28,24,60,24],[60,24,28,56],[28,56,60,56]], 'Z');
-
-    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.getAttribute('data-stage') === 'final', undefined, { timeout: 5_000, polling: 'raf' });
-    const finalState = await readState();
     if (finalState.wordOpacity < .95) throw new Error(`Auto Code não terminou visível. opacity=${finalState.wordOpacity}.`);
-    await page.screenshot({ path: path.join(outputDir, 'startup-auto-codez.png') });
 
-    await splash.waitFor({ state: 'detached', timeout: 5_000 });
     results.push({ name, status: 'passed' });
   } catch (error) {
     const message = errorText(error);
