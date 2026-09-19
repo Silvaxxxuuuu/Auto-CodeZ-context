@@ -42,6 +42,15 @@ contextBridge.exposeInMainWorld('autoCodez', {
     ipcRenderer.on('account-auth-flow:event', handler);
     return () => ipcRenderer.removeListener('account-auth-flow:event', handler);
   },
+  accountDeviceRegistryState: () => invoke('account-device-registry:get-state'),
+  refreshAccountDeviceRegistry: () => invoke('account-device-registry:refresh'),
+  renameAccountDeviceRegistryCurrent: (name: string) => invoke('account-device-registry:rename-current', requireNonEmptyString(name, 'Nome do dispositivo')),
+  revokeAccountDevice: (deviceId: string) => invoke('account-device-registry:revoke', requireNonEmptyString(deviceId, 'Dispositivo')),
+  onAccountDeviceRegistryState: (listener: (state: unknown) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+    ipcRenderer.on('account-device-registry:event', handler);
+    return () => ipcRenderer.removeListener('account-device-registry:event', handler);
+  },
   listModels: (providerId: string) => invoke('providers:list-models', requireIdentifier(providerId, 'Provider')),
   listModelsForApiKey: (keyId: string) => invoke('providers:list-models-for-key', requireIdentifier(keyId, 'API key')),
   listApiKeys: () => invoke('providers:list-keys'),
