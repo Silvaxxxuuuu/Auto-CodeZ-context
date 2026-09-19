@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('autoCodez', {
   accountAuthFlowState: () => invoke('account-auth-flow:get-state'),
   resetAccountAuthFlow: () => invoke('account-auth-flow:reset'),
   accountAuthConfiguration: () => invoke('account-auth:get-configuration'),
+  beginAccountMagicLink: (email: string) => invoke('account-auth:begin-magic-link', requireNonEmptyString(email, 'E-mail')),
+  beginAccountOAuth: (provider: string) => invoke('account-auth:begin-oauth', requireIdentifier(provider, 'Provider OAuth')),
+  beginAccountPasskey: () => invoke('account-auth:begin-passkey'),
+  completeAccountPasskey: (input: unknown) => invoke('account-auth:complete-passkey', requireObject(input, 'Credencial Passkey')),
   onAccountAuthFlowState: (listener: (state: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
     ipcRenderer.on('account-auth-flow:event', handler);
