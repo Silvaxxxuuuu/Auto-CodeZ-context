@@ -76,5 +76,6 @@ export class UnavailableAuthAdapter implements AuthAdapter {
   }
 
   async revoke(): Promise<void> {
+    return;
   }
 }
