@@ -66,6 +66,7 @@ import { LocalProtectedCredentialStore } from './account/protected-credential-st
 import { DeviceIdentityStore } from './account/device-identity';
 import { AccountSessionRuntime } from './account/account-session-runtime';
 import { createAccountAuthAdapter } from './account/auth-adapter-factory';
+import { DeviceRegistryRuntime } from './account/device-registry-runtime';
 import { AccountAuthFlowRuntime } from './account/account-auth-flow-runtime';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
@@ -96,6 +97,11 @@ const accountAuthFlowRuntime = new AccountAuthFlowRuntime(
   accountAuthAdapter,
   accountSessionRuntime,
   accountDeviceIdentity,
+);
+const deviceRegistryRuntime = new DeviceRegistryRuntime(
+  accountSessionRuntime,
+  accountDeviceIdentity,
+  accountAuth.deviceRegistry,
 );
 const providerManager = new ProviderManager(storage);
 const chatManager = new ChatManager(storage);
@@ -245,12 +251,21 @@ function sendAccountAuthFlowState(snapshot: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('account-auth-flow:event', snapshot);
 }
 
+function sendDeviceRegistryState(snapshot: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('account-device-registry:event', snapshot);
+}
+
 accountSessionRuntime.subscribe((snapshot) => {
   sendAccountState(snapshot);
+  if (snapshot.state === 'authenticated') void deviceRegistryRuntime.ensureRegistered();
 });
 
 accountAuthFlowRuntime.subscribe((snapshot) => {
   sendAccountAuthFlowState(snapshot);
+});
+
+deviceRegistryRuntime.subscribe((snapshot) => {
+  sendDeviceRegistryState(snapshot);
 });
 
 executionPlanner.subscribe((change) => {
@@ -539,6 +554,10 @@ ipcMain.handle('account:rename-device', async (_event, name: string) => accountS
 ipcMain.handle('account-auth-flow:get-state', async () => accountAuthFlowRuntime.snapshot());
 ipcMain.handle('account-auth-flow:reset', async () => accountAuthFlowRuntime.reset());
 ipcMain.handle('account-auth:get-configuration', async () => ({ ...accountAuth.configuration, methods: [...accountAuth.configuration.methods] }));
+ipcMain.handle('account-device-registry:get-state', async () => deviceRegistryRuntime.snapshot());
+ipcMain.handle('account-device-registry:refresh', async () => deviceRegistryRuntime.refresh());
+ipcMain.handle('account-device-registry:rename-current', async (_event, name: string) => deviceRegistryRuntime.renameCurrent(requireNonEmptyString(name, 'Nome do dispositivo')));
+ipcMain.handle('account-device-registry:revoke', async (_event, deviceId: string) => deviceRegistryRuntime.revoke(requireNonEmptyString(deviceId, 'Dispositivo')));
 ipcMain.handle('providers:list-models', async (_event, identifier: string) => {
   const value = requireIdentifier(identifier, 'Provider');
   const key = (await providerManager.listKeys()).find((item) => item.id === value);
