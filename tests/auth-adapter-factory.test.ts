@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { createAccountAuthAdapter } from '../src/account/auth-adapter-factory';
 import { UnavailableAuthAdapter } from '../src/account/auth-adapter';
 import { HttpAuthAdapter } from '../src/account/http-auth-adapter';
+import { HttpDeviceRegistryAdapter } from '../src/account/http-device-registry-adapter';
+import { UnavailableDeviceRegistryAdapter } from '../src/account/device-registry-adapter';
 
 test('account auth factory stays disabled when no backend is configured', () => {
   const result = createAccountAuthAdapter(undefined);
@@ -10,6 +12,7 @@ test('account auth factory stays disabled when no backend is configured', () => 
   assert.deepEqual(result.configuration.methods, []);
   assert.equal(result.configuration.configurationError, undefined);
   assert.ok(result.adapter instanceof UnavailableAuthAdapter);
+  assert.ok(result.deviceRegistry instanceof UnavailableDeviceRegistryAdapter);
 });
 
 test('account auth factory enables all passwordless methods for a valid HTTPS backend', () => {
@@ -23,6 +26,7 @@ test('account auth factory enables all passwordless methods for a valid HTTPS ba
     'passkey',
   ]);
   assert.ok(result.adapter instanceof HttpAuthAdapter);
+  assert.ok(result.deviceRegistry instanceof HttpDeviceRegistryAdapter);
 });
 
 test('account auth factory fails closed without blocking local app on invalid configuration', () => {
@@ -31,4 +35,5 @@ test('account auth factory fails closed without blocking local app on invalid co
   assert.deepEqual(result.configuration.methods, []);
   assert.match(result.configuration.configurationError ?? '', /HTTPS/);
   assert.ok(result.adapter instanceof UnavailableAuthAdapter);
+  assert.ok(result.deviceRegistry instanceof UnavailableDeviceRegistryAdapter);
 });
