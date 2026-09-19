@@ -8,7 +8,6 @@ export type AuthFlowStatus =
   | 'idle'
   | 'waiting_magic_link'
   | 'waiting_browser'
-  | 'waiting_passkey'
   | 'completing'
   | 'authenticated'
   | 'error';
@@ -22,7 +21,6 @@ export interface AuthFlowSnapshot {
   flowId?: string;
   emailHint?: string;
   expiresAt?: number;
-  publicKeyOptions?: unknown;
   lastError?: string;
 }
 
@@ -42,6 +40,9 @@ interface PendingMagicLinkFlow {
 
 interface PendingPasskeyFlow {
   flowId: string;
+  state: string;
+  nonce: string;
+  codeVerifier: string;
   expiresAt: number;
 }
 
@@ -68,12 +69,7 @@ function emailHint(email: string): string {
 }
 
 function cloneSnapshot(snapshot: AuthFlowSnapshot): AuthFlowSnapshot {
-  return {
-    ...snapshot,
-    publicKeyOptions: snapshot.publicKeyOptions === undefined
-      ? undefined
-      : structuredClone(snapshot.publicKeyOptions),
-  };
+  return { ...snapshot };
 }
 
 export class AccountAuthFlowRuntime {
@@ -261,38 +257,74 @@ export class AccountAuthFlowRuntime {
     }
   }
 
-  async beginPasskey(): Promise<AuthFlowSnapshot> {
+  async beginPasskey(): Promise<{
+    snapshot: AuthFlowSnapshot;
+    authorizationUrl: string;
+  }> {
     this.assertCanBegin();
     const device = await this.requirePersistentDevice();
+    const state = randomBase64Url();
+    const nonce = randomBase64Url();
+    const codeVerifier = randomBase64Url(48);
+    const codeChallenge = pkceChallenge(codeVerifier);
 
     try {
-      const result = await this.auth.beginPasskey({ deviceId: device.id });
+      const result = await this.auth.beginPasskey({
+        deviceId: device.id,
+        state,
+        nonce,
+        codeChallenge,
+        codeChallengeMethod: 'S256',
+      });
       this.pendingPasskey = {
         flowId: result.flowId,
+        state,
+        nonce,
+        codeVerifier,
         expiresAt: result.expiresAt,
       };
       this.pendingOAuth = undefined;
       this.pendingMagicLink = undefined;
 
-      return this.setState({
-        status: 'waiting_passkey',
-        method: 'passkey',
-        flowId: result.flowId,
-        expiresAt: result.expiresAt,
-        publicKeyOptions: result.publicKeyOptions,
-      });
+      return {
+        snapshot: this.setState({
+          status: 'waiting_browser',
+          method: 'passkey',
+          flowId: result.flowId,
+          expiresAt: result.expiresAt,
+        }),
+        authorizationUrl: result.authorizationUrl,
+      };
     } catch (error) {
-      return this.fail(error);
+      return {
+        snapshot: this.fail(error),
+        authorizationUrl: '',
+      };
     }
   }
 
-  async completePasskey(flowId: string, credential: unknown): Promise<AuthFlowSnapshot> {
+  async completePasskey(input: {
+    flowId: string;
+    code: string;
+    state: string;
+  }): Promise<AuthFlowSnapshot> {
     const pending = this.pendingPasskey;
-    if (!pending || pending.flowId !== flowId) throw new Error('Fluxo Passkey inválido.');
+    if (!pending || pending.flowId !== input.flowId) throw new Error('Fluxo Passkey inválido.');
     this.assertNotExpired(pending.expiresAt);
-    if (credential === null || credential === undefined) throw new Error('Credencial Passkey inválida.');
 
+    if (input.state !== pending.state) {
+      this.clearPending();
+      return this.setState({
+        status: 'error',
+        method: 'passkey',
+        lastError: 'Estado Passkey inválido.',
+      });
+    }
+
+    const code = input.code.trim();
+    if (!code || code.length > 16_384) throw new Error('Código Passkey inválido.');
     const device = await this.requirePersistentDevice();
+
     this.setState({
       status: 'completing',
       method: 'passkey',
@@ -304,7 +336,10 @@ export class AccountAuthFlowRuntime {
       const grant = await this.auth.completePasskey({
         flowId: pending.flowId,
         deviceId: device.id,
-        credential,
+        code,
+        state: pending.state,
+        nonce: pending.nonce,
+        codeVerifier: pending.codeVerifier,
       });
       return await this.finishGrant(grant);
     } catch (error) {
