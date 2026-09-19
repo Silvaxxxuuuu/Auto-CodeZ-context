@@ -150,7 +150,13 @@ test('HttpAuthAdapter rejects non-JSON successful responses', async () => {
   });
 
   await assert.rejects(
-    adapter.beginMagicLink({ email: 'user@example.com', deviceId: 'device-1' }),
+    adapter.beginMagicLink({
+      email: 'user@example.com',
+      deviceId: 'device-1',
+      state: 'state-1',
+      codeChallenge: 'challenge-1',
+      codeChallengeMethod: 'S256',
+    }),
     /Resposta não JSON/,
   );
 });
