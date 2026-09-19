@@ -312,3 +312,94 @@ test('AccountSessionRuntime subscriptions expose only sanitized snapshots', asyn
   assert.ok(seen.every((serialized) => !serialized.includes('refresh-secret')));
   assert.ok(seen[1]?.includes('Meu PC'));
 });
+
+
+test('AccountSessionRuntime logout clears local credentials even when remote revoke fails', async () => {
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => 100,
+    },
+  );
+  const device = await devices.getOrCreate();
+
+  const adapter: AuthAdapter = {
+    async refresh(): Promise<AuthGrant> {
+      throw new Error('refresh não deveria ser chamado neste teste');
+    },
+    async revoke(): Promise<void> {
+      throw new AuthAdapterError('offline', 'Servidor indisponível.');
+    },
+  };
+
+  const runtime = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+
+  await runtime.establish({
+    account: profile(),
+    session: session(device.id),
+    accessToken: 'access-secret',
+    refreshToken: 'refresh-secret',
+  });
+
+  const snapshot = await runtime.logout();
+  assert.equal(snapshot.state, 'signed_out');
+  assert.equal(runtime.getAccessToken(), null);
+  assert.equal(credentials.values.has('account.session.refresh-token'), false);
+  assert.equal(storage.values.has('account-session.json'), false);
+});
+
+test('AccountSessionRuntime rejects grants bound to another device', async () => {
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => 100,
+    },
+  );
+
+  const adapter: AuthAdapter = {
+    async refresh(): Promise<AuthGrant> {
+      throw new Error('refresh não deveria ser chamado neste teste');
+    },
+    async revoke(): Promise<void> {
+    },
+  };
+
+  const runtime = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+
+  await assert.rejects(
+    runtime.establish({
+      account: profile(),
+      session: session('other-device'),
+      accessToken: 'access-secret',
+      refreshToken: 'refresh-secret',
+    }),
+    /outro dispositivo/,
+  );
+
+  assert.equal(credentials.values.has('account.session.refresh-token'), false);
+  assert.equal(storage.values.has('account-session.json'), false);
+});
