@@ -14,9 +14,15 @@ async function main(): Promise<void> {
   const migrations = await getMigrations(auth.options);
   await migrations.runMigrations();
 
-  const desktopSchemaUrl = new URL('../migrations/001_desktop_account.sql', import.meta.url);
-  const desktopSchema = await fs.readFile(desktopSchemaUrl, 'utf8');
-  await database.pool.query(desktopSchema);
+  const desktopMigrationsUrl = new URL('../migrations/', import.meta.url);
+  const desktopMigrations = (await fs.readdir(desktopMigrationsUrl))
+    .filter((name) => /^\d+_[a-z0-9_-]+\.sql$/i.test(name))
+    .sort((left, right) => left.localeCompare(right));
+  if (!desktopMigrations.length) throw new Error('No desktop account migrations were found.');
+  for (const name of desktopMigrations) {
+    const sql = await fs.readFile(new URL(name, desktopMigrationsUrl), 'utf8');
+    await database.pool.query(sql);
+  }
 
   console.log('Auto CodeZ Account API migrations completed.');
 }

@@ -181,8 +181,7 @@ export class DeviceRegistryService {
           $1, $2, $3, $4, $5, $6, $7,
           to_timestamp($8 / 1000.0), to_timestamp($8 / 1000.0), NULL
         )
-        ON CONFLICT (device_id) DO UPDATE SET
-          user_id = EXCLUDED.user_id,
+        ON CONFLICT (user_id, device_id) DO UPDATE SET
           name = EXCLUDED.name,
           platform = EXCLUDED.platform,
           arch = EXCLUDED.arch,

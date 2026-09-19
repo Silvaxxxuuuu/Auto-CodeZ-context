@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { AccountApiEnvironment } from '../../src/env.js';
 import { Database } from '../../src/db.js';
 import { DesktopSessionService } from '../../src/desktop-session.js';
@@ -22,6 +23,17 @@ function environment(): AccountApiEnvironment {
   };
 }
 
+async function migrateDesktopSchema(database: Database): Promise<void> {
+  const directory = path.join(process.cwd(), 'migrations');
+  const migrations = (await fs.readdir(directory))
+    .filter((name) => /^\d+_[a-z0-9_-]+\.sql$/i.test(name))
+    .sort((left, right) => left.localeCompare(right));
+  assert.ok(migrations.length > 0, 'Desktop migrations are missing.');
+  for (const name of migrations) {
+    await database.pool.query(await fs.readFile(path.join(directory, name), 'utf8'));
+  }
+}
+
 async function reset(database: Database): Promise<void> {
   await database.pool.query(`
     TRUNCATE TABLE
@@ -40,11 +52,7 @@ test('refresh rotation revokes the whole session on token replay', async () => {
   const env = environment();
   const database = new Database(env);
   try {
-    const schema = await fs.readFile(
-      new URL('migrations/001_desktop_account.sql', new URL('file://' + process.cwd().replace(/\\/g, '/') + '/')),
-      'utf8',
-    );
-    await database.pool.query(schema);
+    await migrateDesktopSchema(database);
     await reset(database);
 
     let now = 1_800_000_000_000;
@@ -89,11 +97,7 @@ test('Device Registry requires proof of Ed25519 private-key possession and revoc
   const env = environment();
   const database = new Database(env);
   try {
-    const schema = await fs.readFile(
-      new URL('migrations/001_desktop_account.sql', new URL('file://' + process.cwd().replace(/\\/g, '/') + '/')),
-      'utf8',
-    );
-    await database.pool.query(schema);
+    await migrateDesktopSchema(database);
     await reset(database);
 
     let now = 1_800_000_000_000;
@@ -171,11 +175,7 @@ test('desktop auth flow enforces PKCE, state, nonce and one-time exchange', asyn
   const env = environment();
   const database = new Database(env);
   try {
-    const schema = await fs.readFile(
-      new URL('migrations/001_desktop_account.sql', new URL('file://' + process.cwd().replace(/\\/g, '/') + '/')),
-      'utf8',
-    );
-    await database.pool.query(schema);
+    await migrateDesktopSchema(database);
     await reset(database);
 
     let now = 1_800_000_000_000;
@@ -253,11 +253,7 @@ test('session revoke requires refresh-token proof and invalidates later refreshe
   const env = environment();
   const database = new Database(env);
   try {
-    const schema = await fs.readFile(
-      new URL('migrations/001_desktop_account.sql', new URL('file://' + process.cwd().replace(/\\/g, '/') + '/')),
-      'utf8',
-    );
-    await database.pool.query(schema);
+    await migrateDesktopSchema(database);
     await reset(database);
 
     const sessions = new DesktopSessionService(database, env, () => 1_800_000_000_000);
@@ -289,6 +285,79 @@ test('session revoke requires refresh-token proof and invalidates later refreshe
       sessions.refresh(grant.refreshToken, 'device-revoke-1'),
       /invalid_grant/,
     );
+  } finally {
+    await database.close();
+  }
+});
+
+
+test('Device Registry isolates the same physical device id between accounts', async () => {
+  const env = environment();
+  const database = new Database(env);
+  try {
+    await migrateDesktopSchema(database);
+    await reset(database);
+
+    let now = 1_800_000_000_000;
+    const sessions = new DesktopSessionService(database, env, () => now);
+    const registry = new DeviceRegistryService(database, env, () => now);
+    const deviceId = 'shared-physical-device';
+    const keyPair = crypto.generateKeyPairSync('ed25519');
+    const publicKey = keyPair.publicKey.export({
+      type: 'spki',
+      format: 'pem',
+    }).toString();
+
+    async function register(
+      userId: string,
+      email: string,
+      name: string,
+    ) {
+      const grant = await sessions.issue({
+        user: { id: userId, email, name },
+        provider: 'github',
+        deviceId,
+      });
+      const context = await registry.authenticate(grant.accessToken);
+      const pending = await registry.beginRegistration(context, {
+        id: deviceId,
+        name,
+        platform: 'win32',
+        arch: 'x64',
+        appVersion: '2.0.0-test',
+        publicKey,
+      });
+      const signature = crypto.sign(
+        null,
+        Buffer.from(pending.challenge, 'utf8'),
+        keyPair.privateKey,
+      ).toString('base64');
+      await registry.completeRegistration(context, {
+        registrationId: pending.registrationId,
+        deviceId,
+        signature,
+      });
+      return { grant, context };
+    }
+
+    const first = await register('user-shared-a', 'a@example.com', 'Conta A');
+    now += 1_000;
+    const second = await register('user-shared-b', 'b@example.com', 'Conta B');
+
+    const firstDevices = await registry.list(first.context);
+    const secondDevices = await registry.list(second.context);
+    assert.deepEqual(firstDevices.map((device) => device.name), ['Conta A']);
+    assert.deepEqual(secondDevices.map((device) => device.name), ['Conta B']);
+
+    now += 1_000;
+    await registry.revoke(second.context, deviceId);
+    await assert.rejects(registry.authenticate(second.grant.accessToken), /invalid_token/);
+
+    const firstContextAfterSecondRevoke = await registry.authenticate(first.grant.accessToken);
+    const firstDevicesAfterSecondRevoke = await registry.list(firstContextAfterSecondRevoke);
+    assert.equal(firstDevicesAfterSecondRevoke.length, 1);
+    assert.equal(firstDevicesAfterSecondRevoke[0]?.name, 'Conta A');
+    assert.equal(firstDevicesAfterSecondRevoke[0]?.revokedAt, undefined);
   } finally {
     await database.close();
   }
