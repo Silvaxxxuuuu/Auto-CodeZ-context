@@ -117,6 +117,7 @@ async function playBrandReveal(root: HTMLElement): Promise<void> {
   if (!layout) return;
   const { mark, word, finalZOffset } = layout;
 
+  root.dataset.stage = 'brand';
   root.classList.add('is-branding');
   await delay(30);
 
@@ -172,18 +173,24 @@ async function finishSplash(): Promise<void> {
   if (reducedMotion) {
     applyGlyph(lines, Z_GLYPH);
     applyFinalBrandLayout(root);
+    root.dataset.stage = 'final';
     root.classList.add('is-branding', 'is-final');
     await delay(180);
   } else {
     await delay(90);
+    root.dataset.stage = 'morph-a';
     await interpolateGlyph(lines, TERMINAL_GLYPH, A_GLYPH, 520);
+    root.dataset.stage = 'a';
     root.classList.add('is-a');
-    await delay(150);
+    await delay(280);
+    root.dataset.stage = 'morph-z';
     await interpolateGlyph(lines, A_GLYPH, Z_GLYPH, 500);
     root.classList.remove('is-a');
+    root.dataset.stage = 'z';
     root.classList.add('is-z');
     await delay(120);
     await playBrandReveal(root);
+    root.dataset.stage = 'final';
     root.classList.add('is-final');
     await delay(420);
   }
