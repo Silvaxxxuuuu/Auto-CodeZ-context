@@ -664,10 +664,7 @@ app.addEventListener('click', async (event) => {
     renderMessages();
     renderComposer();
     void refreshApprovals();
-    void refresh().finally(() => {
-  document.documentElement.dataset.autoCodezCoreReady = 'true';
-  window.dispatchEvent(new CustomEvent('auto-codez-core-ready'));
-});
+    void refresh();
     return;
   }
   const projectButton = target.closest<HTMLElement>('[data-project]');
@@ -825,4 +822,7 @@ window.addEventListener('unhandledrejection', (event) => {
   window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: message }));
 });
 
-void refresh();
+void refresh().finally(() => {
+  document.documentElement.dataset.autoCodezCoreReady = 'true';
+  window.dispatchEvent(new CustomEvent('auto-codez-core-ready'));
+});
