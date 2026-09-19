@@ -6496,3 +6496,44 @@ CRITÉRIO PARA CONSIDERAR ACCOUNT CORE V1 PRONTO
 SÓ DEPOIS:
 Device Registry → Relay.
 
+------------------------------------------------------------
+24.38. STARTUP IDENTITY / BOOT SPLASH — DECISÃO DE PRODUTO
+------------------------------------------------------------
+
+Direção aprovada em 18/09/2026:
+
+O Auto CodeZ terá uma animação de bootstrap própria, usada como identidade visual e como cobertura do carregamento real do produto.
+
+Sequência:
+1. símbolo inicial ">_";
+2. "_" funciona como cursor e pisca enquanto o bootstrap ainda não terminou;
+3. quando app/account bootstrap estiver realmente pronto, os mesmos três traços fazem morph para "A";
+4. o "A" faz morph contínuo para "Z";
+5. o "Z" inicia deslocamento horizontal com aceleração suave, velocidade no meio e desaceleração no encaixe;
+6. durante o deslocamento, "Auto Code" é revelado;
+7. o Z se posiciona no final e forma "Auto CodeZ";
+8. splash desaparece e a UI pronta é revelada.
+
+Regra arquitetural:
+- não usar timer fixo como fonte de verdade;
+- ">_" permanece enquanto o bootstrap real estiver pendente;
+- a animação de branding final só começa após readiness real;
+- usuário deslogado espera apenas bootstrap local/app;
+- usuário com sessão existente futuramente espera app + AccountSession + DeviceIdentity + dados mínimos necessários;
+- falha de internet não deve bloquear local AI/editor;
+- recursos cloud podem entrar em estado degraded/offline sem impedir bootstrap local;
+- respeitar prefers-reduced-motion.
+
+Implementação visual inicial:
+- src/startup-splash.ts;
+- src/startup-splash.css;
+- markup mínimo no index.html para aparecer antes do renderer;
+- renderer sinaliza auto-codez-core-ready após o primeiro refresh;
+- renderer-entry só sinaliza auto-codez-bootstrap-ready depois de core + módulos críticos;
+- secondary enhancements continuam sem bloquear a entrada no produto.
+
+Quando Account Core for implementado:
+- substituir/estender o readiness gate;
+- não duplicar a animação;
+- AccountSessionRuntime/DeviceIdentityRuntime entram no mesmo bootstrap coordinator.
+
