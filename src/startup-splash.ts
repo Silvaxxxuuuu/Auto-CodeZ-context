@@ -161,12 +161,13 @@ async function finishSplash(): Promise<void> {
 
   const lines = getSegments(root);
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  root.classList.add('is-ready');
 
   const elapsed = performance.now() - STARTED_AT;
   if (!reducedMotion && elapsed < MIN_TERMINAL_DWELL_MS) {
     await delay(MIN_TERMINAL_DWELL_MS - elapsed);
   }
+
+  root.classList.add('is-ready');
 
   if (reducedMotion) {
     applyGlyph(lines, Z_GLYPH);
