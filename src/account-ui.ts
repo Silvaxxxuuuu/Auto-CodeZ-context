@@ -8,13 +8,12 @@ type AccountState = {
 };
 
 type AuthFlowState = {
-  status: 'idle' | 'waiting_magic_link' | 'waiting_browser' | 'waiting_passkey' | 'completing' | 'authenticated' | 'error';
+  status: 'idle' | 'waiting_magic_link' | 'waiting_browser' | 'completing' | 'authenticated' | 'error';
   method?: 'magic_link' | 'oauth' | 'passkey';
   provider?: 'github' | 'google' | 'microsoft';
   flowId?: string;
   emailHint?: string;
   expiresAt?: number;
-  publicKeyOptions?: unknown;
   lastError?: string;
 };
 
