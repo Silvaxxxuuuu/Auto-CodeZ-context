@@ -6828,3 +6828,949 @@ Não iniciar Relay antes de account session + registered device estarem comprova
 
 PR #9 continua OPEN/DRAFT e não deve ser mesclado sem autorização explícita.
 
+------------------------------------------------------------
+24.41. ACCOUNT CORE V1 — ESTADO MAIS RECENTE / HANDOFF 19-09-2026
+------------------------------------------------------------
+
+Este bloco é o handoff AUTORITATIVO mais recente para continuar o Account Core V1 em outro chat.
+Ele complementa 24.39 e 24.40 e substitui qualquer “próximo passo” antigo que conflite com este estado.
+
+BRANCH / PR
+
+Repo:
+Silvaxxxuuuu/Auto-CodeZ-context
+
+Branch:
+feature/ui-hierarchy-polish
+
+PR #9:
+- OPEN;
+- DRAFT;
+- não mesclar sem autorização explícita;
+- não iniciar Roblox/Blender antes da plataforma/Account estar validada.
+
+HEAD observado durante o fechamento deste chat:
+2b932d3c5798ee4eb560af01819f846d6125c103
+fix(test): keep fake auth capabilities mutable
+
+ATENÇÃO:
+alguns arquivos do Account API adicionados durante o bloco também já estão presentes na branch, incluindo:
+- services/account-api/src/server.ts;
+- services/account-api/src/passkey-client.ts;
+- .github/workflows/account-api.yml.
+
+Ao abrir o próximo chat:
+1. consultar o HEAD real da branch novamente;
+2. NÃO assumir hash antigo sem verificar;
+3. continuar do estado real do repositório, não deste texto isoladamente.
+
+CI MAIS RECENTE OBSERVADO
+
+No HEAD 2b932d3c5798ee4eb560af01819f846d6125c103:
+- Validate Account API #61 / run 35421367837: SUCCESS;
+- Validate Auto CodeZ #4199 / run 35421367856: SUCCESS;
+- Validate Auto CodeZ push #4198 / run 35421364698: SUCCESS;
+- Visual Auto CodeZ #921 / run 35421367835: FAILURE.
+
+Falha do Visual #921:
+- NÃO foi uma falha de Account;
+- falhou em scripts/visual-lm-studio-chat.cjs;
+- verifyLmStudioChatSelection esperou 15s por option “Granite Local” no #chat-model;
+- timeout:
+  locator('#chat-model').locator('option').filter({ hasText: 'Granite Local' });
+- isso é continuação da família de races/flakes antigas do seletor local/unified AI;
+- não mascarar aumentando timeout cegamente;
+- preferir readiness causal/evento explícito como já foi feito em outros cenários.
+
+ACCOUNT CORE DESKTOP — ESTADO ATUAL
+
+Já implementado:
+
+1. Account/Profile contracts
+- AccountProfile com primaryEmail;
+- displayName;
+- username opcional/automático;
+- identities vinculadas;
+- account status;
+- AccountSession separada;
+- snapshots públicos sanitizados.
+
+2. Sessão
+- access token somente em memória;
+- refresh token no ProtectedCredentialStore;
+- metadata de sessão persistida encriptada;
+- hydrate/restart;
+- offline cached account;
+- refresh/revocation;
+- logout local mesmo com backend offline;
+- rejeição de grant emitido para outro device;
+- sessão bound ao device.
+
+3. Device Identity
+- deviceId aleatório/opaco;
+- NÃO usar hostname/MAC/serial/machine GUID como identidade;
+- Ed25519 local;
+- public key registrável;
+- private key nunca sai do dispositivo;
+- signChallenge();
+- nome amigável/editável somente para produto;
+- sugestão inicial pode usar displayName da conta;
+- fallback ephemeral em memória se secure storage estiver indisponível;
+- local editor/IA NÃO podem ser bloqueados por indisponibilidade de cloud/safe storage.
+
+4. Auth Flow Runtime
+Métodos:
+- Magic Link;
+- GitHub;
+- Google;
+- Microsoft;
+- Passkey.
+
+OAuth:
+- state;
+- nonce;
+- PKCE S256;
+- verifier privado no main;
+- browser HTTPS;
+- callback deep-link;
+- state mismatch rejeitado;
+- expiry;
+- sem segredo no renderer.
+
+Magic Link:
+- email normalizado;
+- emailHint mascarado na UI;
+- PKCE S256 também foi adicionado;
+- callback exige state;
+- token de uso único;
+- verifier privado;
+- capturar o deep-link sozinho não deve ser suficiente.
+
+Passkey:
+- decisão corrigida:
+  NÃO executar WebAuthn diretamente no renderer file:// do Electron;
+- Passkey usa navegador HTTPS oficial;
+- PKCE + state + nonce;
+- browser faz WebAuthn no RP ID do backend;
+- retorno por autocodez://auth/passkey;
+- renderer não recebe credential privada/raw response para concluir sessão.
+
+5. Desktop callback
+Arquivo:
+src/account/account-auth-callback.ts
+
+Scheme:
+autocodez://auth/
+
+Rotas:
+- /oauth
+- /magic-link
+- /passkey
+
+Hardening:
+- parser estrito;
+- parâmetros obrigatórios;
+- limites de tamanho;
+- single-instance handling;
+- second-instance;
+- open-url;
+- foco da janela principal após callback.
+
+Packaging:
+forge.config.ts declara protocolo:
+autocodez
+
+Nome:
+Auto CodeZ Authentication
+
+6. HttpAuthAdapter
+Arquivo:
+src/account/http-auth-adapter.ts
+
+Contrato:
+POST /v1/auth/session/refresh
+POST /v1/auth/session/revoke
+POST /v1/auth/oauth/begin
+POST /v1/auth/oauth/complete
+POST /v1/auth/magic-link/begin
+POST /v1/auth/magic-link/complete
+POST /v1/auth/passkey/begin
+POST /v1/auth/passkey/complete
+
+Regras:
+- HTTPS obrigatório;
+- POST JSON;
+- tokens/códigos não vão em query string;
+- credentials=omit;
+- cache=no-store;
+- redirect=error;
+- timeout bounded;
+- resposta validada;
+- authorization URLs precisam ser HTTPS.
+
+7. Backend capability discovery
+Já implementado depois do início do Account API:
+- backend publica os métodos realmente configurados;
+- desktop descobre capabilities;
+- UI NÃO deve mostrar provider inexistente/não configurado;
+- Fake adapter/testes foram ajustados para capabilities mutáveis;
+- commits recentes:
+  - 401d963... expose auth capability discovery contract;
+  - 9d60ae2... discover backend login capabilities;
+  - abb6d93... publish configured login capabilities;
+  - 8a0d996... use backend auth capability discovery;
+  - e62d5d2... validate discovered auth capabilities;
+  - 2b932d3... keep fake auth capabilities mutable.
+
+8. Device Registry V1
+Desktop:
+- src/account/device-registry-adapter.ts;
+- src/account/device-registry-runtime.ts;
+- src/account/http-device-registry-adapter.ts.
+
+Fluxo:
+authenticated desktop
+→ register/begin
+→ backend retorna challenge curto
+→ desktop assina challenge com private key Ed25519
+→ register/complete
+→ backend verifica public key/signature
+→ device fica registrado.
+
+Operações:
+- list;
+- rename;
+- revoke;
+- currentDeviceId;
+- estado reativo/sanitizado;
+- access token só no main/HTTP Authorization.
+
+Revogação de device:
+- deve revogar sessões remotas daquele device;
+- NÃO apagar automaticamente arquivos locais;
+- private local identity só é destruída por política explícita futura.
+
+9. Login UI profissional
+Arquivos:
+- src/account-ui.ts;
+- src/account-ui.css.
+
+Direção visual implementada:
+“Bem-vindo ao Auto CodeZ”
+“Escolha uma das formas de login para continuar. Você pode adicionar outros métodos depois.”
+
+Métodos:
+- Magic Link;
+- GitHub;
+- Google;
+- Microsoft;
+- Passkey.
+
+Regras:
+- UI só aparece se backend auth estiver realmente configured;
+- providers vêm de capability discovery;
+- não mostrar botão funcional falso;
+- waiting state;
+- completing state;
+- device onboarding;
+- nome do device editável;
+- security note;
+- sem senha.
+
+10. Account no Perfil
+Arquivos:
+- src/account-profile-ui.ts;
+- src/account-profile-ui.css.
+
+Inclui:
+- displayName/email/username;
+- status online/offline/revoked;
+- métodos vinculados;
+- sessão atual;
+- device atual;
+- lista de dispositivos;
+- last seen;
+- refresh;
+- revoke device;
+- logout com confirmação.
+
+11. Startup identity
+A animação já definida em 24.38 continua válida.
+Account bootstrap deve integrar-se ao mesmo readiness gate:
+- usuário sem sessão: app/local readiness;
+- usuário com sessão: app + account/session/device bootstrap mínimo;
+- offline nunca impede editor/IA local.
+
+ACCOUNT API — ESTADO ATUAL
+
+Serviço separado:
+services/account-api/
+
+Objetivo:
+backend de Account V1 separado do Electron e deployável em Azure sem acoplar dependências de servidor ao desktop.
+
+Stack atual:
+- Node 24;
+- TypeScript;
+- Express;
+- PostgreSQL;
+- Better Auth;
+- @better-auth/passkey;
+- Azure Communication Services Email;
+- esbuild para passkey browser client.
+
+Better Auth:
+- email/password DESATIVADO;
+- senha tradicional NÃO faz parte do produto;
+- métodos desejados:
+  - Magic Link;
+  - GitHub;
+  - Google;
+  - Microsoft;
+  - Passkey.
+
+Versão Better Auth foi alinhada para evitar peer conflict.
+Não usar --force/--legacy-peer-deps como “solução” permanente para conflito de dependência.
+
+Arquivos principais:
+- services/account-api/package.json;
+- services/account-api/tsconfig.json;
+- services/account-api/.env.example;
+- src/env.ts;
+- src/db.ts;
+- src/crypto.ts;
+- src/email.ts;
+- src/auth.ts;
+- src/models.ts;
+- src/http.ts;
+- src/desktop-auth-flow.ts;
+- src/desktop-session.ts;
+- src/device-registry.ts;
+- src/passkey-client.ts;
+- src/server.ts;
+- migrations/001_desktop_account.sql.
+
+SCHEMA ACCOUNT API
+
+Tabelas Auto CodeZ:
+- desktop_account;
+- desktop_identity;
+- desktop_auth_flow;
+- desktop_session;
+- desktop_refresh_token;
+- device_registry;
+- device_registration.
+
+Better Auth mantém suas próprias tabelas/migrações para browser identity/session conforme a integração oficial.
+
+DESKTOP AUTH FLOW BACKEND
+
+desktop-auth-flow.ts:
+- auth flow kind:
+  - oauth;
+  - magic_link;
+  - passkey;
+- device binding;
+- outer state;
+- outer nonce quando aplicável;
+- code challenge;
+- short TTL;
+- one-time exchange token;
+- token armazenado somente como hash;
+- exchange exige PKCE;
+- flow consumido uma única vez;
+- replay deve falhar.
+
+Browser:
+OAuth:
+Auto CodeZ desktop
+→ POST /oauth/begin
+→ Better Auth/social provider
+→ callback HTTPS do Account API
+→ browser session Better Auth
+→ one-time code
+→ autocodez://auth/oauth
+→ desktop POST /oauth/complete + verifier
+→ Auto CodeZ desktop session grant.
+
+Magic Link:
+desktop
+→ begin + PKCE/state
+→ Azure Email
+→ Better Auth verify
+→ callback HTTPS
+→ one-time token
+→ autocodez://auth/magic-link
+→ complete + verifier/state
+→ grant.
+
+Passkey:
+desktop
+→ begin + PKCE/state/nonce
+→ navegador HTTPS /desktop/passkey
+→ Better Auth passkey/WebAuthn
+→ /desktop/passkey/finish
+→ one-time code
+→ autocodez://auth/passkey
+→ complete + verifier/state/nonce
+→ grant.
+
+DESKTOP SESSION BACKEND
+
+desktop-session.ts:
+- access token curto;
+- JWT HS256 atual;
+- issuer explícito;
+- audience:
+  auto-codez-desktop;
+- deviceId/sessionId/userId no claim;
+- refresh token aleatório;
+- refresh token persistido somente como hash;
+- refresh rotation;
+- refresh expiry;
+- lastActivity;
+- revokedAt;
+- refresh replay deve revogar a sessão.
+
+Hardening recente:
+- refresh proof passou a ser exigido também no session revoke;
+- secrets fracos no ambiente passaram a ser rejeitados;
+- issuer/audience permanecem explícitos;
+- nenhuma sessão do Better Auth browser substitui a sessão desktop Auto CodeZ.
+
+DEVICE BACKEND
+
+device-registry.ts:
+- valida access token;
+- valida sessão correspondente;
+- begin registration;
+- challenge aleatório;
+- TTL curto;
+- complete registration;
+- verifica assinatura Ed25519;
+- upsert de device;
+- list;
+- rename;
+- revoke;
+- revoke device revoga desktop sessions associadas.
+
+ACCOUNT API SECURITY / TEST SYSTEM
+
+Novo sistema de testes específico do Account API existe e deve continuar separado do Electron.
+
+Workflow:
+.github/workflows/account-api.yml
+Nome:
+Validate Account API
+
+O serviço foi isolado do:
+- desktop tsconfig.typecheck;
+- desktop ESLint.
+
+Account API possui validação própria.
+
+Cobertura recente adicionada no repo:
+- primitives de token;
+- PKCE;
+- JWT/access token;
+- environment validation;
+- minimum secret length/entropy baseline;
+- PostgreSQL integration;
+- migrations;
+- session issuance;
+- refresh rotation;
+- refresh replay;
+- replay revocation persistida;
+- refresh proof on revoke;
+- one-time PKCE auth exchange;
+- device challenge;
+- assinatura Ed25519;
+- device registry/revoke.
+
+CI Account API mais recente observado:
+Validate Account API #61: SUCCESS.
+
+Visual account onboarding também foi adicionado:
+- scripts de visual onboarding;
+- workflow visual chama cenário de account onboarding;
+- intenção:
+  testar login/passwordless/device onboarding no Electron empacotado com backend/fake determinístico.
+
+HARDENING HTTP / BACKEND
+
+Recentemente adicionado:
+- proxy/auth response headers endurecidos;
+- X-Content-Type-Options;
+- Referrer-Policy;
+- Permissions-Policy;
+- CSP específica da tela Passkey;
+- no x-powered-by;
+- one-time secret em deep link;
+- grant real só via POST + PKCE;
+- access/refresh reais não devem aparecer na URL.
+
+ENV / DEPLOY
+
+.env.example inclui conceitualmente:
+- ACCOUNT_PUBLIC_URL;
+- PORT;
+- DATABASE_URL;
+- BETTER_AUTH_SECRET;
+- ACCOUNT_ACCESS_TOKEN_SECRET;
+- GITHUB_CLIENT_ID / SECRET;
+- GOOGLE_CLIENT_ID / SECRET;
+- MICROSOFT_CLIENT_ID / SECRET;
+- MICROSOFT_TENANT_ID;
+- Azure Communication Services Email connection string/sender;
+- PASSKEY_RP_ID;
+- PASSKEY_RP_NAME.
+
+Regras:
+- ACCOUNT_PUBLIC_URL HTTPS;
+- secrets fortes;
+- não versionar secrets reais;
+- não colar secrets no chat;
+- não hardcodar domínio fictício como domínio final.
+
+Azure é um alvo natural para:
+- Container Apps ou App Service para Account API;
+- PostgreSQL gerenciado;
+- Azure Communication Services Email;
+- secrets em Key Vault / configuração segura;
+- observabilidade sanitizada.
+
+Ainda NÃO considerar produção pronta apenas porque o serviço compila.
+
+O QUE FALTA PARA DECLARAR ACCOUNT CORE V1 CLOSED
+
+1. corrigir Visual #921 / race “Granite Local” e obter Visual verde no HEAD exato;
+2. revalidar HEAD real após qualquer correção;
+3. Validate Auto CodeZ verde;
+4. Validate Account API verde;
+5. Visual Auto CodeZ verde;
+6. revisar src/server.ts contra os tipos/behavior da versão exata Better Auth instalada;
+7. garantir package-lock determinístico do serviço;
+8. confirmar migrations em PostgreSQL real/test container;
+9. confirmar browser callback OAuth/Magic Link/Passkey end-to-end;
+10. provisionar backend real para teste:
+   - PostgreSQL;
+   - HTTPS;
+   - Email;
+   - provider credentials;
+11. fazer login real no Auto CodeZ;
+12. restart/hydrate;
+13. offline;
+14. expired access + refresh;
+15. revoked session;
+16. revoke device;
+17. multi-device;
+18. logout;
+19. Visual E2E final do first login/device onboarding;
+20. atualizar este contexto com o HEAD final e declarar Account Core V1 CLOSED.
+
+NÃO iniciar Relay antes de:
+- session/device contracts reais estarem comprovados;
+- V1 fechada.
+
+------------------------------------------------------------
+24.42. AZURE FOUNDRY TEST LAB — NOVA PRIORIDADE APROVADA
+------------------------------------------------------------
+
+Decisão de produto/desenvolvimento aprovada em 19/09/2026.
+
+O usuário criou conta no Microsoft Azure e recebeu aproximadamente US$200 em créditos promocionais.
+Esses créditos serão usados SOMENTE para desenvolvimento/testes pessoais do Auto CodeZ.
+Não distribuir o crédito para usuários e não tratá-lo como infraestrutura de produção.
+
+MODELO ESCOLHIDO PARA TESTES
+
+Principal modelo cloud de teste:
+GPT-5.6 Luna
+
+Motivo:
+- custo muito menor que Sol;
+- usuário pretende fazer MUITOS testes;
+- inclui testes repetitivos de tools, Activities, web, edição, terminal, artifacts, criação/descoberta de ferramentas etc.;
+- Luna deve ser o baseline barato/forte para regressão real de agente.
+
+GPT-5.6 Sol:
+- usar apenas pontualmente quando for necessário distinguir:
+  “falha do Auto CodeZ” vs “limitação do modelo”.
+
+GPT-4o / outros:
+- apenas compatibilidade/cenários específicos, não default.
+
+IMPORTANTE — NOMENCLATURA
+
+Modelos Azure NÃO são “IA local” tecnicamente.
+
+A UI/arquitetura deve separar:
+
+IA
+├── Cloud
+│   └── Azure Foundry
+│       └── GPT-5.6 Luna
+└── Local
+    ├── Auto CodeZ Local
+    ├── Ollama
+    └── LM Studio
+
+Não misturar Azure com “Local” só porque o Auto CodeZ controla o provider.
+
+ARQUITETURA
+
+Azure GPT-5.6 Luna
+→ AzureFoundryProvider
+→ ChatRuntime
+→ AgentRuntime
+→ policies / approvals
+→ PluginToolCatalog
+→ filesystem / terminal / web / MCP / plugins / Roblox / Blender futuro
+→ Activity Timeline
+→ artifacts.
+
+A Azure fornece inferência.
+A autoridade local continua no Auto CodeZ.
+
+Azure nunca deve:
+- bypassar AgentRuntime;
+- executar terminal diretamente fora da policy;
+- escrever filesystem sem approvals/scope;
+- bypassar PluginToolCatalog.
+
+AZURE FOUNDRY TEST PROVIDER — ESCOPO
+
+Criar depois de fechar o slice atual Account Core V1.
+
+Provider esperado:
+AzureFoundryProvider
+
+Capacidades:
+- Responses API;
+- streaming;
+- cancellation;
+- retry bounded;
+- error normalization;
+- usage/token telemetry;
+- model/deployment discovery;
+- tool calling;
+- tool search/deferred tools se suportado pelo modelo/endpoint real;
+- cost estimation;
+- latency measurements.
+
+Não inventar endpoint/model availability.
+No momento da implementação:
+- consultar Azure subscription real;
+- listar deployments/modelos disponíveis;
+- escolher região/deployment com base em disponibilidade real;
+- medir latência.
+
+MÉTRICAS DO TEST LAB
+
+Registrar por run:
+- network RTT quando mensurável;
+- TTFT;
+- total latency;
+- tokens input;
+- tokens output;
+- tokens/s;
+- tool count;
+- tool round-trip;
+- retries;
+- cancellation;
+- estimated cost;
+- model/deployment;
+- resultado do cenário.
+
+Tela futura interna possível:
+Azure Test Lab
+
+Exemplo conceitual:
+Model: GPT-5.6 Luna
+Provider: Azure Foundry
+
+Network
+TTFT
+Generation tok/s
+
+Agent
+Tools
+Web Search
+Filesystem
+Terminal
+Images
+Activities
+Plugins
+
+Usage
+Input tokens
+Output tokens
+Estimated cost
+Total lab spend
+
+Não bloquear implementação por UI sofisticada; telemetry primeiro.
+
+NOVO SISTEMA DE TESTES DE AGENTE
+
+Azure Luna será usado para testes E2E REAIS do Auto CodeZ, não apenas chat.
+
+Cenário baseline recomendado:
+“Crie um pequeno projeto HTML com uma página,
+pesquise uma informação atual na web,
+adicione essa informação ao projeto,
+execute uma validação,
+corrija qualquer erro e mostre o resultado.”
+
+Isso força:
+- planning;
+- web research;
+- source handling;
+- filesystem;
+- write approval;
+- terminal;
+- validation;
+- self-correction;
+- Activities;
+- artifacts;
+- final answer.
+
+Bateria posterior:
+1. chat/streaming;
+2. web research;
+3. file read/write/edit;
+4. terminal;
+5. approvals;
+6. cancellation;
+7. tool failure/retry;
+8. tool creation/discovery;
+9. large tool catalog/tool search;
+10. Git workflow;
+11. image generation;
+12. MCP external;
+13. Roblox Studio;
+14. Blender.
+
+TOOL SEARCH
+
+Direção desejada:
+PluginToolCatalog
+→ namespaces/deferred tool definitions
+→ Azure/Luna tool search quando disponível
+→ carregar somente tools necessárias.
+
+Objetivo:
+- não enviar centenas de definitions em toda request;
+- reduzir tokens;
+- preservar extensibilidade dos plugins.
+
+Verificar suporte real na Azure/modelo antes de codificar.
+
+IMAGE GENERATION
+
+Não tratar Luna como gerador de imagem diretamente.
+
+Arquitetura:
+Luna decide que precisa de imagem
+→ image.generate tool
+→ modelo de imagem dedicado na Azure, quando disponível/configurado
+→ artifact
+→ preview/Activity.
+
+Isso permite testar a arquitetura de tools corretamente.
+
+CUSTO / CRÉDITO
+
+US$200 são orçamento de LAB pessoal, não produção.
+
+Estratégia:
+- Luna como default;
+- Sol apenas casos difíceis;
+- evitar provisioned throughput/PTU no laboratório inicial;
+- preferir consumo sob demanda;
+- evitar GPU/VM idle;
+- adicionar budget/telemetry desde o começo.
+
+Guardrails sugeridos:
+- alerta interno ~US$25;
+- alerta forte ~US$50;
+- revisão manual ~US$75;
+- hard budget de laboratório ~US$100;
+- restante como reserva.
+
+Não confiar cegamente em estimativa mensal fixa.
+Custo depende de:
+- tokens;
+- output;
+- contexto;
+- imagens;
+- número de execuções;
+- recursos Azure adicionais.
+
+PLANO FUTURO “CLOUD AI”
+
+Nome de produto mencionado pelo usuário:
+“Cloude AI” / Cloud AI.
+Confirmar grafia final futuramente.
+
+Ideia:
+plano futuro do Auto CodeZ que hospeda runtime/modelos para usuários executarem IAs sem depender do hardware do PC deles.
+
+Conceito:
+Usuário
+→ Auto CodeZ
+→ Cloud AI Runtime
+→ compute/GPU hospedada
+→ modelo open-weight/servido pelo Auto CodeZ.
+
+Isso NÃO é o mesmo que o laboratório Azure atual.
+
+No Cloud AI futuro, custos passam a incluir:
+- GPU por hora;
+- VRAM;
+- idle;
+- autoscaling;
+- cold start;
+- model storage;
+- egress;
+- concurrency;
+- quotas;
+- isolation multi-tenant;
+- abuse prevention;
+- billing.
+
+Não usar os US$200 atuais como “produção Cloud AI”.
+Podem futuramente servir para protótipo, mas prioridade atual é testar o Auto CodeZ.
+
+ORDEM DE PRIORIDADE ATUALIZADA
+
+Prioridade canônica após fechar Account Core V1:
+
+1. Account Core V1 CLOSED;
+2. Azure Foundry Test Lab / GPT-5.6 Luna;
+3. Agent E2E real:
+   - streaming;
+   - tools;
+   - web;
+   - Activities;
+   - artifacts;
+   - image tool;
+4. Account real/device hardening residual se algum cenário revelar problema;
+5. Relay;
+6. Remote MCP/public Auto CodeZ plugin;
+7. Roblox real via public path;
+8. Blender;
+9. Sync V1;
+10. product/distribution hardening.
+
+Azure Luna entra ANTES do Relay porque fornece um cérebro forte/barato para validar o restante do AgentRuntime.
+
+Não interromper Account Core no meio para começar Azure.
+Fechar o Account V1 primeiro.
+
+------------------------------------------------------------
+24.43. PONTO EXATO PARA O PRÓXIMO CHAT
+------------------------------------------------------------
+
+Ao continuar:
+
+PASSO 1 — VERIFICAR ESTADO REAL
+- repo Silvaxxxuuuu/Auto-CodeZ-context;
+- branch feature/ui-hierarchy-polish;
+- buscar HEAD atual;
+- PR #9 continua sem merge;
+- consultar workflows do HEAD exato.
+
+PASSO 2 — FECHAR VISUAL ATUAL
+Problema conhecido:
+Visual #921 falhou por timeout esperando “Granite Local” em:
+scripts/visual-lm-studio-chat.cjs
+verifyLmStudioChatSelection.
+
+Não é falha de Account.
+Investigar readiness causal do unified/local model selector.
+Não apenas aumentar timeout.
+
+PASSO 3 — VALIDAR ACCOUNT API
+Confirmar no HEAD real:
+- Validate Account API;
+- typecheck;
+- build server;
+- build browser passkey;
+- migrations;
+- unit tests;
+- PostgreSQL integration tests.
+
+Validate Account API #61 estava SUCCESS no checkpoint observado.
+
+PASSO 4 — REVISAR BACKEND REAL
+Abrir e revisar:
+- services/account-api/src/server.ts;
+- passkey-client.ts;
+- auth.ts;
+- desktop-auth-flow.ts;
+- desktop-session.ts;
+- device-registry.ts;
+- env.ts;
+- migrations.
+
+Validar contra Better Auth version realmente instalada.
+
+PASSO 5 — PACKAGE LOCK
+Se ainda não existir/estiver desatualizado:
+- gerar package-lock determinístico;
+- trocar CI de npm install para npm ci quando possível;
+- não usar legacy-peer-deps como baseline.
+
+PASSO 6 — FECHAR ACCOUNT V1
+- backend test environment;
+- real provider capability discovery;
+- Magic Link;
+- OAuth;
+- Passkey;
+- session restart;
+- offline;
+- refresh;
+- replay;
+- revoke;
+- multi-device;
+- device rename;
+- profile account UI;
+- first-login/device onboarding visual.
+
+PASSO 7 — CI EXATO
+Exigir:
+- Validate Auto CodeZ GREEN;
+- Validate Account API GREEN;
+- Visual Auto CodeZ GREEN;
+- sem pageErrors;
+- sem consoleErrors;
+- artifact visual revisado.
+
+PASSO 8 — CONTEXTO
+Adicionar checkpoint com:
+- HEAD final;
+- runs exatos;
+- artifact;
+- screenshots relevantes;
+- Account Core V1 CLOSED.
+
+PASSO 9 — AZURE LUNA
+Só depois:
+- criar AzureFoundryProvider;
+- usar GPT-5.6 Luna como default do Test Lab;
+- iniciar bateria E2E real.
+
+REGRAS QUE NÃO MUDARAM
+
+- NÃO fazer merge do PR #9 sem autorização explícita;
+- NÃO iniciar Roblox/Blender antes da fundação/Account/Azure test path estar validada conforme roadmap;
+- trabalhar em blocos grandes;
+- testar de verdade;
+- preferir estado real do repo sobre memória/chat;
+- não pedir secrets para serem colados no chat;
+- não expor access token/refresh token/private key;
+- local/offline continua funcionando sem Internet;
+- Relay nunca vira authority/executor;
+- AgentRuntime/policies/PluginToolCatalog continuam autoritativos;
+- código novo deve manter precisão e fail-closed.
+
