@@ -9,6 +9,7 @@ import {
   type AuthAdapter,
   type AuthAdapterErrorCode,
   type AuthGrant,
+  type AuthMethod,
   type BeginMagicLinkInput,
   type BeginOAuthInput,
   type BeginPasskeyInput,
@@ -178,6 +179,22 @@ export class HttpAuthAdapter implements AuthAdapter {
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs < 1_000 || this.timeoutMs > 60_000) {
       throw new Error('Timeout do serviço de autenticação inválido.');
     }
+  }
+
+  async configuration(): Promise<{ methods: AuthMethod[] }> {
+    const source = objectValue(await this.post('/v1/auth/configuration', {}), 'Configuração de autenticação');
+    if (!Array.isArray(source.methods)) {
+      throw new AuthAdapterError('server', 'Métodos de autenticação inválidos retornados pelo serviço.');
+    }
+    const allowed = new Set<AuthMethod>(['magic_link', 'github', 'google', 'microsoft', 'passkey']);
+    const methods: AuthMethod[] = [];
+    for (const value of source.methods) {
+      if (typeof value !== 'string' || !allowed.has(value as AuthMethod)) {
+        throw new AuthAdapterError('server', 'Método de autenticação inválido retornado pelo serviço.');
+      }
+      if (!methods.includes(value as AuthMethod)) methods.push(value as AuthMethod);
+    }
+    return { methods };
   }
 
   async refresh(input: RefreshSessionInput): Promise<AuthGrant> {
