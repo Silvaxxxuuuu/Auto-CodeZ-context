@@ -44,3 +44,16 @@ test('findAccountAuthCallback extracts callback URL from desktop argv', () => {
   );
   assert.equal(findAccountAuthCallback(['Auto CodeZ.exe']), undefined);
 });
+
+
+test('parseAccountAuthCallback accepts browser passkey callbacks', () => {
+  assert.deepEqual(
+    parseAccountAuthCallback('autocodez://auth/passkey?flowId=passkey-1&code=one-time-code&state=state-1'),
+    {
+      type: 'passkey',
+      flowId: 'passkey-1',
+      code: 'one-time-code',
+      state: 'state-1',
+    },
+  );
+});
