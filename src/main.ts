@@ -606,7 +606,23 @@ ipcMain.handle('account:logout', async () => accountSessionRuntime.logout());
 ipcMain.handle('account:rename-device', async (_event, name: string) => accountSessionRuntime.renameDevice(requireNonEmptyString(name, 'Nome do dispositivo')));
 ipcMain.handle('account-auth-flow:get-state', async () => accountAuthFlowRuntime.snapshot());
 ipcMain.handle('account-auth-flow:reset', async () => accountAuthFlowRuntime.reset());
-ipcMain.handle('account-auth:get-configuration', async () => ({ ...accountAuth.configuration, methods: [...accountAuth.configuration.methods] }));
+ipcMain.handle('account-auth:get-configuration', async () => {
+  try {
+    const discovered = await accountAuthAdapter.configuration();
+    return {
+      configured: accountAuth.configuration.configured,
+      methods: [...discovered.methods],
+    };
+  } catch (error) {
+    return {
+      ...accountAuth.configuration,
+      methods: [...accountAuth.configuration.methods],
+      configurationError: error instanceof Error
+        ? error.message
+        : accountAuth.configuration.configurationError,
+    };
+  }
+});
 ipcMain.handle('account-auth:begin-magic-link', async (_event, email: string) => accountAuthFlowRuntime.beginMagicLink(requireNonEmptyString(email, 'E-mail')));
 ipcMain.handle('account-auth:begin-oauth', async (_event, provider: unknown) => {
   const result = await accountAuthFlowRuntime.beginOAuth(requireOAuthProvider(provider));
