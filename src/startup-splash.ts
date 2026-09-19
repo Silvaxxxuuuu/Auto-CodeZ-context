@@ -19,6 +19,11 @@ const Z_GLYPH: Glyph = [
   [28, 56, 60, 56],
 ];
 
+const STARTED_AT = performance.now();
+const MIN_TERMINAL_DWELL_MS = 900;
+const FINAL_Z_VISUAL_WIDTH_PX = 29;
+const BRAND_GAP_PX = 1;
+
 const easeInOut = (value: number): number => value < 0.5
   ? 4 * value * value * value
   : 1 - Math.pow(-2 * value + 2, 3) / 2;
@@ -83,15 +88,20 @@ async function playBrandReveal(root: HTMLElement): Promise<void> {
   const word = root.querySelector<HTMLElement>('.ac-startup-word');
   if (!mark || !word) return;
 
+  const wordWidth = word.getBoundingClientRect().width;
+  const totalBrandWidth = wordWidth + BRAND_GAP_PX + FINAL_Z_VISUAL_WIDTH_PX;
+  const finalZOffset = (wordWidth + BRAND_GAP_PX) / 2;
+  word.style.marginLeft = `-${(totalBrandWidth / 2).toFixed(3)}px`;
+
   root.classList.add('is-branding');
   await delay(30);
 
   const markAnimation = mark.animate(
     [
       { transform: 'translate3d(0,0,0) scale(1)' },
-      { transform: 'translate3d(14px,0,0) scale(1)', offset: .16 },
-      { transform: 'translate3d(116px,0,0) scale(.86)', offset: .78 },
-      { transform: 'translate3d(142px,0,0) scale(.86)' },
+      { transform: 'translate3d(8px,0,0) scale(1)', offset: .16 },
+      { transform: `translate3d(${(finalZOffset * .82).toFixed(3)}px,0,0) scale(.9)`, offset: .76 },
+      { transform: `translate3d(${finalZOffset.toFixed(3)}px,0,0) scale(.86)` },
     ],
     {
       duration: 920,
@@ -128,6 +138,11 @@ async function finishSplash(): Promise<void> {
   const lines = getSegments(root);
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   root.classList.add('is-ready');
+
+  const elapsed = performance.now() - STARTED_AT;
+  if (!reducedMotion && elapsed < MIN_TERMINAL_DWELL_MS) {
+    await delay(MIN_TERMINAL_DWELL_MS - elapsed);
+  }
 
   if (reducedMotion) {
     applyGlyph(lines, Z_GLYPH);
