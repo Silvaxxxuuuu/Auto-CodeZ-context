@@ -35,6 +35,8 @@ interface PendingOAuthFlow {
 
 interface PendingMagicLinkFlow {
   flowId: string;
+  state: string;
+  codeVerifier: string;
   expiresAt: number;
 }
 
@@ -106,15 +108,23 @@ export class AccountAuthFlowRuntime {
     this.assertCanBegin();
     const normalizedEmail = normalizeEmail(email);
     const device = await this.requirePersistentDevice();
+    const state = randomBase64Url();
+    const codeVerifier = randomBase64Url(48);
+    const codeChallenge = pkceChallenge(codeVerifier);
 
     try {
       const result = await this.auth.beginMagicLink({
         email: normalizedEmail,
         deviceId: device.id,
+        state,
+        codeChallenge,
+        codeChallengeMethod: 'S256',
       });
 
       this.pendingMagicLink = {
         flowId: result.flowId,
+        state,
+        codeVerifier,
         expiresAt: result.expiresAt,
       };
       this.pendingOAuth = undefined;
@@ -132,12 +142,25 @@ export class AccountAuthFlowRuntime {
     }
   }
 
-  async completeMagicLink(flowId: string, token: string): Promise<AuthFlowSnapshot> {
+  async completeMagicLink(input: {
+    flowId: string;
+    token: string;
+    state: string;
+  }): Promise<AuthFlowSnapshot> {
     const pending = this.pendingMagicLink;
-    if (!pending || pending.flowId !== flowId) throw new Error('Fluxo de Magic Link inválido.');
+    if (!pending || pending.flowId !== input.flowId) throw new Error('Fluxo de Magic Link inválido.');
     this.assertNotExpired(pending.expiresAt);
 
-    const value = token.trim();
+    if (input.state !== pending.state) {
+      this.clearPending();
+      return this.setState({
+        status: 'error',
+        method: 'magic_link',
+        lastError: 'Estado Magic Link inválido.',
+      });
+    }
+
+    const value = input.token.trim();
     if (!value || value.length > 16_384) throw new Error('Token de Magic Link inválido.');
 
     const device = await this.requirePersistentDevice();
@@ -153,6 +176,8 @@ export class AccountAuthFlowRuntime {
         flowId: pending.flowId,
         token: value,
         deviceId: device.id,
+        state: pending.state,
+        codeVerifier: pending.codeVerifier,
       });
       return await this.finishGrant(grant);
     } catch (error) {
