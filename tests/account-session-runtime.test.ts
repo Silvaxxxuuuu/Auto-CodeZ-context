@@ -403,3 +403,43 @@ test('AccountSessionRuntime rejects grants bound to another device', async () =>
   assert.equal(credentials.values.has('account.session.refresh-token'), false);
   assert.equal(storage.values.has('account-session.json'), false);
 });
+
+
+test('DeviceIdentityStore falls back to ephemeral identity when protected storage is unavailable', async () => {
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  credentials.set = async (): Promise<void> => {
+    throw new Error('Sistema de armazenamento seguro indisponível.');
+  };
+
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => 100,
+    },
+  );
+
+  const first = await devices.getOrCreate();
+  const second = await devices.getOrCreate();
+
+  assert.equal(first.credentialPersistence, 'ephemeral');
+  assert.equal(second.id, first.id);
+  assert.equal(storage.values.has('device-identity.json'), false);
+
+  const challenge = 'ephemeral-challenge';
+  const signature = await devices.signChallenge(challenge);
+  assert.equal(
+    crypto.verify(
+      null,
+      Buffer.from(challenge, 'utf8'),
+      first.publicKey,
+      Buffer.from(signature, 'base64'),
+    ),
+    true,
+  );
+});
