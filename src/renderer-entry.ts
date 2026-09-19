@@ -1,3 +1,4 @@
+import './startup-splash';
 import './renderer';
 
 type Enhancement = {
@@ -71,8 +72,20 @@ async function loadEnhancement(enhancement: Enhancement): Promise<void> {
   }
 }
 
+function waitForCoreReady(): Promise<void> {
+  if (document.documentElement.dataset.autoCodezCoreReady === 'true') return Promise.resolve();
+  return new Promise((resolve) => {
+    window.addEventListener('auto-codez-core-ready', () => resolve(), { once: true });
+  });
+}
+
 async function initializeEnhancements(): Promise<void> {
   for (const enhancement of criticalEnhancements) await loadEnhancement(enhancement);
+  await waitForCoreReady();
+
+  document.documentElement.dataset.autoCodezBootstrapReady = 'true';
+  window.dispatchEvent(new CustomEvent('auto-codez-bootstrap-ready'));
+
   for (const enhancement of secondaryEnhancements) void loadEnhancement(enhancement);
 }
 
