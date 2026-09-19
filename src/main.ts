@@ -229,6 +229,14 @@ function sendMcpTunnelStatus(status: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('mcp-tunnel:event', status);
 }
 
+function sendAccountState(snapshot: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('account:event', snapshot);
+}
+
+accountSessionRuntime.subscribe((snapshot) => {
+  sendAccountState(snapshot);
+});
+
 executionPlanner.subscribe((change) => {
   sendExecutionPlanChange(change);
   const historyChanged = executionPlanHistory.record(change);
