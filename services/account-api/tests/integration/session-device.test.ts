@@ -40,7 +40,7 @@ test('refresh rotation revokes the whole session on token replay', async () => {
   const database = new Database(env);
   try {
     const schema = await fs.readFile(
-      new URL('../../migrations/001_desktop_account.sql', import.meta.url),
+      new URL('migrations/001_desktop_account.sql', new URL('file://' + process.cwd().replace(/\\/g, '/') + '/')),
       'utf8',
     );
     await database.pool.query(schema);
@@ -89,7 +89,7 @@ test('Device Registry requires proof of Ed25519 private-key possession and revoc
   const database = new Database(env);
   try {
     const schema = await fs.readFile(
-      new URL('../../migrations/001_desktop_account.sql', import.meta.url),
+      new URL('migrations/001_desktop_account.sql', new URL('file://' + process.cwd().replace(/\\/g, '/') + '/')),
       'utf8',
     );
     await database.pool.query(schema);
