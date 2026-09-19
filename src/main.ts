@@ -123,6 +123,8 @@ async function completeAccountAuthCallback(rawUrl: string): Promise<void> {
   const callback = parseAccountAuthCallback(rawUrl);
   if (callback.type === 'oauth') {
     await accountAuthFlowRuntime.completeOAuth(callback);
+  } else if (callback.type === 'passkey') {
+    await accountAuthFlowRuntime.completePasskey(callback);
   } else {
     await accountAuthFlowRuntime.completeMagicLink(callback.flowId, callback.token);
   }
@@ -611,13 +613,10 @@ ipcMain.handle('account-auth:begin-oauth', async (_event, provider: unknown) => 
   if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
   return result.snapshot;
 });
-ipcMain.handle('account-auth:begin-passkey', async () => accountAuthFlowRuntime.beginPasskey());
-ipcMain.handle('account-auth:complete-passkey', async (_event, input: unknown) => {
-  const value = requireObject(input, 'Credencial Passkey');
-  return accountAuthFlowRuntime.completePasskey(
-    requireNonEmptyString(value.flowId, 'Fluxo Passkey'),
-    value.credential,
-  );
+ipcMain.handle('account-auth:begin-passkey', async () => {
+  const result = await accountAuthFlowRuntime.beginPasskey();
+  if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
+  return result.snapshot;
 });
 ipcMain.handle('account-device-registry:get-state', async () => deviceRegistryRuntime.snapshot());
 ipcMain.handle('account-device-registry:refresh', async () => deviceRegistryRuntime.refresh());
