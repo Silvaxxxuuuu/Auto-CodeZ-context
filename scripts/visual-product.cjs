@@ -219,14 +219,17 @@ async function captureStartupIdentity() {
     const findStage = (stage) => snapshots.find((snapshot) => snapshot.stage === stage);
     const aState = findStage('a');
     const zState = findStage('z');
+    const settledState = findStage('brand-z-settled');
     const finalState = findStage('final');
 
     if (!aState) throw new Error('O estágio A não foi observado durante o morph.');
     if (!zState) throw new Error('O estágio Z não foi observado durante o morph.');
+    if (!settledState) throw new Error('O Z não confirmou a posição final antes da revelação do nome.');
     if (!finalState) throw new Error('O estágio final Auto CodeZ não foi observado.');
 
     assertGlyph(aState, [[28,56,44,22],[44,22,60,56],[35,43,53,43]], 'A');
     assertGlyph(zState, [[28,24,60,24],[60,24,28,56],[28,56,60,56]], 'Z');
+    if (settledState.wordOpacity > .05) throw new Error(`Auto Code apareceu antes de o Z concluir o deslocamento. opacity=${settledState.wordOpacity}.`);
     if (finalState.wordOpacity < .95) throw new Error(`Auto Code não terminou visível. opacity=${finalState.wordOpacity}.`);
 
     results.push({ name, status: 'passed' });

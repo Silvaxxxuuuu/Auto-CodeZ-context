@@ -139,6 +139,7 @@ async function playBrandReveal(root: HTMLElement): Promise<void> {
   );
 
   await markAnimation.finished.catch((): void => undefined);
+  root.dataset.stage = 'brand-z-settled';
   await delay(35);
 
   const wordAnimation = word.animate(
