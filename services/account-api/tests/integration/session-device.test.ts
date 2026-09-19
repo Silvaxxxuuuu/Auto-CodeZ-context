@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import type { AccountApiEnvironment } from '../../src/env.js';
 import { Database } from '../../src/db.js';
 import { DesktopSessionService } from '../../src/desktop-session.js';
+import { DesktopAuthFlowService } from '../../src/desktop-auth-flow.js';
 import { DeviceRegistryService } from '../../src/device-registry.js';
 
 function environment(): AccountApiEnvironment {
@@ -159,6 +160,88 @@ test('Device Registry requires proof of Ed25519 private-key possession and revoc
     await assert.rejects(
       registry.authenticate(grant.accessToken),
       /invalid_token/,
+    );
+  } finally {
+    await database.close();
+  }
+});
+
+
+test('desktop auth flow enforces PKCE, state, nonce and one-time exchange', async () => {
+  const env = environment();
+  const database = new Database(env);
+  try {
+    const schema = await fs.readFile(
+      new URL('migrations/001_desktop_account.sql', new URL('file://' + process.cwd().replace(/\\/g, '/') + '/')),
+      'utf8',
+    );
+    await database.pool.query(schema);
+    await reset(database);
+
+    let now = 1_800_000_000_000;
+    const flows = new DesktopAuthFlowService(database, () => now);
+    const verifier = 'v'.repeat(64);
+    const challenge = crypto.createHash('sha256').update(verifier, 'utf8').digest('base64url');
+
+    const started = await flows.begin({
+      kind: 'oauth',
+      deviceId: 'device-flow-1',
+      provider: 'github',
+      state: 'outer-state-1',
+      nonce: 'outer-nonce-1',
+      codeChallenge: challenge,
+    });
+
+    const finished = await flows.finishBrowser({
+      flowId: started.flowId,
+      kind: 'oauth',
+      user: {
+        id: 'browser-user-1',
+        email: 'flow@example.com',
+        name: 'Flow User',
+      },
+    });
+
+    await assert.rejects(
+      flows.exchange({
+        kind: 'oauth',
+        flowId: started.flowId,
+        provider: 'github',
+        deviceId: 'device-flow-1',
+        oneTimeToken: finished.oneTimeToken,
+        state: 'outer-state-1',
+        nonce: 'outer-nonce-1',
+        codeVerifier: 'wrong-verifier',
+      }),
+      /invalid_grant/,
+    );
+
+    const exchanged = await flows.exchange({
+      kind: 'oauth',
+      flowId: started.flowId,
+      provider: 'github',
+      deviceId: 'device-flow-1',
+      oneTimeToken: finished.oneTimeToken,
+      state: 'outer-state-1',
+      nonce: 'outer-nonce-1',
+      codeVerifier: verifier,
+    });
+
+    assert.equal(exchanged.user.id, 'browser-user-1');
+    assert.equal(exchanged.provider, 'github');
+
+    await assert.rejects(
+      flows.exchange({
+        kind: 'oauth',
+        flowId: started.flowId,
+        provider: 'github',
+        deviceId: 'device-flow-1',
+        oneTimeToken: finished.oneTimeToken,
+        state: 'outer-state-1',
+        nonce: 'outer-nonce-1',
+        codeVerifier: verifier,
+      }),
+      /invalid_grant/,
     );
   } finally {
     await database.close();
