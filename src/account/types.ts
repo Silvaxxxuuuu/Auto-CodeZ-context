@@ -63,6 +63,7 @@ export interface DeviceRecord {
   arch: string;
   appVersion: string;
   publicKey: string;
+  credentialPersistence: 'protected' | 'ephemeral';
   createdAt: number;
   lastSeenAt: number;
   revokedAt?: number;
