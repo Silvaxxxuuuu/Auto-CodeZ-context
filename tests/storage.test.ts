@@ -150,3 +150,30 @@ test('failed encrypted writes leave no temporary files behind', async () => {
     assert.deepEqual(await readdir(root), []);
   });
 });
+
+
+test('account session metadata is encrypted transparently', async () => {
+  await withTempRoot(async (root) => {
+    const storage = new LocalStorage(root, createSecureAdapter());
+    await storage.init();
+
+    const accountState = {
+      account: {
+        id: 'acct-1',
+        primaryEmail: 'private@example.com',
+        displayName: 'Private User',
+      },
+      session: {
+        id: 'session-1',
+        deviceId: 'device-1',
+      },
+    };
+
+    await storage.write('account-session.json', accountState);
+
+    const raw = await readFile(path.join(root, 'account-session.json'), 'utf8');
+    assert.equal(raw.includes('private@example.com'), false);
+    assert.equal(raw.includes('session-1'), false);
+    assert.deepEqual(await storage.read('account-session.json', null), accountState);
+  });
+});
