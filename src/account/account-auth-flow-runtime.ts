@@ -1,0 +1,364 @@
+import crypto from 'node:crypto';
+import type { AuthAdapter, AuthGrant, OAuthProvider } from './auth-adapter';
+import { AuthAdapterError } from './auth-adapter';
+import { AccountSessionRuntime } from './account-session-runtime';
+import { DeviceIdentityStore } from './device-identity';
+
+export type AuthFlowStatus =
+  | 'idle'
+  | 'waiting_magic_link'
+  | 'waiting_browser'
+  | 'waiting_passkey'
+  | 'completing'
+  | 'authenticated'
+  | 'error';
+
+export type AuthFlowMethod = 'magic_link' | 'oauth' | 'passkey';
+
+export interface AuthFlowSnapshot {
+  status: AuthFlowStatus;
+  method?: AuthFlowMethod;
+  provider?: OAuthProvider;
+  flowId?: string;
+  emailHint?: string;
+  expiresAt?: number;
+  publicKeyOptions?: unknown;
+  lastError?: string;
+}
+
+interface PendingOAuthFlow {
+  flowId: string;
+  provider: OAuthProvider;
+  state: string;
+  nonce: string;
+  codeVerifier: string;
+  expiresAt: number;
+}
+
+interface PendingMagicLinkFlow {
+  flowId: string;
+  expiresAt: number;
+}
+
+interface PendingPasskeyFlow {
+  flowId: string;
+  expiresAt: number;
+}
+
+function randomBase64Url(bytes = 32): string {
+  return crypto.randomBytes(bytes).toString('base64url');
+}
+
+function pkceChallenge(verifier: string): string {
+  return crypto.createHash('sha256').update(verifier, 'utf8').digest('base64url');
+}
+
+function normalizeEmail(email: string): string {
+  const normalized = email.trim().toLowerCase();
+  if (normalized.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) {
+    throw new Error('E-mail inválido.');
+  }
+  return normalized;
+}
+
+function emailHint(email: string): string {
+  const [local = '', domain = ''] = email.split('@');
+  const visibleLocal = local.length <= 2 ? local.slice(0, 1) : local.slice(0, 2);
+  return `${visibleLocal}${'*'.repeat(Math.max(2, local.length - visibleLocal.length))}@${domain}`;
+}
+
+function cloneSnapshot(snapshot: AuthFlowSnapshot): AuthFlowSnapshot {
+  return {
+    ...snapshot,
+    publicKeyOptions: snapshot.publicKeyOptions === undefined
+      ? undefined
+      : structuredClone(snapshot.publicKeyOptions),
+  };
+}
+
+export class AccountAuthFlowRuntime {
+  private snapshotState: AuthFlowSnapshot = { status: 'idle' };
+  private pendingOAuth?: PendingOAuthFlow;
+  private pendingMagicLink?: PendingMagicLinkFlow;
+  private pendingPasskey?: PendingPasskeyFlow;
+  private readonly listeners = new Set<(snapshot: AuthFlowSnapshot) => void>();
+
+  constructor(
+    private readonly auth: AuthAdapter,
+    private readonly sessions: AccountSessionRuntime,
+    private readonly devices: DeviceIdentityStore,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  snapshot(): AuthFlowSnapshot {
+    return cloneSnapshot(this.snapshotState);
+  }
+
+  subscribe(listener: (snapshot: AuthFlowSnapshot) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  reset(): AuthFlowSnapshot {
+    this.pendingOAuth = undefined;
+    this.pendingMagicLink = undefined;
+    this.pendingPasskey = undefined;
+    return this.setState({ status: 'idle' });
+  }
+
+  async beginMagicLink(email: string): Promise<AuthFlowSnapshot> {
+    this.assertCanBegin();
+    const normalizedEmail = normalizeEmail(email);
+    const device = await this.requirePersistentDevice();
+
+    try {
+      const result = await this.auth.beginMagicLink({
+        email: normalizedEmail,
+        deviceId: device.id,
+      });
+
+      this.pendingMagicLink = {
+        flowId: result.flowId,
+        expiresAt: result.expiresAt,
+      };
+      this.pendingOAuth = undefined;
+      this.pendingPasskey = undefined;
+
+      return this.setState({
+        status: 'waiting_magic_link',
+        method: 'magic_link',
+        flowId: result.flowId,
+        emailHint: emailHint(normalizedEmail),
+        expiresAt: result.expiresAt,
+      });
+    } catch (error) {
+      return this.fail(error);
+    }
+  }
+
+  async completeMagicLink(flowId: string, token: string): Promise<AuthFlowSnapshot> {
+    const pending = this.pendingMagicLink;
+    if (!pending || pending.flowId !== flowId) throw new Error('Fluxo de Magic Link inválido.');
+    this.assertNotExpired(pending.expiresAt);
+
+    const value = token.trim();
+    if (!value || value.length > 16_384) throw new Error('Token de Magic Link inválido.');
+
+    const device = await this.requirePersistentDevice();
+    this.setState({
+      status: 'completing',
+      method: 'magic_link',
+      flowId: pending.flowId,
+      expiresAt: pending.expiresAt,
+    });
+
+    try {
+      const grant = await this.auth.completeMagicLink({
+        flowId: pending.flowId,
+        token: value,
+        deviceId: device.id,
+      });
+      return await this.finishGrant(grant);
+    } catch (error) {
+      return this.fail(error);
+    }
+  }
+
+  async beginOAuth(provider: OAuthProvider): Promise<{
+    snapshot: AuthFlowSnapshot;
+    authorizationUrl: string;
+  }> {
+    this.assertCanBegin();
+    const device = await this.requirePersistentDevice();
+    const state = randomBase64Url();
+    const nonce = randomBase64Url();
+    const codeVerifier = randomBase64Url(48);
+    const codeChallenge = pkceChallenge(codeVerifier);
+
+    try {
+      const result = await this.auth.beginOAuth({
+        provider,
+        deviceId: device.id,
+        state,
+        nonce,
+        codeChallenge,
+        codeChallengeMethod: 'S256',
+      });
+
+      this.pendingOAuth = {
+        flowId: result.flowId,
+        provider,
+        state,
+        nonce,
+        codeVerifier,
+        expiresAt: result.expiresAt,
+      };
+      this.pendingMagicLink = undefined;
+      this.pendingPasskey = undefined;
+
+      return {
+        snapshot: this.setState({
+          status: 'waiting_browser',
+          method: 'oauth',
+          provider,
+          flowId: result.flowId,
+          expiresAt: result.expiresAt,
+        }),
+        authorizationUrl: result.authorizationUrl,
+      };
+    } catch (error) {
+      return {
+        snapshot: this.fail(error),
+        authorizationUrl: '',
+      };
+    }
+  }
+
+  async completeOAuth(input: {
+    flowId: string;
+    code: string;
+    state: string;
+  }): Promise<AuthFlowSnapshot> {
+    const pending = this.pendingOAuth;
+    if (!pending || pending.flowId !== input.flowId) throw new Error('Fluxo OAuth inválido.');
+    this.assertNotExpired(pending.expiresAt);
+
+    if (input.state !== pending.state) {
+      this.clearPending();
+      return this.setState({
+        status: 'error',
+        method: 'oauth',
+        provider: pending.provider,
+        lastError: 'Estado OAuth inválido.',
+      });
+    }
+
+    const code = input.code.trim();
+    if (!code || code.length > 16_384) throw new Error('Código OAuth inválido.');
+    const device = await this.requirePersistentDevice();
+
+    this.setState({
+      status: 'completing',
+      method: 'oauth',
+      provider: pending.provider,
+      flowId: pending.flowId,
+      expiresAt: pending.expiresAt,
+    });
+
+    try {
+      const grant = await this.auth.completeOAuth({
+        flowId: pending.flowId,
+        provider: pending.provider,
+        deviceId: device.id,
+        code,
+        state: pending.state,
+        nonce: pending.nonce,
+        codeVerifier: pending.codeVerifier,
+      });
+      return await this.finishGrant(grant);
+    } catch (error) {
+      return this.fail(error);
+    }
+  }
+
+  async beginPasskey(): Promise<AuthFlowSnapshot> {
+    this.assertCanBegin();
+    const device = await this.requirePersistentDevice();
+
+    try {
+      const result = await this.auth.beginPasskey({ deviceId: device.id });
+      this.pendingPasskey = {
+        flowId: result.flowId,
+        expiresAt: result.expiresAt,
+      };
+      this.pendingOAuth = undefined;
+      this.pendingMagicLink = undefined;
+
+      return this.setState({
+        status: 'waiting_passkey',
+        method: 'passkey',
+        flowId: result.flowId,
+        expiresAt: result.expiresAt,
+        publicKeyOptions: result.publicKeyOptions,
+      });
+    } catch (error) {
+      return this.fail(error);
+    }
+  }
+
+  async completePasskey(flowId: string, credential: unknown): Promise<AuthFlowSnapshot> {
+    const pending = this.pendingPasskey;
+    if (!pending || pending.flowId !== flowId) throw new Error('Fluxo Passkey inválido.');
+    this.assertNotExpired(pending.expiresAt);
+    if (credential === null || credential === undefined) throw new Error('Credencial Passkey inválida.');
+
+    const device = await this.requirePersistentDevice();
+    this.setState({
+      status: 'completing',
+      method: 'passkey',
+      flowId: pending.flowId,
+      expiresAt: pending.expiresAt,
+    });
+
+    try {
+      const grant = await this.auth.completePasskey({
+        flowId: pending.flowId,
+        deviceId: device.id,
+        credential,
+      });
+      return await this.finishGrant(grant);
+    } catch (error) {
+      return this.fail(error);
+    }
+  }
+
+  private async finishGrant(grant: AuthGrant): Promise<AuthFlowSnapshot> {
+    await this.sessions.establish(grant);
+    this.clearPending();
+    return this.setState({ status: 'authenticated' });
+  }
+
+  private async requirePersistentDevice() {
+    const device = await this.devices.getOrCreate();
+    if (device.credentialPersistence !== 'protected') {
+      throw new Error('Armazenamento seguro do sistema indisponível para autenticação persistente.');
+    }
+    return device;
+  }
+
+  private assertCanBegin(): void {
+    if (this.snapshotState.status === 'completing') {
+      throw new Error('Uma autenticação já está sendo concluída.');
+    }
+  }
+
+  private assertNotExpired(expiresAt: number): void {
+    if (!Number.isFinite(expiresAt) || expiresAt <= this.now()) {
+      this.clearPending();
+      this.setState({ status: 'error', lastError: 'Fluxo de autenticação expirado.' });
+      throw new AuthAdapterError('expired', 'Fluxo de autenticação expirado.');
+    }
+  }
+
+  private fail(error: unknown): AuthFlowSnapshot {
+    const message = error instanceof Error ? error.message : 'Falha na autenticação.';
+    this.clearPending();
+    return this.setState({
+      status: 'error',
+      lastError: message,
+    });
+  }
+
+  private clearPending(): void {
+    this.pendingOAuth = undefined;
+    this.pendingMagicLink = undefined;
+    this.pendingPasskey = undefined;
+  }
+
+  private setState(snapshot: AuthFlowSnapshot): AuthFlowSnapshot {
+    this.snapshotState = cloneSnapshot(snapshot);
+    const current = this.snapshot();
+    for (const listener of this.listeners) listener(current);
+    return current;
+  }
+}
