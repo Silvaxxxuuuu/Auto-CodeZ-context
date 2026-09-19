@@ -8,7 +8,7 @@ import type {
 import type { AuthAdapter, AuthGrant } from './auth-adapter';
 import { AuthAdapterError } from './auth-adapter';
 import type { ProtectedCredentialStore } from './protected-credential-store';
-import { DeviceIdentityStore } from './device-identity';
+import { DeviceIdentityStore, suggestDeviceName } from './device-identity';
 
 interface StoredAccountState {
   account: AccountProfile;
@@ -100,13 +100,17 @@ export class AccountSessionRuntime {
 
   async establish(grant: AuthGrant, deviceOverride?: DeviceRecord): Promise<AccountRuntimeSnapshot> {
     if (!grant.accessToken.trim() || !grant.refreshToken.trim()) throw new Error('Credenciais de sessão inválidas.');
-    const device = deviceOverride ?? await this.deviceIdentity.getOrCreate();
+    let device = deviceOverride ?? await this.deviceIdentity.getOrCreate();
 
     if (grant.session.deviceId !== device.id) {
       throw new Error('A sessão pertence a outro dispositivo.');
     }
     if (grant.session.accountId !== grant.account.id) {
       throw new Error('A sessão pertence a outra conta.');
+    }
+
+    if (device.name === 'Este dispositivo') {
+      device = await this.deviceIdentity.rename(suggestDeviceName(grant.account.displayName));
     }
 
     await this.credentials.set(REFRESH_TOKEN_CREDENTIAL, grant.refreshToken);
