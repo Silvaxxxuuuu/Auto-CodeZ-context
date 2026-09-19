@@ -30,11 +30,17 @@ const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 app.disable('x-powered-by');
+app.set('trust proxy', 1);
 
 app.use((request, response, next) => {
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('Referrer-Policy', 'no-referrer');
   response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  if (request.path.startsWith('/v1/auth/') || request.path.startsWith('/desktop/')) {
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('Pragma', 'no-cache');
+  }
   if (request.path.startsWith('/desktop/passkey')) {
     response.setHeader(
       'Content-Security-Policy',
