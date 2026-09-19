@@ -9,6 +9,7 @@ export type AccountAuthCallback =
       type: 'magic_link';
       flowId: string;
       token: string;
+      state: string;
     }
   | {
       type: 'passkey';
@@ -46,6 +47,7 @@ export function parseAccountAuthCallback(rawUrl: string): AccountAuthCallback {
       type: 'magic_link',
       flowId: requiredParam(url, 'flowId', 256),
       token: requiredParam(url, 'token'),
+      state: requiredParam(url, 'state', 512),
     };
   }
 
