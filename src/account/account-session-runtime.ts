@@ -5,7 +5,7 @@ import type {
   AccountSession,
   DeviceRecord,
 } from './types';
-import type { AuthAdapter, AuthGrant } from './auth-adapter';
+import type { AuthGrant, SessionAuthAdapter } from './auth-adapter';
 import { AuthAdapterError } from './auth-adapter';
 import type { ProtectedCredentialStore } from './protected-credential-store';
 import { DeviceIdentityStore, suggestDeviceName } from './device-identity';
@@ -42,7 +42,7 @@ export class AccountSessionRuntime {
     private readonly storage: LocalStorage,
     private readonly credentials: ProtectedCredentialStore,
     private readonly deviceIdentity: DeviceIdentityStore,
-    private readonly auth: AuthAdapter,
+    private readonly auth: SessionAuthAdapter,
   ) {}
 
   async hydrate(): Promise<AccountRuntimeSnapshot> {
