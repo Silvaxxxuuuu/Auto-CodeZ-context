@@ -6537,3 +6537,115 @@ Quando Account Core for implementado:
 - não duplicar a animação;
 - AccountSessionRuntime/DeviceIdentityRuntime entram no mesmo bootstrap coordinator.
 
+------------------------------------------------------------
+24.39. ACCOUNT CORE FOUNDATION — VALIDADA
+------------------------------------------------------------
+
+Checkpoint validado em 18/09/2026.
+
+HEAD funcional validado antes deste registro:
+1f70221bc70cae60213007c0e25e7c5d294c3fa8
+
+Workflows exatos:
+- Validate Auto CodeZ #3986 / run 35413672720: SUCCESS;
+- Visual Auto CodeZ #821 / run 35413672576: SUCCESS.
+
+Visual #821:
+- Windows x64 empacotado;
+- startup-identidade PASS;
+- fluxo visual principal PASS;
+- pageErrors=[];
+- consoleErrors=[];
+- artifact 10575006987;
+- digest sha256:25662afeddc1e36afdcb1e557cc558f496d859482110cfb069d9487640584d83.
+
+Mudanças da primeira fundação real de Account Core V1:
+
+1. Contratos de conta atualizados
+- AccountProfile usa primaryEmail;
+- account status explícito;
+- AccountSession separa accessExpiresAt e refreshExpiresAt;
+- DeviceRecord contém arch, publicKey e credentialPersistence;
+- AccountRuntimeSnapshot publica apenas estado sanitizado.
+
+2. ProtectedCredentialStore
+- nova abstração em src/account/protected-credential-store.ts;
+- implementação usa SecretVault/LocalStorage secure storage;
+- refresh token e private device key nunca são expostos ao renderer.
+
+3. Device Identity endurecida
+- deviceId aleatório/opaco;
+- chave Ed25519 gerada localmente;
+- public key pode sair do dispositivo;
+- private key fica no storage protegido;
+- signChallenge() prova posse da device credential;
+- hostname deixou de ser identidade;
+- nome inicial é label local, podendo ser derivado do displayName da conta;
+- rename é somente label de produto;
+- se safeStorage estiver indisponível, device identity cai para modo ephemeral em memória para NÃO impedir editor/IA local de abrir;
+- credentialPersistence informa protected|ephemeral.
+
+4. AccountSessionRuntime
+- access token apenas em memória;
+- refresh token no ProtectedCredentialStore;
+- metadata de account/session persistida sem tokens;
+- account-session.json passou a storage sensível/encriptado;
+- hydrate restaura sessão;
+- offline preserva conta cached sem access token;
+- revoked/invalid_grant limpa sessão e refresh token;
+- grant precisa estar bound ao device atual e à conta correta;
+- logout limpa estado local mesmo se revoke remoto falhar;
+- device rename integrado;
+- snapshots clonados/sanitizados;
+- subscriptions reativas publicam somente snapshot seguro.
+
+5. AuthAdapter boundary
+- interface substituível criada;
+- contratos para refresh, revoke, OAuth, Magic Link e Passkey;
+- backend real ainda NÃO foi inventado;
+- UnavailableAuthAdapter mantém a fronteira explícita até o serviço real existir.
+
+6. Main/preload
+- AccountSessionRuntime vive no main process;
+- hydrate acontece durante bootstrap do Electron;
+- IPC público:
+  - account:get-state;
+  - account:logout;
+  - account:rename-device;
+- evento main→renderer:
+  - account:event;
+- preload expõe apenas snapshot/ações sanitizadas;
+- nenhum access token, refresh token ou private key atravessa contextBridge.
+
+7. Segurança testada
+- device identity estável;
+- assinatura Ed25519 verificável;
+- private key não cai em device-identity.json;
+- access token não aparece em snapshot/persistência;
+- refresh token não aparece em snapshot/persistência pública;
+- restauração offline;
+- revogação;
+- logout com backend offline;
+- rejeição de grant de outro device;
+- subscription sanitizada;
+- account-session.json encriptado;
+- fallback ephemeral sem secure storage.
+
+Decisão preservada:
+Account Core não pode bloquear funcionamento local do Auto CodeZ quando internet/backend/secure persistence estiverem indisponíveis.
+
+PR #9 continua OPEN/DRAFT e não deve ser mesclado sem autorização explícita.
+
+PRÓXIMO SLICE:
+Auth Flow Runtime + backend adapter contract completo:
+- Magic Link;
+- GitHub OAuth;
+- Google OAuth;
+- Microsoft OAuth;
+- Passkey;
+- flow state sanitizado;
+- PKCE/state/nonce boundary;
+- callback/complete contracts;
+- fake auth adapter apenas para testes/E2E;
+- nenhum backend/provedor fictício exposto como funcional ao usuário.
+
