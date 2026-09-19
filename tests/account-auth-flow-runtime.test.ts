@@ -67,6 +67,10 @@ class FakeAuthAdapter implements AuthAdapter {
 
   constructor(private readonly grantFactory: (deviceId: string) => AuthGrant) {}
 
+  async configuration() {
+    return { methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'] as const };
+  }
+
   async refresh(input: RefreshSessionInput): Promise<AuthGrant> {
     return this.grantFactory(input.deviceId);
   }
