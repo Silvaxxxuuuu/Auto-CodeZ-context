@@ -13,8 +13,8 @@ import type {
 import type { ProjectRecord } from '../src/ai/types';
 
 async function removeTemporaryTree(root: string): Promise<void> {
-  const deadline = Date.now() + (process.platform === 'win32' ? 5_000 : 0);
-  while (true) {
+  const attempts = process.platform === 'win32' ? 51 : 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       await fs.rm(root, { recursive: true, force: true });
       return;
@@ -22,7 +22,7 @@ async function removeTemporaryTree(root: string): Promise<void> {
       const code = (error as NodeJS.ErrnoException).code;
       const retryable = process.platform === 'win32'
         && (code === 'EBUSY' || code === 'EPERM' || code === 'ENOTEMPTY')
-        && Date.now() < deadline;
+        && attempt + 1 < attempts;
       if (!retryable) throw error;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
