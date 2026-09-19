@@ -115,8 +115,8 @@ async function playBrandReveal(root: HTMLElement): Promise<void> {
   );
 
   await Promise.all([
-    markAnimation.finished.catch(() => undefined),
-    wordAnimation.finished.catch(() => undefined),
+    markAnimation.finished.catch((): void => undefined),
+    wordAnimation.finished.catch((): void => undefined),
   ]);
 }
 
