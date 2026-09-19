@@ -8021,3 +8021,108 @@ Esperar aprovação explícita.
 Só então:
 Azure Foundry Test Lab → GPT-5.6 Luna.
 
+------------------------------------------------------------
+24.45. LOGIN VISUAL REFINEMENT — ICONS + STARTUP BRANDING
+------------------------------------------------------------
+
+Refinamento aprovado para teste em 19/09/2026.
+
+IMPLEMENTATION HEAD VALIDADO:
+ea90476ba267216cf52fe2cefafc399e2415d1b9
+test(startup): guard Z-first brand reveal sequencing
+
+Commits do refinamento:
+- a60a4e357114835a5278ad6cd0cff256c86eef19
+  polish(account): refine auth icons and startup branding
+- ea90476ba267216cf52fe2cefafc399e2415d1b9
+  test(startup): guard Z-first brand reveal sequencing
+
+CI EXATO:
+- Validate Auto CodeZ #4230 / run 35476176040: SUCCESS;
+- Validate Auto CodeZ push #4229 / run 35476174392: SUCCESS;
+- Validate Account API #82 / run 35476176113: SUCCESS;
+- Visual Auto CodeZ #937 / run 35476176041: SUCCESS.
+
+Artifact:
+- id 10593234648;
+- auto-codez-visual-35476176041;
+- screenshot revisado: funcional-account-login.png.
+
+LOGIN ICONS
+
+Mudanças:
+- GitHub agora usa SVG real da marca em vez do desenho aproximado anterior;
+- Google agora usa G multicolorido;
+- Microsoft usa símbolo 2x2 nas cores oficiais:
+  - #F25022;
+  - #7FBA00;
+  - #00A4EF;
+  - #FFB900;
+- Passkey agora usa o ícone Key do Lucide;
+- todos os ícones são inline/local;
+- nenhuma imagem externa é carregada em runtime;
+- login continua funcionando offline quanto à renderização dos assets;
+- ícones SVG são decorativos para acessibilidade;
+- nomes acessíveis dos botões permanecem somente no texto da ação.
+
+STARTUP BRANDING
+
+Feedback do usuário:
+- transição anterior não parecia suficientemente fluida;
+- “Auto Code” começava a aparecer enquanto o Z ainda atravessava a área do texto;
+- isso causava sobreposição visual do Z sobre o nome.
+
+Nova sequência:
+1. >_ permanece durante bootstrap;
+2. morph >_ → A;
+3. morph A → Z;
+4. Z inicia o deslocamento horizontal;
+5. Z conclui completamente o deslocamento e escala final;
+6. somente depois disso “Auto Code” começa a aparecer;
+7. texto é revelado da direita para a esquerda, partindo visualmente da posição final do Z;
+8. resultado final forma “Auto CodeZ”;
+9. splash desaparece.
+
+Timing do brand reveal:
+- movimento do Z: 820 ms;
+- pausa de assentamento: 35 ms;
+- reveal do texto: 360 ms;
+- easing separado para movimento e reveal.
+
+GUARD AUTOMÁTICO
+
+Novo stage:
+brand-z-settled
+
+Visual E2E agora exige:
+- estágio A presente;
+- estágio Z presente;
+- brand-z-settled presente;
+- em brand-z-settled, opacity de “Auto Code” <= 0.05;
+- somente no estágio final o texto pode estar totalmente visível.
+
+Isso impede regressão do bug relatado pelo usuário:
+“Auto Code aparece antes de o Z terminar de passar.”
+
+VISUAL FINAL REVISADO
+
+No screenshot empacotado:
+- GitHub reconhecível;
+- Google colorido;
+- Microsoft colorido;
+- Passkey com Key outline;
+- espaçamento dos botões preservado;
+- sem overflow;
+- onboarding passwordless PASS;
+- startup identity PASS;
+- pageErrors/consoleErrors continuam limpos no workflow Visual.
+
+ESTADO
+
+Account Core V1 continua READY FOR MANUAL ACCEPTANCE.
+Ainda NÃO marcar CLOSED até:
+- usuário aprovar este refinamento visual;
+- login/backend real ser testado conforme 24.44.
+
+PR #9 continua sem merge.
+
