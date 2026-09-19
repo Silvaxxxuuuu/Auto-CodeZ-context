@@ -8,6 +8,7 @@ import { AccountAuthFlowRuntime } from '../src/account/account-auth-flow-runtime
 import type {
   AuthAdapter,
   AuthGrant,
+  AuthMethod,
   BeginMagicLinkInput,
   BeginOAuthInput,
   BeginPasskeyInput,
@@ -67,8 +68,8 @@ class FakeAuthAdapter implements AuthAdapter {
 
   constructor(private readonly grantFactory: (deviceId: string) => AuthGrant) {}
 
-  async configuration() {
-    return { methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'] as const };
+  async configuration(): Promise<{ methods: AuthMethod[] }> {
+    return { methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'] };
   }
 
   async refresh(input: RefreshSessionInput): Promise<AuthGrant> {
