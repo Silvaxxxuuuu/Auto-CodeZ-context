@@ -126,7 +126,7 @@ async function completeAccountAuthCallback(rawUrl: string): Promise<void> {
   } else if (callback.type === 'passkey') {
     await accountAuthFlowRuntime.completePasskey(callback);
   } else {
-    await accountAuthFlowRuntime.completeMagicLink(callback.flowId, callback.token);
+    await accountAuthFlowRuntime.completeMagicLink(callback);
   }
   focusMainWindow();
 }
