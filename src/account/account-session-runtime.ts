@@ -36,6 +36,7 @@ function cloneDevice(device: DeviceRecord): DeviceRecord {
 export class AccountSessionRuntime {
   private state: AccountRuntimeSnapshot | null = null;
   private accessToken: string | null = null;
+  private readonly listeners = new Set<(snapshot: AccountRuntimeSnapshot) => void>();
 
   constructor(
     private readonly storage: LocalStorage,
@@ -138,6 +139,11 @@ export class AccountSessionRuntime {
     };
   }
 
+  subscribe(listener: (snapshot: AccountRuntimeSnapshot) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   getAccessToken(): string | null {
     return this.accessToken;
   }
@@ -185,6 +191,8 @@ export class AccountSessionRuntime {
       session: snapshot.session ? cloneSession(snapshot.session) : undefined,
       device: cloneDevice(snapshot.device),
     };
-    return this.snapshot();
+    const current = this.snapshot();
+    for (const listener of this.listeners) listener(current);
+    return current;
   }
 }
