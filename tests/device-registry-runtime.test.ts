@@ -43,8 +43,10 @@ class MemoryDeviceRegistryAdapter implements DeviceRegistryAdapter {
   lastBegin?: BeginDeviceRegistrationInput;
   lastComplete?: CompleteDeviceRegistrationInput;
   challenge = 'device-proof-challenge';
+  beginCalls = 0;
 
   async beginRegistration(input: BeginDeviceRegistrationInput) {
+    this.beginCalls += 1;
     this.lastBegin = input;
     return {
       registrationId: 'registration-1',
@@ -177,6 +179,36 @@ test('DeviceRegistryRuntime renames local and remote device consistently', async
   assert.equal(snapshot.state, 'ready');
   assert.equal(snapshot.devices[0]?.name, 'Meu PC Principal');
   assert.equal((await devices.getOrCreate()).name, 'Meu PC Principal');
+});
+
+test('DeviceRegistryRuntime serializes onboarding rename with registration already in flight', async () => {
+  const { registry, adapter, devices } = await setup();
+  const originalComplete = adapter.completeRegistration.bind(adapter);
+  let releaseRegistration: (() => void) | undefined;
+  const registrationGate = new Promise<void>((resolve) => {
+    releaseRegistration = resolve;
+  });
+  adapter.completeRegistration = async (input: CompleteDeviceRegistrationInput) => {
+    await registrationGate;
+    return await originalComplete(input);
+  };
+
+  const registration = registry.ensureRegistered();
+  const deadline = Date.now() + 1_000;
+  while (!adapter.lastBegin && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.ok(adapter.lastBegin, 'Registro remoto não iniciou.');
+
+  const rename = registry.renameCurrent('PC do primeiro login');
+  releaseRegistration?.();
+
+  const [, renamed] = await Promise.all([registration, rename]);
+
+  assert.equal(adapter.beginCalls, 1);
+  assert.equal(renamed.state, 'ready');
+  assert.equal(renamed.devices[0]?.name, 'PC do primeiro login');
+  assert.equal((await devices.getOrCreate()).name, 'PC do primeiro login');
 });
 
 test('DeviceRegistryRuntime revokes remote devices without deleting local identity', async () => {

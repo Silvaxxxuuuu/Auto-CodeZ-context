@@ -40,6 +40,7 @@ function normalizeDeviceName(value: string): string {
 export class DeviceRegistryRuntime {
   private state: DeviceRegistrySnapshot = { state: 'idle', devices: [] };
   private readonly listeners = new Set<(snapshot: DeviceRegistrySnapshot) => void>();
+  private registrationInFlight?: Promise<DeviceRegistrySnapshot>;
 
   constructor(
     private readonly sessions: AccountSessionRuntime,
@@ -58,6 +59,17 @@ export class DeviceRegistryRuntime {
   }
 
   async ensureRegistered(): Promise<DeviceRegistrySnapshot> {
+    if (this.registrationInFlight) return await this.registrationInFlight;
+    const operation = this.registerCurrentDevice();
+    this.registrationInFlight = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.registrationInFlight === operation) this.registrationInFlight = undefined;
+    }
+  }
+
+  private async registerCurrentDevice(): Promise<DeviceRegistrySnapshot> {
     const session = this.sessions.snapshot();
     const accessToken = this.sessions.getAccessToken();
     const localDevice = await this.devices.getOrCreate();
@@ -171,6 +183,14 @@ export class DeviceRegistryRuntime {
     if (!accessToken) throw new Error('Sessão autenticada indisponível.');
 
     const local = await this.devices.rename(normalizeDeviceName(name));
+    const remoteCurrent = this.state.devices.find((device) => device.id === local.id && !device.revokedAt);
+    if (this.state.state !== 'ready' || !remoteCurrent) {
+      const registered = await this.ensureRegistered();
+      const confirmed = registered.devices.find((device) => device.id === local.id && !device.revokedAt);
+      if (registered.state !== 'ready' || !confirmed) {
+        throw new Error(registered.lastError || 'Dispositivo ainda não foi registrado remotamente.');
+      }
+    }
     await this.adapter.rename(accessToken, local.id, local.name);
     return await this.refresh();
   }
