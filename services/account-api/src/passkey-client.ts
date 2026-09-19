@@ -13,12 +13,36 @@ function setMessage(value: string, error = false): void {
   root.dataset.error = error ? 'true' : 'false';
 }
 
-async function initialize(): Promise<void> {
+async function initializeEnrollment(button: HTMLButtonElement): Promise<void> {
+  button.addEventListener('click', () => {
+    button.disabled = true;
+    setMessage('Aguardando a criação da passkey...');
+
+    void authClient.passkey.addPasskey({
+      name: 'Auto CodeZ',
+    }).then((result) => {
+      if (result.error) {
+        button.disabled = false;
+        setMessage(result.error.message || 'Não foi possível adicionar a passkey.', true);
+        return;
+      }
+      button.textContent = 'Passkey adicionada';
+      setMessage('Passkey adicionada à sua conta. Você pode fechar esta aba.');
+    }).catch((error: unknown) => {
+      button.disabled = false;
+      setMessage(
+        error instanceof Error ? error.message : 'Não foi possível adicionar a passkey.',
+        true,
+      );
+    });
+  });
+}
+
+async function initializeSignIn(button: HTMLButtonElement): Promise<void> {
   const params = new URLSearchParams(window.location.search);
   const flowId = params.get('flowId')?.trim() ?? '';
-  const button = document.querySelector<HTMLButtonElement>('#passkey-start');
 
-  if (!flowId || !button) {
+  if (!flowId) {
     setMessage('Fluxo de autenticação inválido.', true);
     return;
   }
@@ -46,6 +70,21 @@ async function initialize(): Promise<void> {
       );
     });
   });
+}
+
+async function initialize(): Promise<void> {
+  const button = document.querySelector<HTMLButtonElement>('#passkey-start');
+  if (!button) {
+    setMessage('Página de passkey inválida.', true);
+    return;
+  }
+
+  if (window.location.pathname === '/desktop/passkey/enroll') {
+    await initializeEnrollment(button);
+    return;
+  }
+
+  await initializeSignIn(button);
 }
 
 void initialize();

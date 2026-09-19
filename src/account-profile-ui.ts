@@ -62,6 +62,7 @@ type Bridge = {
   accountDeviceRegistryState: () => Promise<RegistrySnapshot>;
   refreshAccountDeviceRegistry: () => Promise<RegistrySnapshot>;
   revokeAccountDevice: (deviceId: string) => Promise<RegistrySnapshot>;
+  openAccountPasskeyEnrollment: () => Promise<{ opened: boolean }>;
   logoutAccount: () => Promise<AccountSnapshot>;
   onAccountState: (listener: (state: AccountSnapshot) => void) => () => void;
   onAccountDeviceRegistryState: (listener: (state: RegistrySnapshot) => void) => () => void;
@@ -175,9 +176,9 @@ function panelMarkup(): string {
       </div>
 
       <div class="account-profile-subsection">
-        <div class="account-profile-subheading">
-          <strong>Métodos de acesso</strong>
-          <span>Você pode vincular outros métodos depois.</span>
+        <div class="account-profile-subheading row">
+          <div><strong>Métodos de acesso</strong><span>Vincule métodos passwordless à sua conta.</span></div>
+          ${account.state === 'authenticated' ? '<button type="button" class="profile-secondary-button enabled" data-account-add-passkey>Adicionar passkey</button>' : ''}
         </div>
         <div class="account-profile-methods">${identityRows()}</div>
       </div>
@@ -256,6 +257,11 @@ document.addEventListener('click', (event) => {
 
   if (target.closest('[data-action="profile"]')) {
     window.setTimeout(() => enhanceProfile(), 0);
+    return;
+  }
+
+  if (target.closest('[data-account-add-passkey]')) {
+    void bridge?.openAccountPasskeyEnrollment();
     return;
   }
 

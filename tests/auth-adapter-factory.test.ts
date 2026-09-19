@@ -18,6 +18,7 @@ test('account auth factory stays disabled when no backend is configured', () => 
 test('account auth factory enables all passwordless methods for a valid HTTPS backend', () => {
   const result = createAccountAuthAdapter('https://accounts.autocodez.example');
   assert.equal(result.configuration.configured, true);
+  assert.equal(result.publicOrigin, 'https://accounts.autocodez.example');
   assert.deepEqual(result.configuration.methods, [
     'magic_link',
     'github',
@@ -32,6 +33,7 @@ test('account auth factory enables all passwordless methods for a valid HTTPS ba
 test('account auth factory fails closed without blocking local app on invalid configuration', () => {
   const result = createAccountAuthAdapter('http://accounts.autocodez.example');
   assert.equal(result.configuration.configured, false);
+  assert.equal(result.publicOrigin, undefined);
   assert.deepEqual(result.configuration.methods, []);
   assert.match(result.configuration.configurationError ?? '', /HTTPS/);
   assert.ok(result.adapter instanceof UnavailableAuthAdapter);

@@ -381,6 +381,29 @@ app.get('/desktop/passkey', async (request, response) => {
   }
 });
 
+app.get('/desktop/passkey/enroll', async (request, response) => {
+  try {
+    await browserUser(request);
+    response.type('html').send(
+      '<!doctype html>' +
+      '<html lang="pt-BR"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>Adicionar passkey · Auto CodeZ</title>' +
+      '<style>html{color-scheme:dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#080a0e;color:#edf2f7;font:14px/1.55 system-ui,sans-serif}main{width:min(420px,calc(100vw - 40px));padding:36px;border:1px solid #252c36;border-radius:16px;background:#0d1117;box-sizing:border-box;text-align:center}h1{font-size:22px;margin:0 0 10px}p{color:#84909f;margin:0 0 24px}button{width:100%;height:44px;border:0;border-radius:9px;background:#356ea8;color:#fff;font-weight:650;cursor:pointer}button:disabled{opacity:.55;cursor:default}#passkey-message{min-height:20px;margin-top:16px;color:#7d8997;font-size:12px}#passkey-message[data-error="true"]{color:#d88484}</style>' +
+      '</head><body><main><h1>Adicionar passkey</h1>' +
+      '<p>Crie uma passkey para entrar no Auto CodeZ sem senha nas próximas vezes.</p>' +
+      '<button type="button" id="passkey-start">Adicionar passkey</button>' +
+      '<div id="passkey-message" aria-live="polite"></div>' +
+      '<script src="/assets/passkey-client.js"></script>' +
+      '</main></body></html>',
+    );
+  } catch {
+    response.status(401).type('html').send(
+      errorPage('Sua sessão do navegador expirou. Entre novamente com GitHub, Google, Microsoft ou Magic Link antes de adicionar uma passkey.'),
+    );
+  }
+});
+
 async function deviceContext(request: Request) {
   return await devices.authenticate(bearerToken(request));
 }

@@ -14,6 +14,7 @@ export interface AccountAuthConfigurationSnapshot {
 export interface AccountAuthAdapterFactoryResult {
   adapter: AuthAdapter;
   deviceRegistry: DeviceRegistryAdapter;
+  publicOrigin?: string;
   configuration: AccountAuthConfigurationSnapshot;
 }
 
@@ -33,9 +34,12 @@ export function createAccountAuthAdapter(
   }
 
   try {
+    const adapter = new HttpAuthAdapter(value);
+    const deviceRegistry = new HttpDeviceRegistryAdapter(value);
     return {
-      adapter: new HttpAuthAdapter(value),
-      deviceRegistry: new HttpDeviceRegistryAdapter(value),
+      adapter,
+      deviceRegistry,
+      publicOrigin: new URL(value).origin,
       configuration: {
         configured: true,
         methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'],

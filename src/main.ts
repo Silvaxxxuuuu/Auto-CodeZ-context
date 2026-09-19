@@ -634,6 +634,12 @@ ipcMain.handle('account-auth:begin-passkey', async () => {
   if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
   return result.snapshot;
 });
+ipcMain.handle('account-auth:open-passkey-enrollment', async () => {
+  if (!accountAuth.publicOrigin) throw new Error('Serviço de autenticação não configurado.');
+  const enrollmentUrl = new URL('/desktop/passkey/enroll', accountAuth.publicOrigin).toString();
+  await shell.openExternal(enrollmentUrl);
+  return { opened: true };
+});
 ipcMain.handle('account-device-registry:get-state', async () => deviceRegistryRuntime.snapshot());
 ipcMain.handle('account-device-registry:refresh', async () => deviceRegistryRuntime.refresh());
 ipcMain.handle('account-device-registry:rename-current', async (_event, name: string) => deviceRegistryRuntime.renameCurrent(requireNonEmptyString(name, 'Nome do dispositivo')));
