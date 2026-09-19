@@ -219,9 +219,20 @@ test('Magic Link normalizes email and only exposes a masked hint', async () => {
   assert.equal(started.emailHint, 'us**@example.com');
   assert.equal(adapter.lastMagicBegin?.email, 'user@example.com');
 
-  const completed = await flows.completeMagicLink('magic-flow', 'magic-token');
+  assert.ok(adapter.lastMagicBegin);
+  const publicJson = JSON.stringify(started);
+  assert.ok(!publicJson.includes(adapter.lastMagicBegin.state));
+  assert.ok(!publicJson.includes(adapter.lastMagicBegin.codeChallenge));
+
+  const completed = await flows.completeMagicLink({
+    flowId: 'magic-flow',
+    token: 'magic-token',
+    state: adapter.lastMagicBegin.state,
+  });
   assert.equal(completed.status, 'authenticated');
   assert.equal(adapter.lastMagicComplete?.token, 'magic-token');
+  assert.equal(adapter.lastMagicComplete?.state, adapter.lastMagicBegin.state);
+  assert.equal(adapter.lastMagicComplete?.codeVerifier.length > 40, true);
   assert.ok(!JSON.stringify(completed).includes('magic-token'));
 });
 
@@ -317,7 +328,11 @@ test('Expired auth flow cannot be completed', async () => {
   now = 200;
 
   await assert.rejects(
-    flows.completeMagicLink('magic-flow', 'token'),
+    flows.completeMagicLink({
+      flowId: 'magic-flow',
+      token: 'token',
+      state: adapter.lastMagicBegin?.state ?? 'missing-state',
+    }),
     /expirado/,
   );
   assert.equal(flows.snapshot().status, 'error');
