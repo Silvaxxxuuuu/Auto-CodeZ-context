@@ -76,12 +76,19 @@ export interface CompleteMagicLinkInput {
 
 export interface BeginPasskeyInput {
   deviceId: DeviceId;
+  state: string;
+  nonce: string;
+  codeChallenge: string;
+  codeChallengeMethod: 'S256';
 }
 
 export interface CompletePasskeyInput {
   flowId: string;
   deviceId: DeviceId;
-  credential: unknown;
+  code: string;
+  state: string;
+  nonce: string;
+  codeVerifier: string;
 }
 
 export interface SessionAuthAdapter {
@@ -104,9 +111,9 @@ export interface AuthAdapter extends SessionAuthAdapter {
   completeMagicLink(input: CompleteMagicLinkInput): Promise<AuthGrant>;
 
   beginPasskey(input: BeginPasskeyInput): Promise<{
+    authorizationUrl: string;
     flowId: string;
     expiresAt: number;
-    publicKeyOptions: unknown;
   }>;
   completePasskey(input: CompletePasskeyInput): Promise<AuthGrant>;
 }
@@ -140,7 +147,7 @@ export class UnavailableAuthAdapter implements AuthAdapter {
     return this.unavailable();
   }
 
-  async beginPasskey(): Promise<{ flowId: string; expiresAt: number; publicKeyOptions: unknown }> {
+  async beginPasskey(): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
     return this.unavailable();
   }
 
