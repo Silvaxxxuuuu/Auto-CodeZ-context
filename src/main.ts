@@ -62,12 +62,33 @@ import { McpGatewayExecutionRuntime } from './mcp-gateway/execution-runtime';
 import { McpTunnelRuntime } from './mcp-gateway/tunnel-runtime';
 import { McpRuntimeInstaller } from './mcp-gateway/runtime-installer';
 import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
+import { LocalProtectedCredentialStore } from './account/protected-credential-store';
+import { DeviceIdentityStore } from './account/device-identity';
+import { UnavailableAuthAdapter } from './account/auth-adapter';
+import { AccountSessionRuntime } from './account/account-session-runtime';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const storage = new LocalStorage();
+const accountCredentials = new LocalProtectedCredentialStore(storage);
+const accountDeviceIdentity = new DeviceIdentityStore(
+  storage,
+  accountCredentials,
+  {
+    platform: process.platform,
+    arch: process.arch,
+    appVersion: app.getVersion(),
+    defaultName: 'Este dispositivo',
+  },
+);
+const accountSessionRuntime = new AccountSessionRuntime(
+  storage,
+  accountCredentials,
+  accountDeviceIdentity,
+  new UnavailableAuthAdapter(),
+);
 const providerManager = new ProviderManager(storage);
 const chatManager = new ChatManager(storage);
 const projectManager = new ProjectManager(storage);
@@ -488,6 +509,9 @@ async function buildExecutionContext(
 }
 
 ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.list(), chats: await chatManager.list(), projects: await projectManager.list() }));
+ipcMain.handle('account:get-state', async () => accountSessionRuntime.snapshot());
+ipcMain.handle('account:logout', async () => accountSessionRuntime.logout());
+ipcMain.handle('account:rename-device', async (_event, name: string) => accountSessionRuntime.renameDevice(requireNonEmptyString(name, 'Nome do dispositivo')));
 ipcMain.handle('providers:list-models', async (_event, identifier: string) => {
   const value = requireIdentifier(identifier, 'Provider');
   const key = (await providerManager.listKeys()).find((item) => item.id === value);
@@ -1148,6 +1172,7 @@ ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExt
 
 app.whenReady().then(async () => {
   await storage.init();
+  await accountSessionRuntime.hydrate();
   operationalLedger.restore(await operationalLedgerStore.load());
   await providerManager.init();
   await chatManager.init();
