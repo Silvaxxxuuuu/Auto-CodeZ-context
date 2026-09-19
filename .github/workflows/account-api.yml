@@ -1,0 +1,40 @@
+name: Validate Account API
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - 'services/account-api/**'
+      - '.github/workflows/account-api.yml'
+  pull_request:
+    paths:
+      - 'services/account-api/**'
+      - '.github/workflows/account-api.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: services/account-api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: services/account-api/package-lock.json
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: TypeScript validation
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build
