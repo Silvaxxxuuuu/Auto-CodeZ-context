@@ -68,6 +68,8 @@ import { AccountSessionRuntime } from './account/account-session-runtime';
 import { createAccountAuthAdapter } from './account/auth-adapter-factory';
 import { DeviceRegistryRuntime } from './account/device-registry-runtime';
 import { AccountAuthFlowRuntime } from './account/account-auth-flow-runtime';
+import { findAccountAuthCallback, parseAccountAuthCallback } from './account/account-auth-callback';
+import type { OAuthProvider } from './account/auth-adapter';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -103,6 +105,55 @@ const deviceRegistryRuntime = new DeviceRegistryRuntime(
   accountDeviceIdentity,
   accountAuth.deviceRegistry,
 );
+let pendingAccountAuthCallback = findAccountAuthCallback(process.argv);
+
+function requireOAuthProvider(value: unknown): OAuthProvider {
+  if (value === 'github' || value === 'google' || value === 'microsoft') return value;
+  throw new Error('Provider OAuth inválido.');
+}
+
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+async function completeAccountAuthCallback(rawUrl: string): Promise<void> {
+  const callback = parseAccountAuthCallback(rawUrl);
+  if (callback.type === 'oauth') {
+    await accountAuthFlowRuntime.completeOAuth(callback);
+  } else {
+    await accountAuthFlowRuntime.completeMagicLink(callback.flowId, callback.token);
+  }
+  focusMainWindow();
+}
+
+function queueAccountAuthCallback(rawUrl: string): void {
+  if (!app.isReady()) {
+    pendingAccountAuthCallback = rawUrl;
+    return;
+  }
+  void completeAccountAuthCallback(rawUrl).catch((error) => {
+    console.error('[Auto CodeZ account callback]', error);
+    focusMainWindow();
+  });
+}
+
+if (process.env.AUTO_CODEZ_VISUAL_TEST !== '1') {
+  const lock = app.requestSingleInstanceLock();
+  if (!lock) app.quit();
+  app.on('second-instance', (_event, argv) => {
+    const callback = findAccountAuthCallback(argv);
+    if (callback) queueAccountAuthCallback(callback);
+    else focusMainWindow();
+  });
+}
+
+app.on('open-url', (event, rawUrl) => {
+  event.preventDefault();
+  if (rawUrl.startsWith('autocodez://auth/')) queueAccountAuthCallback(rawUrl);
+});
 const providerManager = new ProviderManager(storage);
 const chatManager = new ChatManager(storage);
 const projectManager = new ProjectManager(storage);
@@ -554,6 +605,20 @@ ipcMain.handle('account:rename-device', async (_event, name: string) => accountS
 ipcMain.handle('account-auth-flow:get-state', async () => accountAuthFlowRuntime.snapshot());
 ipcMain.handle('account-auth-flow:reset', async () => accountAuthFlowRuntime.reset());
 ipcMain.handle('account-auth:get-configuration', async () => ({ ...accountAuth.configuration, methods: [...accountAuth.configuration.methods] }));
+ipcMain.handle('account-auth:begin-magic-link', async (_event, email: string) => accountAuthFlowRuntime.beginMagicLink(requireNonEmptyString(email, 'E-mail')));
+ipcMain.handle('account-auth:begin-oauth', async (_event, provider: unknown) => {
+  const result = await accountAuthFlowRuntime.beginOAuth(requireOAuthProvider(provider));
+  if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
+  return result.snapshot;
+});
+ipcMain.handle('account-auth:begin-passkey', async () => accountAuthFlowRuntime.beginPasskey());
+ipcMain.handle('account-auth:complete-passkey', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Credencial Passkey');
+  return accountAuthFlowRuntime.completePasskey(
+    requireNonEmptyString(value.flowId, 'Fluxo Passkey'),
+    value.credential,
+  );
+});
 ipcMain.handle('account-device-registry:get-state', async () => deviceRegistryRuntime.snapshot());
 ipcMain.handle('account-device-registry:refresh', async () => deviceRegistryRuntime.refresh());
 ipcMain.handle('account-device-registry:rename-current', async (_event, name: string) => deviceRegistryRuntime.renameCurrent(requireNonEmptyString(name, 'Nome do dispositivo')));
@@ -1217,6 +1282,9 @@ ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; 
 ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(requireNonEmptyString(url, 'URL externa')));
 
 app.whenReady().then(async () => {
+  if (app.isPackaged && process.env.AUTO_CODEZ_VISUAL_TEST !== '1') {
+    app.setAsDefaultProtocolClient('autocodez');
+  }
   await storage.init();
   await accountSessionRuntime.hydrate();
   operationalLedger.restore(await operationalLedgerStore.load());
@@ -1321,6 +1389,11 @@ app.whenReady().then(async () => {
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
   createWindow();
+  if (pendingAccountAuthCallback) {
+    const callback = pendingAccountAuthCallback;
+    pendingAccountAuthCallback = undefined;
+    queueAccountAuthCallback(callback);
+  }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
