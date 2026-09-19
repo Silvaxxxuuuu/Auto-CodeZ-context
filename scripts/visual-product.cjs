@@ -172,6 +172,15 @@ async function captureStartupIdentity() {
       });
     };
 
+    await page.waitForFunction(() => {
+      const root = document.querySelector('#auto-codez-startup');
+      const word = root?.querySelector('.ac-startup-word');
+      const cursor = root?.querySelector('[data-cursor]');
+      if (!root || !word || !cursor) return false;
+      return Number(getComputedStyle(word).opacity) <= .05
+        && getComputedStyle(cursor).animationName.includes('ac-startup-cursor');
+    }, undefined, { timeout: 2_000, polling: 'raf' });
+
     const terminal = await readState();
     assertGlyph(terminal, [[28,25,44,40],[44,40,28,55],[52,57,72,57]], '>_');
     if (terminal.wordOpacity > .05) throw new Error('O nome apareceu antes do morph inicial.');
