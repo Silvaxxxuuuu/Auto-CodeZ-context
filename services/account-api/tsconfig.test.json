@@ -8,6 +8,7 @@
   },
   "include": [
     "src/crypto.ts",
+    "src/env.ts",
     "tests/**/*.test.ts"
   ]
 }
