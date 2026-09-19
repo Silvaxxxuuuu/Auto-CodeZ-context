@@ -32,6 +32,24 @@ test('marca aprovação pendente sem perder o resultado associado', () => {
   const snapshot = createToolActivitySnapshot(runId, 'tool-3', 'git_commit', result);
   const input = toActivityInput(snapshot);
   assert.equal(input.status, 'pending');
-  assert.equal(input.message, 'Aguardando aprovação: git_commit');
+  assert.equal(input.message, 'Aguardando sua aprovação.');
   assert.deepEqual(input.gitResult, gitResult);
+});
+
+
+test('preserva somente a provenance estruturada da tool para observabilidade posterior', () => {
+  const result: AIToolResult = {
+    toolCallId: 'tool-web',
+    ok: true,
+    output: 'ok',
+    sources: [{
+      title: 'Example',
+      url: 'https://example.com/docs',
+      origin: 'autocodez-web',
+      retrievedAt: 100,
+    }],
+  };
+  const snapshot = createToolActivitySnapshot(runId, 'tool-web', 'web_search', result);
+  const input = toActivityInput(snapshot);
+  assert.deepEqual(input.sources, result.sources);
 });

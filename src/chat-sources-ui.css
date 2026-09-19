@@ -1,0 +1,116 @@
+.message-sources {
+  margin-top: 14px;
+  padding-top: 11px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.message-sources-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #c8c8cc;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.message-sources-head::before {
+  content: '';
+  width: 11px;
+  height: 11px;
+  border: 1.4px solid currentColor;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2.5px #171719;
+  opacity: 0.82;
+}
+
+.message-sources-count {
+  color: #77777e;
+  font-weight: 500;
+}
+
+.message-sources-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.message-source {
+  min-width: 0;
+  max-width: min(330px, 100%);
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 13px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.026);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.message-source:hover {
+  background: rgba(255, 255, 255, 0.052);
+  border-color: rgba(255, 255, 255, 0.13);
+  transform: translateY(-1px);
+}
+
+.message-source:focus-visible {
+  outline: 2px solid rgba(155, 178, 255, 0.72);
+  outline-offset: 2px;
+}
+
+.message-source-number {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #b9b9bf;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.message-source-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.message-source-title {
+  overflow: hidden;
+  color: #d7d7db;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-source-meta {
+  overflow: hidden;
+  color: #77777e;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-source-open {
+  color: #77777e;
+  font-size: 13px;
+  line-height: 1;
+}
+
+@media (max-width: 760px) {
+  .message-source {
+    max-width: 100%;
+    flex: 1 1 100%;
+  }
+}

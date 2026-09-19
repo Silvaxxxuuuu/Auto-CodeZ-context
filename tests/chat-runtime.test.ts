@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ChatRuntime } from '../src/ai/chat-runtime';
 import { ProviderRegistry } from '../src/ai/provider-registry';
-import type { AIProviderAdapter, AIProviderConfig, AIResponse, AIStreamEvent, ChatRecord } from '../src/ai/types';
+import type { AIProviderAdapter, AIProviderConfig, AIResponse, AIStreamEvent, ChatRecord, ToolName } from '../src/ai/types';
 
 const config: AIProviderConfig = {
   id: 'test-provider',
@@ -11,7 +11,7 @@ const config: AIProviderConfig = {
   enabled: true,
 };
 
-function chat(model = 'test-model', projectId = 'project-test'): ChatRecord {
+function chat(model = 'test-model', projectId = 'project-test', content = 'Inspect the current implementation.'): ChatRecord {
   return {
     id: 'chat-test',
     title: 'Chat Test',
@@ -20,7 +20,7 @@ function chat(model = 'test-model', projectId = 'project-test'): ChatRecord {
     model,
     intelligence: 'normal',
     permissionLevel: 'ask',
-    messages: [{ role: 'user', content: 'Hello' }],
+    messages: [{ role: 'user', content }],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -44,17 +44,15 @@ function registerAdapter(registry: ProviderRegistry, capabilities: ('text' | 'to
   return { requests, responses };
 }
 
+function tool(name: ToolName, requiresWriteAccess: boolean, requiresApproval: boolean) {
+  return { name, description: name, parameters: { type: 'object' }, requiresWriteAccess, requiresApproval };
+}
+
 test('send includes workspace context and tool definitions only when tools are supported', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
-    {
-      name: 'read_file',
-      description: 'Read a file',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: false,
-    },
+    tool('read_file', false, false),
   ]);
 
   await runtime.send(config, chat(), 'src/index.ts contains the current implementation.');
@@ -64,39 +62,89 @@ test('send includes workspace context and tool definitions only when tools are s
   assert.equal(request.projectContext, 'src/index.ts contains the current implementation.');
   assert.equal(request.messages[0].role, 'system');
   assert.match(request.messages[0].content, /Contexto do workspace atual/);
-  assert.equal(request.messages[1].content, 'Hello');
+  assert.equal(request.messages[1].role, 'system');
+  assert.match(request.messages[1].content, /src\/index\.ts contains the current implementation/);
+  assert.equal(request.messages[2].content, 'Inspect the current implementation.');
 });
 
-test('send does not expose workspace tools to a normal chat', async () => {
+test('trivial greeting skips workspace context and tool schemas', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
-    {
-      name: 'read_file',
-      description: 'Read a file',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: false,
-    },
+    tool('read_file', false, false),
+    tool('run_command', false, true),
+  ]);
+
+  await runtime.send(config, chat('test-model', 'project-test', 'Oi'), 'large workspace context that should not be attached');
+  const request = requests[0] as { messages: Array<{ role: string; content: string }>; tools?: unknown[]; toolsEnabled: boolean; projectContext?: string };
+  assert.equal(request.toolsEnabled, false);
+  assert.equal(request.tools, undefined);
+  assert.equal(request.projectContext, undefined);
+  assert.equal(request.messages.some((message) => message.content.includes('large workspace context')), false);
+  assert.equal(request.messages.at(-1)?.content, 'Oi');
+});
+
+test('send exposes protected file tools, run_command and plugin gateway to a normal chat but excludes Git', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry);
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    tool('read_file', false, false),
+    tool('read_symbol', false, false),
+    tool('write_file', true, true),
+    tool('create_file', true, true),
+    tool('replace_range', true, true),
+    tool('replace_text', true, true),
+    tool('replace_symbol', true, true),
+    tool('insert_before', true, true),
+    tool('insert_after', true, true),
+    tool('delete_file', true, true),
+    tool('rename_file', true, true),
+    tool('search_files', false, false),
+    tool('run_command', false, true),
+    tool('plugin_list_tools', false, false),
+    tool('plugin_call', false, false),
+    tool('git_status', false, false),
   ]);
 
   await runtime.send(config, chat('test-model', ''));
-  const request = requests[0] as { toolsEnabled: boolean; tools?: unknown[] };
-  assert.equal(request.toolsEnabled, false);
-  assert.equal(request.tools, undefined);
+  const request = requests[0] as { toolsEnabled: boolean; tools?: Array<{ name: string }>; messages: Array<{ content: string }> };
+  assert.equal(request.toolsEnabled, true);
+  assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'read_symbol', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command', 'plugin_list_tools', 'plugin_call']);
+  assert.equal(request.tools?.some((item) => item.name === 'git_status'), false);
+  assert.match(request.messages[0].content, /Runtime OS:/);
+  assert.match(request.messages[0].content, /protected system workspace rooted at the user's Home directory/i);
+  assert.match(request.messages[0].content, /Desktop\/Novo site\/index\.html/i);
+  assert.match(request.messages[0].content, /only need one complete named TypeScript or JavaScript declaration, prefer read_symbol/i);
+  assert.match(request.messages[0].content, /replacing a complete named TypeScript or JavaScript declaration, prefer replace_symbol/i);
+  assert.match(request.messages[0].content, /smaller localized edits, prefer replace_text/i);
+  assert.match(request.messages[0].content, /Use write_file when most or all of a file genuinely needs replacement/i);
+  assert.match(request.messages[0].content, /plugin_list_tools/);
+  assert.match(request.messages[0].content, /plugin_call only with an exact generated tool name/i);
+});
+
+test('send keeps available protected file tools in a normal chat even when run_command is unavailable', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry);
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    tool('read_file', false, false),
+    tool('read_symbol', false, false),
+    tool('create_file', true, true),
+    tool('replace_range', true, true),
+    tool('replace_text', true, true),
+    tool('replace_symbol', true, true),
+  ]);
+
+  await runtime.send(config, chat('test-model', ''));
+  const request = requests[0] as { toolsEnabled: boolean; tools?: Array<{ name: string }> };
+  assert.equal(request.toolsEnabled, true);
+  assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'read_symbol', 'create_file', 'replace_range', 'replace_text', 'replace_symbol']);
 });
 
 test('send disables tools for models without tool capability', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry, ['text']);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
-    {
-      name: 'read_file',
-      description: 'Read a file',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: false,
-    },
+    tool('read_file', false, false),
   ]);
 
   await runtime.send(config, chat());

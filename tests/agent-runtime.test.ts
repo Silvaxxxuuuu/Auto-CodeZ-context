@@ -85,21 +85,63 @@ test('resume consumes an approval exactly once', async () => {
 
 test('concurrent resume attempts consume the same approval only once', async () => {
   const fixtureData = await fixture(fixtureDataResponses());
-  try { const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask'); const approvalId = pending.pendingApprovalIds[0]; const results = await Promise.allSettled([fixtureData.agent.resume(approvalId), fixtureData.agent.resume(approvalId)]); assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1); assert.equal(results.filter((result) => result.status === 'rejected').length, 1); const rejection = results.find((result) => result.status === 'rejected'); assert.match(String(rejection && rejection.reason), /Aprovação não encontrada/); }
+  try {
+    const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask');
+    const approvalId = pending.pendingApprovalIds[0];
+    const results = await Promise.allSettled([fixtureData.agent.resume(approvalId), fixtureData.agent.resume(approvalId)]);
+    assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+    const rejection = results.find((result) => result.status === 'rejected');
+    assert.match(String(rejection && rejection.reason), /Aprovação não encontrada|já está sendo processada/);
+  } finally { await fixtureData.cleanup(); }
+});
+
+test('approval-dependent calls are materialized sequentially and continue after each decision', async () => {
+  const fixtureData = await fixture([
+    { content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('call-a', 1), toolCall('call-b', 2)] },
+    { content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('call-b', 2)] },
+    { content: 'Finished.', model: 'test-model', providerId: config.id },
+  ]);
+  try {
+    const firstPending = await fixtureData.agent.run(config, chat(), undefined, 'ask');
+    assert.equal(firstPending.pendingApprovalIds.length, 1);
+    assert.equal(firstPending.toolRounds, 1);
+    assert.equal(fixtureData.agent.hasPendingForChat('chat-test'), true);
+    assert.equal(firstPending.messages.filter((message) => message.role === 'tool').length, 1);
+    assert.match(firstPending.messages.find((message) => message.toolCallId === 'call-b')?.content ?? '', /operação anterior.*aguarda aprovação/i);
+
+    const secondPending = await fixtureData.agent.resume(firstPending.pendingApprovalIds[0]);
+    assert.equal(secondPending.pendingApprovalIds.length, 1);
+    assert.equal(secondPending.toolRounds, 2);
+    assert.equal(secondPending.response.content, '');
+    assert.equal(fixtureData.agent.hasPendingForChat('chat-test'), true);
+
+    const finished = await fixtureData.agent.resume(secondPending.pendingApprovalIds[0]);
+    assert.equal(finished.pendingApprovalIds.length, 0);
+    assert.equal(finished.toolRounds, 2);
+    assert.equal(finished.response.content, 'Finished.');
+    assert.equal(fixtureData.agent.hasPendingForChat('chat-test'), false);
+    assert.equal(finished.messages.filter((message) => message.role === 'tool').length, 3);
+  }
   finally { await fixtureData.cleanup(); }
 });
 
-test('multiple approvals resume independently and continue only after the last approval', async () => {
-  const fixtureData = await fixture([{ content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('call-a', 1), toolCall('call-b', 2)] }, { content: 'Finished.', model: 'test-model', providerId: config.id }]);
-  try { const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask'); assert.equal(pending.pendingApprovalIds.length, 2); assert.equal(fixtureData.agent.hasPendingForChat('chat-test'), true); const first = await fixtureData.agent.resume(pending.pendingApprovalIds[0]); assert.equal(first.pendingApprovalIds.length, 1); assert.equal(first.toolRounds, 1); assert.equal(first.response.content, ''); assert.equal(fixtureData.agent.hasPendingForChat('chat-test'), true); const second = await fixtureData.agent.resume(pending.pendingApprovalIds[1]); assert.equal(second.pendingApprovalIds.length, 0); assert.equal(second.toolRounds, 1); assert.equal(second.response.content, 'Finished.'); assert.equal(fixtureData.agent.hasPendingForChat('chat-test'), false); assert.equal(second.messages.filter((message) => message.role === 'tool').length, 2); }
-  finally { await fixtureData.cleanup(); }
-});
-
-test('streaming preserves approval state and resumes with the same tool round', async () => {
+test('streaming preserves approval state and emits complete only after the full run finishes', async () => {
   const events: AIStreamEvent[] = [];
   const fixtureData = await fixture([{ content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('stream-call')] }, { content: 'Stream finished.', model: 'test-model', providerId: config.id }], [[{ type: 'start' }, { type: 'delta', text: 'Preparing...' }, { type: 'complete', response: { content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('stream-call')] } }], [{ type: 'start' }, { type: 'delta', text: 'Stream finished.' }, { type: 'complete', response: { content: 'Stream finished.', model: 'test-model', providerId: config.id } }]]);
-  try { const pending = await fixtureData.agent.runStreaming(config, chat(), undefined, 'ask', (event) => events.push(event)); assert.equal(pending.toolRounds, 1); assert.equal(pending.pendingApprovalIds.length, 1); assert.equal(events.some((event) => event.type === 'approval_required'), true); const resumed = await fixtureData.agent.resume(pending.pendingApprovalIds[0]); assert.equal(resumed.toolRounds, 1); assert.equal(resumed.response.content, 'Stream finished.'); assert.equal(resumed.pendingApprovalIds.length, 0); assert.equal(events.some((event) => event.type === 'delta' && event.text === 'Stream finished.'), true); }
-  finally { await fixtureData.cleanup(); }
+  try {
+    const pending = await fixtureData.agent.runStreaming(config, chat(), undefined, 'ask', (event) => events.push(event));
+    assert.equal(pending.toolRounds, 1);
+    assert.equal(pending.pendingApprovalIds.length, 1);
+    assert.equal(events.some((event) => event.type === 'approval_required'), true);
+    assert.equal(events.filter((event) => event.type === 'complete').length, 0);
+    const resumed = await fixtureData.agent.resume(pending.pendingApprovalIds[0]);
+    assert.equal(resumed.toolRounds, 1);
+    assert.equal(resumed.response.content, 'Stream finished.');
+    assert.equal(resumed.pendingApprovalIds.length, 0);
+    assert.equal(events.some((event) => event.type === 'delta' && event.text === 'Stream finished.'), true);
+    assert.equal(events.filter((event) => event.type === 'complete').length, 1);
+  } finally { await fixtureData.cleanup(); }
 });
 
 test('agent stops after the global twelve-round tool limit', async () => {
@@ -146,7 +188,7 @@ test('persists a recoverable cycle after a provider failure and never re-execute
   assert.equal(recovered.length, 1);
   await assert.rejects(second.resumeRecovered(recovered[0].runId), /Provider interrupted/);
   assert.equal(await fs.readFile(target, 'utf8'), 'export const value = 99;');
-  assert.equal(providerCalls, 2);
+  assert.equal(providerCalls, 3);
   await fs.rm(root, { recursive: true, force: true });
 });
 

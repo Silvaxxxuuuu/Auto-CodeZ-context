@@ -1,26 +1,106 @@
-import type { AIModel, AIProviderConfig, ProviderId } from './types';
+import crypto from 'node:crypto';
+import type { AIModel, AIProviderConfig, Capability, IntelligenceLevel, ProviderId } from './types';
 import { ProviderRegistry } from './provider-registry';
 import { selectDefaultModel } from './model-selection';
 
 const UNCONFIGURED_MODEL_IDS = new Set(['unconfigured', 'Unconfigured']);
+const DEFAULT_FALLBACK_CAPABILITIES: Capability[] = ['text', 'streaming', 'tools'];
+const REQUEST_DISCOVERY_BUDGET_MS = 750;
+
+function cloneModel(model: AIModel): AIModel {
+  return {
+    ...model,
+    capabilities: [...model.capabilities],
+    ...(model.reasoningLevels ? { reasoningLevels: [...model.reasoningLevels] } : {}),
+  };
+}
+
+function fallbackReasoningLevels(capabilities: Capability[]): IntelligenceLevel[] {
+  return capabilities.includes('reasoning') ? ['low', 'normal', 'high', 'maximum'] : ['normal'];
+}
 
 export class ModelResolver {
-  private readonly cache = new Map<ProviderId, { models: AIModel[]; fetchedAt: number }>();
+  private readonly cache = new Map<string, { models: AIModel[]; fetchedAt: number }>();
+  private readonly inFlight = new Map<string, Promise<AIModel[]>>();
   private readonly ttlMs = 5 * 60 * 1000;
 
   constructor(private readonly registry: ProviderRegistry) {}
 
+  private cacheKey(config: AIProviderConfig): string {
+    const credentialFingerprint = crypto.createHash('sha256').update(config.apiKey).digest('hex');
+    return `${config.id}\u0000${config.baseUrl ?? ''}\u0000${credentialFingerprint}`;
+  }
+
   async list(config: AIProviderConfig, forceRefresh = false): Promise<AIModel[]> {
-    const cached = this.cache.get(config.id);
-    if (!forceRefresh && cached && Date.now() - cached.fetchedAt < this.ttlMs) return [...cached.models];
-    const models = await this.registry.listModels(config);
-    this.cache.set(config.id, { models, fetchedAt: Date.now() });
-    return [...models];
+    const key = this.cacheKey(config);
+    const cached = this.cache.get(key);
+    if (!forceRefresh && cached && Date.now() - cached.fetchedAt < this.ttlMs) return cached.models.map(cloneModel);
+    if (!forceRefresh) {
+      const pending = this.inFlight.get(key);
+      if (pending) return (await pending).map(cloneModel);
+    }
+
+    const task = this.registry.listModels(config)
+      .then((models) => {
+        const stored = models.map(cloneModel);
+        this.cache.set(key, { models: stored, fetchedAt: Date.now() });
+        return stored.map(cloneModel);
+      })
+      .catch((error) => {
+        if (cached?.models.length) return cached.models.map(cloneModel);
+        throw error;
+      })
+      .finally(() => {
+        if (this.inFlight.get(key) === task) this.inFlight.delete(key);
+      });
+
+    if (!forceRefresh) this.inFlight.set(key, task);
+    return (await task).map(cloneModel);
+  }
+
+  async resolveForRequest(config: AIProviderConfig, modelId: string, discoveryBudgetMs = REQUEST_DISCOVERY_BUDGET_MS): Promise<AIModel> {
+    if (!modelId.trim() || UNCONFIGURED_MODEL_IDS.has(modelId)) {
+      const models = await this.list(config);
+      return cloneModel(this.find(models, modelId, config.id));
+    }
+
+    const cached = this.cache.get(this.cacheKey(config))?.models.find((model) => model.id === modelId);
+    if (cached) return cloneModel(cached);
+
+    const discovery = this.list(config);
+    if (discoveryBudgetMs <= 0) {
+      void discovery.catch((): undefined => undefined);
+      return this.fallbackForConfiguredModel(config, modelId);
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race<AIModel[] | undefined>([
+        discovery,
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), discoveryBudgetMs);
+        }),
+      ]);
+      if (result) return cloneModel(this.find(result, modelId, config.id));
+    } catch {
+      return this.fallbackForConfiguredModel(config, modelId);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+
+    void discovery.catch((): undefined => undefined);
+    return this.fallbackForConfiguredModel(config, modelId);
   }
 
   invalidate(providerId?: ProviderId): void {
-    if (providerId) this.cache.delete(providerId);
-    else this.cache.clear();
+    if (!providerId) {
+      this.cache.clear();
+      this.inFlight.clear();
+      return;
+    }
+    const prefix = `${providerId}\u0000`;
+    for (const key of this.cache.keys()) if (key.startsWith(prefix)) this.cache.delete(key);
+    for (const key of this.inFlight.keys()) if (key.startsWith(prefix)) this.inFlight.delete(key);
   }
 
   find(models: AIModel[], modelId: string, providerId?: ProviderId): AIModel {
@@ -32,5 +112,20 @@ export class ModelResolver {
     const model = models.find((item) => item.id === modelId);
     if (!model) throw new Error(`Modelo '${modelId}' não está disponível.`);
     return model;
+  }
+
+  fallbackForConfiguredModel(config: AIProviderConfig, modelId: string): AIModel {
+    if (!modelId.trim() || UNCONFIGURED_MODEL_IDS.has(modelId)) throw new Error('Nenhum modelo foi configurado para este chat.');
+    const cached = this.cache.get(this.cacheKey(config))?.models.find((model) => model.id === modelId);
+    if (cached) return cloneModel(cached);
+    const adapter = this.registry.get(config.id);
+    const capabilities = adapter.fallbackCapabilities?.length ? [...adapter.fallbackCapabilities] : [...DEFAULT_FALLBACK_CAPABILITIES];
+    return {
+      id: modelId,
+      name: modelId,
+      providerId: config.id,
+      capabilities,
+      reasoningLevels: fallbackReasoningLevels(capabilities),
+    };
   }
 }

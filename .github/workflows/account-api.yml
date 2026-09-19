@@ -1,0 +1,74 @@
+name: Validate Account API
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - 'services/account-api/**'
+      - '.github/workflows/account-api.yml'
+  pull_request:
+    paths:
+      - 'services/account-api/**'
+      - '.github/workflows/account-api.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: autocodez
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d autocodez"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/autocodez
+      ACCOUNT_PUBLIC_URL: https://accounts.example.test
+      BETTER_AUTH_SECRET: better-auth-ci-secret-000000000000000000000000
+      ACCOUNT_ACCESS_TOKEN_SECRET: desktop-access-ci-secret-000000000000000000
+      PASSKEY_RP_ID: accounts.example.test
+      PASSKEY_RP_NAME: Auto CodeZ
+
+    defaults:
+      run:
+        working-directory: services/account-api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: TypeScript validation
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Database migrations
+        run: npm run migrate
+
+      - name: PostgreSQL integration tests
+        run: npm run test:integration
+
+      - name: Production build
+        run: npm run build
+
+      - name: Production container build
+        run: docker build --tag auto-codez-account-api:ci .

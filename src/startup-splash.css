@@ -1,0 +1,109 @@
+.ac-startup{
+  position:fixed;
+  inset:0;
+  z-index:2147483000;
+  display:grid;
+  place-items:center;
+  overflow:hidden;
+  background:
+    radial-gradient(circle at 50% 38%,rgba(36,44,57,.18),transparent 34%),
+    #080a0e;
+  color:#edf1f6;
+  opacity:1;
+  transition:opacity .34s cubic-bezier(.4,0,.2,1),visibility .34s;
+}
+.ac-startup::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.018) 50%,transparent 70%);
+  transform:translateX(-100%);
+  animation:ac-startup-sheen 3.8s ease-in-out infinite;
+}
+.ac-startup-stage{
+  position:relative;
+  width:360px;
+  height:104px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  transform:translateY(-2px);
+}
+.ac-startup-mark{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:92px;
+  height:76px;
+  margin-left:-46px;
+  margin-top:-38px;
+  transform-origin:50% 50%;
+  will-change:transform;
+}
+.ac-startup-glyph{
+  width:100%;
+  height:100%;
+  overflow:visible;
+}
+.ac-startup-glyph line{
+  fill:none;
+  stroke:#edf1f6;
+  stroke-width:4.15;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  vector-effect:non-scaling-stroke;
+  filter:drop-shadow(0 0 12px rgba(218,228,240,.08));
+}
+.ac-startup-glyph [data-cursor]{
+  animation:ac-startup-cursor .92s steps(1,end) infinite;
+}
+.ac-startup.is-ready .ac-startup-glyph [data-cursor],
+.ac-startup.is-a .ac-startup-glyph [data-cursor],
+.ac-startup.is-z .ac-startup-glyph [data-cursor],
+.ac-startup.is-branding .ac-startup-glyph [data-cursor]{
+  animation:none;
+  opacity:1;
+}
+.ac-startup-word{
+  position:absolute;
+  left:50%;
+  top:50%;
+  margin-left:-88px;
+  transform:translate3d(7px,-50%,0);
+  font:600 31px/1 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  letter-spacing:-.046em;
+  color:#edf1f6;
+  white-space:nowrap;
+  opacity:0;
+  clip-path:inset(0 100% 0 0);
+  will-change:clip-path,opacity,transform;
+}
+.ac-startup.is-final .ac-startup-word{
+  opacity:1;
+}
+.ac-startup.is-leaving{
+  opacity:0;
+  visibility:hidden;
+}
+.auto-codez-booting #app{
+  visibility:hidden;
+}
+@keyframes ac-startup-cursor{
+  0%,54%{opacity:1}
+  55%,100%{opacity:.12}
+}
+@keyframes ac-startup-sheen{
+  0%,68%{transform:translateX(-100%);opacity:0}
+  78%{opacity:.65}
+  100%{transform:translateX(100%);opacity:0}
+}
+@media(max-width:520px){
+  .ac-startup-stage{width:300px}
+  .ac-startup-word{font-size:27px;margin-left:-78px}
+}
+@media(prefers-reduced-motion:reduce){
+  .ac-startup::after,
+  .ac-startup-glyph [data-cursor]{animation:none}
+  .ac-startup{transition-duration:.12s}
+}

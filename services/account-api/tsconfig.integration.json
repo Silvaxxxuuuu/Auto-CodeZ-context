@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": ".integration-dist",
+    "rootDir": ".",
+    "sourceMap": false,
+    "noEmit": false
+  },
+  "include": [
+    "src/crypto.ts",
+    "src/db.ts",
+    "src/desktop-auth-flow.ts",
+    "src/desktop-session.ts",
+    "src/device-registry.ts",
+    "src/env.ts",
+    "src/models.ts",
+    "tests/integration/**/*.test.ts"
+  ]
+}
