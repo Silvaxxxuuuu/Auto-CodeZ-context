@@ -218,15 +218,17 @@ export class HttpAuthAdapter implements AuthAdapter {
     return parseGrant(await this.post('/v1/auth/magic-link/complete', input));
   }
 
-  async beginPasskey(input: BeginPasskeyInput): Promise<{ flowId: string; expiresAt: number; publicKeyOptions: unknown }> {
+  async beginPasskey(input: BeginPasskeyInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
     const source = objectValue(await this.post('/v1/auth/passkey/begin', input), 'Início da Passkey');
-    if (source.publicKeyOptions === undefined || source.publicKeyOptions === null) {
-      throw new AuthAdapterError('server', 'Opções da Passkey inválidas retornadas pelo serviço de autenticação.');
+    const authorizationUrl = stringValue(source.authorizationUrl, 'URL da Passkey', 4_096);
+    const parsed = new URL(authorizationUrl);
+    if (parsed.protocol !== 'https:') {
+      throw new AuthAdapterError('server', 'URL Passkey insegura retornada pelo serviço de autenticação.');
     }
     return {
+      authorizationUrl,
       flowId: stringValue(source.flowId, 'ID do fluxo Passkey', 256),
       expiresAt: numberValue(source.expiresAt, 'Expiração do fluxo Passkey'),
-      publicKeyOptions: structuredClone(source.publicKeyOptions),
     };
   }
 
