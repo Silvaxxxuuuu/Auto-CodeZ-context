@@ -254,7 +254,7 @@ export class DesktopSessionService {
     const nowMs = this.now();
     const hash = tokenHash(refreshToken);
 
-    return await this.database.transaction(async (client) => {
+    const outcome = await this.database.transaction(async (client) => {
       const tokenResult = await client.query<RefreshRow & SessionRow>(
         `SELECT rt.id, rt.session_id, rt.token_hash,
                 EXTRACT(EPOCH FROM rt.expires_at) * 1000 AS expires_at_ms,
@@ -271,22 +271,20 @@ export class DesktopSessionService {
         [hash],
       );
       const row = tokenResult.rows[0];
-      if (!row || row.device_id !== deviceId || row.revoked_at_ms !== null) throw new Error('invalid_grant');
-
-      if (row.consumed_at_ms !== null) {
-        await client.query(
-          'UPDATE desktop_session SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL',
-          [row.session_id],
-        );
-        throw new Error('invalid_grant');
+      if (!row || row.device_id !== deviceId || row.revoked_at_ms !== null) {
+        return { kind: 'invalid' as const };
       }
 
-      if (numberValue(row.expires_at_ms) <= nowMs || numberValue(row.refresh_expires_at_ms) <= nowMs) {
+      if (
+        row.consumed_at_ms !== null
+        || numberValue(row.expires_at_ms) <= nowMs
+        || numberValue(row.refresh_expires_at_ms) <= nowMs
+      ) {
         await client.query(
           'UPDATE desktop_session SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL',
           [row.session_id],
         );
-        throw new Error('invalid_grant');
+        return { kind: 'invalid' as const };
       }
 
       await client.query(
@@ -313,12 +311,18 @@ export class DesktopSessionService {
       };
       const access = accessTokenFor(this.environment, updated, nowMs);
       return {
-        account: await loadAccount(client, row.user_id),
-        session: toDesktopSession(updated, access.expiresAt),
-        accessToken: access.token,
-        refreshToken: nextRefresh,
+        kind: 'grant' as const,
+        grant: {
+          account: await loadAccount(client, row.user_id),
+          session: toDesktopSession(updated, access.expiresAt),
+          accessToken: access.token,
+          refreshToken: nextRefresh,
+        },
       };
     });
+
+    if (outcome.kind !== 'grant') throw new Error('invalid_grant');
+    return outcome.grant;
   }
 
   async revoke(input: {
