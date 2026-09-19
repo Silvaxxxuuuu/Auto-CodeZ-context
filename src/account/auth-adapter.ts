@@ -5,12 +5,16 @@ import type {
   IdentityProvider,
 } from './types';
 
+export type OAuthProvider = Extract<IdentityProvider, 'github' | 'google' | 'microsoft'>;
+
 export type AuthAdapterErrorCode =
   | 'offline'
   | 'revoked'
   | 'invalid_grant'
+  | 'expired'
   | 'server'
-  | 'cancelled';
+  | 'cancelled'
+  | 'not_configured';
 
 export class AuthAdapterError extends Error {
   constructor(
@@ -41,8 +45,22 @@ export interface RevokeSessionInput {
 }
 
 export interface BeginOAuthInput {
-  provider: Extract<IdentityProvider, 'github' | 'google' | 'microsoft'>;
+  provider: OAuthProvider;
   deviceId: DeviceId;
+  state: string;
+  nonce: string;
+  codeChallenge: string;
+  codeChallengeMethod: 'S256';
+}
+
+export interface CompleteOAuthInput {
+  flowId: string;
+  provider: OAuthProvider;
+  deviceId: DeviceId;
+  code: string;
+  state: string;
+  nonce: string;
+  codeVerifier: string;
 }
 
 export interface BeginMagicLinkInput {
@@ -60,22 +78,71 @@ export interface BeginPasskeyInput {
   deviceId: DeviceId;
 }
 
+export interface CompletePasskeyInput {
+  flowId: string;
+  deviceId: DeviceId;
+  credential: unknown;
+}
+
 export interface AuthAdapter {
   refresh(input: RefreshSessionInput): Promise<AuthGrant>;
   revoke(input: RevokeSessionInput): Promise<void>;
 
-  beginOAuth?(input: BeginOAuthInput): Promise<{ authorizationUrl: string; flowId: string }>;
-  beginMagicLink?(input: BeginMagicLinkInput): Promise<{ flowId: string; expiresAt: number }>;
-  completeMagicLink?(input: CompleteMagicLinkInput): Promise<AuthGrant>;
-  beginPasskey?(input: BeginPasskeyInput): Promise<AuthGrant>;
+  beginOAuth(input: BeginOAuthInput): Promise<{
+    authorizationUrl: string;
+    flowId: string;
+    expiresAt: number;
+  }>;
+  completeOAuth(input: CompleteOAuthInput): Promise<AuthGrant>;
+
+  beginMagicLink(input: BeginMagicLinkInput): Promise<{
+    flowId: string;
+    expiresAt: number;
+  }>;
+  completeMagicLink(input: CompleteMagicLinkInput): Promise<AuthGrant>;
+
+  beginPasskey(input: BeginPasskeyInput): Promise<{
+    flowId: string;
+    expiresAt: number;
+    publicKeyOptions: unknown;
+  }>;
+  completePasskey(input: CompletePasskeyInput): Promise<AuthGrant>;
 }
 
 export class UnavailableAuthAdapter implements AuthAdapter {
+  private unavailable(): never {
+    throw new AuthAdapterError('not_configured', 'Serviço de autenticação ainda não está configurado.');
+  }
+
   async refresh(): Promise<AuthGrant> {
-    throw new AuthAdapterError('offline', 'Serviço de autenticação ainda não está configurado.');
+    return this.unavailable();
   }
 
   async revoke(): Promise<void> {
     return;
+  }
+
+  async beginOAuth(): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
+    return this.unavailable();
+  }
+
+  async completeOAuth(): Promise<AuthGrant> {
+    return this.unavailable();
+  }
+
+  async beginMagicLink(): Promise<{ flowId: string; expiresAt: number }> {
+    return this.unavailable();
+  }
+
+  async completeMagicLink(): Promise<AuthGrant> {
+    return this.unavailable();
+  }
+
+  async beginPasskey(): Promise<{ flowId: string; expiresAt: number; publicKeyOptions: unknown }> {
+    return this.unavailable();
+  }
+
+  async completePasskey(): Promise<AuthGrant> {
+    return this.unavailable();
   }
 }
