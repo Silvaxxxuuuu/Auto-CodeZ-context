@@ -7774,3 +7774,250 @@ REGRAS QUE NÃO MUDARAM
 - AgentRuntime/policies/PluginToolCatalog continuam autoritativos;
 - código novo deve manter precisão e fail-closed.
 
+------------------------------------------------------------
+24.44. ACCOUNT CORE V1 — READY FOR MANUAL ACCEPTANCE
+------------------------------------------------------------
+
+Checkpoint registrado em 19/09/2026.
+
+IMPLEMENTATION HEAD VALIDADO:
+40e95b8b2ff4ab69c543ff010bc29514db51f98e
+fix(account): hide decorative passkey glyph from accessibility name
+
+IMPORTANTE:
+Este estado está pronto para ACEITAÇÃO MANUAL do usuário.
+NÃO declarar Account Core V1 CLOSED antes do teste manual/aprovação do usuário.
+NÃO iniciar Azure Foundry / GPT-5.6 Luna antes dessa aprovação.
+
+PR #9:
+- OPEN;
+- DRAFT;
+- mergeable no checkpoint;
+- sem merge;
+- não mesclar sem autorização explícita.
+
+CI EXATO DO IMPLEMENTATION HEAD
+
+- Validate Auto CodeZ #4224 / run 35428852287: SUCCESS;
+- Validate Auto CodeZ push #4223 / run 35428850426: SUCCESS;
+- Validate Account API #79 / run 35428852291: SUCCESS;
+- Visual Auto CodeZ #934 / run 35428852286: SUCCESS.
+
+Visual #934:
+- Windows Server 2022 / win32 x64;
+- Electron empacotado;
+- startup identity PASS;
+- fluxo visual principal PASS;
+- unified local AI PASS;
+- unavailable runtime recovery PASS;
+- secure local runtime settings PASS;
+- LM Studio chat PASS;
+- passwordless account onboarding PASS;
+- pageErrors=[];
+- consoleErrors=[];
+- artifact id 10579494737;
+- artifact name auto-codez-visual-35428852286.
+
+Screenshot revisado:
+funcional-account-login.png
+
+Estado visual observado:
+- “Bem-vindo ao Auto CodeZ”;
+- Magic Link;
+- GitHub;
+- Google;
+- Microsoft;
+- Passkey;
+- nota de segurança passwordless;
+- sem overflow/regressão perceptível em 1440×900;
+- botão Passkey com glyph decorativo aria-hidden para nome acessível correto.
+
+TRABALHO FECHADO DESDE 24.43
+
+1. Local AI visual flakes
+- health probes de Ollama/LM Studio separados de requests normais;
+- availability probe bounded;
+- event ownership de local:unified tornado determinístico;
+- Visual unificado espera readiness causal;
+- save espera reload real + provider/model persistidos;
+- LM Studio restore usa readiness causal e estado persistido;
+- não foi resolvido aumentando timeout cegamente.
+
+2. Account package determinístico
+- services/account-api/package-lock.json versionado;
+- lockfileVersion 3;
+- dependencies Better Auth/Passkey pinadas conforme package.json;
+- workflow Account API usa npm ci;
+- Dockerfile usa package-lock + npm ci;
+- CI também constrói production container.
+
+3. Device Registry multi-account
+- device_registry agora é scoped por (user_id, device_id);
+- migration 002_device_registry_account_scope.sql;
+- revoke de um device/account não transfere nem revoga o mesmo deviceId em outra conta;
+- integration test PostgreSQL cobre duas contas com mesmo physical device id.
+
+4. Migration runner
+- Better Auth migrations continuam executadas via getMigrations(auth.options);
+- migrations desktop numeradas são aplicadas em ordem lexicográfica;
+- README corrigido para refletir migrations incrementais.
+
+5. Passkey enrollment
+Antes:
+- existia login por Passkey;
+- faltava caminho para criar a primeira Passkey.
+
+Agora:
+- /desktop/passkey/enroll;
+- exige sessão Better Auth válida no navegador HTTPS;
+- usa authClient.passkey.addPasskey();
+- profile autenticado oferece “Adicionar passkey”;
+- renderer não recebe raw WebAuthn credential;
+- desktop não recebe browser session cookie;
+- login Passkey continua browser HTTPS → one-time code → PKCE → deep link.
+
+6. Account public origin
+- publicOrigin derivada somente de base URL HTTPS válida;
+- URL base desktop precisa ser origin HTTPS puro;
+- ACCOUNT_PUBLIC_URL do backend precisa ser origin HTTPS puro;
+- path/query/fragment/credentials são rejeitados.
+
+7. First-device registration race
+Problema encontrado:
+- sessão autenticava;
+- Device Registry iniciava registro;
+- UI podia renomear o device antes de completeRegistration terminar.
+
+Correção:
+- ensureRegistered coalesce registrationInFlight;
+- renameCurrent aguarda registro remoto existente/em andamento;
+- nenhuma segunda registration é disparada;
+- teste concorrente cobre o primeiro onboarding.
+
+8. Windows terminal test cleanup
+- EBUSY/EPERM/ENOTEMPTY no teardown recebem retries finitos;
+- sem while(true);
+- somente test cleanup;
+- runtime de produção não foi enfraquecido.
+
+9. Offline readiness
+Produção:
+- se backend Account estiver configurado mas capability discovery estiver offline/falhar,
+  login blocking UI NÃO prende o app local;
+- resolveAccountAuthConfiguration retorna configured=false + methods=[] em produção;
+- editor/IA local continuam abrindo;
+- conta cached/offline permanece visível no profile.
+
+Visual E2E:
+- AUTO_CODEZ_VISUAL_TEST usa capabilities configuradas deterministicamente;
+- não consulta rede para decidir botões;
+- isso é test-only e não altera production discovery.
+
+10. Session persistence fail-closed
+Problema endurecido:
+- se refresh token fosse salvo e a metadata account-session falhasse logo depois,
+  poderia sobrar estado parcial.
+
+Agora:
+- falha de persistência remove refresh credential + account-session metadata best-effort;
+- access token é zerado;
+- runtime retorna signed_out;
+- teste cobre falha injetada.
+
+11. Passkey accessibility
+- glyph “◉” é decorativo;
+- aria-hidden=true;
+- nome acessível é exatamente “Entrar com passkey”;
+- Visual onboarding PASS.
+
+ACCOUNT API VALIDADO
+
+No Account API #79:
+- npm ci;
+- TypeScript;
+- unit tests;
+- Better Auth migrations;
+- desktop migrations;
+- PostgreSQL integration;
+- session issuance;
+- refresh rotation;
+- refresh replay/revocation;
+- device proof Ed25519;
+- device multi-account isolation;
+- production build;
+- production Docker image build;
+- tudo SUCCESS.
+
+ESTADO DE SEGURANÇA PRESERVADO
+
+- access token somente em memória;
+- refresh token protegido fora do renderer;
+- private Ed25519 key nunca sai do device;
+- PKCE/state/nonce permanecem no main/backend boundary;
+- auth completion secrets são one-time;
+- tokens não vão em query string;
+- tokens/private key não entram no Operational Ledger;
+- renderer recebe somente snapshots sanitizados;
+- HTTP auth base é HTTPS;
+- local/offline não depende de Account API estar online.
+
+O QUE O TESTE MANUAL DO USUÁRIO PRECISA ACEITAR
+
+Visual/UX:
+1. primeira abertura/login;
+2. layout;
+3. Magic Link field;
+4. GitHub/Google/Microsoft;
+5. Passkey;
+6. waiting/completing;
+7. device naming;
+8. Account/Profile;
+9. devices list/rename/revoke;
+10. logout.
+
+Runtime real quando backend/provider de teste estiver configurado:
+11. login real;
+12. callback autocodez://auth;
+13. restart/hydrate;
+14. offline cached session;
+15. refresh;
+16. revoked session;
+17. revoke current/other device;
+18. multi-device;
+19. Passkey enrollment + login.
+
+CRITÉRIO DE ACEITAÇÃO
+
+Se o usuário aprovar o teste manual:
+- marcar Account Core V1 CLOSED em novo checkpoint;
+- não reabrir a arquitetura de Account sem bug real;
+- iniciar imediatamente Azure Foundry Test Lab;
+- GPT-5.6 Luna é o modelo default do laboratório;
+- depois AgentRuntime E2E real.
+
+Se o usuário encontrar problema:
+- manter Account Core V1 OPEN;
+- corrigir;
+- repetir Validate Auto CodeZ + Validate Account API + Visual no HEAD exato;
+- entregar novamente para aceitação.
+
+BLENDER — REQUISITO CORRIGIDO/PRESERVADO
+
+Para futura Blender 3D Automation:
+- Blender opera prioritariamente em background;
+- não depende de janela focada;
+- não disputa mouse/teclado com o usuário;
+- comunicação principal via plugin/bridge + Blender Python API;
+- viewport redraw, screenshots e renders somente quando necessários;
+- objetivo é impacto mínimo de CPU/GPU durante uso normal do PC;
+- não assumir perfis “Eco/Balanced/Maximum” como requisito oficial;
+- o requisito autoritativo é background + mínima interferência/consumo;
+- operações 3D pesadas ainda podem consumir recursos quando tecnicamente inevitável.
+
+PRÓXIMO PASSO IMEDIATO
+
+Entregar ao usuário o teste manual do Account/Login.
+Esperar aprovação explícita.
+Só então:
+Azure Foundry Test Lab → GPT-5.6 Luna.
+
