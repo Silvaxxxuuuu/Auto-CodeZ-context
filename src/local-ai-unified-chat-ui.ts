@@ -116,6 +116,26 @@ function setSaveEnabled(enabled: boolean): void {
   if (button) button.disabled = !enabled;
 }
 
+function markUnifiedRenderReady(): void {
+  const root = stateRoot();
+  if (!root) return;
+  const previous = Number.parseInt(root.dataset.localUnifiedRenderSeq || '0', 10);
+  const next = Number.isFinite(previous) ? previous + 1 : 1;
+  root.dataset.localUnifiedReady = 'true';
+  root.dataset.localUnifiedRenderSeq = String(next);
+  window.dispatchEvent(new CustomEvent('auto-codez-local-unified-rendered', {
+    detail: {
+      sequence: next,
+      modelCount: modelSelect()?.options.length ?? 0,
+    },
+  }));
+}
+
+function markUnifiedRenderPending(): void {
+  const root = stateRoot();
+  if (root) root.dataset.localUnifiedReady = 'false';
+}
+
 function optionIsLocalProvider(option: HTMLOptionElement): boolean {
   if (!option.value.startsWith('provider:')) return false;
   return LOCAL_PROVIDER_IDS.has(option.value.slice('provider:'.length));
@@ -284,6 +304,7 @@ async function renderUnifiedLocal(): Promise<void> {
   if (!isUnifiedLocalSelected()) return;
   renderModelOptions();
   renderSelectionState();
+  markUnifiedRenderReady();
   aiSelect()?.classList.add('local-unified-selected');
 }
 
@@ -423,6 +444,7 @@ document.addEventListener('change', (event) => {
     event.stopImmediatePropagation();
     setSaveEnabled(false);
     localOverrideChoiceId = '';
+    markUnifiedRenderPending();
     void renderUnifiedLocal();
     return;
   }
@@ -447,9 +469,11 @@ const unsubscribeInstall = localApi()?.onInstallEvent((event) => {
   installInFlightKey = '';
   if (event.type === 'complete') {
     localSnapshot = undefined;
+    markUnifiedRenderPending();
     void refreshSnapshot().then(() => {
       renderModelOptions();
       renderSelectionState();
+      markUnifiedRenderReady();
     });
     return;
   }
