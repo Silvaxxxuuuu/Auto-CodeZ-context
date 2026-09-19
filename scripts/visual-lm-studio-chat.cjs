@@ -208,6 +208,11 @@ async function verifyLmStudioChatSelection() {
   await page.waitForFunction(() => Boolean(document.querySelector('#chat-available-ai option[value="local:unified"]')));
   if (await aiSelect.locator('option[value="provider:lm-studio"]').count()) throw new Error('LM Studio vazou como IA separada no seletor unificado.');
   await aiSelect.selectOption('local:unified');
+  await page.waitForFunction(
+    () => document.querySelector('#chat-local-model-state')?.dataset.localUnifiedReady === 'true',
+    undefined,
+    { timeout: 20_000 },
+  );
 
   const modelSelect = page.locator('#chat-model');
   const granite = modelSelect.locator('option').filter({ hasText: 'Granite Local' });
@@ -220,9 +225,22 @@ async function verifyLmStudioChatSelection() {
   await modelSelect.selectOption(graniteChoice);
   const save = page.locator('#save-available-ai-settings');
   await page.waitForFunction(() => !document.querySelector('#save-available-ai-settings')?.hasAttribute('disabled'));
+  const reloaded = page.waitForEvent('framenavigated', {
+    predicate: (frame) => frame === page.mainFrame(),
+    timeout: 30_000,
+  });
   await save.click();
+  await reloaded;
 
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
+  await page.waitForFunction(
+    async (chatId) => {
+      const chat = (await window.autoCodez.getState()).chats.find((item) => item.id === chatId);
+      return chat?.providerId === 'lm-studio' && chat.model === 'granite-local' && !chat.apiKeyId;
+    },
+    created.id,
+    { timeout: 20_000 },
+  );
   await page.locator(`.chat-item.selected[data-chat="${created.id}"]`).first().waitFor({ state: 'visible', timeout: 15_000 });
   await page.waitForFunction((chatId) => {
     const selected = document.querySelector(`.chat-item.selected[data-chat="${CSS.escape(chatId)}"]`);
