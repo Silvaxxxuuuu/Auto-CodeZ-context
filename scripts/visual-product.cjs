@@ -187,16 +187,16 @@ async function captureStartupIdentity() {
     if (!terminal.cursorAnimation.includes('ac-startup-cursor')) throw new Error('O cursor "_" não está piscando no estado inicial.');
     await page.screenshot({ path: path.join(outputDir, 'startup-terminal.png') });
 
-    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.classList.contains('is-a'), undefined, { timeout: 5_000, polling: 'raf' });
+    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.getAttribute('data-stage') === 'a', undefined, { timeout: 5_000, polling: 'raf' });
     const aState = await readState();
     assertGlyph(aState, [[28,56,44,22],[44,22,60,56],[35,43,53,43]], 'A');
     await page.screenshot({ path: path.join(outputDir, 'startup-a.png') });
 
-    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.classList.contains('is-z'), undefined, { timeout: 5_000, polling: 'raf' });
+    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.getAttribute('data-stage') === 'z', undefined, { timeout: 5_000, polling: 'raf' });
     const zState = await readState();
     assertGlyph(zState, [[28,24,60,24],[60,24,28,56],[28,56,60,56]], 'Z');
 
-    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.classList.contains('is-final'), undefined, { timeout: 5_000, polling: 'raf' });
+    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.getAttribute('data-stage') === 'final', undefined, { timeout: 5_000, polling: 'raf' });
     const finalState = await readState();
     if (finalState.wordOpacity < .95) throw new Error(`Auto Code não terminou visível. opacity=${finalState.wordOpacity}.`);
     await page.screenshot({ path: path.join(outputDir, 'startup-auto-codez.png') });
