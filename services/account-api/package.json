@@ -15,8 +15,8 @@
   },
   "dependencies": {
     "@azure/communication-email": "1.0.0",
-    "@better-auth/passkey": "1.6.23",
-    "better-auth": "1.6.23",
+    "@better-auth/passkey": "1.7.5",
+    "better-auth": "1.7.5",
     "express": "5.1.0",
     "pg": "8.16.3"
   },
