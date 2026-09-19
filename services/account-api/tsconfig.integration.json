@@ -9,6 +9,7 @@
   "include": [
     "src/crypto.ts",
     "src/db.ts",
+    "src/desktop-auth-flow.ts",
     "src/desktop-session.ts",
     "src/device-registry.ts",
     "src/env.ts",
