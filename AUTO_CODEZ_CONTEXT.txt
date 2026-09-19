@@ -6649,3 +6649,182 @@ Auth Flow Runtime + backend adapter contract completo:
 - fake auth adapter apenas para testes/E2E;
 - nenhum backend/provedor fictício exposto como funcional ao usuário.
 
+------------------------------------------------------------
+24.40. AUTH FLOW RUNTIME + HTTP AUTH ADAPTER — VALIDADO
+------------------------------------------------------------
+
+Checkpoint funcional validado em 18/09/2026.
+
+HEAD funcional antes deste registro:
+f6888f3ea4acb19c6024138f27e7088f1014026d
+
+Workflows exatos:
+- Validate Auto CodeZ #4017 / run 35414717550: SUCCESS;
+- Visual Auto CodeZ #836 / run 35414717543: SUCCESS.
+
+Validate:
+- TypeScript SUCCESS;
+- Core tests 953/953 PASS, 0 FAIL;
+- ESLint SUCCESS;
+- Electron Forge package SUCCESS;
+- Electron startup smoke SUCCESS.
+
+Visual:
+- Windows x64 packaged Electron;
+- startup-identidade PASS;
+- fluxo visual principal PASS;
+- pageErrors=[];
+- consoleErrors=[];
+- artifact 10574773892;
+- digest sha256:f1add54cf50df524750fb4ec6cc82c007ca2d36fc91be3f998ab418e87363e10.
+
+AUTH FLOW RUNTIME
+
+Novo:
+src/account/account-auth-flow-runtime.ts
+
+Estados públicos:
+- idle;
+- waiting_magic_link;
+- waiting_browser;
+- waiting_passkey;
+- completing;
+- authenticated;
+- error.
+
+Métodos cobertos:
+- Magic Link;
+- GitHub OAuth;
+- Google OAuth;
+- Microsoft OAuth;
+- Passkey.
+
+OAuth:
+- state aleatório;
+- nonce aleatório;
+- PKCE verifier privado;
+- S256 challenge;
+- verifier/state/nonce nunca entram no snapshot público;
+- state mismatch é rejeitado antes de chamar backend completion;
+- fluxos têm expiração;
+- pending state é descartado em erro;
+- nenhuma autenticação persistente é iniciada quando o device está em credentialPersistence=ephemeral.
+
+Magic Link:
+- email normalizado;
+- snapshot público contém somente emailHint mascarado;
+- token de completion nunca entra no snapshot.
+
+Passkey:
+- begin retorna apenas opções públicas;
+- credential de completion é passada ao adapter;
+- sessão só é estabelecida após grant válido.
+
+CONTRATOS DE AUTH
+
+auth-adapter.ts agora separa:
+- SessionAuthAdapter: refresh/revoke;
+- AuthAdapter: fluxos interativos completos.
+
+Isso mantém AccountSessionRuntime desacoplado de UI/OAuth/Passkey.
+
+HTTP AUTH ADAPTER
+
+Novo:
+src/account/http-auth-adapter.ts
+
+Contrato backend HTTP inicial:
+- POST /v1/auth/session/refresh
+- POST /v1/auth/session/revoke
+- POST /v1/auth/oauth/begin
+- POST /v1/auth/oauth/complete
+- POST /v1/auth/magic-link/begin
+- POST /v1/auth/magic-link/complete
+- POST /v1/auth/passkey/begin
+- POST /v1/auth/passkey/complete
+
+Regras:
+- HTTPS obrigatório;
+- sem username/password na URL;
+- sem query/hash na base URL;
+- tokens/códigos ficam em POST JSON, nunca query string;
+- credentials=omit;
+- redirect=error;
+- cache=no-store;
+- timeout bounded;
+- respostas não-JSON inesperadas falham;
+- payload de account/session/grant é validado antes de chegar ao runtime;
+- remote errors são normalizados;
+- authorizationUrl OAuth precisa ser HTTPS.
+
+AUTH ADAPTER FACTORY
+
+Novo:
+src/account/auth-adapter-factory.ts
+
+Comportamento:
+- sem backend configurado → UnavailableAuthAdapter;
+- local editor/IA continuam funcionando;
+- endpoint HTTPS válido → HttpAuthAdapter;
+- configuração inválida falha fechada para cloud auth, mas NÃO impede app local de iniciar.
+
+Entrada provisória de desenvolvimento:
+AUTO_CODEZ_ACCOUNT_API_BASE_URL
+
+IMPORTANTE:
+- isso NÃO define domínio final;
+- não hardcodar domínio fictício;
+- quando API oficial existir, essa factory é o único ponto principal de seleção do adapter.
+
+Main/preload:
+- AccountAuthFlowRuntime instanciado no main;
+- account-auth-flow:get-state;
+- account-auth-flow:reset;
+- account-auth-flow:event;
+- account-auth:get-configuration;
+- preload expõe somente estado/configuração sanitizados;
+- métodos interativos ainda NÃO estão habilitados para a UI final enquanto backend real não existir.
+
+TESTES NOVOS
+
+Cobertura inclui:
+- PKCE/state/nonce não expostos;
+- OAuth state mismatch;
+- Magic Link email hint;
+- Passkey;
+- auth bloqueada quando secure storage é ephemeral;
+- auth flow expiration;
+- HTTPS obrigatório;
+- refresh token somente no POST body;
+- OAuth URL segura;
+- grant malformado rejeitado;
+- invalid_grant normalizado;
+- resposta não JSON rejeitada;
+- factory disabled/valid/invalid.
+
+DECISÃO DE PRODUTO PRESERVADA
+
+Não mostrar uma tela de login falsa ou botões que pareçam funcionais antes de backend real existir.
+
+A futura Login UI deve consumir estes contratos:
+- accountAuthConfiguration();
+- accountAuthFlowState();
+- accountState();
+- eventos sanitizados.
+
+PRÓXIMO BLOCO RECOMENDADO
+
+Account Backend / Device Registration boundary:
+1. escolher/provisionar infraestrutura real da API de conta;
+2. definir issuer/audience/origins;
+3. implementar endpoints do contrato acima;
+4. Device Registry com public key;
+5. callback/deep-link seguro;
+6. só então habilitar os métodos interativos no preload/UI;
+7. implementar Login UI final;
+8. Visual E2E de first login/offline/revoked session.
+
+Não iniciar Relay antes de account session + registered device estarem comprovados.
+
+PR #9 continua OPEN/DRAFT e não deve ser mesclado sem autorização explícita.
+
