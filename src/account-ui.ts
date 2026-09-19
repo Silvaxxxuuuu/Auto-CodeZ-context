@@ -63,11 +63,12 @@ function providerIcon(provider: string): string {
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8v8H3V3Zm10 0h8v8h-8V3ZM3 13h8v8H3v-8Zm10 0h8v8h-8v-8Z"/></svg>';
 }
 
-function base64UrlToBytes(value: string): Uint8Array {
+function base64UrlToBuffer(value: string): ArrayBuffer {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
   const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
   const binary = atob(padded);
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
 function bytesToBase64Url(value: ArrayBuffer | ArrayBufferView): string {
@@ -85,13 +86,13 @@ function webAuthnOptions(value: unknown): PublicKeyCredentialRequestOptions {
   if (typeof source.challenge !== 'string') throw new Error('Challenge de Passkey inválido.');
   const result = {
     ...source,
-    challenge: base64UrlToBytes(source.challenge),
+    challenge: base64UrlToBuffer(source.challenge),
   } as unknown as PublicKeyCredentialRequestOptions;
   if (Array.isArray(source.allowCredentials)) {
     result.allowCredentials = source.allowCredentials.map((item) => {
       const credential = item as PublicKeyCredentialDescriptor & { id: unknown };
       if (typeof credential.id !== 'string') throw new Error('Credencial permitida inválida.');
-      return { ...credential, id: base64UrlToBytes(credential.id) };
+      return { ...credential, id: base64UrlToBuffer(credential.id) };
     });
   }
   return result;
@@ -330,7 +331,7 @@ async function finishDevice(name: string): Promise<void> {
     const normalized = name.trim().replace(/\s+/g, ' ');
     if (!normalized) throw new Error('Digite um nome para este dispositivo.');
     accountState = await bridge.renameAccountDevice(normalized);
-    await bridge.renameAccountDeviceRegistryCurrent(normalized).catch(() => undefined);
+    await bridge.renameAccountDeviceRegistryCurrent(normalized).catch((): undefined => undefined);
     localStorage.setItem(DEVICE_ONBOARDING_KEY, accountState.device.id);
   } catch (error) {
     flowState = { status: 'error', lastError: error instanceof Error ? error.message : 'Não foi possível salvar o dispositivo.' };
