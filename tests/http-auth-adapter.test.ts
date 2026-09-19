@@ -10,7 +10,7 @@ function grantPayload(deviceId = 'device-1') {
       primaryEmail: 'user@example.com',
       displayName: 'Gabriel',
       status: 'active',
-      identities: [],
+      identities: [] as unknown[],
       createdAt: 1,
       updatedAt: 2,
     },
