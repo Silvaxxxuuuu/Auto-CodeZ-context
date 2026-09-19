@@ -1,7 +1,7 @@
 import type { LocalStorage } from '../core/storage';
 import { SecretVault, type SecretMetadata } from './secret-vault';
 
-export interface ProtectedCredentialMetadata extends SecretMetadata {}
+export type ProtectedCredentialMetadata = SecretMetadata;
 
 export interface ProtectedCredentialStore {
   set(key: string, value: string): Promise<void>;
