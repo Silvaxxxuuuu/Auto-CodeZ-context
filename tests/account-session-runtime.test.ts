@@ -260,3 +260,55 @@ test('AccountSessionRuntime clears revoked sessions and local secrets', async ()
   assert.equal(credentials.values.has('account.session.refresh-token'), false);
   assert.equal(storage.values.has('account-session.json'), false);
 });
+
+
+test('AccountSessionRuntime subscriptions expose only sanitized snapshots', async () => {
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => 100,
+    },
+  );
+  const device = await devices.getOrCreate();
+
+  const adapter: AuthAdapter = {
+    async refresh(): Promise<AuthGrant> {
+      throw new Error('refresh não deveria ser chamado neste teste');
+    },
+    async revoke(): Promise<void> {
+    },
+  };
+
+  const runtime = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+
+  const seen: string[] = [];
+  const unsubscribe = runtime.subscribe((snapshot) => {
+    seen.push(JSON.stringify(snapshot));
+  });
+
+  await runtime.establish({
+    account: profile(),
+    session: session(device.id),
+    accessToken: 'access-secret',
+    refreshToken: 'refresh-secret',
+  });
+  await runtime.renameDevice('Meu PC');
+  unsubscribe();
+
+  assert.equal(seen.length, 2);
+  assert.ok(seen.every((serialized) => !serialized.includes('access-secret')));
+  assert.ok(seen.every((serialized) => !serialized.includes('refresh-secret')));
+  assert.ok(seen[1]?.includes('Meu PC'));
+});
