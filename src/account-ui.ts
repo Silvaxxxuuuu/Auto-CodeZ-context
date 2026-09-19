@@ -166,6 +166,9 @@ function renderCompleting(): void {
 function renderDevice(): void {
   if (!accountState) return;
   const target = ensureRoot();
+  const suggestedName = accountState.device.name === 'Este dispositivo'
+    ? accountState.account?.displayName?.trim() || accountState.device.name
+    : accountState.device.name;
   target.innerHTML = `
     <div class="account-backdrop-glow"></div>
     <main class="account-card compact" data-account-screen="device">
@@ -177,7 +180,7 @@ function renderDevice(): void {
       </header>
       <form id="account-device-form" class="account-device-form">
         <label for="account-device-name">Nome do dispositivo</label>
-        <input id="account-device-name" value="${escapeHtml(accountState.device.name)}" maxlength="80" autocomplete="off" ${busy ? 'disabled' : ''}>
+        <input id="account-device-name" value="${escapeHtml(suggestedName)}" maxlength="80" autocomplete="off" ${busy ? 'disabled' : ''}>
         <div class="account-device-meta">${escapeHtml(accountState.device.platform)} · ${escapeHtml(accountState.device.arch)} · Auto CodeZ ${escapeHtml(accountState.device.appVersion)}</div>
         <button type="submit" class="account-primary full" ${busy ? 'disabled' : ''}>Continuar</button>
       </form>
