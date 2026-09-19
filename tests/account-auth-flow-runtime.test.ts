@@ -99,12 +99,12 @@ class FakeAuthAdapter implements AuthAdapter {
     return this.grantFactory(input.deviceId);
   }
 
-  async beginPasskey(input: BeginPasskeyInput): Promise<{ flowId: string; expiresAt: number; publicKeyOptions: unknown }> {
+  async beginPasskey(input: BeginPasskeyInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
     this.lastPasskeyBegin = input;
     return {
+      authorizationUrl: 'https://auth.example.test/passkey',
       flowId: 'passkey-flow',
       expiresAt: 10_000,
-      publicKeyOptions: { challenge: 'public-challenge' },
     };
   }
 
@@ -225,18 +225,30 @@ test('Magic Link normalizes email and only exposes a masked hint', async () => {
   assert.ok(!JSON.stringify(completed).includes('magic-token'));
 });
 
-test('Passkey flow exposes only public challenge options and establishes the session after completion', async () => {
+test('Passkey flow keeps PKCE material private and completes through browser callback', async () => {
   const { adapter, flows, sessions } = setup();
 
   const started = await flows.beginPasskey();
-  assert.equal(started.status, 'waiting_passkey');
-  assert.deepEqual(started.publicKeyOptions, { challenge: 'public-challenge' });
+  assert.equal(started.snapshot.status, 'waiting_browser');
+  assert.equal(started.snapshot.method, 'passkey');
+  assert.equal(started.authorizationUrl, 'https://auth.example.test/passkey');
+  assert.ok(adapter.lastPasskeyBegin);
 
-  const credential = { id: 'credential-id', response: { signature: 'signature' } };
-  const completed = await flows.completePasskey('passkey-flow', credential);
+  const publicJson = JSON.stringify(started.snapshot);
+  assert.ok(!publicJson.includes(adapter.lastPasskeyBegin.state));
+  assert.ok(!publicJson.includes(adapter.lastPasskeyBegin.nonce));
+  assert.ok(!publicJson.includes(adapter.lastPasskeyBegin.codeChallenge));
+
+  const completed = await flows.completePasskey({
+    flowId: 'passkey-flow',
+    code: 'passkey-code',
+    state: adapter.lastPasskeyBegin.state,
+  });
 
   assert.equal(completed.status, 'authenticated');
-  assert.deepEqual(adapter.lastPasskeyComplete?.credential, credential);
+  assert.equal(adapter.lastPasskeyComplete?.code, 'passkey-code');
+  assert.equal(adapter.lastPasskeyComplete?.nonce, adapter.lastPasskeyBegin.nonce);
+  assert.equal(adapter.lastPasskeyComplete?.codeVerifier.length > 40, true);
   assert.equal(sessions.snapshot().state, 'authenticated');
 });
 
