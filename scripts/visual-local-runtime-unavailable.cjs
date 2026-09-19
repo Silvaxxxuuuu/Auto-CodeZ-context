@@ -112,7 +112,14 @@ async function main() {
   await ai.selectOption('local:unified');
 
   const model = page.locator('#chat-model');
-  await page.waitForFunction(() => document.querySelectorAll('#chat-model option').length > 1, null, { timeout: 15_000 });
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#chat-local-model-state');
+    const model = document.querySelector('#chat-model');
+    return root instanceof HTMLElement
+      && root.dataset.localUnifiedReady === 'true'
+      && model instanceof HTMLSelectElement
+      && model.options.length > 1;
+  }, null, { timeout: 20_000 });
   if (await model.isDisabled()) throw new Error('O catálogo local ficou escondido quando runtimes externos estavam desligados.');
   const optionTexts = await model.locator('option').allTextContents();
   if (!optionTexts.some((text) => /recomendado/i.test(text))) throw new Error(`Nenhuma recomendação local apareceu: ${JSON.stringify(optionTexts)}`);
