@@ -142,6 +142,7 @@ test('AccountSessionRuntime keeps access token in memory and refresh token outsi
       throw new Error('refresh não deveria ser chamado neste teste');
     },
     async revoke(): Promise<void> {
+      return;
     },
   };
 
@@ -201,6 +202,7 @@ test('AccountSessionRuntime restores cached account offline without exposing a t
       throw new AuthAdapterError('offline', 'Sem internet.');
     },
     async revoke(): Promise<void> {
+      return;
     },
   };
 
@@ -245,6 +247,7 @@ test('AccountSessionRuntime clears revoked sessions and local secrets', async ()
       throw new AuthAdapterError('revoked', 'Sessão revogada.');
     },
     async revoke(): Promise<void> {
+      return;
     },
   };
 
@@ -283,6 +286,7 @@ test('AccountSessionRuntime subscriptions expose only sanitized snapshots', asyn
       throw new Error('refresh não deveria ser chamado neste teste');
     },
     async revoke(): Promise<void> {
+      return;
     },
   };
 
@@ -380,6 +384,7 @@ test('AccountSessionRuntime rejects grants bound to another device', async () =>
       throw new Error('refresh não deveria ser chamado neste teste');
     },
     async revoke(): Promise<void> {
+      return;
     },
   };
 
