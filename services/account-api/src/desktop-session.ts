@@ -330,20 +330,19 @@ export class DesktopSessionService {
     refreshToken?: string;
     deviceId: string;
   }): Promise<void> {
-    const hash = input.refreshToken ? tokenHash(input.refreshToken) : undefined;
+    if (!input.refreshToken) throw new Error('invalid_grant');
+    const hash = tokenHash(input.refreshToken);
     await this.database.transaction(async (client) => {
-      if (hash) {
-        const result = await client.query<{ session_id: string; device_id: string }>(
-          `SELECT rt.session_id, s.device_id
-             FROM desktop_refresh_token rt
-             JOIN desktop_session s ON s.id = rt.session_id
-            WHERE rt.token_hash = $1`,
-          [hash],
-        );
-        const row = result.rows[0];
-        if (!row || row.session_id !== input.sessionId || row.device_id !== input.deviceId) {
-          throw new Error('invalid_grant');
-        }
+      const result = await client.query<{ session_id: string; device_id: string }>(
+        `SELECT rt.session_id, s.device_id
+           FROM desktop_refresh_token rt
+           JOIN desktop_session s ON s.id = rt.session_id
+          WHERE rt.token_hash = $1`,
+        [hash],
+      );
+      const row = result.rows[0];
+      if (!row || row.session_id !== input.sessionId || row.device_id !== input.deviceId) {
+        throw new Error('invalid_grant');
       }
 
       await client.query(
