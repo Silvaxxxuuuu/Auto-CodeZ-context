@@ -101,7 +101,10 @@ export interface SessionAuthAdapter {
   revoke(input: RevokeSessionInput): Promise<void>;
 }
 
+export type AuthMethod = 'magic_link' | 'github' | 'google' | 'microsoft' | 'passkey';
+
 export interface AuthAdapter extends SessionAuthAdapter {
+  configuration(): Promise<{ methods: AuthMethod[] }>;
   beginOAuth(input: BeginOAuthInput): Promise<{
     authorizationUrl: string;
     flowId: string;
@@ -126,6 +129,10 @@ export interface AuthAdapter extends SessionAuthAdapter {
 export class UnavailableAuthAdapter implements AuthAdapter {
   private unavailable(): never {
     throw new AuthAdapterError('not_configured', 'Serviço de autenticação ainda não está configurado.');
+  }
+
+  async configuration(): Promise<{ methods: AuthMethod[] }> {
+    return { methods: [] };
   }
 
   async refresh(): Promise<AuthGrant> {
