@@ -31,7 +31,6 @@ type AccountBridge = {
   beginAccountMagicLink: (email: string) => Promise<AuthFlowState>;
   beginAccountOAuth: (provider: 'github' | 'google' | 'microsoft') => Promise<AuthFlowState>;
   beginAccountPasskey: () => Promise<AuthFlowState>;
-  completeAccountPasskey: (input: { flowId: string; credential: unknown }) => Promise<AuthFlowState>;
   renameAccountDevice: (name: string) => Promise<AccountState>;
   renameAccountDeviceRegistryCurrent: (name: string) => Promise<unknown>;
   onAccountState: (listener: (state: AccountState) => void) => () => void;
@@ -61,58 +60,6 @@ function providerIcon(provider: string): string {
     return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.2c0-.7-.1-1.4-.2-2.1H12v4h5.1a4.4 4.4 0 0 1-1.9 2.9v2.6h3.1c1.8-1.7 2.7-4.2 2.7-7.4Z"/><path d="M12 21c2.5 0 4.7-.8 6.3-2.2l-3.1-2.6c-.9.6-2 1-3.2 1a5.5 5.5 0 0 1-5.2-3.8H3.6V16A9.5 9.5 0 0 0 12 21Z"/><path d="M6.8 13.4A5.7 5.7 0 0 1 6.5 12c0-.5.1-1 .3-1.4V8H3.6A9.5 9.5 0 0 0 2.6 12c0 1.4.3 2.7 1 4l3.2-2.6Z"/><path d="M12 6.8c1.4 0 2.6.5 3.6 1.4l2.8-2.8A9.3 9.3 0 0 0 3.6 8l3.2 2.6A5.5 5.5 0 0 1 12 6.8Z"/></svg>';
   }
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8v8H3V3Zm10 0h8v8h-8V3ZM3 13h8v8H3v-8Zm10 0h8v8h-8v-8Z"/></svg>';
-}
-
-function base64UrlToBuffer(value: string): ArrayBuffer {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
-  const binary = atob(padded);
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-}
-
-function bytesToBase64Url(value: ArrayBuffer | ArrayBufferView): string {
-  const bytes = value instanceof ArrayBuffer
-    ? new Uint8Array(value)
-    : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-}
-
-function webAuthnOptions(value: unknown): PublicKeyCredentialRequestOptions {
-  if (!value || typeof value !== 'object') throw new Error('Opções de Passkey inválidas.');
-  const source = structuredClone(value) as Record<string, unknown>;
-  if (typeof source.challenge !== 'string') throw new Error('Challenge de Passkey inválido.');
-  const result = {
-    ...source,
-    challenge: base64UrlToBuffer(source.challenge),
-  } as unknown as PublicKeyCredentialRequestOptions;
-  if (Array.isArray(source.allowCredentials)) {
-    result.allowCredentials = source.allowCredentials.map((item) => {
-      const credential = item as PublicKeyCredentialDescriptor & { id: unknown };
-      if (typeof credential.id !== 'string') throw new Error('Credencial permitida inválida.');
-      return { ...credential, id: base64UrlToBuffer(credential.id) };
-    });
-  }
-  return result;
-}
-
-function serializePasskey(credential: PublicKeyCredential): unknown {
-  const response = credential.response;
-  if (!(response instanceof AuthenticatorAssertionResponse)) throw new Error('Resposta de Passkey inválida.');
-  return {
-    id: credential.id,
-    type: credential.type,
-    rawId: bytesToBase64Url(credential.rawId),
-    response: {
-      clientDataJSON: bytesToBase64Url(response.clientDataJSON),
-      authenticatorData: bytesToBase64Url(response.authenticatorData),
-      signature: bytesToBase64Url(response.signature),
-      userHandle: response.userHandle ? bytesToBase64Url(response.userHandle) : null,
-    },
-    clientExtensionResults: credential.getClientExtensionResults(),
-  };
 }
 
 function ensureRoot(): HTMLElement {
@@ -301,22 +248,9 @@ async function beginPasskey(): Promise<void> {
   busy = true;
   render();
   try {
-    const started = await bridge.beginAccountPasskey();
-    flowState = started;
-    if (started.status !== 'waiting_passkey' || !started.flowId || !started.publicKeyOptions) {
-      render();
-      return;
-    }
-    const credential = await navigator.credentials.get({
-      publicKey: webAuthnOptions(started.publicKeyOptions),
-    });
-    if (!(credential instanceof PublicKeyCredential)) throw new Error('Passkey cancelada ou indisponível.');
-    flowState = await bridge.completeAccountPasskey({
-      flowId: started.flowId,
-      credential: serializePasskey(credential),
-    });
+    flowState = await bridge.beginAccountPasskey();
   } catch (error) {
-    flowState = { status: 'error', lastError: error instanceof Error ? error.message : 'Não foi possível usar a passkey.' };
+    flowState = { status: 'error', lastError: error instanceof Error ? error.message : 'Não foi possível abrir o login com passkey.' };
   } finally {
     busy = false;
     render();
