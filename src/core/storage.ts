@@ -24,6 +24,7 @@ const SENSITIVE_JSON_FILES = new Set([
   'execution-shadow-workspaces.json',
   'plugins.json',
   'plugin-settings.json',
+  'account-session.json',
 ]);
 
 function isMissingFile(error: unknown): boolean {
