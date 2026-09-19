@@ -5,7 +5,7 @@ import type { LocalStorage } from '../src/core/storage';
 import type { ProtectedCredentialStore } from '../src/account/protected-credential-store';
 import { DeviceIdentityStore } from '../src/account/device-identity';
 import { AccountSessionRuntime } from '../src/account/account-session-runtime';
-import { AuthAdapterError, type AuthAdapter, type AuthGrant } from '../src/account/auth-adapter';
+import { AuthAdapterError, type AuthGrant, type SessionAuthAdapter } from '../src/account/auth-adapter';
 import type { AccountProfile, AccountSession } from '../src/account/types';
 
 class MemoryStorage {
@@ -137,7 +137,7 @@ test('AccountSessionRuntime keeps access token in memory and refresh token outsi
   );
   const device = await devices.getOrCreate();
 
-  const adapter: AuthAdapter = {
+  const adapter: SessionAuthAdapter = {
     async refresh(): Promise<AuthGrant> {
       throw new Error('refresh não deveria ser chamado neste teste');
     },
@@ -197,7 +197,7 @@ test('AccountSessionRuntime restores cached account offline without exposing a t
   });
   await credentials.set('account.session.refresh-token', 'refresh-secret');
 
-  const adapter: AuthAdapter = {
+  const adapter: SessionAuthAdapter = {
     async refresh(): Promise<AuthGrant> {
       throw new AuthAdapterError('offline', 'Sem internet.');
     },
@@ -242,7 +242,7 @@ test('AccountSessionRuntime clears revoked sessions and local secrets', async ()
   });
   await credentials.set('account.session.refresh-token', 'refresh-secret');
 
-  const adapter: AuthAdapter = {
+  const adapter: SessionAuthAdapter = {
     async refresh(): Promise<AuthGrant> {
       throw new AuthAdapterError('revoked', 'Sessão revogada.');
     },
@@ -281,7 +281,7 @@ test('AccountSessionRuntime subscriptions expose only sanitized snapshots', asyn
   );
   const device = await devices.getOrCreate();
 
-  const adapter: AuthAdapter = {
+  const adapter: SessionAuthAdapter = {
     async refresh(): Promise<AuthGrant> {
       throw new Error('refresh não deveria ser chamado neste teste');
     },
@@ -334,7 +334,7 @@ test('AccountSessionRuntime logout clears local credentials even when remote rev
   );
   const device = await devices.getOrCreate();
 
-  const adapter: AuthAdapter = {
+  const adapter: SessionAuthAdapter = {
     async refresh(): Promise<AuthGrant> {
       throw new Error('refresh não deveria ser chamado neste teste');
     },
@@ -379,7 +379,7 @@ test('AccountSessionRuntime rejects grants bound to another device', async () =>
     },
   );
 
-  const adapter: AuthAdapter = {
+  const adapter: SessionAuthAdapter = {
     async refresh(): Promise<AuthGrant> {
       throw new Error('refresh não deveria ser chamado neste teste');
     },
