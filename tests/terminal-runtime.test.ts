@@ -12,6 +12,23 @@ import type {
 } from '../src/agent/terminal-process';
 import type { ProjectRecord } from '../src/ai/types';
 
+async function removeTemporaryTree(root: string): Promise<void> {
+  const deadline = Date.now() + (process.platform === 'win32' ? 5_000 : 0);
+  while (true) {
+    try {
+      await fs.rm(root, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const retryable = process.platform === 'win32'
+        && (code === 'EBUSY' || code === 'EPERM' || code === 'ENOTEMPTY')
+        && Date.now() < deadline;
+      if (!retryable) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
+
 async function createProject(factory?: InteractiveTerminalProcessFactory): Promise<{ root: string; runtime: TerminalRuntime; events: Array<TerminalOutputEvent | TerminalExitEvent>; cleanup: () => Promise<void> }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-terminal-test-'));
   const project: ProjectRecord = { id: 'terminal-project', name: 'Terminal Test', rootPath: root, createdAt: Date.now(), updatedAt: Date.now() };
@@ -20,7 +37,7 @@ async function createProject(factory?: InteractiveTerminalProcessFactory): Promi
     root,
     events,
     runtime: new TerminalRuntime(async () => [project], (event) => events.push(event), factory),
-    cleanup: () => fs.rm(root, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 10 : 0, retryDelay: 50 }),
+    cleanup: () => removeTemporaryTree(root),
   };
 }
 

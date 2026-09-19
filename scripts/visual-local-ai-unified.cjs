@@ -171,7 +171,11 @@ async function verifyUnifiedChat() {
 
   await ai.selectOption('local:unified');
   const model = page.locator('#chat-model');
-  await page.waitForFunction(() => [...document.querySelectorAll('#chat-model option')].some((option) => option.textContent?.includes('Qwen 3 8B')));
+  await page.waitForFunction(
+    () => document.querySelector('#chat-local-model-state')?.dataset.localUnifiedReady === 'true',
+    undefined,
+    { timeout: 20_000 },
+  );
   const qwen8 = model.locator('option').filter({ hasText: 'Qwen 3 8B' });
   if (await qwen8.count() !== 1) throw new Error(`Qwen 3 8B deveria aparecer uma única vez, apareceu ${await qwen8.count()}.`);
   if (await model.locator('option').filter({ hasText: 'Granite Local' }).count() !== 1) throw new Error('Modelo instalado do LM Studio não entrou na lista unificada.');

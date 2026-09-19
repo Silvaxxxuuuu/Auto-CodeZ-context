@@ -92,6 +92,7 @@ type AvailableAi = {
 };
 
 const RESTORE_CHAT_KEY = 'auto-codez.restore-chat-after-settings';
+const UNIFIED_LOCAL_OPTION_VALUE = 'local:unified';
 const LOCAL_STYLE_ID = 'auto-codez-chat-local-model-style';
 let openChat: Chat | null = null;
 let availableAis: AvailableAi[] = [];
@@ -170,6 +171,10 @@ function currentAiFor(chat: Chat, sources: AvailableAi[], keys: SavedApiKey[]): 
 function selectedAi(): AvailableAi | undefined {
   const select = document.querySelector<HTMLSelectElement>('#chat-available-ai');
   return availableAis.find((item) => item.value === select?.value);
+}
+
+function unifiedLocalSelected(): boolean {
+  return document.querySelector<HTMLSelectElement>('#chat-available-ai')?.value === UNIFIED_LOCAL_OPTION_VALUE;
 }
 
 function modelKey(runtimeId: string, modelId: string): string {
@@ -476,6 +481,7 @@ document.addEventListener('click', async (event) => {
     return;
   }
   if (target.closest('#save-available-ai-settings')) {
+    if (unifiedLocalSelected()) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     await saveSettings();
@@ -506,6 +512,7 @@ document.addEventListener('change', (event) => {
   const target = event.target instanceof HTMLSelectElement ? event.target : null;
   if (!target) return;
   if (target.id === 'chat-available-ai') {
+    if (target.value === UNIFIED_LOCAL_OPTION_VALUE) return;
     event.stopImmediatePropagation();
     const source = availableAis.find((item) => item.value === target.value);
     const modelSelect = document.querySelector<HTMLSelectElement>('#chat-model');
@@ -520,6 +527,7 @@ document.addEventListener('change', (event) => {
     return;
   }
   if (target.id === 'chat-model') {
+    if (unifiedLocalSelected()) return;
     const source = selectedAi();
     if (!source) return;
     if (source.apiKeyId) setSaveEnabled(Boolean(target.value));
