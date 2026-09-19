@@ -12,6 +12,12 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     extraResource: ['plugins'],
+    protocols: [
+      {
+        name: 'Auto CodeZ Authentication',
+        schemes: ['autocodez'],
+      },
+    ],
   },
   rebuildConfig: {
     ignoreModules: ['node-pty'],
