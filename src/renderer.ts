@@ -664,7 +664,10 @@ app.addEventListener('click', async (event) => {
     renderMessages();
     renderComposer();
     void refreshApprovals();
-    void refresh();
+    void refresh().finally(() => {
+  document.documentElement.dataset.autoCodezCoreReady = 'true';
+  window.dispatchEvent(new CustomEvent('auto-codez-core-ready'));
+});
     return;
   }
   const projectButton = target.closest<HTMLElement>('[data-project]');
