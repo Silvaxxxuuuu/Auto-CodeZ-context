@@ -84,10 +84,12 @@ export interface CompletePasskeyInput {
   credential: unknown;
 }
 
-export interface AuthAdapter {
+export interface SessionAuthAdapter {
   refresh(input: RefreshSessionInput): Promise<AuthGrant>;
   revoke(input: RevokeSessionInput): Promise<void>;
+}
 
+export interface AuthAdapter extends SessionAuthAdapter {
   beginOAuth(input: BeginOAuthInput): Promise<{
     authorizationUrl: string;
     flowId: string;
