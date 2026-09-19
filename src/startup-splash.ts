@@ -83,15 +83,39 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function playBrandReveal(root: HTMLElement): Promise<void> {
+type BrandLayout = {
+  mark: HTMLElement;
+  word: HTMLElement;
+  finalZOffset: number;
+};
+
+function prepareBrandLayout(root: HTMLElement): BrandLayout | null {
   const mark = root.querySelector<HTMLElement>('.ac-startup-mark');
   const word = root.querySelector<HTMLElement>('.ac-startup-word');
-  if (!mark || !word) return;
+  if (!mark || !word) return null;
 
   const wordWidth = word.getBoundingClientRect().width;
   const totalBrandWidth = wordWidth + BRAND_GAP_PX + FINAL_Z_VISUAL_WIDTH_PX;
   const finalZOffset = (wordWidth + BRAND_GAP_PX) / 2;
   word.style.marginLeft = `-${(totalBrandWidth / 2).toFixed(3)}px`;
+
+  return { mark, word, finalZOffset };
+}
+
+function applyFinalBrandLayout(root: HTMLElement): void {
+  const layout = prepareBrandLayout(root);
+  if (!layout) return;
+
+  layout.mark.style.transform = `translate3d(${layout.finalZOffset.toFixed(3)}px,0,0) scale(.86)`;
+  layout.word.style.clipPath = 'inset(0 0 0 0)';
+  layout.word.style.opacity = '1';
+  layout.word.style.transform = 'translate3d(0,-50%,0)';
+}
+
+async function playBrandReveal(root: HTMLElement): Promise<void> {
+  const layout = prepareBrandLayout(root);
+  if (!layout) return;
+  const { mark, word, finalZOffset } = layout;
 
   root.classList.add('is-branding');
   await delay(30);
@@ -146,6 +170,7 @@ async function finishSplash(): Promise<void> {
 
   if (reducedMotion) {
     applyGlyph(lines, Z_GLYPH);
+    applyFinalBrandLayout(root);
     root.classList.add('is-branding', 'is-final');
     await delay(180);
   } else {
