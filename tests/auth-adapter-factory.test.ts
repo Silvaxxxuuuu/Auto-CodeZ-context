@@ -57,14 +57,17 @@ test('account auth discovery disables blocking login when configured backend is 
   );
 });
 
-test('visual auth discovery may use configured capabilities without weakening production fallback', async () => {
+test('visual auth discovery uses deterministic configured capabilities without network discovery', async () => {
   const result = createAccountAuthAdapter('https://accounts.autocodez.example');
+  let discoveryCalls = 0;
   result.adapter.configuration = async () => {
-    throw new Error('visual backend intentionally absent');
+    discoveryCalls += 1;
+    throw new Error('visual backend should not be contacted');
   };
 
   const configuration = await resolveAccountAuthConfiguration(result, true);
+  assert.equal(discoveryCalls, 0);
   assert.equal(configuration.configured, true);
   assert.deepEqual(configuration.methods, ['magic_link', 'github', 'google', 'microsoft', 'passkey']);
-  assert.equal(configuration.configurationError, 'visual backend intentionally absent');
+  assert.equal(configuration.configurationError, undefined);
 });
