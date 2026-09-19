@@ -137,6 +137,72 @@ async function assertHealthy() {
   if (await marker.count()) throw new Error((await marker.first().innerText()).trim() || 'Falha de inicialização de módulo.');
 }
 
+async function captureStartupIdentity() {
+  const name = 'startup-identidade';
+  try {
+    const splash = page.locator('#auto-codez-startup');
+    await splash.waitFor({ state: 'visible', timeout: 5_000 });
+
+    const readState = async () => splash.evaluate((root) => {
+      const lines = Array.from(root.querySelectorAll('[data-splash-segment]')).map((line) => ({
+        x1: Number(line.getAttribute('x1')),
+        y1: Number(line.getAttribute('y1')),
+        x2: Number(line.getAttribute('x2')),
+        y2: Number(line.getAttribute('y2')),
+      }));
+      const word = root.querySelector('.ac-startup-word');
+      const cursor = root.querySelector('[data-cursor]');
+      return {
+        classes: root.className,
+        lines,
+        wordOpacity: word ? Number(getComputedStyle(word).opacity) : -1,
+        cursorAnimation: cursor ? getComputedStyle(cursor).animationName : '',
+      };
+    });
+
+    const near = (actual, expected, tolerance = .9) => Math.abs(actual - expected) <= tolerance;
+    const assertGlyph = (state, expected, label) => {
+      if (state.lines.length !== 3) throw new Error(`${label}: esperado 3 traços, recebido ${state.lines.length}.`);
+      state.lines.forEach((line, index) => {
+        const target = expected[index];
+        const actual = [line.x1, line.y1, line.x2, line.y2];
+        if (actual.some((value, valueIndex) => !near(value, target[valueIndex]))) {
+          throw new Error(`${label}: geometria do traço ${index + 1} divergiu. Atual=${JSON.stringify(actual)} esperado=${JSON.stringify(target)}.`);
+        }
+      });
+    };
+
+    const terminal = await readState();
+    assertGlyph(terminal, [[28,25,44,40],[44,40,28,55],[52,57,72,57]], '>_');
+    if (terminal.wordOpacity > .05) throw new Error('O nome apareceu antes do morph inicial.');
+    if (!terminal.cursorAnimation.includes('ac-startup-cursor')) throw new Error('O cursor "_" não está piscando no estado inicial.');
+    await page.screenshot({ path: path.join(outputDir, 'startup-terminal.png') });
+
+    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.classList.contains('is-a'), undefined, { timeout: 5_000, polling: 'raf' });
+    const aState = await readState();
+    assertGlyph(aState, [[28,56,44,22],[44,22,60,56],[35,43,53,43]], 'A');
+    await page.screenshot({ path: path.join(outputDir, 'startup-a.png') });
+
+    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.classList.contains('is-z'), undefined, { timeout: 5_000, polling: 'raf' });
+    const zState = await readState();
+    assertGlyph(zState, [[28,24,60,24],[60,24,28,56],[28,56,60,56]], 'Z');
+
+    await page.waitForFunction(() => document.querySelector('#auto-codez-startup')?.classList.contains('is-final'), undefined, { timeout: 5_000, polling: 'raf' });
+    const finalState = await readState();
+    if (finalState.wordOpacity < .95) throw new Error(`Auto Code não terminou visível. opacity=${finalState.wordOpacity}.`);
+    await page.screenshot({ path: path.join(outputDir, 'startup-auto-codez.png') });
+
+    await splash.waitFor({ state: 'detached', timeout: 5_000 });
+    results.push({ name, status: 'passed' });
+  } catch (error) {
+    const message = errorText(error);
+    results.push({ name, status: 'failed', error: message });
+    await page.screenshot({ path: path.join(outputDir, 'falha-startup-identidade.png') }).catch(() => {});
+    throw error;
+  }
+}
+
+
 async function assertNoHorizontalOverflow() {
   const metrics = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -433,6 +499,7 @@ async function cleanup() {
     page.on('pageerror', (error) => pageErrors.push(errorText(error)));
     page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
     await page.setViewportSize(VIEWPORT);
+    await captureStartupIdentity();
     await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
     await page.evaluate(() => document.fonts.ready);
     await page.addStyleTag({ content: '*{animation-duration:0s!important;transition-duration:0s!important;caret-color:transparent!important}' });
