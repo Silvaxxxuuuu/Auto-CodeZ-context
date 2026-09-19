@@ -66,6 +66,7 @@ import { LocalProtectedCredentialStore } from './account/protected-credential-st
 import { DeviceIdentityStore } from './account/device-identity';
 import { UnavailableAuthAdapter } from './account/auth-adapter';
 import { AccountSessionRuntime } from './account/account-session-runtime';
+import { AccountAuthFlowRuntime } from './account/account-auth-flow-runtime';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -83,11 +84,17 @@ const accountDeviceIdentity = new DeviceIdentityStore(
     defaultName: 'Este dispositivo',
   },
 );
+const accountAuthAdapter = new UnavailableAuthAdapter();
 const accountSessionRuntime = new AccountSessionRuntime(
   storage,
   accountCredentials,
   accountDeviceIdentity,
-  new UnavailableAuthAdapter(),
+  accountAuthAdapter,
+);
+const accountAuthFlowRuntime = new AccountAuthFlowRuntime(
+  accountAuthAdapter,
+  accountSessionRuntime,
+  accountDeviceIdentity,
 );
 const providerManager = new ProviderManager(storage);
 const chatManager = new ChatManager(storage);
@@ -233,8 +240,16 @@ function sendAccountState(snapshot: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('account:event', snapshot);
 }
 
+function sendAccountAuthFlowState(snapshot: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('account-auth-flow:event', snapshot);
+}
+
 accountSessionRuntime.subscribe((snapshot) => {
   sendAccountState(snapshot);
+});
+
+accountAuthFlowRuntime.subscribe((snapshot) => {
+  sendAccountAuthFlowState(snapshot);
 });
 
 executionPlanner.subscribe((change) => {
@@ -520,6 +535,8 @@ ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.
 ipcMain.handle('account:get-state', async () => accountSessionRuntime.snapshot());
 ipcMain.handle('account:logout', async () => accountSessionRuntime.logout());
 ipcMain.handle('account:rename-device', async (_event, name: string) => accountSessionRuntime.renameDevice(requireNonEmptyString(name, 'Nome do dispositivo')));
+ipcMain.handle('account-auth-flow:get-state', async () => accountAuthFlowRuntime.snapshot());
+ipcMain.handle('account-auth-flow:reset', async () => accountAuthFlowRuntime.reset());
 ipcMain.handle('providers:list-models', async (_event, identifier: string) => {
   const value = requireIdentifier(identifier, 'Provider');
   const key = (await providerManager.listKeys()).find((item) => item.id === value);
