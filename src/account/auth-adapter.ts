@@ -66,12 +66,17 @@ export interface CompleteOAuthInput {
 export interface BeginMagicLinkInput {
   email: string;
   deviceId: DeviceId;
+  state: string;
+  codeChallenge: string;
+  codeChallengeMethod: 'S256';
 }
 
 export interface CompleteMagicLinkInput {
   flowId: string;
   token: string;
   deviceId: DeviceId;
+  state: string;
+  codeVerifier: string;
 }
 
 export interface BeginPasskeyInput {
