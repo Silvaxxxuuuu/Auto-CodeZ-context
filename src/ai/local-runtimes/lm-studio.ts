@@ -8,6 +8,7 @@ import type {
 import { fetchWithTimeout } from '../sse';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:1234';
+const AVAILABILITY_TIMEOUT_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 
@@ -15,6 +16,7 @@ type LMStudioLocalRuntimeOptions = {
   endpoint?: string;
   apiToken?: string;
   pollIntervalMs?: number;
+  availabilityTimeoutMs?: number;
 };
 
 type DownloadStatus = 'downloading' | 'paused' | 'completed' | 'failed' | 'already_downloaded';
@@ -79,6 +81,7 @@ export class LMStudioLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
   private readonly endpoint: string;
   private readonly apiToken?: string;
   private readonly pollIntervalMs: number;
+  private readonly availabilityTimeoutMs: number;
 
   constructor(options: LMStudioLocalRuntimeOptions = {}) {
     this.endpoint = normalizeEndpoint(options.endpoint);
@@ -86,13 +89,18 @@ export class LMStudioLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
     this.pollIntervalMs = typeof options.pollIntervalMs === 'number' && Number.isFinite(options.pollIntervalMs) && options.pollIntervalMs >= 0
       ? options.pollIntervalMs
       : DEFAULT_POLL_INTERVAL_MS;
+    this.availabilityTimeoutMs = typeof options.availabilityTimeoutMs === 'number'
+      && Number.isFinite(options.availabilityTimeoutMs)
+      && options.availabilityTimeoutMs > 0
+      ? options.availabilityTimeoutMs
+      : AVAILABILITY_TIMEOUT_MS;
   }
 
   async getInfo(): Promise<LocalModelRuntimeInfo> {
     try {
       const response = await fetchWithTimeout(`${this.endpoint}/api/v1/models`, {
         headers: this.headers(),
-      }, REQUEST_TIMEOUT_MS);
+      }, this.availabilityTimeoutMs);
       return { id: this.id, displayName: this.displayName, available: response.ok, endpoint: this.endpoint };
     } catch {
       return { id: this.id, displayName: this.displayName, available: false, endpoint: this.endpoint };

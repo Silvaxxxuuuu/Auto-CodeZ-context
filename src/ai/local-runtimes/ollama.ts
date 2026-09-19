@@ -8,6 +8,7 @@ import type {
 import { fetchWithTimeout } from '../sse';
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:11434';
+const AVAILABILITY_TIMEOUT_MS = 5_000;
 const REQUEST_TIMEOUT_MS = 30_000;
 const INSTALL_TIMEOUT_MS = 60 * 60_000;
 
@@ -62,14 +63,18 @@ export class OllamaLocalRuntimeAdapter implements LocalModelRuntimeAdapter {
   readonly displayName = 'Ollama';
   readonly supportsInstallCancellation = true;
   private readonly endpoint: string;
+  private readonly availabilityTimeoutMs: number;
 
-  constructor(endpoint?: string) {
+  constructor(endpoint?: string, availabilityTimeoutMs = AVAILABILITY_TIMEOUT_MS) {
     this.endpoint = normalizeEndpoint(endpoint);
+    this.availabilityTimeoutMs = Number.isFinite(availabilityTimeoutMs) && availabilityTimeoutMs > 0
+      ? availabilityTimeoutMs
+      : AVAILABILITY_TIMEOUT_MS;
   }
 
   async getInfo(): Promise<LocalModelRuntimeInfo> {
     try {
-      const response = await fetchWithTimeout(`${this.endpoint}/api/tags`, {}, REQUEST_TIMEOUT_MS);
+      const response = await fetchWithTimeout(`${this.endpoint}/api/tags`, {}, this.availabilityTimeoutMs);
       return { id: this.id, displayName: this.displayName, available: response.ok, endpoint: this.endpoint };
     } catch {
       return { id: this.id, displayName: this.displayName, available: false, endpoint: this.endpoint };
