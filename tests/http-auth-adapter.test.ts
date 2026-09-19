@@ -160,3 +160,36 @@ test('HttpAuthAdapter rejects non-JSON successful responses', async () => {
     /Resposta não JSON/,
   );
 });
+
+
+test('HttpAuthAdapter accepts only known discovered login methods', async () => {
+  const adapter = new HttpAuthAdapter('https://accounts.example.com', {
+    fetch: async () => new Response(JSON.stringify({
+      methods: ['github', 'magic_link', 'passkey', 'github'],
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  });
+
+  assert.deepEqual(
+    await adapter.configuration(),
+    { methods: ['github', 'magic_link', 'passkey'] },
+  );
+});
+
+test('HttpAuthAdapter rejects unknown discovered login methods', async () => {
+  const adapter = new HttpAuthAdapter('https://accounts.example.com', {
+    fetch: async () => new Response(JSON.stringify({
+      methods: ['github', 'password'],
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }),
+  });
+
+  await assert.rejects(
+    adapter.configuration(),
+    /Método de autenticação inválido/,
+  );
+});
