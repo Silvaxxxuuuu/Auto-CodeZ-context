@@ -12,6 +12,9 @@ on:
       - 'services/account-api/**'
       - '.github/workflows/account-api.yml'
 
+permissions:
+  contents: write
+
 jobs:
   validate:
     runs-on: ubuntu-24.04
@@ -55,13 +58,18 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
 
-      - name: Export generated lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: account-api-package-lock-${{ github.run_id }}
-          path: services/account-api/package-lock.json
-          if-no-files-found: error
-          retention-days: 1
+      - name: Commit generated lockfile
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1 && git diff --quiet -- package-lock.json; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "build(account): lock backend dependencies"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: TypeScript validation
         run: npm run typecheck
