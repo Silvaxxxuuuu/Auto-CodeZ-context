@@ -122,7 +122,7 @@ function renderLogin(): void {
         ${providerButton('google', 'Google')}
         ${providerButton('microsoft', 'Microsoft')}
       </div>
-      ${passkey ? '<button type="button" class="account-passkey" data-account-passkey '+(busy ? 'disabled' : '')+'><span>◉</span> Entrar com passkey</button>' : ''}
+      ${passkey ? '<button type="button" class="account-passkey" data-account-passkey '+(busy ? 'disabled' : '')+'><span aria-hidden="true">◉</span> Entrar com passkey</button>' : ''}
       ${error ? `<div class="account-inline-error" role="alert">${escapeHtml(error)}</div>` : ''}
       <p class="account-security-note">Sem senhas. Suas credenciais sensíveis permanecem protegidas pelo sistema operacional.</p>
     </main>
