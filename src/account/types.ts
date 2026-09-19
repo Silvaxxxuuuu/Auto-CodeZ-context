@@ -29,11 +29,15 @@ export interface LinkedIdentity {
   lastUsedAt?: number;
 }
 
+export type AccountStatus = 'active' | 'disabled' | 'pending_deletion';
+
 export interface AccountProfile {
   id: AccountId;
-  email: string;
+  primaryEmail: string;
   displayName: string;
+  username?: string;
   avatarUrl?: string;
+  status: AccountStatus;
   identities: LinkedIdentity[];
   createdAt: number;
   updatedAt: number;
@@ -46,7 +50,8 @@ export interface AccountSession {
   identityProvider: IdentityProvider;
   createdAt: number;
   lastActivityAt: number;
-  expiresAt: number;
+  accessExpiresAt: number;
+  refreshExpiresAt?: number;
   revokedAt?: number;
 }
 
@@ -55,11 +60,30 @@ export interface DeviceRecord {
   accountId?: AccountId;
   name: string;
   platform: NodeJS.Platform;
+  arch: string;
   appVersion: string;
+  publicKey: string;
   createdAt: number;
   lastSeenAt: number;
+  revokedAt?: number;
   isCurrent: boolean;
   sessionId?: SessionId;
+}
+
+export type AccountConnectionState =
+  | 'signed_out'
+  | 'authenticated'
+  | 'offline'
+  | 'restoring'
+  | 'revoked'
+  | 'error';
+
+export interface AccountRuntimeSnapshot {
+  state: AccountConnectionState;
+  account?: AccountProfile;
+  session?: AccountSession;
+  device: DeviceRecord;
+  lastError?: string;
 }
 
 export type SyncEntityType =
