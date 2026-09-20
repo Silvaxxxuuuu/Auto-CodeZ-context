@@ -76,6 +76,30 @@ async function openApiKeyManager(): Promise<void> {
   }
 }
 
-function installApiKeyButton(): void { const rail = document.querySelector<HTMLElement>('.rail'); const terminalButton = document.querySelector<HTMLElement>('.terminal-rail-button'); if (!rail || !terminalButton || rail.querySelector('.api-key-rail-button')) return; const button = document.createElement('button'); button.className = 'rail-button api-key-rail-button'; button.type = 'button'; button.title = 'API Keys'; button.setAttribute('aria-label', 'API Keys'); button.innerHTML = '<span aria-hidden="true"></span>'; rail.insertBefore(button, terminalButton); button.addEventListener('click', () => void openApiKeyManager()); }
+function installApiKeyButton(): void {
+  const rail = document.querySelector<HTMLElement>('.rail');
+  const terminalButton = document.querySelector<HTMLElement>('.terminal-rail-button');
+  if (!rail || !terminalButton) return;
+  let button = rail.querySelector<HTMLButtonElement>('.api-key-rail-button');
+  if (!button) {
+    button = document.createElement('button');
+    button.className = 'rail-button api-key-rail-button';
+    button.type = 'button';
+    button.title = 'API Keys';
+    button.setAttribute('aria-label', 'API Keys');
+    rail.insertBefore(button, terminalButton);
+  }
+  if (button.dataset.apiKeyReady === 'true') return;
+  button.dataset.apiKeyReady = 'true';
+  button.addEventListener('click', () => void openApiKeyManager());
+}
 
-installStyles(); installApiKeyButton(); if (!document.querySelector('.api-key-rail-button')) { const observer = new MutationObserver(() => { installApiKeyButton(); if (document.querySelector('.api-key-rail-button')) observer.disconnect(); }); observer.observe(document.body, { childList: true, subtree: true }); }
+installStyles();
+installApiKeyButton();
+if (!document.querySelector('.api-key-rail-button[data-api-key-ready="true"]')) {
+  const observer = new MutationObserver(() => {
+    installApiKeyButton();
+    if (document.querySelector('.api-key-rail-button[data-api-key-ready="true"]')) observer.disconnect();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+}
