@@ -110,21 +110,29 @@ async function nextWithAbortSignal<T>(signal: AbortSignal | undefined, next: () 
   return runWithAbortSignal(signal, next);
 }
 
-function activityEventForResponse(response: AIResponse): AIStreamEvent | undefined {
-  if (!response.toolCalls?.length) return undefined;
-  const message = response.content.trim().replace(/\s+/g, ' ').slice(0, 180);
-  if (!message) return undefined;
-  const firstTool = response.toolCalls[0];
-  return {
-    type: 'activity',
-    activity: {
-      type: 'thought',
-      message,
-      status: 'running',
-      toolCallId: firstTool.id,
-      toolName: firstTool.name,
-    },
-  };
+function activityEventsForResponse(response: AIResponse): AIStreamEvent[] {
+  if (!response.toolCalls?.length) return [];
+  const lines = response.content
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-*•]\s*/, '').replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .slice(0, response.toolCalls.length);
+
+  if (!lines.length) return [];
+
+  return lines.map((message, index) => {
+    const tool = response.toolCalls![Math.min(index, response.toolCalls!.length - 1)];
+    return {
+      type: 'activity' as const,
+      activity: {
+        type: 'thought' as const,
+        message: message.slice(0, 180),
+        status: 'running' as const,
+        toolCallId: tool.id,
+        toolName: tool.name,
+      },
+    };
+  });
 }
 
 function responseForAgent(response: AIResponse): AIResponse {
@@ -219,15 +227,15 @@ export class ChatRuntime {
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
       const journal = await this.beginProviderRequest(config, request);
       if (journal.cachedResponse) {
-        const cachedActivity = activityEventForResponse(journal.cachedResponse);
-        if (cachedActivity?.activity) this.activity.emit(cachedActivity.activity);
+        const cachedActivities = activityEventsForResponse(journal.cachedResponse);
+        for (const event of cachedActivities) if (event.activity) this.activity.emit(event.activity);
         return responseForAgent(journal.cachedResponse);
       }
       try {
         const response = await runWithAbortSignal(signal, () => adapter.send(config, request, signal));
         await this.requestJournal.complete(journal.requestId, response);
-        const dynamicActivity = activityEventForResponse(response);
-        if (dynamicActivity?.activity) this.activity.emit(dynamicActivity.activity);
+        const dynamicActivities = activityEventsForResponse(response);
+        for (const event of dynamicActivities) if (event.activity) this.activity.emit(event.activity);
         return responseForAgent(response);
       } catch (error) {
         if (isAbortError(error)) {
@@ -255,8 +263,8 @@ export class ChatRuntime {
       const journal = await this.beginProviderRequest(config, request);
       if (journal.cachedResponse) {
         yield { type: 'start' };
-        const cachedActivity = activityEventForResponse(journal.cachedResponse);
-        if (cachedActivity) yield cachedActivity;
+        const cachedActivities = activityEventsForResponse(journal.cachedResponse);
+        for (const event of cachedActivities) yield event;
         if (journal.cachedResponse.content) yield { type: 'delta', text: journal.cachedResponse.content };
         const cachedResponse = responseForAgent(journal.cachedResponse);
         yield { type: 'complete', response: cachedResponse, usage: cachedResponse.usage };
@@ -273,9 +281,9 @@ export class ChatRuntime {
             if (event.type === 'activity' && event.activity) this.activity.emit(event.activity);
             if (event.type === 'complete' && event.response) {
               const originalResponse = event.response;
-              const dynamicActivity = activityEventForResponse(originalResponse);
-              if (dynamicActivity?.activity) {
-                this.activity.emit(dynamicActivity.activity);
+              const dynamicActivities = activityEventsForResponse(originalResponse);
+              for (const dynamicActivity of dynamicActivities) {
+                if (dynamicActivity.activity) this.activity.emit(dynamicActivity.activity);
                 yield dynamicActivity;
               }
               await this.requestJournal.complete(journal.requestId, originalResponse);
@@ -292,9 +300,9 @@ export class ChatRuntime {
           await this.requestJournal.complete(journal.requestId, response);
           completed = true;
           yield { type: 'start' };
-          const dynamicActivity = activityEventForResponse(response);
-          if (dynamicActivity?.activity) {
-            this.activity.emit(dynamicActivity.activity);
+          const dynamicActivities = activityEventsForResponse(response);
+          for (const dynamicActivity of dynamicActivities) {
+            if (dynamicActivity.activity) this.activity.emit(dynamicActivity.activity);
             yield dynamicActivity;
           }
           if (response.content) yield { type: 'delta', text: response.content };
