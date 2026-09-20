@@ -611,6 +611,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     }
 
     const embedded = extractEmbeddedToolCalls(content, request);
+    for (const toolCall of embedded.toolCalls) yield { type: 'tool_call', toolCall };
     const result: AIResponse = {
       content: embedded.content,
       model: request.model,
