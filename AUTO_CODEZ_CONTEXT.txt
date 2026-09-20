@@ -8358,3 +8358,140 @@ Depois:
 Account Core V1 permanece OPEN até a bateria real ser aprovada.
 Azure Foundry / GPT-5.6 Luna começa somente depois.
 PR #9 continua OPEN / DRAFT / sem merge.
+
+
+------------------------------------------------------------
+24.49. AZURE OPENAI PROVIDER — INTEGRAÇÃO PRONTA PARA TESTE REAL
+------------------------------------------------------------
+
+Checkpoint em 20/09/2026.
+
+HEAD VALIDADO:
+ee71ff8c926ddeffd132082dbc2539111d407a86
+polish(ai): guide Azure OpenAI credential setup
+
+OBJETIVO DESTA ETAPA
+
+Desbloquear testes de IA no Auto CodeZ sem depender do Account Core real,
+Docker local, ACR build ou Container Apps.
+
+DECISÃO DE ARQUITETURA
+
+- Account Core permanece OPEN e separado;
+- testes de IA Azure não ficam mais bloqueados pelo deploy do Account API;
+- Azure OpenAI entra como provider independente no mesmo runtime de IA já existente;
+- OpenAI, Google e Anthropic permanecem inalterados;
+- PR #9 continua OPEN / DRAFT / sem merge.
+
+COMMITS DESTA INTEGRAÇÃO
+
+- 0cd1f3e0685a97ee5501da8e5682e4deb4a7c10e
+  feat(ai): add Azure OpenAI provider adapter
+- 1cd3d904ab21c4ef7a617f0447e11277559a0681
+  feat(ai): register Azure OpenAI provider
+- 3358be3a269e415364f1ed36a127b0626a6924ef
+  test(ai): cover Azure OpenAI provider adapter
+- ee71ff8c926ddeffd132082dbc2539111d407a86
+  polish(ai): guide Azure OpenAI credential setup
+
+PROVIDER AZURE OPENAI
+
+Arquivo:
+src/ai/providers/azure-openai.ts
+
+Suporte implementado:
+- provider id azure-openai;
+- display name Azure OpenAI;
+- endpoint configurável;
+- normalização automática para /openai/v1;
+- api-key;
+- GET /models;
+- POST /responses;
+- streaming SSE;
+- reasoning effort;
+- tool/function calling;
+- usage;
+- identidade do provider preservada;
+- GPT-5.6 Luna reconhecido como reasoning model.
+
+UI DE CREDENCIAIS
+
+A UI existente foi reutilizada.
+
+Ao selecionar Azure OpenAI:
+- “URL base” vira “Endpoint Azure, obrigatório”;
+- placeholder mostra https://seu-recurso.openai.azure.com;
+- “Modelo” vira “Deployment, opcional”;
+- placeholder usa gpt-5.6-luna como exemplo;
+- a UI impede salvar Azure sem endpoint.
+
+IMPORTANTE:
+no Azure, o valor enviado em model deve ser o NOME DO DEPLOYMENT,
+mesmo quando o deployment tem o mesmo nome do modelo.
+
+VALIDAÇÃO
+
+Validate Account API #99:
+- SUCCESS.
+
+Validate Auto CodeZ push #4263:
+- SUCCESS;
+- 976 tests;
+- 976 pass;
+- 0 fail;
+- inclui 4 testes Azure OpenAI aprovados.
+
+Validate Auto CodeZ PR #4264:
+- tentativa 1 falhou por EBUSY intermitente do Windows ao remover pasta
+  temporária de teste antigo de terminal;
+- não relacionado à integração Azure;
+- rerun tentativa 2: SUCCESS.
+
+Visual Auto CodeZ #954:
+- tentativa 1 falhou em cenário LM Studio por timeout de navegação de 30s;
+- captura principal, Local AI, recovery e secure runtime haviam passado;
+- rerun tentativa 2: SUCCESS.
+
+ESTADO FINAL DESTE CHECKPOINT
+
+- integração Azure OpenAI pronta;
+- CI funcional verde;
+- Visual verde;
+- nenhum backend intermediário é necessário para os testes de IA;
+- Docker não é necessário;
+- Account API não é pré-requisito para iniciar o Azure Foundry Test Lab.
+
+PRÓXIMO PASSO HUMANO
+
+No Microsoft Foundry:
+1. criar deployment do gpt-5.6-luna;
+2. preferir deployment name gpt-5.6-luna para simplicidade;
+3. obter o endpoint do recurso;
+4. obter uma API key;
+5. no Auto CodeZ, adicionar Azure OpenAI no cofre de API Keys:
+   - Endpoint Azure;
+   - API Key;
+   - Deployment;
+6. criar chat usando Azure OpenAI;
+7. executar bateria real:
+   - texto simples;
+   - streaming;
+   - reasoning low/normal/high/maximum;
+   - tool calling read-only;
+   - tool calling com aprovação;
+   - multi-turn;
+   - cancelamento;
+   - provider error;
+   - usage;
+   - AgentRuntime completo.
+
+GPT-5.6 Luna:
+- modelo alvo do laboratório;
+- versão de modelo atual documentada: 2026-07-09;
+- Responses API suportada;
+- reasoning suportado;
+- functions/tools suportados;
+- algumas assinaturas/tier podem exigir quota antes do deployment.
+
+Não retomar o bootstrap Account API para iniciar estes testes.
+Não instalar Docker apenas para este laboratório.
