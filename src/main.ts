@@ -770,9 +770,11 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   const controller = new AbortController();
   activeStreamControllers.set(chatId, { runId: execution.runId, controller });
   const runId = execution.runId;
+  let partialAssistantText = '';
   recordExecutionContext(chat, config, runId);
 
   const emit = (event: AIStreamEvent): void => {
+    if (event.type === 'delta' && event.text) partialAssistantText += event.text;
     try {
       if (event.type === 'approval_required') executionManager.update(chatId, { state: 'waiting_approval', runId });
       else if (event.type === 'error') executionManager.update(chatId, { state: 'failed', error: event.error, runId });
@@ -801,6 +803,14 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
     return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
   } catch (error) {
     if (controller.signal.aborted || isAbortError(error)) {
+      const partial = partialAssistantText.trim();
+      if (partial) {
+        await chatManager.addMessage(chat.id, {
+          role: 'assistant',
+          content: partial,
+          createdAt: Date.now(),
+        });
+      }
       await clearChatExecution(chatId);
       emit({ type: 'cancelled', chatId, runId });
       return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
