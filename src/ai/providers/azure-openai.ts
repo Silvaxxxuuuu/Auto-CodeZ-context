@@ -205,7 +205,7 @@ function extractEmbeddedToolCalls(content: string, request: AIRequest): { conten
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
       const input = normalizeEmbeddedToolInput(name, parsed as Record<string, unknown>, request);
       calls.push({
-        id: \`foundry-embedded-\${Date.now().toString(36)}-\${index++}\`,
+        id: `foundry-embedded-${Date.now().toString(36)}-${index++}`,
         name: name as AIToolCall['name'],
         input,
       });
@@ -223,10 +223,10 @@ function extractEmbeddedToolCalls(content: string, request: AIRequest): { conten
 
 function mergeToolCalls(primary: AIToolCall[], fallback: AIToolCall[]): AIToolCall[] {
   if (!fallback.length) return primary;
-  const signatures = new Set(primary.map((call) => \`\${call.name}:\${JSON.stringify(call.input)}\`));
+  const signatures = new Set(primary.map((call) => `${call.name}:${JSON.stringify(call.input)}`));
   const merged = [...primary];
   for (const call of fallback) {
-    const signature = \`\${call.name}:\${JSON.stringify(call.input)}\`;
+    const signature = `${call.name}:${JSON.stringify(call.input)}`;
     if (signatures.has(signature)) continue;
     signatures.add(signature);
     merged.push(call);
