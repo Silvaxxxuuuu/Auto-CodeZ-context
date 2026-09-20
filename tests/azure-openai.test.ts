@@ -266,3 +266,117 @@ test('Azure Foundry streams Kimi chat completions and tool calls', async () => {
     });
   });
 });
+
+
+test('Azure Foundry recovers embedded Kimi tool protocol without exposing control tokens', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+    messages: [{ role: 'user', content: 'Crie um site completo.' }],
+    tools: [{
+      name: 'plan_execution',
+      description: 'Plan',
+      parameters: {
+        type: 'object',
+        properties: {
+          objective: { type: 'string' },
+          steps: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['objective', 'steps'],
+        additionalProperties: false,
+      },
+      requiresWriteAccess: false,
+      requiresApproval: false,
+    }],
+  };
+
+  const raw = 'Planejando a criação do site.\n<|toolcallssectionbegin|><|toolcallbegin|>functions.planexecution:5<|toolcallargumentbegin|>{"plan":["Criar HTML","Criar CSS"]}<|toolcallend|><|toolcallssectionend|>';
+
+  await withMockedFetch(async () => jsonResponse({
+    choices: [{ message: { content: raw }, finish_reason: 'stop' }],
+  }), async () => {
+    const response = await adapter.send(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    );
+
+    assert.equal(response.content, 'Planejando a criação do site.');
+    assert.equal(response.content.includes('<|toolcall'), false);
+    assert.equal(response.toolCalls?.length, 1);
+    assert.equal(response.toolCalls?.[0]?.name, 'plan_execution');
+    assert.deepEqual(response.toolCalls?.[0]?.input, {
+      objective: 'Crie um site completo.',
+      steps: ['Criar HTML', 'Criar CSS'],
+    });
+  });
+});
+
+test('Azure Foundry hides split embedded Kimi tool markers during streaming', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+    messages: [{ role: 'user', content: 'Crie um site completo.' }],
+    tools: [{
+      name: 'plan_execution',
+      description: 'Plan',
+      parameters: {
+        type: 'object',
+        properties: {
+          objective: { type: 'string' },
+          steps: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['objective', 'steps'],
+        additionalProperties: false,
+      },
+      requiresWriteAccess: false,
+      requiresApproval: false,
+    }],
+  };
+
+  const chunks = [
+    'Planejando o site.',
+    '<|toolcallssect',
+    'ionbegin|><|toolcallbegin|>functions.planexecution:5',
+    '<|toolcallargumentbegin|>{"plan":["HTML","CSS"]}',
+    '<|toolcallend|><|toolcallssectionend|>',
+  ];
+  const sse = chunks.flatMap((content, index) => [
+    'data: ' + JSON.stringify({ choices: [{ delta: { content }, finish_reason: index === chunks.length - 1 ? 'stop' : null }] }),
+    '',
+  ]).concat(['data: [DONE]', '']).join('\n');
+
+  await withMockedFetch(async () => new Response(sse, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+  }), async () => {
+    const events = [];
+    for await (const event of adapter.stream!(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    )) events.push(event);
+
+    const streamedText = events
+      .filter((event) => event.type === 'delta')
+      .map((event) => event.text || '')
+      .join('');
+    assert.equal(streamedText, 'Planejando o site.');
+    assert.equal(streamedText.includes('<|toolcall'), false);
+
+    const recoveredCalls = events
+      .filter((event) => event.type === 'tool_call')
+      .map((event) => event.toolCall);
+    assert.equal(recoveredCalls.length, 1);
+    assert.equal(recoveredCalls[0]?.name, 'plan_execution');
+
+    const complete = events.find((event) => event.type === 'complete');
+    assert.equal(complete?.response?.content, 'Planejando o site.');
+    assert.deepEqual(complete?.response?.toolCalls?.[0]?.input, {
+      objective: 'Crie um site completo.',
+      steps: ['HTML', 'CSS'],
+    });
+  });
+});
