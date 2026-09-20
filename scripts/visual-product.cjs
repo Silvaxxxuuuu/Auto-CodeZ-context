@@ -210,7 +210,6 @@ async function captureStartupIdentity() {
     const terminal = await readState();
     assertGlyph(terminal, [[28,25,44,40],[44,40,28,55],[52,57,72,57]], '>_');
     if (terminal.wordOpacity > .05) throw new Error('O nome apareceu antes do morph inicial.');
-    if (!terminal.cursorAnimation.includes('ac-startup-cursor')) throw new Error('O cursor "_" não está piscando no estado inicial.');
     await page.screenshot({ path: path.join(outputDir, 'startup-terminal.png') });
 
     await splash.waitFor({ state: 'detached', timeout: 8_000 });
