@@ -45,3 +45,16 @@ test('formats provider failures for the application UI', () => {
   assert.match(formatProviderError(quota), /Google AI:.*cota.*API key continua salva/i);
   assert.match(formatProviderError(billing), /OpenAI:.*créditos.*API key continua salva/i);
 });
+
+
+test('formats rate-limit retry windows when the provider supplies them', () => {
+  const limited = new ProviderRequestError(
+    'Too many requests',
+    429,
+    'Azure Foundry',
+    'rate_limit',
+    'stream',
+    12_000,
+  );
+  assert.match(formatProviderError(limited), /Azure Foundry:.*12s/i);
+});
