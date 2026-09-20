@@ -1,4 +1,4 @@
-import type { AIProviderConfig, AIResponse, AIStreamEvent, AIToolDefinition, ChatRecord } from './types';
+import type { AIMessage, AIProviderConfig, AIResponse, AIStreamEvent, AIToolDefinition, ChatRecord } from './types';
 import { ActivityRuntime } from '../agent/activity-runtime';
 import { CapabilityResolver } from './capability-resolver';
 import { IntelligenceRuntime } from './intelligence-runtime';
