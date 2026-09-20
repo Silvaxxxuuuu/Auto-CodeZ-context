@@ -4,6 +4,7 @@ import { ProviderRegistry } from './provider-registry';
 import { OpenAIAdapter } from './providers/openai';
 import { GoogleAdapter } from './providers/google';
 import { AnthropicAdapter } from './providers/anthropic';
+import { AzureOpenAIAdapter } from './providers/azure-openai';
 import { selectDefaultModel } from './model-selection';
 import { isAuthenticationError, normalizeProviderError } from './provider-errors';
 
@@ -55,6 +56,7 @@ export class ProviderManager {
     this.registry.register(new OpenAIAdapter());
     this.registry.register(new GoogleAdapter());
     this.registry.register(new AnthropicAdapter());
+    this.registry.register(new AzureOpenAIAdapter());
   }
 
   async init(): Promise<void> {
