@@ -163,6 +163,7 @@ test('Azure Foundry sends Kimi deployments through chat completions with api-key
 
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     assert.equal(body.model, 'Kimi-K2.6');
+    assert.equal(body.max_completion_tokens, 16_384);
     assert.ok(Array.isArray(body.messages));
     assert.ok(Array.isArray(body.tools));
     assert.equal('input' in body, false);
@@ -232,6 +233,7 @@ test('Azure Foundry streams Kimi chat completions and tool calls', async () => {
     assert.equal(String(input), 'https://example.services.ai.azure.com/openai/v1/chat/completions');
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     assert.equal(body.stream, true);
+    assert.equal(body.max_completion_tokens, 16_384);
     return new Response(sse, {
       status: 200,
       headers: { 'content-type': 'text/event-stream' },

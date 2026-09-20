@@ -194,3 +194,26 @@ test('successful proactive web research counts toward Change Budget and becomes 
   assert.equal(blocked.ok, false);
   assert.match(blocked.error || '', /Change Budget excedido/);
 });
+
+
+test('web_fetch bounds the text returned to the agent context', async () => {
+  const longText = 'x'.repeat(20_000);
+  const { tools } = createTools(
+    { id: 'fixture', displayName: 'Fixture', async search() { return []; } },
+    async () => new Response(`<html><head><title>Long page</title></head><body><main>${longText}</main></body></html>`, {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    }),
+  );
+
+  const result = await tools.execute('chat-a', '__system__', 'read-only', {
+    id: 'fetch-long',
+    name: 'web_fetch',
+    input: { url: 'https://example.com/long' },
+  }, 'run-a');
+
+  assert.equal(result.ok, true);
+  const parsed = JSON.parse(result.output || '{}') as { text?: string; truncated?: boolean };
+  assert.ok((parsed.text || '').length <= 12_000);
+  assert.equal(parsed.truncated, true);
+});

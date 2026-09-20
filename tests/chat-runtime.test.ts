@@ -244,3 +244,43 @@ test('streaming greeting also receives only the current lightweight user turn', 
     ['Opa'],
   );
 });
+
+
+test('provider request compacts large historical tool payloads without mutating local chat history', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry);
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    tool('read_file', false, false),
+  ]);
+  const value = chat();
+  const oldArgument = 'A'.repeat(8_000);
+  const oldResult = 'B'.repeat(30_000);
+  const recentResult = 'C'.repeat(30_000);
+  value.messages = [
+    { role: 'user', content: 'Faça uma tarefa longa.' },
+    { role: 'assistant', content: 'round 1', toolCalls: [{ id: 'call-1', name: 'read_file', input: { path: 'a.txt', payload: oldArgument } }] },
+    { role: 'tool', content: oldResult, toolCallId: 'call-1', toolName: 'read_file' },
+    { role: 'assistant', content: 'round 2', toolCalls: [{ id: 'call-2', name: 'read_file', input: { path: 'b.txt' } }] },
+    { role: 'tool', content: recentResult, toolCallId: 'call-2', toolName: 'read_file' },
+    { role: 'assistant', content: 'round 3', toolCalls: [{ id: 'call-3', name: 'read_file', input: { path: 'c.txt' } }] },
+    { role: 'tool', content: recentResult, toolCallId: 'call-3', toolName: 'read_file' },
+  ];
+
+  await runtime.send(config, value);
+  const request = requests[0] as { messages: Array<{ role: string; content: string; toolCalls?: Array<{ input: Record<string, unknown> }> }> };
+  const providerOldTool = request.messages.find((message) => message.role === 'tool' && message.content.startsWith('B'));
+  const providerRecentTools = request.messages.filter((message) => message.role === 'tool' && message.content.startsWith('C'));
+  const providerOldAssistant = request.messages.find((message) => message.role === 'assistant' && message.content === 'round 1');
+
+  assert.ok(providerOldTool);
+  assert.ok(providerOldTool!.content.length < oldResult.length);
+  assert.match(providerOldTool!.content, /caracteres omitidos pelo Auto CodeZ/i);
+  assert.equal(providerRecentTools.length, 2);
+  assert.ok(providerRecentTools.every((message) => message.content.length < recentResult.length));
+  assert.ok(String(providerOldAssistant?.toolCalls?.[0]?.input.payload).length < oldArgument.length);
+  assert.equal(request.messages.some((message) => /histórico local permanece completo/i.test(message.content)), true);
+
+  assert.equal(value.messages[2].content, oldResult);
+  assert.equal(value.messages[4].content, recentResult);
+  assert.equal(value.messages[1].toolCalls?.[0]?.input.payload, oldArgument);
+});

@@ -11,6 +11,70 @@ import { SYSTEM_PROJECT_ID } from '../agent/command-runtime';
 import { runWithAbortSignal } from './request-cancellation';
 import { WebGroundingCoordinator } from '../web/web-grounding-coordinator';
 
+const PROVIDER_RECENT_TOOL_ROUNDS = 2;
+const PROVIDER_RECENT_TOOL_RESULT_CHARS = 12_000;
+const PROVIDER_OLD_TOOL_RESULT_CHARS = 2_000;
+const PROVIDER_OLD_TOOL_ARGUMENT_CHARS = 1_500;
+
+function compactTextForProvider(value: string, maximum: number): string {
+  if (value.length <= maximum) return value;
+  const suffix = Math.min(400, Math.floor(maximum / 4));
+  const prefix = maximum - suffix;
+  return `${value.slice(0, prefix)}\n[... ${value.length - maximum} caracteres omitidos pelo Auto CodeZ para controlar o contexto ...]\n${value.slice(-suffix)}`;
+}
+
+function compactToolInputValue(value: unknown): unknown {
+  if (typeof value === 'string') return compactTextForProvider(value, PROVIDER_OLD_TOOL_ARGUMENT_CHARS);
+  if (Array.isArray(value)) return value.map((item) => compactToolInputValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, compactToolInputValue(item)]),
+    );
+  }
+  return value;
+}
+
+function compactToolHistoryForProvider(messages: AIMessage[]): { messages: AIMessage[]; compacted: boolean } {
+  const roundIndexes = messages
+    .map((message, index) => message.role === 'assistant' && message.toolCalls?.length ? index : -1)
+    .filter((index) => index >= 0);
+  if (!roundIndexes.length) return { messages: messages.map((message) => ({ ...message })), compacted: false };
+
+  const recentRoundIndexes = new Set(roundIndexes.slice(-PROVIDER_RECENT_TOOL_ROUNDS));
+  const oldToolCallIds = new Set<string>();
+  let compacted = false;
+
+  const prepared = messages.map((message, index): AIMessage => {
+    if (message.role === 'assistant' && message.toolCalls?.length) {
+      const recent = recentRoundIndexes.has(index);
+      const toolCalls = message.toolCalls.map((call) => {
+        if (recent) return { ...call, input: structuredClone(call.input) };
+        oldToolCallIds.add(call.id);
+        const input = compactToolInputValue(call.input) as Record<string, unknown>;
+        if (JSON.stringify(input) !== JSON.stringify(call.input)) compacted = true;
+        return { ...call, input };
+      });
+      const contentLimit = recent ? PROVIDER_RECENT_TOOL_RESULT_CHARS : PROVIDER_OLD_TOOL_RESULT_CHARS;
+      const content = compactTextForProvider(message.content, contentLimit);
+      if (content !== message.content) compacted = true;
+      return { ...message, content, toolCalls };
+    }
+
+    if (message.role === 'tool') {
+      const maximum = message.toolCallId && oldToolCallIds.has(message.toolCallId)
+        ? PROVIDER_OLD_TOOL_RESULT_CHARS
+        : PROVIDER_RECENT_TOOL_RESULT_CHARS;
+      const content = compactTextForProvider(message.content, maximum);
+      if (content !== message.content) compacted = true;
+      return { ...message, content };
+    }
+
+    return { ...message };
+  });
+
+  return { messages: prepared, compacted };
+}
+
 const AUTOCODEZ_SYSTEM_INSTRUCTIONS = `
 You are operating inside Auto CodeZ, a local desktop AI development agent. Auto CodeZ is not only a chat interface. When tools are provided, you have controlled access to the user's active local workspace and should use those tools to perform development tasks requested by the user.
 
@@ -206,9 +270,16 @@ export class ChatRuntime {
     if (webContext) systemMessages.push({ role: 'system' as const, content: webContext });
     if (projectContext && !lightweightTurn) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
     const currentUserMessage = [...chat.messages].reverse().find((message) => message.role === 'user');
-    const messages = lightweightTurn && currentUserMessage
-      ? [...systemMessages, currentUserMessage]
-      : [...systemMessages, ...chat.messages];
+    const compactedHistory = lightweightTurn
+      ? { messages: currentUserMessage ? [currentUserMessage] : [], compacted: false }
+      : compactToolHistoryForProvider(chat.messages);
+    if (compactedHistory.compacted) {
+      systemMessages.push({
+        role: 'system' as const,
+        content: 'O Auto CodeZ compactou resultados ou argumentos antigos de ferramentas somente no contexto enviado ao provider para controlar uso de tokens. O histórico local permanece completo. Se um detalhe omitido for necessário, consulte novamente a fonte ou arquivo com a ferramenta apropriada.',
+      });
+    }
+    const messages = [...systemMessages, ...compactedHistory.messages];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
     if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
     const tools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => SYSTEM_CHAT_TOOL_NAMES.has(tool.name));

@@ -18,6 +18,7 @@ const FOUNDRY_MAX_RATE_LIMIT_RETRIES = 5;
 const FOUNDRY_MAX_AUTO_RETRY_WAIT_MS = 120_000;
 const FOUNDRY_MAX_TOTAL_RATE_LIMIT_WAIT_MS = 180_000;
 const FOUNDRY_RETRY_BACKOFF_BASE_MS = 2_000;
+const KIMI_K2_6_MAX_COMPLETION_TOKENS = 16_384;
 
 function normalizeBaseUrl(value?: string): string {
   const raw = value?.trim().replace(/\/+$/, '');
@@ -413,6 +414,9 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
       model: request.model,
       messages: buildChatMessages(request.messages),
     };
+    if (/^Kimi-K2\.6(?:$|[-_.])/i.test(request.model.trim())) {
+      body.max_completion_tokens = KIMI_K2_6_MAX_COMPLETION_TOKENS;
+    }
     const tools = buildChatTools(request);
     if (tools) body.tools = tools;
     if (stream) body.stream = true;
