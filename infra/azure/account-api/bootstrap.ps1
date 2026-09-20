@@ -43,7 +43,12 @@ function Invoke-Az {
 function New-UrlSafeSecret {
   param([int]$Bytes = 48)
   $buffer = New-Object byte[] $Bytes
-  [System.Security.Cryptography.RandomNumberGenerator]::Fill($buffer)
+  $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $rng.GetBytes($buffer)
+  } finally {
+    $rng.Dispose()
+  }
   return [Convert]::ToBase64String($buffer).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 }
 
@@ -53,7 +58,8 @@ function Get-StableSuffix {
   try {
     $bytes = [Text.Encoding]::UTF8.GetBytes($Value)
     $hash = $sha.ComputeHash($bytes)
-    return ([Convert]::ToHexString($hash).Substring(0, 8)).ToLowerInvariant()
+    $hex = [System.BitConverter]::ToString($hash).Replace('-', '')
+    return $hex.Substring(0, 8).ToLowerInvariant()
   } finally {
     $sha.Dispose()
   }
@@ -82,8 +88,29 @@ if ($SubscriptionId) {
   }
 }
 
-Invoke-Az -Arguments @('extension', 'add', '--name', 'containerapp', '--upgrade', '--only-show-errors')
+Write-Host ''
+Write-Host 'Verificando extensão Azure CLI: containerapp...'
+$containerAppExtension = Invoke-Az -Arguments @(
+  'extension', 'list',
+  '--query', "[?name=='containerapp'].name | [0]",
+  '--output', 'tsv'
+) -Capture
 
+if ($containerAppExtension -ne 'containerapp') {
+  Write-Host 'A extensão containerapp ainda não está instalada.'
+  Write-Host 'Instalando containerapp. Esta etapa pode levar alguns minutos; não interrompa enquanto houver atividade do Azure CLI...'
+  Invoke-Az -Arguments @(
+    'extension', 'add',
+    '--name', 'containerapp',
+    '--only-show-errors'
+  )
+  Write-Host 'Extensão containerapp instalada.'
+} else {
+  Write-Host 'Extensão containerapp já instalada. Pulando atualização forçada.'
+}
+
+Write-Host ''
+Write-Host 'Preparando resource providers da assinatura...'
 foreach ($providerNamespace in @(
   'Microsoft.App',
   'Microsoft.ContainerRegistry',
