@@ -407,10 +407,6 @@ async function saveSettings(): Promise<void> {
     openChat = updated;
     modalRoot()?.replaceChildren();
     window.dispatchEvent(new CustomEvent('auto-codez-chat-settings-updated', { detail: updated }));
-    if (!source.apiKeyId) {
-      sessionStorage.setItem(RESTORE_CHAT_KEY, updated.id);
-      window.location.reload();
-    }
   } catch (error) {
     saveButton.disabled = false;
     saveButton.textContent = 'Salvar configurações';
