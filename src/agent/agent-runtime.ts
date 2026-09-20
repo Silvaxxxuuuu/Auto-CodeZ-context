@@ -11,6 +11,27 @@ const STATE_FILE = 'agent-runs.json';
 
 type StreamEmitter = (event: AIStreamEvent) => void;
 
+function stableToolValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => stableToolValue(item)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableToolValue(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function toolCallSignature(call: AIToolCall): string {
+  return `${call.name}:${stableToolValue(call.input)}`;
+}
+
+function duplicatePendingApprovalResult(call: AIToolCall, approvalId: string): AIToolResult {
+  return {
+    toolCallId: call.id,
+    ok: true,
+    output: `Chamada duplicada não executada: uma operação idêntica já aguarda aprovação local (${approvalId}). Não repita esta operação; aguarde o resultado da chamada já pendente.`,
+  };
+}
+
 type PendingRun = {
   runId: string;
   config: AIProviderConfig;
@@ -444,15 +465,21 @@ export class AgentRuntime {
 
       const pendingApprovalIds: string[] = [];
       const approvalCalls: Record<string, AIToolCall> = {};
+      const pendingApprovalSignatures = new Map<string, string>();
       for (const call of response.toolCalls) {
         signal?.throwIfAborted();
-        const result = await this.tools.execute(run.chat.id, executionProjectId, run.permission, call, run.runId);
+        const signature = toolCallSignature(call);
+        const duplicateApprovalId = pendingApprovalSignatures.get(signature);
+        const result = duplicateApprovalId
+          ? duplicatePendingApprovalResult(call, duplicateApprovalId)
+          : await this.tools.execute(run.chat.id, executionProjectId, run.permission, call, run.runId);
         signal?.throwIfAborted();
         this.appendToolResult(run.workingChat, call, result);
         this.emitToolActivity(run.runId, run.chat.id, call, result);
         if (result.pendingApproval && result.approvalId) {
           pendingApprovalIds.push(result.approvalId);
           approvalCalls[result.approvalId] = call;
+          pendingApprovalSignatures.set(signature, result.approvalId);
         }
         await this.persist();
       }
@@ -548,15 +575,21 @@ export class AgentRuntime {
 
       const pendingApprovalIds: string[] = [];
       const approvalCalls: Record<string, AIToolCall> = {};
+      const pendingApprovalSignatures = new Map<string, string>();
       for (const call of response.toolCalls) {
         signal?.throwIfAborted();
-        const result = await this.tools.execute(run.chat.id, executionProjectId, run.permission, call, run.runId);
+        const signature = toolCallSignature(call);
+        const duplicateApprovalId = pendingApprovalSignatures.get(signature);
+        const result = duplicateApprovalId
+          ? duplicatePendingApprovalResult(call, duplicateApprovalId)
+          : await this.tools.execute(run.chat.id, executionProjectId, run.permission, call, run.runId);
         signal?.throwIfAborted();
         this.appendToolResult(run.workingChat, call, result);
         this.emitToolActivity(run.runId, run.chat.id, call, result, emit);
         if (result.pendingApproval && result.approvalId) {
           pendingApprovalIds.push(result.approvalId);
           approvalCalls[result.approvalId] = call;
+          pendingApprovalSignatures.set(signature, result.approvalId);
         }
         await this.persist();
       }
