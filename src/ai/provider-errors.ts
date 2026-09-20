@@ -5,14 +5,23 @@ export class ProviderRequestError extends Error {
   readonly provider: string;
   readonly kind: ProviderErrorKind;
   readonly operation: string;
+  readonly retryAfterMs?: number;
 
-  constructor(message: string, status: number, provider = 'AI provider', kind?: ProviderErrorKind, operation = 'request') {
+  constructor(
+    message: string,
+    status: number,
+    provider = 'AI provider',
+    kind?: ProviderErrorKind,
+    operation = 'request',
+    retryAfterMs?: number,
+  ) {
     super(message);
     this.name = 'ProviderRequestError';
     this.status = status;
     this.provider = provider;
     this.kind = kind || classifyProviderError(status, message);
     this.operation = operation;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -31,7 +40,10 @@ export function normalizeProviderError(provider: string, operation: string, erro
   if (error instanceof ProviderRequestError) return error;
   const message = error instanceof Error ? error.message : String(error);
   const status = error && typeof error === 'object' && 'status' in error && typeof (error as { status?: unknown }).status === 'number' ? (error as { status: number }).status : 0;
-  return new ProviderRequestError(message || 'Falha desconhecida do provider.', status, provider, undefined, operation);
+  const retryAfterMs = error && typeof error === 'object' && 'retryAfterMs' in error && typeof (error as { retryAfterMs?: unknown }).retryAfterMs === 'number'
+    ? (error as { retryAfterMs: number }).retryAfterMs
+    : undefined;
+  return new ProviderRequestError(message || 'Falha desconhecida do provider.', status, provider, undefined, operation, retryAfterMs);
 }
 
 export function isAuthenticationError(error: unknown): boolean {
@@ -65,7 +77,12 @@ export function formatProviderError(error: unknown): string {
     case 'authentication': return `${prefix} a API key foi recusada. Abra Configurações de IA para verificar ou trocar a chave.`;
     case 'billing': return `${prefix} não há créditos ou faturamento disponível para esta solicitação. Sua API key continua salva. Abra Configurações de IA para usar outra chave.`;
     case 'quota': return `${prefix} a cota disponível para este modelo foi atingida. Sua API key continua salva. Tente outro modelo ou outra chave em Configurações de IA.`;
-    case 'rate_limit': return `${prefix} o limite de requisições foi atingido${httpSuffix(error)}. Aguarde e tente novamente.`;
+    case 'rate_limit': {
+      const wait = error.retryAfterMs && error.retryAfterMs > 0
+        ? ` Tente novamente em cerca de ${Math.max(1, Math.ceil(error.retryAfterMs / 1000))}s.`
+        : ' Aguarde e tente novamente.';
+      return `${prefix} o limite de requisições foi atingido${httpSuffix(error)}.${wait}`;
+    }
     case 'server': return `${prefix} o serviço respondeu com uma falha temporária${httpSuffix(error)}.${detail ? ` ${detail}` : ''}`;
     case 'network': return `${prefix} não foi possível concluir a conexão com o serviço.${detail ? ` ${detail}` : ' Verifique a conexão e tente novamente.'}`;
     case 'invalid_request': return `${prefix} a solicitação foi recusada${httpSuffix(error)}. ${detail || 'O provider não aceitou o formato enviado.'}`;
@@ -73,6 +90,12 @@ export function formatProviderError(error: unknown): string {
   }
 }
 
-export function createProviderRequestError(provider: string, operation: string, status: number, message: string): ProviderRequestError {
-  return new ProviderRequestError(message, status, provider, undefined, operation);
+export function createProviderRequestError(
+  provider: string,
+  operation: string,
+  status: number,
+  message: string,
+  retryAfterMs?: number,
+): ProviderRequestError {
+  return new ProviderRequestError(message, status, provider, undefined, operation, retryAfterMs);
 }
