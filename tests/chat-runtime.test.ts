@@ -81,6 +81,10 @@ test('trivial greeting skips workspace context and tool schemas', async () => {
   assert.equal(request.tools, undefined);
   assert.equal(request.projectContext, undefined);
   assert.equal(request.messages.some((message) => message.content.includes('large workspace context')), false);
+  assert.equal(
+    request.messages.some((message) => /não retome, continue, execute nem complete automaticamente tarefas de turnos anteriores/i.test(message.content)),
+    true,
+  );
   assert.equal(request.messages.at(-1)?.content, 'Oi');
 });
 
