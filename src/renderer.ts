@@ -814,6 +814,22 @@ window.autoCodez.onActivity((event) => {
   }
 });
 
+window.addEventListener('auto-codez-chat-settings-updated', (event) => {
+  const updated = (event as CustomEvent<Chat>).detail;
+  if (!updated?.id) return;
+  const index = chats.findIndex((chat) => chat.id === updated.id);
+  if (index >= 0) chats[index] = updated;
+  else chats.unshift(updated);
+  if (activeChat?.id === updated.id) {
+    activeChat = updated;
+    composerIntelligence = updated.intelligence;
+  }
+  renderNav();
+  renderHeader();
+  renderMessages();
+  renderComposer();
+});
+
 window.addEventListener('error', (event) => {
   const message = event.error instanceof Error ? event.error.message : event.message || 'Erro inesperado no renderer.';
   console.error('[Auto CodeZ renderer]', event.error || event.message);
