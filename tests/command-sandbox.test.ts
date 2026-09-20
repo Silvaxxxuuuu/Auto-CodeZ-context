@@ -236,8 +236,11 @@ test('system workspace materialization succeeds when the sandbox lives inside th
         'system workspace',
       );
       await assert.rejects(fs.access(path.join(sandbox.rootPath, '.env')));
+      const canonicalSourceRoot = await fs.realpath(sourceRoot);
+      const canonicalSandboxRoot = await fs.realpath(sandbox.rootPath);
+      const nestedRelative = path.relative(canonicalSourceRoot, canonicalSandboxRoot);
       assert.equal(
-        sandbox.rootPath.startsWith(sourceRoot),
+        nestedRelative === '' || (!nestedRelative.startsWith('..') && !path.isAbsolute(nestedRelative)),
         true,
         'the regression requires the destination sandbox to be nested below the source root',
       );
