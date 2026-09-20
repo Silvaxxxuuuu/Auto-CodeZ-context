@@ -380,3 +380,118 @@ test('Azure Foundry hides split embedded Kimi tool markers during streaming', as
     });
   });
 });
+
+
+test('Azure Foundry retries a pre-stream 429 only when the provider supplies a retry window', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+  let attempts = 0;
+
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"Recuperado"},"finish_reason":"stop"}]}',
+    '',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+
+  await withMockedFetch(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      return new Response(JSON.stringify({
+        error: { message: 'Too many requests' },
+      }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'retry-after-ms': '0',
+        },
+      });
+    }
+    return new Response(sse, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  }, async () => {
+    const events = [];
+    for await (const event of adapter.stream!(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    )) events.push(event);
+
+    assert.equal(attempts, 2);
+    const complete = events.find((event) => event.type === 'complete');
+    assert.equal(complete?.response?.content, 'Recuperado');
+  });
+});
+
+test('Azure Foundry does not blindly retry 429 responses without retry metadata', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+  let attempts = 0;
+
+  await withMockedFetch(async () => {
+    attempts += 1;
+    return new Response(JSON.stringify({
+      error: { message: 'Too many requests' },
+    }), {
+      status: 429,
+      headers: { 'content-type': 'application/json' },
+    });
+  }, async () => {
+    await assert.rejects(
+      async () => {
+        for await (const _event of adapter.stream!(
+          config('https://example.services.ai.azure.com/openai/v1'),
+          kimiRequest,
+        )) {
+          // Drain the stream.
+        }
+      },
+      (error: unknown) => {
+        assert.equal(attempts, 1);
+        assert.equal(typeof error, 'object');
+        assert.equal((error as { status?: number }).status, 429);
+        return true;
+      },
+    );
+  });
+});
+
+test('Azure Foundry preserves retry-after metadata when automatic retry is not safe', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+
+  await withMockedFetch(async () => new Response(JSON.stringify({
+    error: { message: 'Too many requests' },
+  }), {
+    status: 429,
+    headers: {
+      'content-type': 'application/json',
+      'retry-after': '120',
+    },
+  }), async () => {
+    await assert.rejects(
+      () => adapter.send(
+        config('https://example.services.ai.azure.com/openai/v1'),
+        kimiRequest,
+      ),
+      (error: unknown) => {
+        assert.equal((error as { status?: number }).status, 429);
+        assert.equal((error as { retryAfterMs?: number }).retryAfterMs, 120_000);
+        return true;
+      },
+    );
+  });
+});
