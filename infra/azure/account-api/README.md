@@ -116,6 +116,7 @@ Account Core V1 só fecha depois desses testes essenciais serem aprovados.
 - Pull usa Managed Identity.
 - secrets entram como Container Apps secrets.
 - scripts não gravam secrets em arquivo.
+- mensagens de erro dos scripts não reimprimem argumentos completos do Azure CLI, evitando eco acidental de secrets.
 - migrations rodam em job separado.
 - Account API não recebe autoridade sobre tools locais.
 - deep link continua usando apenas código/token one-time.

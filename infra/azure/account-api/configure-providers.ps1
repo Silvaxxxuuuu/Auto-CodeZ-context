@@ -19,13 +19,26 @@ function Invoke-Az {
     [string[]]$Arguments,
     [switch]$Capture
   )
+  $operation = if ($Arguments.Count -ge 2) {
+    "az $($Arguments[0]) $($Arguments[1])"
+  } elseif ($Arguments.Count -eq 1) {
+    "az $($Arguments[0])"
+  } else {
+    'az'
+  }
+
   if ($Capture) {
     $output = & az @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "Azure CLI failed: az $($Arguments -join ' ')" }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Azure CLI failed during $operation (exit code $LASTEXITCODE). Arguments were intentionally omitted."
+    }
     return ($output -join [Environment]::NewLine).Trim()
   }
+
   & az @Arguments
-  if ($LASTEXITCODE -ne 0) { throw "Azure CLI failed: az $($Arguments -join ' ')" }
+  if ($LASTEXITCODE -ne 0) {
+    throw "Azure CLI failed during $operation (exit code $LASTEXITCODE). Arguments were intentionally omitted."
+  }
 }
 
 function Get-StableSuffix {
