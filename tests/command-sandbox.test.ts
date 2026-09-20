@@ -205,3 +205,47 @@ test('command sandbox rejeita run ausente e projeto divergente', async () => {
     await fx.cleanup();
   }
 });
+
+
+test('system workspace materialization succeeds when the sandbox lives inside the source tree', async () => {
+  const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-system-home-test-'));
+  const nestedTempParent = path.join(sourceRoot, 'AppData', 'Local', 'Temp');
+  await fs.mkdir(path.join(sourceRoot, 'Desktop', 'Teste'), { recursive: true });
+  await fs.mkdir(nestedTempParent, { recursive: true });
+  await fs.writeFile(path.join(sourceRoot, 'Desktop', 'Teste', 'README.md'), 'system workspace');
+  await fs.writeFile(path.join(sourceRoot, '.env'), 'SECRET=hidden');
+
+  const temporaryRoots: string[] = [];
+  const createNestedTemporaryRoot = async (): Promise<string> => {
+    const root = await fs.mkdtemp(path.join(nestedTempParent, 'auto-codez-command-sandbox-'));
+    temporaryRoots.push(root);
+    return root;
+  };
+
+  const materializer = new CommandSandboxMaterializer(
+    async () => [],
+    () => sourceRoot,
+    createNestedTemporaryRoot,
+  );
+
+  try {
+    const sandbox = await materializer.materialize(SYSTEM_PROJECT_ID, []);
+    try {
+      assert.equal(
+        await fs.readFile(path.join(sandbox.rootPath, 'Desktop', 'Teste', 'README.md'), 'utf8'),
+        'system workspace',
+      );
+      await assert.rejects(fs.access(path.join(sandbox.rootPath, '.env')));
+      assert.equal(
+        sandbox.rootPath.startsWith(sourceRoot),
+        true,
+        'the regression requires the destination sandbox to be nested below the source root',
+      );
+    } finally {
+      await sandbox.cleanup();
+    }
+  } finally {
+    await Promise.all(temporaryRoots.map((root) => fs.rm(root, { recursive: true, force: true })));
+    await fs.rm(sourceRoot, { recursive: true, force: true });
+  }
+});
