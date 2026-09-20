@@ -128,12 +128,10 @@ test('materialização suporta workspace de sistema usando raiz controlada', asy
     await write(systemRoot, 'desktop-file.txt', 'desktop-base');
     await write(systemRoot, '.env', 'SECRET=desktop-secret');
     const materializer = new CommandSandboxMaterializer(fx.projects, () => systemRoot);
-    const sandbox = await materializer.materialize(SYSTEM_PROJECT_ID, []);
+    const sandbox = await materializer.materialize(SYSTEM_PROJECT_ID, [], 'node -v');
     try {
-      assert.equal(await fs.readFile(path.join(sandbox.rootPath, 'desktop-file.txt'), 'utf8'), 'desktop-base');
+      await assert.rejects(fs.access(path.join(sandbox.rootPath, 'desktop-file.txt')));
       await assert.rejects(fs.access(path.join(sandbox.rootPath, '.env')));
-      await fs.writeFile(path.join(sandbox.rootPath, 'desktop-file.txt'), 'sandbox-only', 'utf8');
-      assert.equal(await fs.readFile(path.join(systemRoot, 'desktop-file.txt'), 'utf8'), 'desktop-base');
     } finally {
       await sandbox.cleanup();
     }
@@ -229,7 +227,7 @@ test('system workspace materialization succeeds when the sandbox lives inside th
   );
 
   try {
-    const sandbox = await materializer.materialize(SYSTEM_PROJECT_ID, []);
+    const sandbox = await materializer.materialize(SYSTEM_PROJECT_ID, [], 'cd Desktop/Teste && node -v');
     try {
       assert.equal(
         await fs.readFile(path.join(sandbox.rootPath, 'Desktop', 'Teste', 'README.md'), 'utf8'),
@@ -249,6 +247,35 @@ test('system workspace materialization succeeds when the sandbox lives inside th
     }
   } finally {
     await Promise.all(temporaryRoots.map((root) => fs.rm(root, { recursive: true, force: true })));
+    await fs.rm(sourceRoot, { recursive: true, force: true });
+  }
+});
+
+
+test('system workspace command sandbox executes version probes without cloning the user home', async () => {
+  const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-system-probe-test-'));
+  const nestedTempParent = path.join(sourceRoot, 'AppData', 'Local', 'Temp');
+  await fs.mkdir(nestedTempParent, { recursive: true });
+  await write(sourceRoot, 'Desktop/large-marker.txt', 'must-not-copy');
+
+  const temporaryRootFactory = async (): Promise<string> =>
+    fs.mkdtemp(path.join(nestedTempParent, 'auto-codez-command-sandbox-'));
+
+  const materializer = new CommandSandboxMaterializer(
+    async () => [],
+    () => sourceRoot,
+    temporaryRootFactory,
+  );
+
+  try {
+    const sandbox = await materializer.materialize(SYSTEM_PROJECT_ID, [], 'node -v');
+    try {
+      await assert.rejects(fs.access(path.join(sandbox.rootPath, 'Desktop', 'large-marker.txt')));
+      assert.equal((await fs.readdir(sandbox.rootPath)).length, 0);
+    } finally {
+      await sandbox.cleanup();
+    }
+  } finally {
     await fs.rm(sourceRoot, { recursive: true, force: true });
   }
 });
