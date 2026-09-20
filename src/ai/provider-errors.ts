@@ -69,6 +69,20 @@ function httpSuffix(error: ProviderRequestError): string {
   return error.status > 0 ? ` (HTTP ${error.status})` : '';
 }
 
+function retryAfterFromMessage(message: string): number | undefined {
+  const seconds = message.match(/(?:retry after|tente novamente em(?: cerca de)?)\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s|segundos?)/i);
+  if (seconds) {
+    const value = Number(seconds[1]);
+    if (Number.isFinite(value) && value >= 0) return value * 1000;
+  }
+  const minutes = message.match(/(?:retry after|tente novamente em(?: cerca de)?)\s+(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m|minutos?)/i);
+  if (minutes) {
+    const value = Number(minutes[1]);
+    if (Number.isFinite(value) && value >= 0) return value * 60_000;
+  }
+  return undefined;
+}
+
 export function formatProviderError(error: unknown): string {
   if (!(error instanceof ProviderRequestError)) return error instanceof Error ? error.message : String(error);
   const prefix = `${error.provider}:`;
@@ -78,8 +92,9 @@ export function formatProviderError(error: unknown): string {
     case 'billing': return `${prefix} não há créditos ou faturamento disponível para esta solicitação. Sua API key continua salva. Abra Configurações de IA para usar outra chave.`;
     case 'quota': return `${prefix} a cota disponível para este modelo foi atingida. Sua API key continua salva. Tente outro modelo ou outra chave em Configurações de IA.`;
     case 'rate_limit': {
-      const wait = error.retryAfterMs && error.retryAfterMs > 0
-        ? ` Tente novamente em cerca de ${Math.max(1, Math.ceil(error.retryAfterMs / 1000))}s.`
+      const retryMs = error.retryAfterMs ?? retryAfterFromMessage(error.message);
+      const wait = retryMs && retryMs > 0
+        ? ` Tente novamente em cerca de ${Math.max(1, Math.ceil(retryMs / 1000))}s.`
         : ' Aguarde e tente novamente.';
       return `${prefix} o limite de requisições foi atingido${httpSuffix(error)}.${wait}`;
     }
