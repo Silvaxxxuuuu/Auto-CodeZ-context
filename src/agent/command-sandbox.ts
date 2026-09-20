@@ -152,7 +152,8 @@ export class CommandSandboxMaterializer {
     }
 
     const sourceRoot = await fs.realpath(path.resolve(sourcePath));
-    const temporaryRoot = await this.temporaryRootFactory();
+    const createdTemporaryRoot = await this.temporaryRootFactory();
+    const temporaryRoot = await fs.realpath(createdTemporaryRoot);
     const sandboxRoot = path.join(temporaryRoot, 'workspace');
     const homePath = path.join(temporaryRoot, 'home');
     const tempPath = path.join(temporaryRoot, 'tmp');
