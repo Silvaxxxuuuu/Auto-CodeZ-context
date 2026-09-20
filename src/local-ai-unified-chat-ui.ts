@@ -376,8 +376,6 @@ async function saveUnifiedLocal(): Promise<void> {
     });
     document.querySelector('#modal-root')?.replaceChildren();
     window.dispatchEvent(new CustomEvent('auto-codez-chat-settings-updated', { detail: updated }));
-    sessionStorage.setItem(RESTORE_CHAT_KEY, updated.id);
-    window.location.reload();
   } catch (error) {
     button.disabled = false;
     button.textContent = 'Salvar configurações';
