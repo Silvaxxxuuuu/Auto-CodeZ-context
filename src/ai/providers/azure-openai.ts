@@ -527,6 +527,10 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     let content = '';
     let usage: AIResponse['usage'];
     let terminal = false;
+    let visibleBuffer = '';
+    let embeddedProtocolStarted = false;
+    const embeddedMarkers = ['<|toolcallssectionbegin|>', '<|toolcallbegin|>'];
+    const markerTailLength = Math.max(...embeddedMarkers.map((marker) => marker.length)) - 1;
     const pendingCalls = new Map<number, { id: string; name: string; arguments: string }>();
     yield { type: 'start' };
 
@@ -542,7 +546,24 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         const text = contentText(delta?.content);
         if (text) {
           content += text;
-          yield { type: 'delta', text };
+          if (!embeddedProtocolStarted) {
+            visibleBuffer += text;
+            const markerIndex = embeddedMarkers
+              .map((marker) => visibleBuffer.indexOf(marker))
+              .filter((index) => index >= 0)
+              .sort((left, right) => left - right)[0];
+            if (markerIndex !== undefined) {
+              const visible = visibleBuffer.slice(0, markerIndex);
+              if (visible) yield { type: 'delta', text: visible };
+              visibleBuffer = '';
+              embeddedProtocolStarted = true;
+            } else if (visibleBuffer.length > markerTailLength) {
+              const safeLength = visibleBuffer.length - markerTailLength;
+              const visible = visibleBuffer.slice(0, safeLength);
+              visibleBuffer = visibleBuffer.slice(safeLength);
+              if (visible) yield { type: 'delta', text: visible };
+            }
+          }
         }
         if (Array.isArray(delta?.tool_calls)) {
           for (const callValue of delta.tool_calls) {
@@ -560,6 +581,10 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
       }
     }
 
+    if (!embeddedProtocolStarted && visibleBuffer) {
+      yield { type: 'delta', text: visibleBuffer };
+      visibleBuffer = '';
+    }
     if (!terminal) throw new Error('Azure Foundry encerrou o streaming sem um evento terminal.');
     const toolCalls: AIToolCall[] = [];
     for (const [, call] of [...pendingCalls.entries()].sort(([a], [b]) => a - b)) {
