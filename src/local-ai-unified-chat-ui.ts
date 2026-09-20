@@ -9,7 +9,6 @@ import type { ManagedLocalRuntimeInfo } from './ai/local-model-manager';
 const LOCAL_OPTION_VALUE = 'local:unified';
 const LOCAL_PROVIDER_IDS = new Set(['auto-codez-local', 'ollama', 'lm-studio']);
 const LOCAL_STYLE_ID = 'auto-codez-unified-local-chat-style';
-const RESTORE_CHAT_KEY = 'auto-codez.restore-chat-after-settings';
 
 type Chat = {
   id: string;
