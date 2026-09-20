@@ -828,6 +828,7 @@ window.addEventListener('auto-codez-chat-settings-updated', (event) => {
   renderHeader();
   renderMessages();
   renderComposer();
+  void refresh();
 });
 
 window.addEventListener('error', (event) => {
