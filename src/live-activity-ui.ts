@@ -21,7 +21,8 @@ style.id = 'auto-codez-live-activity-style';
 style.textContent = `
   #messages > .activity-card{display:none!important}
   #messages > .ac-internal-transcript{display:none!important}
-  .ac-live-activity{width:min(860px,calc(100% - 56px));margin:5px auto 12px;display:flex;align-items:center;gap:8px;color:#7f8997;font:11px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:20px}
+  .ac-live-activity{width:min(860px,calc(100% - 56px));margin:4px auto;display:flex;align-items:center;gap:8px;color:#7f8997;font:11px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:20px}
+  .ac-live-activity:first-of-type{margin-top:6px}.ac-live-activity:last-of-type{margin-bottom:12px}
   .ac-live-activity[hidden]{display:none}.ac-live-activity.status-failed{color:#d58e96}.ac-live-activity.status-success{color:#8995a4}.ac-live-activity.status-pending{color:#a89b7d}
   .ac-live-activity-icon{display:grid;place-items:center;width:16px;height:16px;flex:0 0 16px;color:currentColor}.ac-live-activity-icon svg{display:block;width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .ac-live-activity-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ac-live-activity-dots{display:inline-flex;margin-left:1px;letter-spacing:1px;opacity:.7}.ac-live-activity-dots span{animation:ac-live-dot 1.05s infinite;opacity:.25}.ac-live-activity-dots span:nth-child(2){animation-delay:.15s}.ac-live-activity-dots span:nth-child(3){animation-delay:.3s}
@@ -97,22 +98,41 @@ function normalizedActivityMessage(event: Partial<ActivityEvent>): string {
   return message;
 }
 
-function render(message: string, toolName?: ToolName, status: ActivityEvent['status'] = 'running'): void {
+function render(
+  message: string,
+  toolName?: ToolName,
+  status: ActivityEvent['status'] = 'running',
+  activityKey = '',
+): void {
   const messages = messagesRoot();
   const normalized = message.trim();
   if (!messages || !normalized || isInfrastructureMessage(normalized)) return;
-  remove();
-  const row = document.createElement('div');
+
+  const key = activityKey.trim();
+  let row = key
+    ? messages.querySelector<HTMLElement>(`.ac-live-activity[data-activity-key="${CSS.escape(key)}"]`)
+    : null;
+
+  if (!row) {
+    row = document.createElement('div');
+    row.className = `ac-live-activity status-${status}`;
+    row.setAttribute('role', 'status');
+    if (key) row.dataset.activityKey = key;
+    row.innerHTML = `<span class="ac-live-activity-icon" aria-hidden="true">${iconFor(toolName)}</span><span class="ac-live-activity-text"></span><span class="ac-live-activity-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>`;
+    const streaming = messages.querySelector('.message.assistant.streaming');
+    const approval = messages.querySelector('.ac-approval-root');
+    const anchor = streaming || approval;
+    if (anchor) messages.insertBefore(row, anchor);
+    else messages.appendChild(row);
+  }
+
   row.className = `ac-live-activity status-${status}`;
-  row.setAttribute('role', 'status');
-  row.innerHTML = `<span class="ac-live-activity-icon" aria-hidden="true">${iconFor(toolName)}</span><span class="ac-live-activity-text"></span><span class="ac-live-activity-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>`;
+  row.querySelector<HTMLElement>('.ac-live-activity-icon')!.innerHTML = iconFor(toolName);
   row.querySelector<HTMLElement>('.ac-live-activity-text')!.textContent = normalized;
-  const streaming = messages.querySelector('.message.assistant.streaming');
-  const approval = messages.querySelector('.ac-approval-root');
-  const anchor = streaming || approval;
-  if (anchor) messages.insertBefore(row, anchor);
-  else messages.appendChild(row);
   messages.classList.add('ac-has-live-activity');
+
+  const rows = [...messages.querySelectorAll<HTMLElement>('.ac-live-activity')];
+  while (rows.length > 8) rows.shift()?.remove();
 }
 
 function matchesActiveChat(chatId?: string): boolean {
@@ -122,17 +142,14 @@ function matchesActiveChat(chatId?: string): boolean {
 
 const unsubscribeStream = bridge.onStreamEvent((event) => {
   if (!matchesActiveChat(event.chatId)) return;
-  if (event.type === 'delta' && event.text) {
-    remove();
-    return;
-  }
+  if (event.type === 'delta' && event.text) return;
   if (event.type === 'activity' && event.activity) {
     const message = normalizedActivityMessage(event.activity);
     const toolCallId = event.activity.toolCallId;
     if (message && event.activity.type === 'thought' && toolCallId) {
       dynamicToolSummaries.set(toolCallId, { message, toolName: event.activity.toolName });
     }
-    if (message) render(message, event.activity.toolName, event.activity.status || 'running');
+    if (message) render(message, event.activity.toolName, event.activity.status || 'running', toolCallId || event.activity.id || 'stream-current');
     return;
   }
   if (event.type === 'approval_required') return;
@@ -153,13 +170,15 @@ const unsubscribeActivity = bridge.onActivity((event) => {
   const toolCallId = event.toolCallId;
   const dynamic = toolCallId ? dynamicToolSummaries.get(toolCallId) : undefined;
 
-  if (event.status === 'running' && dynamic) {
-    render(dynamic.message, dynamic.toolName || event.toolName, 'running');
+  if (dynamic) {
+    render(dynamic.message, dynamic.toolName || event.toolName, event.status, toolCallId || event.id || 'activity-current');
+    if (event.type === 'complete' && event.status === 'success') {
+      clearDynamicSummaries();
+      remove();
+    }
     return;
   }
 
-  if (event.status === 'failed' && toolCallId) dynamicToolSummaries.delete(toolCallId);
-  if (event.status === 'success' && toolCallId) dynamicToolSummaries.delete(toolCallId);
   const message = normalizedActivityMessage(event);
   if (!message) return;
   if (event.type === 'complete' && event.status === 'success') {
@@ -167,7 +186,7 @@ const unsubscribeActivity = bridge.onActivity((event) => {
     remove();
     return;
   }
-  render(message, event.toolName, event.status);
+  render(message, event.toolName, event.status, toolCallId || event.id || `${event.type}:${event.toolName || 'runtime'}`);
 });
 
 const messages = messagesRoot();
