@@ -146,7 +146,7 @@ test('web_fetch returns bounded untrusted source content and activity', async ()
   assert.equal(output.source?.retrievedAt, 42);
   assert.equal(output.source?.url, 'https://docs.example/latest');
   assert.match(output.text || '', /Versão 9\.1/);
-  assert.equal(output.text?.length, 24_000);
+  assert.equal(output.text?.length, 12_000);
   assert.equal(output.truncated, true);
   assert.match(output.security || '', /untrusted data/i);
   assert.equal(events.some((event) => event.includes('Abrindo fonte Web: https://docs.example/latest')), true);
@@ -193,27 +193,4 @@ test('successful proactive web research counts toward Change Budget and becomes 
   }, 'run-plan');
   assert.equal(blocked.ok, false);
   assert.match(blocked.error || '', /Change Budget excedido/);
-});
-
-
-test('web_fetch bounds the text returned to the agent context', async () => {
-  const longText = 'x'.repeat(20_000);
-  const { tools } = createTools(
-    { id: 'fixture', displayName: 'Fixture', async search() { return []; } },
-    async () => new Response(`<html><head><title>Long page</title></head><body><main>${longText}</main></body></html>`, {
-      status: 200,
-      headers: { 'content-type': 'text/html' },
-    }),
-  );
-
-  const result = await tools.execute('chat-a', '__system__', 'read-only', {
-    id: 'fetch-long',
-    name: 'web_fetch',
-    input: { url: 'https://example.com/long' },
-  }, 'run-a');
-
-  assert.equal(result.ok, true);
-  const parsed = JSON.parse(result.output || '{}') as { text?: string; truncated?: boolean };
-  assert.ok((parsed.text || '').length <= 12_000);
-  assert.equal(parsed.truncated, true);
 });
