@@ -61,13 +61,16 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-const button = document.createElement('button');
-button.className = 'rail-button terminal-rail-button';
-button.type = 'button';
-button.title = 'Terminal';
-button.setAttribute('aria-label', 'Terminal');
-button.setAttribute('aria-expanded', 'false');
-rail.insertBefore(button, rail.querySelector('.rail-spacer'));
+const button = document.querySelector<HTMLButtonElement>('.terminal-rail-button') ?? document.createElement('button');
+if (!button.isConnected) {
+  button.className = 'rail-button terminal-rail-button';
+  button.type = 'button';
+  button.title = 'Terminal';
+  button.setAttribute('aria-label', 'Terminal');
+  button.setAttribute('aria-expanded', 'false');
+  rail.insertBefore(button, rail.querySelector('.rail-spacer'));
+}
+button.setAttribute('aria-expanded', button.getAttribute('aria-expanded') || 'false');
 
 const panel = document.createElement('section');
 panel.className = 'terminal-panel';
