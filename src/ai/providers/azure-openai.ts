@@ -14,6 +14,8 @@ import { fetchWithTimeout, parseSSE } from '../sse';
 const MODEL_LIST_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 const FOUNDRY_STREAM_IDLE_TIMEOUT_MS = 300_000;
+const FOUNDRY_MAX_RATE_LIMIT_RETRIES = 2;
+const FOUNDRY_MAX_AUTO_RETRY_WAIT_MS = 60_000;
 
 function normalizeBaseUrl(value?: string): string {
   const raw = value?.trim().replace(/\/+$/, '');
@@ -273,6 +275,68 @@ function headers(config: AIProviderConfig): Record<string, string> {
   };
 }
 
+function retryAfterMs(response: Response): number | undefined {
+  const retryAfterMsHeader = response.headers.get('retry-after-ms') || response.headers.get('x-ms-retry-after-ms');
+  if (retryAfterMsHeader) {
+    const parsed = Number(retryAfterMsHeader);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+
+  const retryAfter = response.headers.get('retry-after');
+  if (!retryAfter) return undefined;
+
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+
+  const date = Date.parse(retryAfter);
+  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
+  return undefined;
+}
+
+async function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  if (delayMs <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, delayMs);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal?.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  signal?.throwIfAborted();
+}
+
+async function fetchFoundryWithRateLimitRetry(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<Response> {
+  let response: Response | undefined;
+
+  for (let attempt = 0; attempt <= FOUNDRY_MAX_RATE_LIMIT_RETRIES; attempt += 1) {
+    response = await fetchWithTimeout(input, { ...init, signal }, timeoutMs);
+    if (response.status !== 429) return response;
+
+    const delayMs = retryAfterMs(response);
+    const canRetry = attempt < FOUNDRY_MAX_RATE_LIMIT_RETRIES
+      && delayMs !== undefined
+      && delayMs <= FOUNDRY_MAX_AUTO_RETRY_WAIT_MS;
+
+    if (!canRetry) return response;
+
+    try {
+      await response.body?.cancel();
+    } catch {
+      // Best effort only. The retry still uses a fresh request.
+    }
+    await waitForRetry(delayMs, signal);
+  }
+
+  return response!;
+}
+
 export class AzureOpenAIAdapter implements AIProviderAdapter {
   readonly id = 'azure-openai';
   readonly displayName = 'Azure Foundry';
@@ -331,7 +395,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
   async send(config: AIProviderConfig, request: AIRequest, signal?: AbortSignal): Promise<AIResponse> {
     if (!usesResponsesApi(request.model)) return this.sendChatCompletion(config, request, signal);
 
-    const response = await fetchWithTimeout(
+    const response = await fetchFoundryWithRateLimitRetry(
       `${normalizeBaseUrl(config.baseUrl)}/responses`,
       {
         method: 'POST',
@@ -340,6 +404,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         signal,
       },
       REQUEST_TIMEOUT_MS,
+      signal,
     );
     const data = await response.json().catch(() => ({})) as {
       output_text?: string;
@@ -353,6 +418,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         'send',
         response.status,
         data.error?.message || `Azure Foundry Responses request failed: ${response.status}`,
+        retryAfterMs(response),
       );
     }
     return {
@@ -365,7 +431,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
   }
 
   private async sendChatCompletion(config: AIProviderConfig, request: AIRequest, signal?: AbortSignal): Promise<AIResponse> {
-    const response = await fetchWithTimeout(
+    const response = await fetchFoundryWithRateLimitRetry(
       `${normalizeBaseUrl(config.baseUrl)}/chat/completions`,
       {
         method: 'POST',
@@ -374,6 +440,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         signal,
       },
       REQUEST_TIMEOUT_MS,
+      signal,
     );
     const data = await response.json().catch(() => ({})) as Record<string, unknown>;
     if (!response.ok) {
@@ -382,6 +449,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         'send',
         response.status,
         providerErrorMessage(data, `Azure Foundry chat request failed: ${response.status}`),
+        retryAfterMs(response),
       );
     }
     const choices = Array.isArray(data.choices) ? data.choices : [];
@@ -404,7 +472,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
       return;
     }
 
-    const response = await fetchWithTimeout(
+    const response = await fetchFoundryWithRateLimitRetry(
       `${normalizeBaseUrl(config.baseUrl)}/responses`,
       {
         method: 'POST',
@@ -413,6 +481,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         signal,
       },
       REQUEST_TIMEOUT_MS,
+      signal,
     );
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
@@ -421,6 +490,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         'stream',
         response.status,
         providerErrorMessage(data, `Azure Foundry Responses streaming request failed: ${response.status}`),
+        retryAfterMs(response),
       );
     }
 
@@ -504,7 +574,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     request: AIRequest,
     signal?: AbortSignal,
   ): AsyncGenerator<AIStreamEvent> {
-    const response = await fetchWithTimeout(
+    const response = await fetchFoundryWithRateLimitRetry(
       `${normalizeBaseUrl(config.baseUrl)}/chat/completions`,
       {
         method: 'POST',
@@ -513,6 +583,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         signal,
       },
       REQUEST_TIMEOUT_MS,
+      signal,
     );
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
@@ -521,6 +592,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         'stream',
         response.status,
         providerErrorMessage(data, `Azure Foundry chat streaming request failed: ${response.status}`),
+        retryAfterMs(response),
       );
     }
 
