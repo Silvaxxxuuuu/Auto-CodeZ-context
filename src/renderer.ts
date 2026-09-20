@@ -128,6 +128,9 @@ app.innerHTML = `
       <button class="rail-button active" data-panel="chats" title="Chats" aria-label="Chats"></button>
       <button class="rail-button" data-panel="projects" title="Projetos" aria-label="Projetos"></button>
       <button class="rail-button" data-panel="plugins" title="Plugins" aria-label="Plugins"></button>
+      <button class="rail-button api-key-rail-button" type="button" title="API Keys" aria-label="API Keys"><svg class="ac-rail-icon ac-lucide-icon" data-api-key-icon="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg></button>
+      <button class="rail-button terminal-rail-button" type="button" title="Terminal" aria-label="Terminal" aria-expanded="false"><svg class="ac-rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg></button>
+      <button class="rail-button" type="button" data-mcp-mode title="MCP Mode" aria-label="MCP Mode"><svg class="ac-rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 18h6"/><path d="M6 18h.01"/><path d="M8 6h1"/><rect x="2" y="14" width="20" height="8" rx="2"/><rect x="4" y="2" width="16" height="12" rx="2"/></svg></button>
       <div class="rail-spacer"></div>
       <button class="rail-button" data-action="profile" title="Perfil" aria-label="Perfil"></button>
     </aside>
