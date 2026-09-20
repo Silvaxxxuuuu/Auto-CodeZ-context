@@ -548,7 +548,7 @@ test('Azure Foundry preserves retry-after metadata when automatic retry is not s
     status: 429,
     headers: {
       'content-type': 'application/json',
-      'retry-after': '120',
+      'retry-after': '121',
     },
   }), async () => {
     await assert.rejects(
@@ -558,7 +558,7 @@ test('Azure Foundry preserves retry-after metadata when automatic retry is not s
       ),
       (error: unknown) => {
         assert.equal((error as { status?: number }).status, 429);
-        assert.equal((error as { retryAfterMs?: number }).retryAfterMs, 120_000);
+        assert.equal((error as { retryAfterMs?: number }).retryAfterMs, 121_000);
         return true;
       },
     );
