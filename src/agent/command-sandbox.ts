@@ -75,12 +75,70 @@ function isolatedCommandEnvironment(base: NodeJS.ProcessEnv, sandbox: Materializ
   return environment;
 }
 
+type TemporaryRootFactory = () => Promise<string>;
+
+async function copyAllowedTree(
+  sourceRoot: string,
+  sandboxRoot: string,
+  policy: WorkspacePathPolicy,
+  excludedRoot?: string,
+): Promise<void> {
+  const walk = async (sourceDirectory: string): Promise<void> => {
+    const entries = await fs.readdir(sourceDirectory, { withFileTypes: true });
+    for (const entry of entries) {
+      const source = path.join(sourceDirectory, entry.name);
+      if (excludedRoot && isInside(excludedRoot, source)) continue;
+      const relative = path.relative(sourceRoot, source);
+      if (!relative || !isAllowedSandboxSource(relative, policy)) continue;
+
+      const destination = path.resolve(sandboxRoot, relative);
+      if (!isInside(sandboxRoot, destination)) throw new Error('Caminho escapou do command sandbox durante a materialização.');
+
+      const stat = await fs.lstat(source);
+      if (stat.isSymbolicLink()) {
+        let target: string;
+        try {
+          target = await fs.realpath(source);
+        } catch {
+          continue;
+        }
+        if (!isInside(sourceRoot, target)) continue;
+        if (excludedRoot && isInside(excludedRoot, target)) continue;
+        const targetRelative = path.relative(sourceRoot, target);
+        if (!targetRelative || !isAllowedSandboxSource(targetRelative, policy)) continue;
+        const targetStat = await fs.stat(target);
+        if (targetStat.isDirectory()) {
+          await fs.mkdir(destination, { recursive: true });
+          await walk(target);
+        } else if (targetStat.isFile()) {
+          await fs.mkdir(path.dirname(destination), { recursive: true });
+          await fs.copyFile(target, destination, fsConstants.COPYFILE_FICLONE);
+        }
+        continue;
+      }
+
+      if (stat.isDirectory()) {
+        await fs.mkdir(destination, { recursive: true });
+        await walk(source);
+        continue;
+      }
+      if (!stat.isFile()) continue;
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.copyFile(source, destination, fsConstants.COPYFILE_FICLONE);
+    }
+  };
+
+  await fs.mkdir(sandboxRoot, { recursive: true });
+  await walk(sourceRoot);
+}
+
 export class CommandSandboxMaterializer {
   private readonly pathPolicy = new WorkspacePathPolicy();
 
   constructor(
     private readonly projects: () => Promise<ProjectRecord[]>,
     private readonly systemWorkspaceRoot: () => string = getSystemWorkspaceRoot,
+    private readonly temporaryRootFactory: TemporaryRootFactory = () => fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-command-sandbox-')),
   ) {}
 
   async materialize(projectId: string, changes: ReturnType<typeof compactShadowWorkspaceChanges>): Promise<MaterializedCommandSandbox> {
@@ -94,7 +152,7 @@ export class CommandSandboxMaterializer {
     }
 
     const sourceRoot = await fs.realpath(path.resolve(sourcePath));
-    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-command-sandbox-'));
+    const temporaryRoot = await this.temporaryRootFactory();
     const sandboxRoot = path.join(temporaryRoot, 'workspace');
     const homePath = path.join(temporaryRoot, 'home');
     const tempPath = path.join(temporaryRoot, 'tmp');
@@ -110,30 +168,34 @@ export class CommandSandboxMaterializer {
         fs.mkdir(tempPath, { recursive: true }),
       ]);
 
-      await fs.cp(sourceRoot, sandboxRoot, {
-        recursive: true,
-        dereference: true,
-        force: true,
-        errorOnExist: false,
-        preserveTimestamps: false,
-        mode: fsConstants.COPYFILE_FICLONE,
-        filter: async (source) => {
-          const relative = path.relative(sourceRoot, source);
-          if (!relative) return true;
-          if (!isAllowedSandboxSource(relative, this.pathPolicy)) return false;
-          try {
-            const stat = await fs.lstat(source);
-            if (!stat.isSymbolicLink()) return true;
-            const target = await fs.realpath(source);
-            if (!isInside(sourceRoot, target)) return false;
-            const targetRelative = path.relative(sourceRoot, target);
-            if (!targetRelative) return false;
-            return isAllowedSandboxSource(targetRelative, this.pathPolicy);
-          } catch {
-            return false;
-          }
-        },
-      });
+      if (isInside(sourceRoot, sandboxRoot)) {
+        await copyAllowedTree(sourceRoot, sandboxRoot, this.pathPolicy, temporaryRoot);
+      } else {
+        await fs.cp(sourceRoot, sandboxRoot, {
+          recursive: true,
+          dereference: true,
+          force: true,
+          errorOnExist: false,
+          preserveTimestamps: false,
+          mode: fsConstants.COPYFILE_FICLONE,
+          filter: async (source) => {
+            const relative = path.relative(sourceRoot, source);
+            if (!relative) return true;
+            if (!isAllowedSandboxSource(relative, this.pathPolicy)) return false;
+            try {
+              const stat = await fs.lstat(source);
+              if (!stat.isSymbolicLink()) return true;
+              const target = await fs.realpath(source);
+              if (!isInside(sourceRoot, target)) return false;
+              const targetRelative = path.relative(sourceRoot, target);
+              if (!targetRelative) return false;
+              return isAllowedSandboxSource(targetRelative, this.pathPolicy);
+            } catch {
+              return false;
+            }
+          },
+        });
+      }
 
       for (const change of compactShadowWorkspaceChanges(changes)) {
         const relative = safeRelativePath(change.path);
