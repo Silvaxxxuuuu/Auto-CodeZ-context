@@ -225,10 +225,6 @@ async function verifyLmStudioChatSelection() {
   await modelSelect.selectOption(graniteChoice);
   const save = page.locator('#save-available-ai-settings');
   await page.waitForFunction(() => !document.querySelector('#save-available-ai-settings')?.hasAttribute('disabled'));
-  const navigation = page.waitForEvent('framenavigated', {
-    predicate: (frame) => frame === page.mainFrame(),
-    timeout: 15_000,
-  }).catch(() => null);
   await save.click();
 
   await page.waitForFunction(
@@ -239,7 +235,6 @@ async function verifyLmStudioChatSelection() {
     created.id,
     { timeout: 30_000 },
   );
-  await navigation;
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
   await page.waitForFunction(
     async (chatId) => {
