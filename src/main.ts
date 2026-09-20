@@ -12,6 +12,7 @@ import { ShadowAwareGitRuntime } from './agent/shadow-aware-git-runtime';
 import { AgentRuntime } from './agent/agent-runtime';
 import { ChatRuntime } from './ai/chat-runtime';
 import { ProviderRequestJournal } from './ai/provider-request-journal';
+import { retryAfterFromMessage } from './ai/provider-errors';
 import { runWithAbortSignal } from './ai/request-cancellation';
 import { TerminalService, type TerminalEvent } from './agent/terminal-service';
 import { GitService } from './agent/git-service';
@@ -426,6 +427,29 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+function isRateLimitFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /limite de requisi[cç][oõ]es|too many requests|rate[_ -]?limit|HTTP\s*429/i.test(message);
+}
+
+function rateLimitRecoveryDelayMs(error: unknown): number {
+  const message = error instanceof Error ? error.message : String(error);
+  return Math.min(120_000, Math.max(1_000, retryAfterFromMessage(message) ?? 60_000));
+}
+
+async function waitForExecutionRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, delayMs);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  signal.throwIfAborted();
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -793,7 +817,45 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
     if (!isRetryOfPersistedUserMessage) await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const workingChat = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
-    const result = await runWithAbortSignal(controller.signal, () => agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId));
+    let result;
+    try {
+      result = await runWithAbortSignal(controller.signal, () => agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId));
+    } catch (initialError) {
+      let recoveryError: unknown = initialError;
+      let recoveryAttempts = 0;
+      let recoveryWaitMs = 0;
+      while (
+        isRateLimitFailure(recoveryError)
+        && agentRuntime.hasRecoverableForChat(chatId)
+        && recoveryAttempts < 2
+        && recoveryWaitMs < 180_000
+      ) {
+        const delayMs = Math.min(rateLimitRecoveryDelayMs(recoveryError), 180_000 - recoveryWaitMs);
+        recoveryAttempts += 1;
+        recoveryWaitMs += delayMs;
+        emit({
+          type: 'activity',
+          chatId,
+          runId,
+          activity: {
+            runId,
+            chatId,
+            type: 'action',
+            message: `Azure atingiu o limite temporário. A execução foi preservada e continua automaticamente em cerca de ${Math.max(1, Math.ceil(delayMs / 1000))}s.`,
+            status: 'pending',
+          },
+        });
+        await waitForExecutionRetry(delayMs, controller.signal);
+        try {
+          result = await runWithAbortSignal(controller.signal, () => agentRuntime.resumeRecovered(runId, controller.signal));
+          recoveryError = undefined;
+          break;
+        } catch (error) {
+          recoveryError = error;
+        }
+      }
+      if (recoveryError) throw recoveryError;
+    }
     await chatManager.update({ ...workingChat, messages: result.messages });
     if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
     else if (executionManager.get(chatId)?.state === 'running') {

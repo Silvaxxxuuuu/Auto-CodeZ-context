@@ -43,7 +43,7 @@ function activityMessage(toolName: ToolName, result: AIToolResult): string {
     return command ? `Executado: ${command}` : 'Comando concluído.';
   }
   const changed = changeLabel(result);
-  if (changed) return `${toolName === 'read_file' ? 'Lido' : 'Atualizado'}: ${changed}`;
+  if (changed) return `${toolName === 'read_file' ? 'Lido' : 'Preparado'}: ${changed}`;
   if (toolName === 'search_files') return 'Pesquisa concluída.';
   if (toolName.startsWith('git_')) return 'Operação Git concluída.';
   return 'Operação concluída.';

@@ -163,7 +163,7 @@ test('Azure Foundry sends Kimi deployments through chat completions with api-key
 
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     assert.equal(body.model, 'Kimi-K2.6');
-    assert.equal(body.max_completion_tokens, 16_384);
+    assert.equal(body.max_completion_tokens, 8_192);
     assert.ok(Array.isArray(body.messages));
     assert.ok(Array.isArray(body.tools));
     assert.equal('input' in body, false);
@@ -233,7 +233,7 @@ test('Azure Foundry streams Kimi chat completions and tool calls', async () => {
     assert.equal(String(input), 'https://example.services.ai.azure.com/openai/v1/chat/completions');
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     assert.equal(body.stream, true);
-    assert.equal(body.max_completion_tokens, 16_384);
+    assert.equal(body.max_completion_tokens, 8_192);
     return new Response(sse, {
       status: 200,
       headers: { 'content-type': 'text/event-stream' },
@@ -550,7 +550,7 @@ test('Azure Foundry preserves retry-after metadata when automatic retry is not s
     status: 429,
     headers: {
       'content-type': 'application/json',
-      'retry-after': '121',
+      'retry-after': '301',
     },
   }), async () => {
     await assert.rejects(
@@ -560,9 +560,44 @@ test('Azure Foundry preserves retry-after metadata when automatic retry is not s
       ),
       (error: unknown) => {
         assert.equal((error as { status?: number }).status, 429);
-        assert.equal((error as { retryAfterMs?: number }).retryAfterMs, 121_000);
+        assert.equal((error as { retryAfterMs?: number }).retryAfterMs, 301_000);
         return true;
       },
     );
+  });
+});
+
+
+test('Azure Foundry retries from rate-limit reset metadata when retry-after is absent', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+  let attempts = 0;
+
+  await withMockedFetch(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      return new Response(JSON.stringify({ error: { message: 'Too many requests' } }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'x-ratelimit-remaining-tokens': '0',
+          'x-ratelimit-reset-tokens': '0',
+        },
+      });
+    }
+    return jsonResponse({
+      choices: [{ message: { content: 'Reset header recuperado' }, finish_reason: 'stop' }],
+    });
+  }, async () => {
+    const response = await adapter.send(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    );
+    assert.equal(attempts, 2);
+    assert.equal(response.content, 'Reset header recuperado');
   });
 });

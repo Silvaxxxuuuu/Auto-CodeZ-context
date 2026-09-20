@@ -14,11 +14,22 @@ import { fetchWithTimeout, parseSSE } from '../sse';
 const MODEL_LIST_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 const FOUNDRY_STREAM_IDLE_TIMEOUT_MS = 300_000;
-const FOUNDRY_MAX_RATE_LIMIT_RETRIES = 5;
-const FOUNDRY_MAX_AUTO_RETRY_WAIT_MS = 120_000;
-const FOUNDRY_MAX_TOTAL_RATE_LIMIT_WAIT_MS = 180_000;
+const FOUNDRY_MAX_RATE_LIMIT_RETRIES = 8;
+const FOUNDRY_MAX_AUTO_RETRY_WAIT_MS = 300_000;
+const FOUNDRY_MAX_TOTAL_RATE_LIMIT_WAIT_MS = 600_000;
 const FOUNDRY_RETRY_BACKOFF_BASE_MS = 2_000;
-const KIMI_K2_6_MAX_COMPLETION_TOKENS = 16_384;
+const KIMI_K2_6_MAX_COMPLETION_TOKENS = 8_192;
+
+type FoundryRateLimitBudget = {
+  limitRequests?: number;
+  limitTokens?: number;
+  remainingRequests?: number;
+  remainingTokens?: number;
+  resetRequestsAt?: number;
+  resetTokensAt?: number;
+};
+
+const foundryRateLimitBudgets = new Map<string, FoundryRateLimitBudget>();
 
 function normalizeBaseUrl(value?: string): string {
   const raw = value?.trim().replace(/\/+$/, '');
@@ -296,6 +307,114 @@ function retryAfterMs(response: Response): number | undefined {
   return undefined;
 }
 
+function finiteHeaderNumber(response: Response, name: string): number | undefined {
+  const raw = response.headers.get(name);
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function durationHeaderMs(response: Response, name: string): number | undefined {
+  const raw = response.headers.get(name)?.trim().toLowerCase();
+  if (!raw) return undefined;
+  if (/^\d+(?:\.\d+)?$/.test(raw)) return Number(raw) * 1000;
+
+  let total = 0;
+  let matched = false;
+  const pattern = /(\d+(?:\.\d+)?)\s*(ms|s|m|h)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(raw)) !== null) {
+    matched = true;
+    const value = Number(match[1]);
+    if (match[2] === 'ms') total += value;
+    else if (match[2] === 's') total += value * 1000;
+    else if (match[2] === 'm') total += value * 60_000;
+    else total += value * 3_600_000;
+  }
+  return matched ? total : undefined;
+}
+
+function rateLimitBudget(response: Response, now = Date.now()): FoundryRateLimitBudget {
+  const resetRequestsMs = durationHeaderMs(response, 'x-ratelimit-reset-requests');
+  const resetTokensMs = durationHeaderMs(response, 'x-ratelimit-reset-tokens');
+  return {
+    limitRequests: finiteHeaderNumber(response, 'x-ratelimit-limit-requests'),
+    limitTokens: finiteHeaderNumber(response, 'x-ratelimit-limit-tokens'),
+    remainingRequests: finiteHeaderNumber(response, 'x-ratelimit-remaining-requests'),
+    remainingTokens: finiteHeaderNumber(response, 'x-ratelimit-remaining-tokens'),
+    ...(resetRequestsMs !== undefined ? { resetRequestsAt: now + resetRequestsMs } : {}),
+    ...(resetTokensMs !== undefined ? { resetTokensAt: now + resetTokensMs } : {}),
+  };
+}
+
+function hasRateLimitMetadata(value: FoundryRateLimitBudget): boolean {
+  return Object.values(value).some((item) => item !== undefined);
+}
+
+function requestRateLimitKey(input: RequestInfo | URL, init: RequestInit): string {
+  let model = '';
+  if (typeof init.body === 'string') {
+    try {
+      const parsed = JSON.parse(init.body) as { model?: unknown };
+      if (typeof parsed.model === 'string') model = parsed.model.trim();
+    } catch {
+    }
+  }
+  return `${String(input)}::${model}`;
+}
+
+function estimatedRequestTokens(init: RequestInit): number {
+  if (typeof init.body !== 'string') return 0;
+  let maximumOutput = 0;
+  try {
+    const parsed = JSON.parse(init.body) as { max_completion_tokens?: unknown; max_tokens?: unknown };
+    const candidate = typeof parsed.max_completion_tokens === 'number'
+      ? parsed.max_completion_tokens
+      : typeof parsed.max_tokens === 'number'
+        ? parsed.max_tokens
+        : 0;
+    if (Number.isFinite(candidate) && candidate > 0) maximumOutput = candidate;
+  } catch {
+  }
+  return Math.ceil(init.body.length / 4) + maximumOutput;
+}
+
+function knownBudgetWaitMs(budget: FoundryRateLimitBudget | undefined, estimatedTokens: number, now = Date.now()): number {
+  if (!budget) return 0;
+  const waits: number[] = [];
+  if (budget.remainingRequests !== undefined && budget.remainingRequests < 1 && budget.resetRequestsAt) {
+    waits.push(Math.max(0, budget.resetRequestsAt - now));
+  }
+  if (estimatedTokens > 0 && budget.remainingTokens !== undefined && budget.remainingTokens < estimatedTokens && budget.resetTokensAt) {
+    waits.push(Math.max(0, budget.resetTokensAt - now));
+  }
+  return waits.length ? Math.max(...waits) + 250 : 0;
+}
+
+function responseResetWaitMs(response: Response): number | undefined {
+  const budget = rateLimitBudget(response);
+  const waits = [
+    budget.resetRequestsAt ? Math.max(0, budget.resetRequestsAt - Date.now()) : undefined,
+    budget.resetTokensAt ? Math.max(0, budget.resetTokensAt - Date.now()) : undefined,
+  ].filter((value): value is number => value !== undefined);
+  return waits.length ? Math.max(...waits) + 250 : undefined;
+}
+
+function rateLimitDiagnostic(response: Response, message: string): Record<string, unknown> {
+  const budget = rateLimitBudget(response);
+  return {
+    status: response.status,
+    message: message.slice(0, 240),
+    retryAfterMs: retryAfterMs(response),
+    limitRequests: budget.limitRequests,
+    remainingRequests: budget.remainingRequests,
+    limitTokens: budget.limitTokens,
+    remainingTokens: budget.remainingTokens,
+    resetRequestsMs: budget.resetRequestsAt ? Math.max(0, budget.resetRequestsAt - Date.now()) : undefined,
+    resetTokensMs: budget.resetTokensAt ? Math.max(0, budget.resetTokensAt - Date.now()) : undefined,
+  };
+}
+
 async function rateLimitMessage(response: Response): Promise<string> {
   try {
     const text = await response.clone().text();
@@ -337,21 +456,36 @@ async function fetchFoundryWithRateLimitRetry(
 ): Promise<Response> {
   let response: Response | undefined;
   let totalWaitMs = 0;
+  const budgetKey = requestRateLimitKey(input, init);
+  const estimatedTokens = estimatedRequestTokens(init);
+  const proactiveWaitMs = knownBudgetWaitMs(foundryRateLimitBudgets.get(budgetKey), estimatedTokens);
+  if (proactiveWaitMs > 0 && proactiveWaitMs <= FOUNDRY_MAX_AUTO_RETRY_WAIT_MS) {
+    await waitForRetry(proactiveWaitMs, signal);
+  }
 
   for (let attempt = 0; attempt <= FOUNDRY_MAX_RATE_LIMIT_RETRIES; attempt += 1) {
     response = await fetchWithTimeout(input, { ...init, signal }, timeoutMs);
-    if (response.status !== 429) return response;
+    if (response.status !== 429) {
+      const budget = rateLimitBudget(response);
+      if (hasRateLimitMetadata(budget)) foundryRateLimitBudgets.set(budgetKey, budget);
+      return response;
+    }
 
     const message = await rateLimitMessage(response);
     const kind = classifyProviderError(response.status, message || 'Too many requests');
-    const suggestedDelayMs = retryAfterMs(response) ?? retryAfterFromMessage(message);
-    const delayMs = suggestedDelayMs ?? fallbackRetryDelayMs(attempt);
+    const suggestedDelayMs = retryAfterMs(response)
+      ?? retryAfterFromMessage(message)
+      ?? responseResetWaitMs(response);
+    const delayMs = suggestedDelayMs ?? Math.min(60_000, fallbackRetryDelayMs(attempt));
     const canRetry = attempt < FOUNDRY_MAX_RATE_LIMIT_RETRIES
       && kind === 'rate_limit'
       && delayMs <= FOUNDRY_MAX_AUTO_RETRY_WAIT_MS
       && totalWaitMs + delayMs <= FOUNDRY_MAX_TOTAL_RATE_LIMIT_WAIT_MS;
 
-    if (!canRetry) return response;
+    if (!canRetry) {
+      console.warn('[Auto CodeZ Azure rate limit]', JSON.stringify(rateLimitDiagnostic(response, message)));
+      return response;
+    }
 
     try {
       await response.body?.cancel();

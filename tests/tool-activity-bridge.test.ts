@@ -53,3 +53,20 @@ test('preserva somente a provenance estruturada da tool para observabilidade pos
   const input = toActivityInput(snapshot);
   assert.deepEqual(input.sources, result.sources);
 });
+
+
+test('file mutations are described as prepared until the shadow workspace is published', () => {
+  const snapshot = createToolActivitySnapshot('run-shadow', 'call-shadow', 'create_file', {
+    toolCallId: 'call-shadow',
+    ok: true,
+    changes: [{
+      path: 'Desktop/GameZone/index.html',
+      type: 'created',
+      before: '',
+      after: '<h1>GameZone</h1>',
+      addedLines: 1,
+      removedLines: 0,
+    }],
+  });
+  assert.equal(snapshot.message, 'Preparado: Desktop/GameZone/index.html');
+});
