@@ -41,6 +41,29 @@ jobs:
       - name: ESLint validation
         run: npm run lint
 
+      - name: Azure deployment script syntax
+        shell: pwsh
+        run: |
+          $scripts = @(
+            'infra/azure/account-api/bootstrap.ps1',
+            'infra/azure/account-api/configure-providers.ps1',
+            'infra/azure/account-api/smoke.ps1',
+            'infra/azure/account-api/destroy.ps1'
+          )
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$script: $($_.Message)" }
+              throw "PowerShell parse failed for $script"
+            }
+          }
+
       - name: Electron Forge package build
         run: npm run package
 
