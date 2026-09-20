@@ -67,25 +67,38 @@ test('send includes workspace context and tool definitions only when tools are s
   assert.equal(request.messages[2].content, 'Inspect the current implementation.');
 });
 
-test('trivial greeting skips workspace context and tool schemas', async () => {
+test('trivial greeting isolates the current turn from old task history, workspace context and tools', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
     tool('read_file', false, false),
     tool('run_command', false, true),
   ]);
+  const greeting = chat('test-model', 'project-test', 'Oi?');
+  greeting.messages = [
+    { role: 'user', content: 'Crie o site GameHub completo e use ferramentas para escrever os arquivos.' },
+    { role: 'assistant', content: '<toolcall>functions.create_file {"path":"GameHub/index.html"}</toolcall>' },
+    { role: 'tool', content: '<!DOCTYPE html><html><body>GameHub</body></html>' },
+    { role: 'user', content: 'Oi?' },
+  ];
 
-  await runtime.send(config, chat('test-model', 'project-test', 'Oi'), 'large workspace context that should not be attached');
+  await runtime.send(config, greeting, 'large workspace context that should not be attached');
   const request = requests[0] as { messages: Array<{ role: string; content: string }>; tools?: unknown[]; toolsEnabled: boolean; projectContext?: string };
   assert.equal(request.toolsEnabled, false);
   assert.equal(request.tools, undefined);
   assert.equal(request.projectContext, undefined);
   assert.equal(request.messages.some((message) => message.content.includes('large workspace context')), false);
+  assert.equal(request.messages.some((message) => message.content.includes('GameHub')), false);
+  assert.equal(request.messages.some((message) => message.content.includes('<toolcall>')), false);
+  assert.deepEqual(
+    request.messages.filter((message) => message.role === 'user').map((message) => message.content),
+    ['Oi?'],
+  );
   assert.equal(
     request.messages.some((message) => /não retome, continue, execute nem complete automaticamente tarefas de turnos anteriores/i.test(message.content)),
     true,
   );
-  assert.equal(request.messages.at(-1)?.content, 'Oi');
+  assert.equal(request.messages.at(-1)?.content, 'Oi?');
 });
 
 test('send exposes protected file tools, run_command and plugin gateway to a normal chat but excludes Git', async () => {
@@ -186,4 +199,48 @@ test('stream preserves provider stream events and final response', async () => {
   for await (const event of runtime.stream(config, chat())) events.push(event);
 
   assert.deepEqual(events, providerEvents);
+});
+
+
+test('streaming greeting also receives only the current lightweight user turn', async () => {
+  const registry = new ProviderRegistry();
+  const requests: Array<{ messages: Array<{ role: string; content: string }>; toolsEnabled: boolean; tools?: unknown[] }> = [];
+  registry.register({
+    id: config.id,
+    displayName: config.displayName,
+    async listModels() {
+      return [{ id: 'test-model', name: 'Test Model', providerId: config.id, capabilities: ['text', 'tools', 'streaming'] }];
+    },
+    async send() {
+      return { content: 'Oi!', model: 'test-model', providerId: config.id };
+    },
+    async *stream(_config, request) {
+      requests.push(request);
+      yield { type: 'start' };
+      yield { type: 'delta', text: 'Oi!' };
+      yield { type: 'complete', response: { content: 'Oi!', model: 'test-model', providerId: config.id } };
+    },
+  });
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    tool('create_file', true, true),
+  ]);
+  const greeting = chat('test-model', 'project-test', 'Opa');
+  greeting.messages = [
+    { role: 'user', content: 'Continue criando todos os arquivos do GameHub.' },
+    { role: 'assistant', content: '<toolcall>functions.create_file</toolcall>' },
+    { role: 'user', content: 'Opa' },
+  ];
+
+  const events: AIStreamEvent[] = [];
+  for await (const event of runtime.stream(config, greeting, 'GameHub workspace context')) events.push(event);
+
+  assert.deepEqual(events.map((event) => event.type), ['start', 'delta', 'complete']);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].toolsEnabled, false);
+  assert.equal(requests[0].tools, undefined);
+  assert.equal(requests[0].messages.some((message) => message.content.includes('GameHub')), false);
+  assert.deepEqual(
+    requests[0].messages.filter((message) => message.role === 'user').map((message) => message.content),
+    ['Opa'],
+  );
 });

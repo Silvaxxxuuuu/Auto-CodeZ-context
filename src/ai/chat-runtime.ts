@@ -170,26 +170,28 @@ export class ChatRuntime {
     const lightweightTurn = isLightweightConversationTurn(chat);
 
     let webContext: string | undefined;
-    const groundingDecision = this.webGrounding.classify(chat.messages);
-    if (groundingDecision.required) {
-      this.activity.emit({ type: 'action', message: 'Verificando informações atuais na web.', status: 'running' });
-      try {
-        const grounding = await runWithAbortSignal(signal, () => this.webGrounding.ground(chat.messages, signal));
-        if (grounding) {
-          webContext = grounding.context;
-          this.activity.emit({
-            type: 'action',
-            message: grounding.cached
-              ? `Contexto Web atual reutilizado: ${grounding.sources.length} fonte${grounding.sources.length === 1 ? '' : 's'}.`
-              : `Grounding Web concluído: ${grounding.sources.length} fonte${grounding.sources.length === 1 ? '' : 's'} consultada${grounding.sources.length === 1 ? '' : 's'}.`,
-            status: 'success',
-          });
+    if (!lightweightTurn) {
+      const groundingDecision = this.webGrounding.classify(chat.messages);
+      if (groundingDecision.required) {
+        this.activity.emit({ type: 'action', message: 'Verificando informações atuais na web.', status: 'running' });
+        try {
+          const grounding = await runWithAbortSignal(signal, () => this.webGrounding.ground(chat.messages, signal));
+          if (grounding) {
+            webContext = grounding.context;
+            this.activity.emit({
+              type: 'action',
+              message: grounding.cached
+                ? `Contexto Web atual reutilizado: ${grounding.sources.length} fonte${grounding.sources.length === 1 ? '' : 's'}.`
+                : `Grounding Web concluído: ${grounding.sources.length} fonte${grounding.sources.length === 1 ? '' : 's'} consultada${grounding.sources.length === 1 ? '' : 's'}.`,
+              status: 'success',
+            });
+          }
+        } catch (error) {
+          if (isAbortError(error)) throw error;
+          const message = error instanceof Error ? error.message : String(error);
+          this.activity.emit({ type: 'action', message: 'Não foi possível obter as informações atuais necessárias.', status: 'failed', error: message });
+          throw new Error(`A solicitação exige informação atual, mas o grounding Web falhou: ${message}`);
         }
-      } catch (error) {
-        if (isAbortError(error)) throw error;
-        const message = error instanceof Error ? error.message : String(error);
-        this.activity.emit({ type: 'action', message: 'Não foi possível obter as informações atuais necessárias.', status: 'failed', error: message });
-        throw new Error(`A solicitação exige informação atual, mas o grounding Web falhou: ${message}`);
       }
     }
 
@@ -202,7 +204,10 @@ export class ChatRuntime {
     }
     if (webContext) systemMessages.push({ role: 'system' as const, content: webContext });
     if (projectContext && !lightweightTurn) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
-    const messages = [...systemMessages, ...chat.messages];
+    const currentUserMessage = [...chat.messages].reverse().find((message) => message.role === 'user');
+    const messages = lightweightTurn && currentUserMessage
+      ? [...systemMessages, currentUserMessage]
+      : [...systemMessages, ...chat.messages];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
     if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
     const tools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => SYSTEM_CHAT_TOOL_NAMES.has(tool.name));
