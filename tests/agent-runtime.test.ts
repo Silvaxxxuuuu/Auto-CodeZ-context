@@ -193,3 +193,41 @@ test('persists a recoverable cycle after a provider failure and never re-execute
 });
 
 function fixtureDataResponses(): AIResponse[] { return [{ content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall('call-approval')] }, { content: 'Finished.', model: 'test-model', providerId: config.id }]; }
+
+
+test('identical approval-dependent calls in one provider round require only one approval', async () => {
+  const duplicateCall = (id: string): AIToolCall => ({
+    id,
+    name: 'write_file',
+    input: { path: 'src/index.ts', content: 'export const value = 99;' },
+  });
+  const fixtureData = await fixture([
+    {
+      content: '',
+      model: 'test-model',
+      providerId: config.id,
+      toolCalls: [duplicateCall('dup-a'), duplicateCall('dup-b')],
+    },
+    { content: 'Finished.', model: 'test-model', providerId: config.id },
+  ]);
+
+  try {
+    const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask');
+    assert.equal(pending.pendingApprovalIds.length, 1);
+    assert.equal(pending.toolRounds, 1);
+    assert.equal(fixtureData.agent.listExternalApprovals({ chatId: 'chat-test' }).length, 1);
+    assert.match(
+      pending.messages.find((message) => message.toolCallId === 'dup-b')?.content ?? '',
+      /chamada duplicada não executada/i,
+    );
+
+    const resumed = await fixtureData.agent.resume(pending.pendingApprovalIds[0]);
+    assert.equal(resumed.pendingApprovalIds.length, 0);
+    assert.equal(resumed.toolRounds, 1);
+    assert.equal(resumed.response.content, 'Finished.');
+    assert.equal(await fs.readFile(path.join(fixtureData.root, 'src', 'index.ts'), 'utf8'), 'export const value = 99;');
+    assert.equal(fixtureData.agent.listExternalApprovals({ chatId: 'chat-test' }).length, 0);
+  } finally {
+    await fixtureData.cleanup();
+  }
+});
