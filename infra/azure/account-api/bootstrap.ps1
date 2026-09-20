@@ -60,6 +60,22 @@ if (-not (Test-Path (Join-Path $accountApiRoot 'Dockerfile'))) {
 Invoke-Az -Arguments @('account', 'set', '--subscription', $SubscriptionId)
 Invoke-Az -Arguments @('extension', 'add', '--name', 'containerapp', '--upgrade', '--only-show-errors')
 
+foreach ($providerNamespace in @(
+  'Microsoft.App',
+  'Microsoft.ContainerRegistry',
+  'Microsoft.DBforPostgreSQL',
+  'Microsoft.ManagedIdentity',
+  'Microsoft.OperationalInsights'
+)) {
+  Write-Host "Registrando resource provider $providerNamespace..."
+  Invoke-Az -Arguments @(
+    'provider', 'register',
+    '--namespace', $providerNamespace,
+    '--wait',
+    '--output', 'none'
+  )
+}
+
 $suffix = Get-StableSuffix "$SubscriptionId|$NamePrefix"
 $normalizedPrefix = ($NamePrefix.ToLowerInvariant() -replace '[^a-z0-9]', '')
 if ($normalizedPrefix.Length -lt 3) {
@@ -158,6 +174,9 @@ Invoke-Az -Arguments @(
   '--scope', $acrId,
   '--output', 'none'
 )
+
+Write-Host 'Aguardando propagação inicial do AcrPull...'
+Start-Sleep -Seconds 20
 
 Invoke-Az -Arguments @(
   'containerapp', 'env', 'create',
