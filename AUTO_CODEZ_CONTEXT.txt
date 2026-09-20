@@ -8495,3 +8495,112 @@ GPT-5.6 Luna:
 
 Não retomar o bootstrap Account API para iniciar estes testes.
 Não instalar Docker apenas para este laboratório.
+
+
+------------------------------------------------------------
+24.50. AZURE FOUNDRY REAL ACCEPTANCE + COMMAND SANDBOX FIX
+------------------------------------------------------------
+
+Checkpoint em 20/09/2026.
+
+ESTADO VALIDADO
+
+HEAD funcional:
+0806fc2e409b44aabe1073c0735394b445764c9f
+test(agent): canonicalize nested sandbox assertion on Windows
+
+Commits desta sequência:
+- 5b27e0f02c57bef5c710aafb6566cb6fc88d43ff
+  fix(agent): materialize system command sandbox inside home safely
+- 05722eb4745dcc74889fcba96d9c12e9b47eb414
+  test(agent): cover nested system command sandbox
+- ca920b26bfd761f94cad0538f57aab2dbb84f64d
+  fix(agent): suppress duplicate approval calls in one tool round
+- 8cace814a231a9282c003e97dbcc9bc8c4398e3b
+  test(agent): cover duplicate approval suppression
+- 2fe177dc7ef0156019e96136bc2c7f4e0cb1fe96
+  fix(agent): canonicalize nested command sandbox root on Windows
+- dcbe16feb5579da605da8c4aaaea99f5fe5d7359
+  polish(mcp): use Lucide computer icon in rail
+- 0806fc2e409b44aabe1073c0735394b445764c9f
+  test(agent): canonicalize nested sandbox assertion on Windows
+
+CI DO HEAD
+
+- Validate Auto CodeZ #4284: SUCCESS
+- Validate Auto CodeZ push #4283: SUCCESS
+- Validate Account API #109: SUCCESS
+- Visual Auto CodeZ #964: SUCCESS
+
+AZURE FOUNDRY REAL ACCEPTANCE
+
+Deployment real usado:
+- provider: Azure Foundry
+- model/deployment: Kimi-K2.6
+- endpoint base confirmado pelo Foundry:
+  https://sebastiao54e-1097-resource.services.ai.azure.com/openai/v1
+- protocolo real:
+  /chat/completions
+- autenticação:
+  api-key
+
+Fluxos já confirmados manualmente no app:
+- chat real com resposta do Kimi-K2.6;
+- Web search com fontes;
+- read_file;
+- create_file;
+- aprovação local de escrita;
+- arquivo criado corretamente;
+- edição de arquivo existente;
+- diff local;
+- aprovação local de edição;
+- conteúdo persistido corretamente.
+
+Teste run_command revelou bug real:
+- chat normal usa SYSTEM_WORKSPACE_ID;
+- raiz protegida: Home do usuário;
+- no Windows, os temporários normalmente ficam dentro da Home;
+- o command sandbox tentava copiar a Home para um descendente dela própria;
+- Node retornava ERR_FS_CP_EINVAL / cannot copy source to a subdirectory of self.
+
+CORREÇÃO DO COMMAND SANDBOX
+
+- quando o sandbox temporário fica dentro da própria sourceRoot, a materialização usa cópia controlada por árvore;
+- arquivos sensíveis continuam filtrados;
+- diretório temporário do próprio sandbox é excluído da caminhada;
+- caminhos temporários são canonicalizados via fs.realpath para lidar com nomes curtos do Windows, ex. RUNNER~1 versus runneradmin;
+- regressão específica adicionada para system workspace com sandbox nested dentro da origem.
+
+APROVAÇÃO DUPLICADA
+
+Também foi corrigido o caso em que o provider retorna chamadas idênticas approval-dependent na mesma rodada:
+- somente uma aprovação real é materializada;
+- duplicata recebe resultado interno explicando que operação idêntica já aguarda aprovação;
+- não deve surgir segunda aprovação para o mesmo comando na mesma rodada.
+
+MCP UI
+
+O botão MCP no rail agora usa o ícone Lucide computer fornecido pelo usuário:
+- sem alterar tamanho do rail;
+- sem alterar hover, active state ou alinhamento;
+- substitui o pseudo-ícone antigo.
+
+PRÓXIMO TESTE MANUAL
+
+Atualizar a branch local e repetir em chat normal:
+"Execute um comando no terminal para mostrar a versão do Node.js instalada neste projeto."
+
+Esperado:
+1. uma única aprovação;
+2. comando exibido como node -v;
+3. após aprovar, sem ERR_FS_CP_EINVAL;
+4. stdout real do Node retorna ao Kimi;
+5. Kimi responde com a versão encontrada.
+
+Se esse teste passar, continuar com:
+- cancelamento;
+- erro controlado;
+- tarefa multi-etapas usando mais de uma ferramenta;
+- registrar Azure Foundry como operacional para o laboratório real.
+
+PR #9 continua OPEN / DRAFT / sem merge.
