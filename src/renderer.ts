@@ -817,6 +817,7 @@ window.autoCodez.onActivity((event) => {
 window.addEventListener('auto-codez-chat-settings-updated', (event) => {
   const updated = (event as CustomEvent<Chat>).detail;
   if (!updated?.id) return;
+  closeModal();
   const index = chats.findIndex((chat) => chat.id === updated.id);
   if (index >= 0) chats[index] = updated;
   else chats.unshift(updated);

@@ -184,7 +184,19 @@ async function ensureSnapshot(): Promise<void> {
   await snapshotInFlight;
 }
 
+function selectedChatId(): string {
+  return document.querySelector<HTMLElement>('.chat-item.selected[data-chat]')?.dataset.chat || '';
+}
+
+function syncActiveModalChatId(): void {
+  const selected = selectedChatId();
+  if (!selected || selected === activeModalChatId) return;
+  activeModalChatId = selected;
+  activeChat = undefined;
+}
+
 async function loadActiveChat(): Promise<void> {
+  if (!activeModalChatId) syncActiveModalChatId();
   if (!activeModalChatId) return;
   try {
     const state = await appApi().getState();
@@ -318,6 +330,7 @@ function scheduleEnhancement(): void {
       observedAiSelect = null;
       return;
     }
+    syncActiveModalChatId();
     const isNewSelect = observedAiSelect !== select;
     const hadUnifiedOption = [...select.options].some((option) => option.value === LOCAL_OPTION_VALUE);
     observedAiSelect = select;
@@ -361,6 +374,7 @@ async function saveUnifiedLocal(): Promise<void> {
   if (!model.installed || !model.runtime?.available || model.compatibility.level === 'blocked') return;
   if (model.compatibility.level === 'limit' && localOverrideChoiceId !== choice.id) return;
 
+  syncActiveModalChatId();
   if (!activeChat || activeChat.id !== activeModalChatId) await loadActiveChat();
   if (!activeChat) return;
   button.disabled = true;

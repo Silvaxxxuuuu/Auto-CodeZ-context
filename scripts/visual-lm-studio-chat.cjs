@@ -226,6 +226,11 @@ async function verifyLmStudioChatSelection() {
   const save = page.locator('#save-available-ai-settings');
   await page.waitForFunction(() => !document.querySelector('#save-available-ai-settings')?.hasAttribute('disabled'));
   await save.click();
+  await page.waitForFunction(
+    () => !document.querySelector('#modal-root')?.firstElementChild,
+    undefined,
+    { timeout: 15_000 },
+  );
 
   await page.waitForFunction(
     async (chatId) => {
@@ -245,11 +250,27 @@ async function verifyLmStudioChatSelection() {
     { timeout: 20_000 },
   );
   await page.locator(`.chat-item.selected[data-chat="${created.id}"]`).first().waitFor({ state: 'visible', timeout: 15_000 });
-  await page.waitForFunction((chatId) => {
-    const selected = document.querySelector(`.chat-item.selected[data-chat="${CSS.escape(chatId)}"]`);
-    const header = document.querySelector('#chat-header');
-    return Boolean(selected?.textContent?.includes('LM Studio') && header?.textContent?.includes('LM Studio') && header.textContent.includes('granite-local'));
-  }, created.id, { timeout: 15_000 });
+  try {
+    await page.waitForFunction((chatId) => {
+      const selected = document.querySelector(`.chat-item.selected[data-chat="${CSS.escape(chatId)}"]`);
+      const header = document.querySelector('#chat-header');
+      return Boolean(selected?.textContent?.includes('LM Studio') && header?.textContent?.includes('LM Studio') && header.textContent.includes('granite-local'));
+    }, created.id, { timeout: 15_000 });
+  } catch (error) {
+    const diagnostics = await page.evaluate(async (chatId) => {
+      const state = await window.autoCodez.getState();
+      const selected = document.querySelector(`.chat-item.selected[data-chat="${CSS.escape(chatId)}"]`);
+      const header = document.querySelector('#chat-header');
+      return {
+        selectedText: selected?.textContent || '',
+        headerText: header?.textContent || '',
+        modalOpen: Boolean(document.querySelector('#modal-root')?.firstElementChild),
+        chat: state.chats.find((item) => item.id === chatId) || null,
+        provider: state.providers.find((item) => item.id === 'lm-studio') || null,
+      };
+    }, created.id);
+    throw new Error(`UI LM Studio não sincronizou após o save: ${JSON.stringify(diagnostics)}\n${errorText(error)}`);
+  }
 
   const persisted = await page.evaluate(async (chatId) => {
     const state = await window.autoCodez.getState();

@@ -464,7 +464,7 @@ document.addEventListener('click', async (event) => {
   const settings = target.closest<HTMLElement>('[data-chat-settings]');
   if (settings) {
     event.preventDefault();
-    event.stopImmediatePropagation();
+    event.stopPropagation();
     try {
       const state = await api().getState();
       const chat = state.chats.find((item) => item.id === settings.dataset.chatSettings);
