@@ -16,6 +16,15 @@ const directMutationPatterns = [
 
 const rawGitMutationPattern = /\bgit(?:\.exe)?\s+(?:add|commit|checkout|switch|reset|clean|rm|mv|restore|config|update-ref|merge|rebase|cherry-pick|revert|tag)\b/i;
 const shellApprovalReason = 'shell sem confinamento completo do sistema operacional';
+const readOnlyProbePatterns = [
+  /^node(?:\.exe)?\s+(?:-v|--version)\s*$/i,
+  /^npm(?:\.cmd|\.exe)?\s+(?:-v|--version)\s*$/i,
+  /^npx(?:\.cmd|\.exe)?\s+--version\s*$/i,
+  /^git(?:\.exe)?\s+--version\s*$/i,
+  /^python(?:\.exe)?\s+--version\s*$/i,
+  /^python3(?:\.exe)?\s+--version\s*$/i,
+  /^py(?:\.exe)?\s+--version\s*$/i,
+];
 
 function stronger(left: PermissionDecision, right: PermissionDecision): PermissionDecision {
   const severity = (value: PermissionDecision): number => value === 'deny' ? 2 : value === 'ask' ? 1 : 0;
@@ -36,8 +45,8 @@ export class CommandSafetyPolicy {
     const value = command.trim();
     if (!value) return { decision: 'deny', reasons: ['comando vazio'], matchedPaths: [] };
 
-    let decision: PermissionDecision = 'ask';
-    const reasons: string[] = [shellApprovalReason];
+    let decision: PermissionDecision = readOnlyProbePatterns.some((pattern) => pattern.test(value)) ? 'allow' : 'ask';
+    const reasons: string[] = decision === 'ask' ? [shellApprovalReason] : [];
     const matchedPaths: string[] = [];
     const mutatesDirectly = directMutationPatterns.some((pattern) => pattern.test(value));
 
