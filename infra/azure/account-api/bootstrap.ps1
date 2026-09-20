@@ -235,7 +235,7 @@ if (-not $fqdn) { throw 'A Azure não retornou o FQDN do Container App.' }
 
 $publicUrl = "https://$fqdn"
 $encodedDbPassword = [Uri]::EscapeDataString($postgresPassword)
-$databaseUrl = "postgresql://$PostgresAdmin:$encodedDbPassword@$postgresName.postgres.database.azure.com:5432/autocodez?sslmode=require"
+$databaseUrl = "postgresql://${PostgresAdmin}:$encodedDbPassword@$postgresName.postgres.database.azure.com:5432/autocodez?sslmode=require"
 $registryServer = "$acrName.azurecr.io"
 $fullImage = "$registryServer/$imageName"
 
