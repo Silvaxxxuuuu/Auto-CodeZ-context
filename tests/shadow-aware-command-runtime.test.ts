@@ -132,3 +132,35 @@ test('workspace de sistema materializa somente a pasta explicitamente usada pelo
     ]);
   }
 });
+
+
+test('workspace de sistema materializa cd /d com USERPROFILE dentro da cópia protegida do Home', async () => {
+  const fx = await fixture();
+  const systemRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-system-profile-command-'));
+  try {
+    const projectFolder = path.join(systemRoot, 'Desktop', 'GameZone');
+    await fs.mkdir(projectFolder, { recursive: true });
+    await fs.writeFile(path.join(projectFolder, 'index.html'), '<h1>GameZone</h1>', 'utf8');
+
+    const materializer = new CommandSandboxMaterializer(fx.projects, () => systemRoot);
+    const sandbox = await materializer.materialize(
+      SYSTEM_PROJECT_ID,
+      [],
+      'cd /d "%USERPROFILE%\\Desktop" && dir GameZone /b',
+    );
+    try {
+      assert.equal(sandbox.userProfilePath, sandbox.rootPath);
+      assert.equal(
+        await fs.readFile(path.join(sandbox.rootPath, 'Desktop', 'GameZone', 'index.html'), 'utf8'),
+        '<h1>GameZone</h1>',
+      );
+    } finally {
+      await sandbox.cleanup();
+    }
+  } finally {
+    await Promise.all([
+      fx.cleanup(),
+      fs.rm(systemRoot, { recursive: true, force: true }),
+    ]);
+  }
+});

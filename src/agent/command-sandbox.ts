@@ -15,6 +15,7 @@ const COMMAND_SANDBOX_PROJECT_ID = '__auto_codez_command_sandbox__';
 export type MaterializedCommandSandbox = {
   rootPath: string;
   homePath: string;
+  userProfilePath: string;
   tempPath: string;
   cleanup(): Promise<void>;
 };
@@ -48,8 +49,8 @@ function isolatedCommandEnvironment(base: NodeJS.ProcessEnv, sandbox: Materializ
   const localAppData = path.join(sandbox.homePath, 'AppData', 'Local');
   const environment: NodeJS.ProcessEnv = {
     ...base,
-    HOME: sandbox.homePath,
-    USERPROFILE: sandbox.homePath,
+    HOME: sandbox.userProfilePath,
+    USERPROFILE: sandbox.userProfilePath,
     APPDATA: appData,
     LOCALAPPDATA: localAppData,
     XDG_CONFIG_HOME: path.join(sandbox.homePath, '.config'),
@@ -66,10 +67,10 @@ function isolatedCommandEnvironment(base: NodeJS.ProcessEnv, sandbox: Materializ
   };
 
   if (process.platform === 'win32') {
-    const root = path.parse(sandbox.homePath).root;
+    const root = path.parse(sandbox.userProfilePath).root;
     const drive = root.replace(/[\\/]+$/, '');
     environment.HOMEDRIVE = drive;
-    environment.HOMEPATH = sandbox.homePath.slice(drive.length) || '\\';
+    environment.HOMEPATH = sandbox.userProfilePath.slice(drive.length) || '\\';
   }
 
   return environment;
@@ -136,13 +137,32 @@ async function copyAllowedTree(
 
 function commandWorkspaceDirectories(command: string): string[] {
   const values: string[] = [];
-  const pattern = /(?:^|[;&|]\s*)(?:cd|chdir|pushd|set-location)\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/gi;
+  const pattern = /(?:^|[;&|]\s*)(?:cd|chdir|pushd|set-location)\s+(?:\/d\s+)?(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/gi;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(command)) !== null) {
     const value = (match[1] || match[2] || match[3] || '').trim();
     if (value) values.push(value);
   }
   return values;
+}
+
+function resolveSystemCommandDirectory(sourceRoot: string, value: string): string {
+  let expanded = value.trim()
+    .replace(/%USERPROFILE%/gi, sourceRoot)
+    .replace(/%HOME%/gi, sourceRoot)
+    .replace(/\$\{HOME\}/g, sourceRoot)
+    .replace(/\$HOME\b/g, sourceRoot);
+
+  if (expanded === '~') expanded = sourceRoot;
+  else if (/^~[\\/]/.test(expanded)) expanded = path.join(sourceRoot, expanded.slice(2));
+
+  expanded = path.sep === '/'
+    ? expanded.replaceAll('\\', '/')
+    : expanded.replaceAll('/', '\\');
+
+  return path.isAbsolute(expanded)
+    ? path.resolve(expanded)
+    : path.resolve(sourceRoot, expanded);
 }
 
 function selectedSystemPaths(
@@ -156,7 +176,7 @@ function selectedSystemPaths(
     if (parent && parent !== '.' && parent !== path.sep) selected.add(parent);
   }
   for (const value of commandWorkspaceDirectories(command)) {
-    const resolved = path.isAbsolute(value) ? path.resolve(value) : path.resolve(sourceRoot, value);
+    const resolved = resolveSystemCommandDirectory(sourceRoot, value);
     if (!isInside(sourceRoot, resolved)) continue;
     const relative = normalizeRelativePath(path.relative(sourceRoot, resolved));
     if (relative && relative !== '.') selected.add(relative);
@@ -296,6 +316,7 @@ export class CommandSandboxMaterializer {
       return {
         rootPath: sandboxRoot,
         homePath,
+        userProfilePath: projectId === SYSTEM_PROJECT_ID ? sandboxRoot : homePath,
         tempPath,
         cleanup: async () => {
           await fs.rm(temporaryRoot, { recursive: true, force: true });
