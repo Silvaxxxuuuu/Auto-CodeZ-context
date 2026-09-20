@@ -10,6 +10,7 @@ import { runWithExecutionWorkspaceContext } from '../src/agent/execution-workspa
 import { ShadowAwareCommandRuntime } from '../src/agent/shadow-aware-command-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 import { ExecutionShadowWorkspaceRuntime } from '../src/execution-shadow-workspace';
+import { DiffRuntime } from '../src/agent/diff-runtime';
 
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-shadow-aware-command-'));
@@ -153,6 +154,44 @@ test('workspace de sistema materializa cd /d com USERPROFILE dentro da cópia pr
       assert.equal(
         await fs.readFile(path.join(sandbox.rootPath, 'Desktop', 'GameZone', 'index.html'), 'utf8'),
         '<h1>GameZone</h1>',
+      );
+    } finally {
+      await sandbox.cleanup();
+    }
+  } finally {
+    await Promise.all([
+      fx.cleanup(),
+      fs.rm(systemRoot, { recursive: true, force: true }),
+    ]);
+  }
+});
+
+
+test('workspace de sistema materializa arquivos ainda pendentes do Shadow Workspace sob USERPROFILE', async () => {
+  const fx = await fixture();
+  const systemRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-system-shadow-profile-'));
+  try {
+    await fs.mkdir(path.join(systemRoot, 'Desktop'), { recursive: true });
+    const changes = [
+      new DiffRuntime().create(
+        'Desktop/GameZone/index.html',
+        'created',
+        '',
+        '<h1>Shadow GameZone</h1>',
+      ),
+    ];
+
+    const materializer = new CommandSandboxMaterializer(fx.projects, () => systemRoot);
+    const sandbox = await materializer.materialize(
+      SYSTEM_PROJECT_ID,
+      changes,
+      'cd /d "%USERPROFILE%\\Desktop" && dir GameZone /b',
+    );
+    try {
+      assert.equal(sandbox.userProfilePath, sandbox.rootPath);
+      assert.equal(
+        await fs.readFile(path.join(sandbox.userProfilePath, 'Desktop', 'GameZone', 'index.html'), 'utf8'),
+        '<h1>Shadow GameZone</h1>',
       );
     } finally {
       await sandbox.cleanup();
