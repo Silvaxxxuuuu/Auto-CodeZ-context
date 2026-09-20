@@ -24,13 +24,13 @@ No Windows:
 - assinatura Azure ativa.
 - login feito com az login.
 
-O script usa brazilsouth por padrão.
+O script usa brazilsouth por padrão e usa a assinatura atualmente ativa no Azure CLI. O parâmetro -SubscriptionId continua disponível quando você quiser selecionar outra assinatura.
 
 ## 2. Bootstrap da infraestrutura
 
 Na raiz do repositório execute:
 
-    pwsh ./infra/azure/account-api/bootstrap.ps1 -SubscriptionId "<SUA_SUBSCRIPTION_ID>"
+    pwsh ./infra/azure/account-api/bootstrap.ps1
 
 O script cria resource group, ACR, imagem, Managed Identity, Container Apps Environment, PostgreSQL, Container App e um Job separado de migrations.
 
@@ -55,7 +55,6 @@ Crie Azure Communication Services, Email Communication Service e um Azure Manage
 Exemplo:
 
     pwsh ./infra/azure/account-api/configure-providers.ps1 \
-      -SubscriptionId "<SUA_SUBSCRIPTION_ID>" \
       -GitHubClientId "<ID>" \
       -GitHubClientSecret "<SECRET>" \
       -GoogleClientId "<ID>" \
@@ -105,7 +104,7 @@ Account Core V1 só fecha depois desses testes essenciais serem aprovados.
 
 ## 9. Cleanup
 
-    pwsh ./infra/azure/account-api/destroy.ps1 -SubscriptionId "<SUA_SUBSCRIPTION_ID>" -ConfirmDelete
+    pwsh ./infra/azure/account-api/destroy.ps1 -ConfirmDelete
 
 ## Segurança
 

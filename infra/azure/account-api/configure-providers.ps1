@@ -1,6 +1,5 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)]
   [string]$SubscriptionId,
   [string]$ResourceGroup = 'rg-autocodez-account-test',
   [string]$NamePrefix = 'autocodezacct',
@@ -57,7 +56,18 @@ Assert-Pair $AzureEmailConnectionString $AzureEmailSender 'Azure Communication S
 
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) { throw 'Azure CLI não foi encontrado.' }
 
-Invoke-Az -Arguments @('account', 'set', '--subscription', $SubscriptionId)
+if ($SubscriptionId) {
+  Invoke-Az -Arguments @('account', 'set', '--subscription', $SubscriptionId)
+} else {
+  $SubscriptionId = Invoke-Az -Arguments @(
+    'account', 'show',
+    '--query', 'id',
+    '--output', 'tsv'
+  ) -Capture
+  if (-not $SubscriptionId) {
+    throw 'Nenhuma assinatura Azure ativa. Execute az login primeiro.'
+  }
+}
 
 $suffix = Get-StableSuffix "$SubscriptionId|$NamePrefix"
 $normalizedPrefix = ($NamePrefix.ToLowerInvariant() -replace '[^a-z0-9]', '')

@@ -1,6 +1,5 @@
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)]
   [string]$SubscriptionId,
   [string]$Location = 'brazilsouth',
   [string]$ResourceGroup = 'rg-autocodez-account-test',
@@ -57,7 +56,19 @@ if (-not (Test-Path (Join-Path $accountApiRoot 'Dockerfile'))) {
   throw "Dockerfile do Account API não encontrado em $accountApiRoot"
 }
 
-Invoke-Az -Arguments @('account', 'set', '--subscription', $SubscriptionId)
+if ($SubscriptionId) {
+  Invoke-Az -Arguments @('account', 'set', '--subscription', $SubscriptionId)
+} else {
+  $SubscriptionId = Invoke-Az -Arguments @(
+    'account', 'show',
+    '--query', 'id',
+    '--output', 'tsv'
+  ) -Capture
+  if (-not $SubscriptionId) {
+    throw 'Nenhuma assinatura Azure ativa. Execute az login primeiro.'
+  }
+}
+
 Invoke-Az -Arguments @('extension', 'add', '--name', 'containerapp', '--upgrade', '--only-show-errors')
 
 foreach ($providerNamespace in @(
