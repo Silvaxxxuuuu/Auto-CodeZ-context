@@ -13,6 +13,7 @@ import { fetchWithTimeout, parseSSE } from '../sse';
 
 const MODEL_LIST_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 120_000;
+const FOUNDRY_STREAM_IDLE_TIMEOUT_MS = 300_000;
 
 function normalizeBaseUrl(value?: string): string {
   const raw = value?.trim().replace(/\/+$/, '');
@@ -165,6 +166,72 @@ function parseChatToolCall(value: unknown): AIToolCall | undefined {
 function parseChatToolCalls(value: unknown): AIToolCall[] {
   if (!Array.isArray(value)) return [];
   return value.map(parseChatToolCall).filter((item): item is AIToolCall => Boolean(item));
+}
+
+function normalizeEmbeddedToolName(raw: string, request: AIRequest): string | undefined {
+  const compact = raw
+    .replace(/^functions\./i, '')
+    .replace(/:[^:<>]+$/u, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toLowerCase();
+  if (!compact) return undefined;
+  return request.tools?.find((tool) => tool.name.replace(/[^a-z0-9]/gi, '').toLowerCase() === compact)?.name;
+}
+
+function normalizeEmbeddedToolInput(name: string, input: Record<string, unknown>, request: AIRequest): Record<string, unknown> {
+  if (name !== 'plan_execution' || !Array.isArray(input.plan) || 'steps' in input) return input;
+  const lastUser = [...request.messages].reverse().find((message) => message.role === 'user')?.content?.trim();
+  const { plan, ...rest } = input;
+  return {
+    ...rest,
+    objective: typeof input.objective === 'string' && input.objective.trim()
+      ? input.objective
+      : lastUser || 'Executar a tarefa solicitada pelo usuário.',
+    steps: plan,
+  };
+}
+
+function extractEmbeddedToolCalls(content: string, request: AIRequest): { content: string; toolCalls: AIToolCall[] } {
+  if (!content.includes('<|toolcall')) return { content, toolCalls: [] };
+  const calls: AIToolCall[] = [];
+  const pattern = /<\|toolcallbegin\|>\s*([^<]+?)<\|toolcallargumentbegin\|>([\s\S]*?)<\|toolcallend\|>/g;
+  let match: RegExpExecArray | null;
+  let index = 0;
+  while ((match = pattern.exec(content)) !== null) {
+    const name = normalizeEmbeddedToolName(match[1].trim(), request);
+    if (!name) continue;
+    try {
+      const parsed = JSON.parse(match[2].trim() || '{}');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue;
+      const input = normalizeEmbeddedToolInput(name, parsed as Record<string, unknown>, request);
+      calls.push({
+        id: \`foundry-embedded-\${Date.now().toString(36)}-\${index++}\`,
+        name: name as AIToolCall['name'],
+        input,
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  const visible = content
+    .replace(/<\|toolcallssectionbegin\|>[\s\S]*?<\|toolcallssectionend\|>/g, '')
+    .replace(/<\|toolcallbegin\|>[\s\S]*?<\|toolcallend\|>/g, '')
+    .trim();
+  return { content: visible, toolCalls: calls };
+}
+
+function mergeToolCalls(primary: AIToolCall[], fallback: AIToolCall[]): AIToolCall[] {
+  if (!fallback.length) return primary;
+  const signatures = new Set(primary.map((call) => \`\${call.name}:\${JSON.stringify(call.input)}\`));
+  const merged = [...primary];
+  for (const call of fallback) {
+    const signature = \`\${call.name}:\${JSON.stringify(call.input)}\`;
+    if (signatures.has(signature)) continue;
+    signatures.add(signature);
+    merged.push(call);
+  }
+  return merged;
 }
 
 function responsesUsage(value: unknown): AIResponse['usage'] | undefined {
@@ -320,12 +387,14 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     const choices = Array.isArray(data.choices) ? data.choices : [];
     const choice = asRecord(choices[0]);
     const message = asRecord(choice?.message);
+    const rawContent = contentText(message?.content);
+    const embedded = extractEmbeddedToolCalls(rawContent, request);
     return {
-      content: contentText(message?.content),
+      content: embedded.content,
       model: request.model,
       providerId: this.id,
       usage: chatUsage(data.usage),
-      toolCalls: parseChatToolCalls(message?.tool_calls),
+      toolCalls: mergeToolCalls(parseChatToolCalls(message?.tool_calls), embedded.toolCalls),
     };
   }
 
@@ -362,7 +431,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     let terminal = false;
     yield { type: 'start' };
 
-    for await (const raw of parseSSE(response, 30_000)) {
+    for await (const raw of parseSSE(response, FOUNDRY_STREAM_IDLE_TIMEOUT_MS)) {
       const event = raw as {
         type?: string;
         delta?: string;
@@ -461,7 +530,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     const pendingCalls = new Map<number, { id: string; name: string; arguments: string }>();
     yield { type: 'start' };
 
-    for await (const raw of parseSSE(response, 30_000)) {
+    for await (const raw of parseSSE(response, FOUNDRY_STREAM_IDLE_TIMEOUT_MS)) {
       const chunk = asRecord(raw) ?? {};
       if (chunk.error) throw new Error(providerErrorMessage(chunk, 'Azure Foundry retornou um erro durante o streaming.'));
       const nextUsage = chatUsage(chunk.usage);
@@ -508,12 +577,13 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
       yield { type: 'tool_call', toolCall };
     }
 
+    const embedded = extractEmbeddedToolCalls(content, request);
     const result: AIResponse = {
-      content,
+      content: embedded.content,
       model: request.model,
       providerId: this.id,
       usage,
-      toolCalls,
+      toolCalls: mergeToolCalls(toolCalls, embedded.toolCalls),
     };
     yield { type: 'complete', response: result, usage };
   }
