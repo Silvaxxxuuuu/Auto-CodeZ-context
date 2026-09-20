@@ -10,7 +10,11 @@ function simplifyProviderError(message: string): string {
   }
 
   if (/limite de requisições|rate limit|rate_limit|too many requests/.test(normalized)) {
-    return 'O limite de requisições da API foi atingido. Aguarde um pouco e tente novamente.';
+    const retryHint = message.match(/tente novamente em cerca de\s+\d+s/i)?.[0]
+      || message.match(/retry after\s+\d+(?:\.\d+)?\s*(?:seconds?|secs?|s)/i)?.[0];
+    return retryHint
+      ? `O limite de requisições da API foi atingido. ${retryHint.replace(/^./, (value) => value.toUpperCase())}.`
+      : 'O limite de requisições da API foi atingido. Aguarde um pouco e tente novamente.';
   }
 
   if (/api key foi recusada|invalid api key|invalid key|authentication|unauthorized|forbidden/.test(normalized)) {
