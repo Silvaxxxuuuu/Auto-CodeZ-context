@@ -530,7 +530,6 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     let visibleBuffer = '';
     let embeddedProtocolStarted = false;
     const embeddedMarkers = ['<|toolcallssectionbegin|>', '<|toolcallbegin|>'];
-    const markerTailLength = Math.max(...embeddedMarkers.map((marker) => marker.length)) - 1;
     const pendingCalls = new Map<number, { id: string; name: string; arguments: string }>();
     yield { type: 'start' };
 
@@ -557,11 +556,20 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
               if (visible) yield { type: 'delta', text: visible };
               visibleBuffer = '';
               embeddedProtocolStarted = true;
-            } else if (visibleBuffer.length > markerTailLength) {
-              const safeLength = visibleBuffer.length - markerTailLength;
-              const visible = visibleBuffer.slice(0, safeLength);
-              visibleBuffer = visibleBuffer.slice(safeLength);
-              if (visible) yield { type: 'delta', text: visible };
+            } else {
+              let holdLength = 0;
+              for (const marker of embeddedMarkers) {
+                const maxPrefix = Math.min(marker.length - 1, visibleBuffer.length);
+                for (let length = 1; length <= maxPrefix; length += 1) {
+                  if (visibleBuffer.endsWith(marker.slice(0, length))) holdLength = Math.max(holdLength, length);
+                }
+              }
+              const safeLength = visibleBuffer.length - holdLength;
+              if (safeLength > 0) {
+                const visible = visibleBuffer.slice(0, safeLength);
+                visibleBuffer = visibleBuffer.slice(safeLength);
+                if (visible) yield { type: 'delta', text: visible };
+              }
             }
           }
         }
