@@ -98,11 +98,14 @@ test('contexto de outro projeto falha fechado em vez de tocar no workspace real'
   }
 });
 
-test('workspace de sistema executa comando contra sandbox temporário sem tocar no Desktop real', async () => {
+test('workspace de sistema materializa somente a pasta explicitamente usada pelo comando', async () => {
   const fx = await fixture();
   const systemRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-shadow-system-command-'));
   try {
-    await fs.writeFile(path.join(systemRoot, 'a.txt'), 'desktop-base', 'utf8');
+    const projectFolder = path.join(systemRoot, 'Desktop', 'Teste');
+    await fs.mkdir(projectFolder, { recursive: true });
+    await fs.writeFile(path.join(projectFolder, 'a.txt'), 'desktop-base', 'utf8');
+    await fs.writeFile(path.join(systemRoot, 'outside.txt'), 'must-not-copy', 'utf8');
     const materializer = new CommandSandboxMaterializer(fx.projects, () => systemRoot);
     const sandbox = new CommandSandboxRuntime(fx.projects, fx.shadows, materializer);
     const runtime = new ShadowAwareCommandRuntime(fx.projects, fx.shadows, sandbox);
@@ -111,12 +114,13 @@ test('workspace de sistema executa comando contra sandbox temporário sem tocar 
       { chatId: 'chat-system', runId: 'run-system', projectId: SYSTEM_PROJECT_ID },
       () => runtime.run(
         SYSTEM_PROJECT_ID,
-        'node -e "const fs=require(\'fs\'); console.log(fs.readFileSync(\'a.txt\',\'utf8\')); fs.writeFileSync(\'a.txt\',\'command-only\')"',
+        'cd Desktop/Teste && node -e "const fs=require(\'fs\'); console.log(fs.readFileSync(\'a.txt\',\'utf8\')); fs.writeFileSync(\'a.txt\',\'command-only\')"',
       ),
     );
 
     assert.match(result.stdout, /desktop-base/);
-    assert.equal(await fs.readFile(path.join(systemRoot, 'a.txt'), 'utf8'), 'desktop-base');
+    assert.equal(await fs.readFile(path.join(projectFolder, 'a.txt'), 'utf8'), 'desktop-base');
+    assert.equal(await fs.readFile(path.join(systemRoot, 'outside.txt'), 'utf8'), 'must-not-copy');
     const shadow = fx.shadows.get('chat-system', 'run-system');
     assert.ok(shadow);
     assert.equal(shadow.projectId, SYSTEM_PROJECT_ID);
