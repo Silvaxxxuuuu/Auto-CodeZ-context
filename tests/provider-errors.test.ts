@@ -58,3 +58,15 @@ test('formats rate-limit retry windows when the provider supplies them', () => {
   );
   assert.match(formatProviderError(limited), /Azure Foundry:.*12s/i);
 });
+
+
+test('recovers retry timing from provider rate-limit text when headers are absent', () => {
+  const limited = new ProviderRequestError(
+    'Too many requests. Please retry after 35 seconds.',
+    429,
+    'Azure Foundry',
+    'rate_limit',
+    'stream',
+  );
+  assert.match(formatProviderError(limited), /Azure Foundry:.*35s/i);
+});
