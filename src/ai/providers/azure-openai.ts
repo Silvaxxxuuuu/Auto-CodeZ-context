@@ -8,14 +8,16 @@ import type {
   AIStreamEvent,
   AIToolCall,
 } from '../types';
-import { createProviderRequestError } from '../provider-errors';
+import { classifyProviderError, createProviderRequestError, retryAfterFromMessage } from '../provider-errors';
 import { fetchWithTimeout, parseSSE } from '../sse';
 
 const MODEL_LIST_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 const FOUNDRY_STREAM_IDLE_TIMEOUT_MS = 300_000;
-const FOUNDRY_MAX_RATE_LIMIT_RETRIES = 2;
-const FOUNDRY_MAX_AUTO_RETRY_WAIT_MS = 60_000;
+const FOUNDRY_MAX_RATE_LIMIT_RETRIES = 5;
+const FOUNDRY_MAX_AUTO_RETRY_WAIT_MS = 120_000;
+const FOUNDRY_MAX_TOTAL_RATE_LIMIT_WAIT_MS = 180_000;
+const FOUNDRY_RETRY_BACKOFF_BASE_MS = 2_000;
 
 function normalizeBaseUrl(value?: string): string {
   const raw = value?.trim().replace(/\/+$/, '');
@@ -293,6 +295,25 @@ function retryAfterMs(response: Response): number | undefined {
   return undefined;
 }
 
+async function rateLimitMessage(response: Response): Promise<string> {
+  try {
+    const text = await response.clone().text();
+    if (!text.trim()) return '';
+    try {
+      return providerErrorMessage(JSON.parse(text), text);
+    } catch {
+      return text.trim();
+    }
+  } catch {
+    return '';
+  }
+}
+
+function fallbackRetryDelayMs(attempt: number): number {
+  if (attempt <= 0) return 0;
+  return FOUNDRY_RETRY_BACKOFF_BASE_MS * (2 ** (attempt - 1));
+}
+
 async function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
   if (delayMs <= 0) return;
@@ -314,15 +335,20 @@ async function fetchFoundryWithRateLimitRetry(
   signal?: AbortSignal,
 ): Promise<Response> {
   let response: Response | undefined;
+  let totalWaitMs = 0;
 
   for (let attempt = 0; attempt <= FOUNDRY_MAX_RATE_LIMIT_RETRIES; attempt += 1) {
     response = await fetchWithTimeout(input, { ...init, signal }, timeoutMs);
     if (response.status !== 429) return response;
 
-    const delayMs = retryAfterMs(response);
+    const message = await rateLimitMessage(response);
+    const kind = classifyProviderError(response.status, message || 'Too many requests');
+    const suggestedDelayMs = retryAfterMs(response) ?? retryAfterFromMessage(message);
+    const delayMs = suggestedDelayMs ?? fallbackRetryDelayMs(attempt);
     const canRetry = attempt < FOUNDRY_MAX_RATE_LIMIT_RETRIES
-      && delayMs !== undefined
-      && delayMs <= FOUNDRY_MAX_AUTO_RETRY_WAIT_MS;
+      && kind === 'rate_limit'
+      && delayMs <= FOUNDRY_MAX_AUTO_RETRY_WAIT_MS
+      && totalWaitMs + delayMs <= FOUNDRY_MAX_TOTAL_RATE_LIMIT_WAIT_MS;
 
     if (!canRetry) return response;
 
@@ -331,6 +357,7 @@ async function fetchFoundryWithRateLimitRetry(
     } catch {
       // Best effort only. The retry still uses a fresh request.
     }
+    totalWaitMs += delayMs;
     await waitForRetry(delayMs, signal);
   }
 

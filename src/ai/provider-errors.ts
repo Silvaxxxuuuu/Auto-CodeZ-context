@@ -69,7 +69,7 @@ function httpSuffix(error: ProviderRequestError): string {
   return error.status > 0 ? ` (HTTP ${error.status})` : '';
 }
 
-function retryAfterFromMessage(message: string): number | undefined {
+export function retryAfterFromMessage(message: string): number | undefined {
   const seconds = message.match(/(?:retry after|tente novamente em(?: cerca de)?)\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s|segundos?)/i);
   if (seconds) {
     const value = Number(seconds[1]);

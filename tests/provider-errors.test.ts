@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ProviderRequestError, classifyProviderError, formatProviderError, normalizeProviderError, createProviderRequestError } from '../src/ai/provider-errors';
+import { ProviderRequestError, classifyProviderError, formatProviderError, normalizeProviderError, createProviderRequestError, retryAfterFromMessage } from '../src/ai/provider-errors';
 
 test('classifies quota errors independently of provider', () => {
   assert.equal(classifyProviderError(429, 'You exceeded your current quota'), 'quota');
@@ -69,4 +69,11 @@ test('recovers retry timing from provider rate-limit text when headers are absen
     'stream',
   );
   assert.match(formatProviderError(limited), /Azure Foundry:.*35s/i);
+});
+
+
+test('parses provider retry windows for automatic retry', () => {
+  assert.equal(retryAfterFromMessage('Please retry after 35 seconds.'), 35_000);
+  assert.equal(retryAfterFromMessage('Please retry after 1.5 minutes.'), 90_000);
+  assert.equal(retryAfterFromMessage('Too many requests'), undefined);
 });
