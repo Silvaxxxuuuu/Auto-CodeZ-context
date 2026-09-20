@@ -82,6 +82,7 @@ async function copyAllowedTree(
   sandboxRoot: string,
   policy: WorkspacePathPolicy,
   excludedRoot?: string,
+  startDirectory = sourceRoot,
 ): Promise<void> {
   const walk = async (sourceDirectory: string): Promise<void> => {
     const entries = await fs.readdir(sourceDirectory, { withFileTypes: true });
@@ -129,7 +130,69 @@ async function copyAllowedTree(
   };
 
   await fs.mkdir(sandboxRoot, { recursive: true });
-  await walk(sourceRoot);
+  await walk(startDirectory);
+}
+
+
+function commandWorkspaceDirectories(command: string): string[] {
+  const values: string[] = [];
+  const pattern = /(?:^|[;&|]\s*)(?:cd|chdir|pushd|set-location)\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(command)) !== null) {
+    const value = (match[1] || match[2] || match[3] || '').trim();
+    if (value) values.push(value);
+  }
+  return values;
+}
+
+function selectedSystemPaths(
+  sourceRoot: string,
+  changes: ReturnType<typeof compactShadowWorkspaceChanges>,
+  command: string,
+): string[] {
+  const selected = new Set<string>();
+  for (const change of compactShadowWorkspaceChanges(changes)) {
+    const parent = path.dirname(normalizeRelativePath(change.path));
+    if (parent && parent !== '.' && parent !== path.sep) selected.add(parent);
+  }
+  for (const value of commandWorkspaceDirectories(command)) {
+    const resolved = path.isAbsolute(value) ? path.resolve(value) : path.resolve(sourceRoot, value);
+    if (!isInside(sourceRoot, resolved)) continue;
+    const relative = normalizeRelativePath(path.relative(sourceRoot, resolved));
+    if (relative && relative !== '.') selected.add(relative);
+  }
+  return [...selected];
+}
+
+async function copySelectedSystemPaths(
+  sourceRoot: string,
+  sandboxRoot: string,
+  policy: WorkspacePathPolicy,
+  relativePaths: string[],
+  excludedRoot?: string,
+): Promise<void> {
+  await fs.mkdir(sandboxRoot, { recursive: true });
+  for (const relative of relativePaths) {
+    if (!relative || relative === '.') continue;
+    if (!isAllowedSandboxSource(relative, policy)) continue;
+    const source = path.resolve(sourceRoot, relative);
+    if (!isInside(sourceRoot, source)) continue;
+    let stat;
+    try {
+      stat = await fs.lstat(source);
+    } catch {
+      continue;
+    }
+    const destination = path.resolve(sandboxRoot, relative);
+    if (!isInside(sandboxRoot, destination)) continue;
+    if (stat.isDirectory()) {
+      await fs.mkdir(destination, { recursive: true });
+      await copyAllowedTree(sourceRoot, sandboxRoot, policy, excludedRoot, source);
+    } else if (stat.isFile()) {
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.copyFile(source, destination, fsConstants.COPYFILE_FICLONE);
+    }
+  }
 }
 
 export class CommandSandboxMaterializer {
@@ -141,7 +204,11 @@ export class CommandSandboxMaterializer {
     private readonly temporaryRootFactory: TemporaryRootFactory = () => fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-command-sandbox-')),
   ) {}
 
-  async materialize(projectId: string, changes: ReturnType<typeof compactShadowWorkspaceChanges>): Promise<MaterializedCommandSandbox> {
+  async materialize(
+    projectId: string,
+    changes: ReturnType<typeof compactShadowWorkspaceChanges>,
+    command = '',
+  ): Promise<MaterializedCommandSandbox> {
     let sourcePath: string;
     if (projectId === SYSTEM_PROJECT_ID) {
       sourcePath = this.systemWorkspaceRoot();
@@ -169,7 +236,15 @@ export class CommandSandboxMaterializer {
         fs.mkdir(tempPath, { recursive: true }),
       ]);
 
-      if (isInside(sourceRoot, sandboxRoot)) {
+      if (projectId === SYSTEM_PROJECT_ID) {
+        await copySelectedSystemPaths(
+          sourceRoot,
+          sandboxRoot,
+          this.pathPolicy,
+          selectedSystemPaths(sourceRoot, changes, command),
+          temporaryRoot,
+        );
+      } else if (isInside(sourceRoot, sandboxRoot)) {
         await copyAllowedTree(sourceRoot, sandboxRoot, this.pathPolicy, temporaryRoot);
       } else {
         await fs.cp(sourceRoot, sandboxRoot, {
@@ -255,7 +330,7 @@ export class CommandSandboxRuntime {
     if (!shadow) throw new Error('Shadow Workspace ativo não encontrado para o command sandbox.');
     if (shadow.projectId !== projectId) throw new Error('Shadow Workspace pertence a outro projeto.');
 
-    const sandbox = await this.materializer.materialize(projectId, shadow.changes);
+    const sandbox = await this.materializer.materialize(projectId, shadow.changes, command);
     try {
       const environment = isolatedCommandEnvironment(this.parentEnvironment, sandbox);
       const sandboxProject: ProjectRecord = {
