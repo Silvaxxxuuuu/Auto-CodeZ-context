@@ -8604,3 +8604,116 @@ Se esse teste passar, continuar com:
 - registrar Azure Foundry como operacional para o laboratório real.
 
 PR #9 continua OPEN / DRAFT / sem merge.
+
+
+------------------------------------------------------------
+24.51. FOUNDRY LONG-RUN HARDENING + DYNAMIC ACTIVITY STACK
+------------------------------------------------------------
+
+Checkpoint em 20/09/2026.
+
+RELATO REAL DO USUÁRIO
+
+Durante um pedido substancial para criar um site completo usando Azure Foundry / Kimi-K2.6:
+- o modelo ficou pensando por tempo maior;
+- o Auto CodeZ encerrou o stream com mensagem equivalente a provider sem dados por 30 segundos;
+- em outra tentativa, o chat exibiu diretamente tokens internos do protocolo Kimi:
+  <|toolcallssectionbegin|>
+  <|toolcallbegin|>
+  functions.planexecution:...
+  <|toolcallargumentbegin|>
+  ...
+- o modelo parecia estar tentando chamar plan_execution, mas o protocolo textual escapou para a UI em vez de virar tool call;
+- atividades dinâmicas de execução não ficavam empilhadas; o renderer substituía a atividade anterior pela nova;
+- usuário pediu atividades naturais como "Montando o HTML", "Estilizando o CSS" sem exigir uma chamada extra de API.
+
+DIAGNÓSTICO
+
+1. Azure Foundry adapter chamava parseSSE(..., 30_000).
+   - Kimi pode ficar mais de 30 segundos sem chunk durante planejamento/raciocínio.
+   - esse idle timeout era curto demais para trabalho agentic longo.
+
+2. Kimi-K2.6 pode, em alguns casos, devolver seu protocolo de tool calling como conteúdo textual especial em vez do campo OpenAI-compatible tool_calls.
+   - o adapter só entendia tool_calls estruturado;
+   - por isso os tokens internos apareciam no chat.
+
+3. O pipeline já tinha suporte a resumo de atividade produzido pelo próprio modelo na mesma resposta de tool call.
+   - não existe necessidade de uma segunda requisição de IA só para gerar textos de atividade;
+   - live-activity-ui.ts chamava remove() antes de renderizar cada novo item, portanto somente uma atividade permanecia visível.
+
+CORREÇÕES
+
+Azure Foundry / Kimi:
+- idle timeout específico de stream aumentado de 30 s para 300 s;
+- protocolo Kimi textual recuperado como tool call real;
+- nomes compactados como functions.planexecution são reconciliados com tools reais como plan_execution;
+- fallback específico converte payload legado {"plan":[...]} para objective + steps no plan_execution;
+- marcadores <|toolcall...|> são removidos da resposta user-facing;
+- filtro de streaming reconhece marcadores mesmo quando chegam divididos entre chunks;
+- texto normal continua streaming sem aguardar um buffer grande;
+- tool calls recuperadas são publicadas aos observadores do stream;
+- tool_calls estruturadas continuam prioritárias e são deduplicadas contra fallback textual.
+
+Atividades:
+- ChatRuntime agora preserva mais de um resumo de atividade gerado pelo modelo;
+- live activity deixa de apagar a linha anterior ao chegar uma nova;
+- atividades são atualizadas por toolCallId quando possível;
+- até 8 atividades podem ficar empilhadas durante a execução;
+- sucesso/falha atualiza a linha correspondente;
+- stack é limpa quando a execução realmente termina/cancela;
+- nenhuma segunda chamada de provider foi adicionada para gerar atividades.
+
+ESTRATÉGIA DE CUSTO PARA ATIVIDADES
+
+Decisão atual:
+- NÃO embutir outro LLM apenas para atividades;
+- usar primeiro o resumo curto que o próprio modelo principal já emite na mesma resposta de tool call;
+- usar descrições locais determinísticas do ToolRuntime como fallback;
+- isso evita uma requisição adicional de API, evita download/RAM/CPU de outro modelo e reduz complexidade;
+- um micro-modelo local só deve ser reconsiderado no futuro se houver um caso real que o pipeline híbrido não cubra.
+
+COMMITS PRINCIPAIS
+
+- c91daa924cf303fe1010bf6ab86859dbfdbb48e6
+  fix(ai): harden Foundry long streams and embedded Kimi tool calls
+- ce5e9f227b34a3cd1fadd3718723c5963102137a
+  fix(ai): hide embedded Kimi tool protocol from streamed text
+- c1b7f08e4fd4cf360eb41e114c75fb098cf953f7
+  feat(ai): preserve model-generated activity steps
+- 5be5ad3697cd5e69124abea54684eed306992b72
+  feat(ui): stack dynamic agent activities during execution
+- c6545ffe4a7bb09887b68a39e831d783ecf31d32
+  fix(ai): stream normal Foundry text without tool-marker latency
+- 53691fcef76541bac4fedf7496e62b2183277abf
+  feat(ai): expose recovered Kimi tool calls to stream observers
+- 5f8103fbe2a1651e2b15f3268480a92f96d88a88
+  test(ai): cover long-form Kimi embedded tool recovery
+- 565f7169250ac30d7ee317da0df2208a534db02f
+  fix(ai): restore embedded tool template literals
+
+VALIDAÇÃO DO HEAD 565f7169250ac30d7ee317da0df2208a534db02f
+
+- Validate Auto CodeZ #4302: SUCCESS
+- Validate Auto CodeZ push #4301: SUCCESS
+- Validate Account API #118: SUCCESS
+- Visual Auto CodeZ #973: SUCCESS
+
+Testes novos cobrem:
+- protocolo textual Kimi em resposta não-streaming;
+- reconciliação planexecution -> plan_execution;
+- adaptação plan -> objective + steps;
+- marcador Kimi dividido entre chunks SSE;
+- garantia de que tokens <|toolcall...|> não aparecem nos deltas user-facing;
+- recuperação da tool call no stream.
+
+PRÓXIMO TESTE MANUAL
+
+Depois de atualizar a branch:
+1. repetir node -v para validar o command sandbox corrigido;
+2. repetir uma tarefa longa/multi-etapas semelhante à criação do site;
+3. confirmar que não existe mais erro de idle em 30 segundos;
+4. confirmar que nenhum token <|toolcall...|> aparece;
+5. observar se atividades naturais ficam empilhadas durante a execução;
+6. confirmar que as ferramentas realmente executam e que o modelo não apenas descreve ações.
+
+PR #9 continua OPEN / DRAFT / sem merge.
