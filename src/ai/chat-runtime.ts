@@ -194,6 +194,12 @@ export class ChatRuntime {
     }
 
     const systemMessages = [{ role: 'system' as const, content: `${AUTOCODEZ_SYSTEM_INSTRUCTIONS}\n\nRuntime OS: ${runtimePlatform()}.\nRuntime date: ${runtimeDate()}.` }];
+    if (lightweightTurn) {
+      systemMessages.push({
+        role: 'system' as const,
+        content: 'O turno atual é uma saudação ou conversa leve. Responda apenas ao turno atual. Não retome, continue, execute nem complete automaticamente tarefas de turnos anteriores. As ferramentas estão intencionalmente desativadas neste turno leve. Só retome uma tarefa anterior quando o usuário pedir isso explicitamente em uma nova instrução acionável.',
+      });
+    }
     if (webContext) systemMessages.push({ role: 'system' as const, content: webContext });
     if (projectContext && !lightweightTurn) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
     const messages = [...systemMessages, ...chat.messages];
