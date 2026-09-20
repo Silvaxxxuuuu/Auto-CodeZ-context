@@ -8210,3 +8210,57 @@ PR #9:
 - permanece OPEN;
 - DRAFT;
 - sem merge.
+
+------------------------------------------------------------
+24.47. LOGIN VISUAL APROVADO — INÍCIO DO BACKEND REAL
+------------------------------------------------------------
+
+Aprovação explícita do usuário em 19/09/2026:
+“Beleza. Eu aprovo agora.”
+
+Estado no momento da aprovação:
+- branch feature/ui-hierarchy-polish;
+- HEAD 092270dff19be43e63dff20389df7421486973e7;
+- Validate Auto CodeZ #4236: SUCCESS;
+- Validate Account API #85: SUCCESS;
+- Visual Auto CodeZ #940: SUCCESS;
+- PR #9 continua OPEN / DRAFT / sem merge.
+
+INTERPRETAÇÃO DA APROVAÇÃO
+
+- refinamento visual do login APROVADO;
+- ícones GitHub/Google/Microsoft/Passkey aprovados;
+- startup branding refinado aprovado;
+- Account Core V1 ainda NÃO é CLOSED;
+- último gate é autenticação real contra Account API HTTPS.
+
+PRÓXIMA FASE IMEDIATA
+
+Provisionar laboratório real do Account API:
+- Azure Container Apps;
+- HTTPS origin real;
+- Azure Container Registry;
+- Managed Identity / AcrPull;
+- Azure Database for PostgreSQL Flexible Server;
+- migrations por Container Apps Job;
+- GitHub OAuth;
+- Google OAuth;
+- Microsoft OAuth;
+- Azure Communication Services Email / Magic Link;
+- Passkey real.
+
+Depois executar aceitação real do desktop:
+- login;
+- deep link autocodez://auth;
+- Device Registry;
+- restart/hydrate;
+- offline cached session;
+- refresh/replay/revoke;
+- logout;
+- Passkey enrollment + login;
+- demais providers.
+
+Somente após aprovação dessa bateria:
+- marcar Account Core V1 CLOSED;
+- iniciar Azure Foundry Test Lab;
+- GPT-5.6 Luna como modelo default do laboratório.
