@@ -4,13 +4,9 @@ param(
   [string]$ResourceGroup = 'rg-autocodez-account-test',
   [string]$NamePrefix = 'autocodezacct',
   [string]$GitHubClientId,
-  [string]$GitHubClientSecret,
   [string]$GoogleClientId,
-  [string]$GoogleClientSecret,
   [string]$MicrosoftClientId,
-  [string]$MicrosoftClientSecret,
   [string]$MicrosoftTenantId = 'common',
-  [string]$AzureEmailConnectionString,
   [string]$AzureEmailSender
 )
 
@@ -44,15 +40,31 @@ function Get-StableSuffix {
   }
 }
 
-function Assert-Pair {
-  param([string]$Left, [string]$Right, [string]$Label)
-  if ([bool]$Left -ne [bool]$Right) { throw "$Label precisa de ID e secret juntos." }
-}
+function Read-SecretValue {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$EnvironmentName,
+    [Parameter(Mandatory = $true)]
+    [string]$Prompt
+  )
 
-Assert-Pair $GitHubClientId $GitHubClientSecret 'GitHub'
-Assert-Pair $GoogleClientId $GoogleClientSecret 'Google'
-Assert-Pair $MicrosoftClientId $MicrosoftClientSecret 'Microsoft'
-Assert-Pair $AzureEmailConnectionString $AzureEmailSender 'Azure Communication Services Email'
+  $fromEnvironment = [Environment]::GetEnvironmentVariable($EnvironmentName)
+  if ($fromEnvironment) {
+    return $fromEnvironment
+  }
+
+  $secure = Read-Host $Prompt -AsSecureString
+  if (-not $secure -or $secure.Length -eq 0) {
+    throw "$Prompt não pode ficar vazio."
+  }
+
+  $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+  try {
+    return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+  }
+}
 
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) { throw 'Azure CLI não foi encontrado.' }
 
@@ -84,6 +96,23 @@ $fqdn = Invoke-Az -Arguments @(
 if (-not $fqdn) { throw 'Container App não encontrado ou sem FQDN.' }
 
 $publicUrl = "https://$fqdn"
+
+$GitHubClientSecret = if ($GitHubClientId) {
+  Read-SecretValue -EnvironmentName 'AUTO_CODEZ_GITHUB_CLIENT_SECRET' -Prompt 'GitHub Client Secret'
+} else { $null }
+
+$GoogleClientSecret = if ($GoogleClientId) {
+  Read-SecretValue -EnvironmentName 'AUTO_CODEZ_GOOGLE_CLIENT_SECRET' -Prompt 'Google Client Secret'
+} else { $null }
+
+$MicrosoftClientSecret = if ($MicrosoftClientId) {
+  Read-SecretValue -EnvironmentName 'AUTO_CODEZ_MICROSOFT_CLIENT_SECRET' -Prompt 'Microsoft Client Secret'
+} else { $null }
+
+$AzureEmailConnectionString = if ($AzureEmailSender) {
+  Read-SecretValue -EnvironmentName 'AUTO_CODEZ_AZURE_EMAIL_CONNECTION_STRING' -Prompt 'Azure Communication Services Email connection string'
+} else { $null }
+
 $secretArgs = @()
 $envArgs = @(
   "ACCOUNT_PUBLIC_URL=$publicUrl",

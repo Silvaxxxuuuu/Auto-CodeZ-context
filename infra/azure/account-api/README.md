@@ -56,15 +56,19 @@ Exemplo:
 
     pwsh ./infra/azure/account-api/configure-providers.ps1 \
       -GitHubClientId "<ID>" \
-      -GitHubClientSecret "<SECRET>" \
       -GoogleClientId "<ID>" \
-      -GoogleClientSecret "<SECRET>" \
       -MicrosoftClientId "<ID>" \
-      -MicrosoftClientSecret "<SECRET>" \
-      -AzureEmailConnectionString "<CONNECTION_STRING>" \
       -AzureEmailSender "<SENDER>"
 
-Não envie esses secrets pelo chat.
+O script pede cada secret com prompt protegido. Os secrets não aparecem na linha de comando nem precisam entrar no histórico do PowerShell.
+
+Para automação local, também é possível definir temporariamente:
+- AUTO_CODEZ_GITHUB_CLIENT_SECRET
+- AUTO_CODEZ_GOOGLE_CLIENT_SECRET
+- AUTO_CODEZ_MICROSOFT_CLIENT_SECRET
+- AUTO_CODEZ_AZURE_EMAIL_CONNECTION_STRING
+
+Não envie nenhum desses valores pelo chat e não os grave no repositório.
 
 Você também pode configurar um provider por vez. O backend só anuncia métodos realmente configurados. Passkey é sempre anunciado.
 
