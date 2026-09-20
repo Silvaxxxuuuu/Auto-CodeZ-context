@@ -606,17 +606,20 @@ function install(): void {
   const rail = document.querySelector<HTMLElement>('.rail');
   const body = document.querySelector<HTMLElement>('.body');
   const spacer = rail?.querySelector<HTMLElement>('.rail-spacer');
-  if (!rail || !body || !spacer || document.querySelector('[data-mcp-mode]')) return;
+  if (!rail || !body || !spacer || document.getElementById(rootId)) return;
 
   installStyles();
 
-  const button = document.createElement('button');
-  button.className = 'rail-button';
-  button.type = 'button';
-  button.setAttribute('data-mcp-mode', '');
-  button.title = 'MCP Mode';
-  button.setAttribute('aria-label', 'MCP Mode');
-  rail.insertBefore(button, spacer);
+  let button = rail.querySelector<HTMLButtonElement>('[data-mcp-mode]');
+  if (!button) {
+    button = document.createElement('button');
+    button.className = 'rail-button';
+    button.type = 'button';
+    button.setAttribute('data-mcp-mode', '');
+    button.title = 'MCP Mode';
+    button.setAttribute('aria-label', 'MCP Mode');
+    rail.insertBefore(button, spacer);
+  }
 
   const root = document.createElement('section');
   root.id = rootId;
