@@ -124,6 +124,27 @@ async function startElectron() {
   throw lastError || new Error('Renderer indisponível.');
 }
 
+async function verifyUtilityRailIconsOnFirstFrame() {
+  const selectors = [
+    ['API Keys', '.api-key-rail-button'],
+    ['Terminal', '.terminal-rail-button'],
+    ['MCP Mode', '[data-mcp-mode]'],
+  ];
+
+  for (const [label, selector] of selectors) {
+    const button = page.locator(selector).first();
+    await button.waitFor({ state: 'visible', timeout: 15_000 });
+    const icon = button.locator(':scope > svg.ac-rail-icon, :scope > svg.ac-lucide-icon').first();
+    await icon.waitFor({ state: 'visible', timeout: 10_000 });
+    const box = await icon.boundingBox();
+    if (!box || box.width < 12 || box.height < 12) {
+      throw new Error(`${label} não possui ícone visível no primeiro frame: ${JSON.stringify(box)}`);
+    }
+  }
+
+  await page.screenshot({ path: path.join(outputDir, 'funcional-rail-utilitarios-primeiro-frame.png'), animations: 'disabled' });
+}
+
 async function verifyTerminalSessions() {
   await page.locator('.terminal-rail-button').click();
   await page.locator('.terminal-panel.open').waitFor({ state: 'visible' });
@@ -231,6 +252,7 @@ async function main() {
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
+  await verifyUtilityRailIconsOnFirstFrame();
   await verifyTerminalSessions();
   await verifyLocalChatInstallFlow();
   await verifyNoHistoricalGraphInjection();
