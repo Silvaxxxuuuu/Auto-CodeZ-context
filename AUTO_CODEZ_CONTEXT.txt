@@ -8858,3 +8858,632 @@ Depois de atualizar a branch:
 4. confirmar que node -v não pede aprovação e retorna rapidamente;
 5. depois repetir uma tarefa longa/multi-etapas com Kimi para validar conjuntamente command sandbox, atividades e Foundry long-run;
 6. não fazer merge do PR #9.
+
+
+------------------------------------------------------------
+24.53. MCP MODE — SESSION HISTORY / RESTORE POINTS (ESPECIFICAÇÃO FUTURA)
+------------------------------------------------------------
+
+Checkpoint de produto em 20/09/2026.
+
+STATUS
+
+- IDEIA APROVADA COMO PRIORIDADE ALTA FUTURA DO MCP MODE.
+- NÃO IMPLEMENTAR NESTE MOMENTO.
+- objetivo: MCP Mode extremamente seguro, estável, reversível e acessível;
+- o sistema deve permitir voltar a estados anteriores quando uma ação posterior da IA degrada ou quebra trabalho que estava bom;
+- não depender de Git;
+- não depender de uma segunda IA;
+- local-first;
+- baixo impacto de CPU, RAM e disco;
+- UI narrativa, não uma timeline técnica barulhenta.
+
+MOTIVAÇÃO
+
+Caso real que o recurso precisa resolver:
+
+1. IA executa uma sessão/operação e o projeto fica excelente;
+2. sobra um bug pequeno;
+3. usuário pede para corrigir o bug;
+4. a IA faz uma alteração ruim e quebra várias partes;
+5. usuário deve conseguir voltar exatamente ao estado anterior à correção ruim sem perder o trabalho bom da etapa anterior.
+
+Esse princípio vale para:
+- arquivos de código;
+- configurações;
+- assets;
+- operações MCP;
+- ferramentas externas;
+- Roblox;
+- Blender;
+- futuras integrações;
+- qualquer recurso no qual MCP tenha permissão real de mutação.
+
+O recurso não deve ser tratado como simples "backup de pasta".
+Internamente ele deve funcionar como:
+- journal transacional;
+- checkpoints incrementais;
+- snapshots content-addressed;
+- restore engine;
+- audit trail.
+
+Na UI, o conceito pode aparecer como:
+"Session History"
+"Pontos de restauração"
+ou combinação equivalente simples para o usuário.
+
+PRINCÍPIO CENTRAL DE UX — TIMELINE NARRATIVA
+
+A timeline NÃO pode espelhar cada tool call.
+
+Exemplo incorreto:
+- criou index.html
+- escreveu 40 linhas
+- criou styles.css
+- alterou styles.css
+- chamou terminal
+- leu package.json
+- alterou app.ts
+- alterou app.ts novamente
+- ...
+
+Isso vira ruído cognitivo.
+
+Exemplo correto:
+
+[ Refatorou sistema de autenticação ]
+14 arquivos · 30 alterações · 2m18s
+
+[ Corrigiu refresh token ]
+3 arquivos · 6 alterações · 41s
+
+[ Atualizou testes ]
+5 arquivos · 11 alterações · 58s
+
+A visão padrão deve contar a história do trabalho.
+O detalhe técnico completo continua disponível, mas fica atrás de:
+- Ver alterações
+- Ver detalhes
+- Ver ferramentas
+- Ver comandos
+- Ver arquivos afetados
+- Ver approvals
+- Ver diffs
+
+AGRUPAMENTO INTELIGENTE
+
+Regra de produto:
+30 alterações em 2 minutos que fazem parte de uma única intenção lógica devem virar UM card narrativo, não 30 entradas.
+
+Agrupamento deve preferir sinais determinísticos já disponíveis no runtime:
+- user turn / instrução explícita;
+- runId;
+- sessionId;
+- plan_execution / etapa de plano;
+- tool round;
+- relação temporal;
+- mesmo conjunto/subárvore de arquivos;
+- mesma intenção ativa;
+- ausência de nova instrução do usuário;
+- operationId;
+- task capsule;
+- tool calls originadas da mesma execução.
+
+Nova instrução explícita do usuário normalmente cria uma nova operação narrativa.
+
+Um único user turn pode, quando necessário, conter suboperações lógicas internas, mas a UI padrão deve evitar fragmentação excessiva.
+
+Não usar um LLM separado apenas para agrupar ou nomear a timeline.
+
+Títulos dos cards:
+1. preferir descrição curta já produzida pelo modelo durante a execução, se existir;
+2. senão usar plano/intenção do AgentRuntime;
+3. senão usar composer local determinístico baseado nas tools/arquivos;
+4. nunca fazer uma nova chamada paga apenas para escrever o título.
+
+DOIS NÍVEIS DE HISTÓRICO
+
+1. Session History narrativo
+   - focado no usuário;
+   - poucos cards;
+   - intenção e resultado;
+   - restauração simples;
+   - sem log técnico por padrão.
+
+2. Recovery Journal técnico
+   - completo;
+   - interno;
+   - registra operações individuais;
+   - tool calls;
+   - timestamps;
+   - approvals;
+   - arquivos;
+   - hashes;
+   - diffs;
+   - comandos;
+   - status;
+   - erros/retries;
+   - base para restore/auditoria.
+
+CHECKPOINTS
+
+Tipos planejados:
+
+A. SESSION START
+- obrigatório;
+- criado antes da primeira mutação de uma sessão MCP;
+- permite "Voltar ao início da sessão".
+
+B. PRE-CRITICAL
+- automático antes de operação com blast radius alto;
+- exemplos:
+  - refatoração grande;
+  - delete/move em massa;
+  - migração;
+  - alteração de banco;
+  - comando potencialmente destrutivo;
+  - operação Blender/Roblox de grande alcance;
+  - mudanças em muitos arquivos.
+
+C. LOGICAL OPERATION COMPLETE
+- marca o estado após conclusão bem-sucedida de uma operação narrativa;
+- exemplo:
+  "Sistema de login concluído".
+
+D. MANUAL
+- usuário pode clicar em algo como:
+  "Criar ponto de restauração";
+- nome opcional;
+- pode ser marcado como importante.
+
+E. PINNED / STABLE
+- usuário pode marcar um ponto como estável;
+- pontos pinned nunca devem ser removidos automaticamente pelo garbage collector sem confirmação explícita.
+
+CHECKPOINTS TÉCNICOS VS CHECKPOINTS VISÍVEIS
+
+O engine pode manter vários checkpoints técnicos.
+A UI NÃO precisa mostrar todos.
+
+Promoção para timeline visível deve ocorrer principalmente em:
+- início da sessão;
+- operação lógica concluída;
+- antes de ação crítica;
+- checkpoint manual;
+- estado marcado como estável.
+
+Os demais permanecem internos para segurança/recovery.
+
+RESTORE
+
+Escopos planejados:
+
+1. Restaurar sessão inteira
+2. Restaurar uma operação/card
+3. Restaurar uma pasta
+4. Restaurar somente um ou mais arquivos selecionados
+
+Exemplo:
+se auth.ts quebrou, o usuário pode restaurar apenas auth.ts sem perder todo o resto da sessão.
+
+PREVIEW RESTORE
+
+Nenhuma restauração ampla deve acontecer às cegas.
+
+Antes de aplicar:
+- mostrar quantidade de arquivos alterados;
+- mostrar arquivos que serão recriados;
+- mostrar arquivos que serão removidos;
+- mostrar arquivos que voltarão a versões anteriores;
+- mostrar conflitos;
+- permitir abrir diffs;
+- confirmar escopo.
+
+Exemplo:
+
+Restaurar "Antes de corrigir refresh token"
+
+17 arquivos serão alterados
+3 arquivos serão recriados
+2 arquivos serão removidos
+1 conflito externo detectado
+
+[Ver alterações] [Cancelar] [Restaurar]
+
+UNDO DO PRÓPRIO RESTORE
+
+Regra crítica:
+antes de restaurar qualquer checkpoint, criar automaticamente um checkpoint do estado atual.
+
+Assim:
+- usuário restaura;
+- percebe que preferia o estado anterior;
+- pode desfazer a própria restauração.
+
+Restore nunca deve ser uma operação sem volta.
+
+CONFLITOS COM ALTERAÇÕES EXTERNAS
+
+O sistema deve detectar se arquivos mudaram fora do Auto CodeZ após o checkpoint.
+
+Usar hashes/metadata para identificar:
+- arquivo igual ao último estado conhecido;
+- arquivo alterado pelo Auto CodeZ;
+- arquivo alterado externamente;
+- arquivo removido externamente.
+
+Em caso de conflito:
+- não sobrescrever silenciosamente;
+- mostrar preview;
+- oferecer escolhas:
+  - manter atual;
+  - restaurar checkpoint;
+  - comparar;
+  - restaurar somente arquivos sem conflito.
+
+ARQUITETURA DE STORAGE
+
+Não copiar a pasta inteira em cada checkpoint.
+
+Estratégia preferida:
+- snapshots incrementais;
+- content-addressed blob store;
+- hash por conteúdo;
+- deduplicação;
+- journal de mudanças;
+- metadados pequenos por checkpoint;
+- compressão quando útil;
+- garbage collection por retenção.
+
+Modelo conceitual:
+
+MCP Session
+  -> Base Checkpoint
+  -> Operation Journal
+  -> Content-addressed blobs
+  -> Logical Checkpoints
+  -> Restore Engine
+
+Para cada arquivo relevante, guardar algo equivalente a:
+- relativePath;
+- previousHash;
+- nextHash;
+- operationId;
+- sessionId;
+- timestamp;
+- size;
+- file mode/metadata necessários;
+- blob reference quando conteúdo anterior/posterior precisar ser preservado.
+
+Não confiar somente em patch textual.
+Arquivos binários também precisam de rollback.
+
+Para arquivos grandes:
+- evitar cópias repetidas;
+- deduplicar por hash;
+- futuramente considerar chunking de blobs grandes;
+- não usar hardlink mutável como mecanismo principal, para evitar que uma escrita altere acidentalmente o "backup".
+
+CONSISTÊNCIA TRANSACIONAL
+
+Ordem de segurança para mutação crítica:
+
+1. determinar arquivos/escopo afetado;
+2. materializar checkpoint necessário;
+3. persistir metadata/journal;
+4. confirmar que checkpoint está committed;
+5. somente então permitir a mutação;
+6. registrar estado posterior;
+7. fechar operation transaction.
+
+Se o app fechar/crashar:
+- journal deve permitir saber se a operação ficou:
+  - preparada;
+  - em andamento;
+  - concluída;
+  - incompleta;
+  - recuperável.
+
+Restore deve preferir escrita atômica:
+- arquivo temporário;
+- flush quando necessário;
+- rename/replace;
+- somente então atualizar metadata.
+
+SEGREDOS E ARQUIVOS SENSÍVEIS
+
+Recovery Engine é parte do control plane local, não da IA.
+
+Princípios:
+- conteúdo de backup não deve ser enviado ao modelo apenas por existir no histórico;
+- secrets não devem aparecer na timeline;
+- previews devem respeitar redaction;
+- arquivos sensíveis que o usuário explicitamente autorizou o MCP a modificar precisam de recovery seguro;
+- conteúdo sensível preservado para rollback deve ser protegido localmente;
+- preferir criptografia/OS-protected storage para blobs classificados como sensíveis;
+- cloud sync desativado por padrão;
+- Session History deve funcionar 100% offline.
+
+AUDITORIA
+
+Cada operação narrativa deve poder responder:
+"O que a IA mudou?"
+
+Detalhe expansível:
+- objetivo;
+- horário;
+- duração;
+- modelo/provider;
+- ferramentas usadas;
+- approvals;
+- comandos;
+- arquivos criados;
+- arquivos modificados;
+- arquivos removidos;
+- diffs;
+- resultado;
+- warnings;
+- retries;
+- checkpoint antes/depois.
+
+Isso NÃO significa mostrar tudo na tela principal.
+
+UI PROPOSTA
+
+Visão padrão enxuta:
+
+Session History
+
+● Estado atual
+
+┌ Refatorou autenticação
+│ 14 arquivos · 30 alterações · 2m18s
+│ [Ver alterações] [Restaurar]
+│
+┌ Corrigiu refresh token
+│ 3 arquivos · 6 alterações · 41s
+│ [Ver alterações] [Restaurar]
+│
+└ Início da sessão
+  [Restaurar]
+
+Cards podem mostrar:
+- título narrativo;
+- horário;
+- duração;
+- número de arquivos;
+- total de alterações;
+- status;
+- ícone discreto de checkpoint;
+- badge "Estável" quando pinned.
+
+Nada de dezenas de linhas técnicas por padrão.
+
+DETALHE DO CARD
+
+Ao expandir:
+- resumo;
+- arquivos;
+- diffs;
+- tools;
+- comandos;
+- approvals;
+- erros;
+- restore parcial;
+- comparar com estado atual.
+
+Acessibilidade:
+- navegação completa por teclado;
+- labels claros;
+- screen reader;
+- foco previsível;
+- sem depender apenas de cor;
+- ações destrutivas/restores amplos com confirmação clara.
+
+RETENÇÃO E ESPAÇO EM DISCO
+
+Precisamos evitar crescimento ilimitado.
+
+Configuração futura:
+- limite por tamanho total;
+- limite por idade/sessões;
+- garbage collection automática;
+- dedupe por hash;
+- mostrar uso de espaço;
+- pontos pinned/stable ficam protegidos;
+- usuário pode limpar históricos antigos conscientemente.
+
+Exemplo:
+"Session History usa 428 MB"
+"Manter últimas 20 sessões"
+"Manter pontos marcados como Estável"
+
+O default deve ser conservador e simples, sem exigir configuração inicial.
+
+INTEGRAÇÃO COM GIT
+
+Git pode ser aproveitado quando existir, mas NÃO é requisito.
+
+Regras:
+- projeto sem Git deve ter recovery completo;
+- não criar commits automáticos no repositório do usuário sem pedido;
+- se existir Git, Session History pode mostrar correlação opcional com commit/branch;
+- restore interno não deve depender de checkout/reset;
+- nunca substituir o repositório Git do usuário como fonte única de recuperação.
+
+MCP E SISTEMAS EXTERNOS
+
+Para ações fora de arquivos locais, rollback depende da capacidade real da integração.
+
+Classificar ferramentas:
+- reversible;
+- partially reversible;
+- irreversible.
+
+Exemplos:
+- escrita de arquivo: reversible;
+- mudança de cena Blender: potencialmente reversible via snapshot do .blend/estado;
+- alteração Roblox local: reversible quando capturada;
+- chamada externa que publica/deleta algo remoto: pode ser irreversível.
+
+A UI precisa deixar claro quando uma operação não pode ser totalmente restaurada.
+
+Checkpoint não pode prometer rollback de uma ação que tecnicamente não é reversível.
+
+RELAÇÃO COM APPROVAL / SANDBOX
+
+Objetivo final de segurança do MCP Mode possui quatro pilares:
+
+1. APPROVAL
+   controla o que a IA pode executar.
+
+2. SCOPE / SANDBOX
+   controla onde a IA pode atuar.
+
+3. AUDIT LOG
+   registra o que ela fez.
+
+4. CHECKPOINTS / ROLLBACK
+   permite desfazer o que deu errado.
+
+Session History é a camada de UX que unifica Audit + Recovery sem expor complexidade técnica.
+
+DESEMPENHO
+
+Requisito de produto:
+o usuário não deve "sentir" o backup.
+
+- checkpoint incremental;
+- dedupe;
+- hashing streaming;
+- trabalho pesado fora da UI thread;
+- operações pequenas devem ser praticamente instantâneas;
+- snapshot crítico precisa estar committed antes da mutação, mas deve minimizar I/O;
+- evitar rescans completos do projeto;
+- reutilizar journal e informações de files touched pelo AgentRuntime.
+
+NÃO USAR MICRO-LLM COMO REQUISITO
+
+Assim como nas atividades:
+- agrupamento e recovery precisam funcionar sem LLM auxiliar;
+- narrativa pode aproveitar dados já produzidos pelo modelo principal;
+- fallback local determinístico;
+- nenhuma nova chamada paga apenas para Session History;
+- nenhum modelo local obrigatório apenas para gerar títulos.
+
+POSSÍVEL MODELO DE DADOS
+
+McpRecoverySession
+- id
+- startedAt
+- endedAt
+- projectId / system workspace scope
+- baseCheckpointId
+- status
+
+McpRecoveryOperation
+- id
+- sessionId
+- runId
+- userTurnId
+- title
+- objective
+- startedAt
+- endedAt
+- status
+- beforeCheckpointId
+- afterCheckpointId
+- toolCallIds[]
+
+McpRestorePoint
+- id
+- sessionId
+- operationId?
+- type: session_start | pre_critical | operation_complete | manual | stable | pre_restore
+- createdAt
+- pinned
+- manifestHash
+
+McpRecoveryEntry
+- id
+- operationId
+- path
+- beforeHash?
+- afterHash?
+- kind: create | modify | delete | move
+- metadata
+
+McpRecoveryBlob
+- hash
+- size
+- compression
+- sensitivity
+- storageRef
+
+Os nomes são provisórios, não contrato final.
+
+CRITÉRIOS DE ACEITAÇÃO FUTUROS
+
+O recurso só deve ser considerado pronto quando provar:
+
+1. sessão perfeita -> mudança ruim -> restore -> bytes do projeto voltam exatamente;
+2. restore parcial de um arquivo;
+3. restore de pasta;
+4. arquivo criado depois do checkpoint é removido corretamente;
+5. arquivo apagado depois do checkpoint é recriado corretamente;
+6. binários são restaurados;
+7. rename/move é restaurado;
+8. conflito externo é detectado;
+9. restore pode ser desfeito;
+10. crash no meio de operação não corrompe o journal;
+11. secrets não vazam para UI/modelo;
+12. checkpoints pinned sobrevivem ao GC;
+13. timeline agrupa dezenas de tool calls em poucos cards narrativos;
+14. detalhe granular continua disponível;
+15. projeto sem Git funciona;
+16. projeto grande não sofre clone completo por checkpoint;
+17. UI continua responsiva;
+18. MCP indica claramente ações irreversíveis.
+
+DECISÃO DE PRIORIDADE
+
+Não implementar enquanto o lote atual de runtime/Foundry/MCP UI ainda estiver em estabilização.
+
+Depois de estabilizar:
+- projetar Recovery Journal primeiro;
+- testes de invariantes/atomicidade;
+- depois Restore Engine;
+- depois grouping narrativo;
+- por último UI Session History.
+
+Não começar pela UI.
+A segurança precisa nascer no engine.
+
+------------------------------------------------------------
+24.54. FECHAMENTO DO LOTE RELOAD/RAIL/COMMAND SANDBOX
+------------------------------------------------------------
+
+HEAD FUNCIONAL VALIDADO ANTES DESTE COMMIT DE DOCUMENTAÇÃO:
+d8b0a5f4b5eac0c984df60964b5fff5c3d0e4ece
+
+Correções finais adicionais:
+- troca de provider/model local não depende mais de window.location.reload();
+- renderer reage a auto-codez-chat-settings-updated;
+- LM Studio e IA local unificada validam estado persistido + UI reativa;
+- teste visual do splash mantém a prova inicial de cursor piscando, mas remove segunda assertiva redundante sujeita à corrida de estágio.
+
+CI:
+- Validate Auto CodeZ #4344: SUCCESS
+- Validate Auto CodeZ push #4343: SUCCESS
+- Validate Account API #139: SUCCESS
+- Visual Auto CodeZ #994: SUCCESS
+
+Visual #994:
+- Capture visual flow: SUCCESS
+- Verify unified local AI: SUCCESS
+- Verify unavailable local runtime recovery: SUCCESS
+- Verify secure local runtime settings: SUCCESS
+- Verify LM Studio chat: SUCCESS
+- Verify passwordless account onboarding: SUCCESS
+
+PR #9 permanece OPEN / DRAFT / sem merge.
