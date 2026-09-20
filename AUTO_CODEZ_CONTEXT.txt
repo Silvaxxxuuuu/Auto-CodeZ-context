@@ -8264,3 +8264,97 @@ Somente após aprovação dessa bateria:
 - marcar Account Core V1 CLOSED;
 - iniciar Azure Foundry Test Lab;
 - GPT-5.6 Luna como modelo default do laboratório.
+
+------------------------------------------------------------
+24.48. ACCOUNT API AZURE ACCEPTANCE HARNESS — READY TO RUN
+------------------------------------------------------------
+
+Checkpoint reconstruído após bug/interrupção do chat em 19/09/2026.
+
+HEAD VALIDADO:
+3b94eaab6fd00652d3b2469de79bfa45b7470ead
+fix(account): redact Azure CLI arguments on failures
+
+CI DO HEAD:
+- Validate Auto CodeZ #4252: SUCCESS;
+- Validate Auto CodeZ push #4251: SUCCESS;
+- Validate Account API #93: SUCCESS;
+- Visual Auto CodeZ #948: SUCCESS.
+
+Commits da preparação Azure:
+- f6a210c51e9c16bc8627a7b68a0f6cd9dcc44514
+  feat(account): prepare reproducible Azure acceptance deploy
+- 3c84cab4e74ec8c3808f81fce29fcf6dce9fa690
+  test(ci): parse Azure account deployment scripts
+- eef33a9193753c9e1a0601f452d0020f452fa321
+  fix(account): harden first Azure resource provisioning
+- a9d247bb089f7d88e98915f6841c580a7077f46f
+  fix(ci): format PowerShell parser diagnostics safely
+- 3433a1076dd89fbba8733763c87e00d3e52ec5b2
+  fix(account): delimit PostgreSQL user in Azure bootstrap
+- 8b940d9f3ca442d5f51c94447116b6d0c9506fe1
+  polish(account): use active Azure subscription by default
+- 50e17720b1815c1d53ddc78c0639cf1e047a528a
+  fix(account): keep provider secrets out of shell history
+- 3b94eaab6fd00652d3b2469de79bfa45b7470ead
+  fix(account): redact Azure CLI arguments on failures
+
+INFRA DISPONÍVEL:
+infra/azure/account-api/
+- README.md
+- bootstrap.ps1
+- configure-providers.ps1
+- smoke.ps1
+- destroy.ps1
+
+BOOTSTRAP CRIA:
+- Resource Group;
+- Azure Container Registry Basic;
+- imagem Account API;
+- user-assigned Managed Identity;
+- AcrPull role;
+- Container Apps Environment;
+- PostgreSQL Flexible Server 16 / Burstable Standard_B1ms / 32 GiB;
+- Container App HTTPS público;
+- Container Apps Job manual de migrations;
+- secrets internos gerados localmente;
+- PASSKEY_RP_ID alinhado ao FQDN;
+- health check e impressão das callback URLs.
+
+SEGURANÇA DOS SCRIPTS:
+- ACR admin desabilitado;
+- pull via Managed Identity;
+- provider secrets não precisam aparecer na command line;
+- configure-providers.ps1 pede secrets via Read-Host -AsSecureString;
+- secrets também podem vir de environment variables temporárias;
+- erros do wrapper Azure CLI omitem argumentos completos;
+- nenhum secret deve ser enviado pelo chat;
+- nenhum secret é commitado.
+
+ASSINATURA:
+- -SubscriptionId agora é opcional;
+- bootstrap usa a assinatura já ativa em az account show;
+- se não houver assinatura ativa, aborta com instrução para az login.
+
+PASSO HUMANO PENDENTE:
+Executar no PC do usuário:
+1. atualizar branch;
+2. confirmar Azure CLI/login;
+3. executar bootstrap.ps1;
+4. devolver somente saída não sensível:
+   - Account API HTTPS URL;
+   - Health result;
+   - OAuth callback URLs;
+   - qualquer erro SEM secrets.
+
+Depois:
+- criar OAuth apps reais;
+- configurar providers usando configure-providers.ps1;
+- Magic Link via Azure Communication Services Email;
+- smoke.ps1;
+- apontar desktop para AUTO_CODEZ_ACCOUNT_API_BASE_URL;
+- executar bateria real do Account Core.
+
+Account Core V1 permanece OPEN até a bateria real ser aprovada.
+Azure Foundry / GPT-5.6 Luna começa somente depois.
+PR #9 continua OPEN / DRAFT / sem merge.
