@@ -8717,3 +8717,144 @@ Depois de atualizar a branch:
 6. confirmar que as ferramentas realmente executam e que o modelo não apenas descreve ações.
 
 PR #9 continua OPEN / DRAFT / sem merge.
+
+
+------------------------------------------------------------
+24.52. COMMAND SANDBOX SPARSE + UTILITY RAIL FIRST-FRAME ICONS
+------------------------------------------------------------
+
+Checkpoint em 20/09/2026.
+
+RELATO REAL DO USUÁRIO
+
+Após puxar o lote de Foundry/Kimi:
+- pediu "Abra o terminal e execute node -v";
+- mesmo com Acesso irrestrito, apareceu aprovação para run_command;
+- após aprovar, a execução ficou parada em "Executando node -v";
+- MCP Mode ainda aparecia sem ícone;
+- ícones Terminal e API Keys só apareciam depois de selecionar algum chat.
+
+DIAGNÓSTICO
+
+1. Aprovação indevida de node -v:
+   - PermissionRuntime já retornava allow para run_command em unrestricted;
+   - CommandSafetyPolicy elevava TODO shell command para ask por padrão;
+   - isso criava conflito de política para probes claramente somente leitura.
+
+2. Travamento aparente após aprovar:
+   - o command sandbox do SYSTEM_PROJECT_ID materializava a raiz inteira do workspace de sistema;
+   - em Windows, a raiz é a Home do usuário;
+   - portanto node -v podia percorrer/copiar uma quantidade enorme de arquivos antes de iniciar o processo.
+
+3. Ícones do rail:
+   - Terminal, API Keys e MCP eram injetados por módulos assíncronos;
+   - o rail base nascia sem esses botões;
+   - módulos de polish ainda dependiam de re-render/MutationObserver;
+   - MCP usava mask-image e permanecia sem representação visual confiável.
+
+CORREÇÕES
+
+Command policy:
+- probes somente leitura conhecidos agora podem ser allow pela CommandSafetyPolicy:
+  node -v / --version
+  npm -v / --version
+  npx --version
+  git --version
+  python / python3 / py --version
+- comandos comuns ou mutáveis continuam sujeitos à política de aprovação;
+- comandos/pastas sensíveis continuam podendo ser ask/deny independentemente do modo irrestrito.
+
+Command sandbox:
+- SYSTEM_PROJECT_ID deixou de clonar a Home inteira;
+- comandos sem dependência de arquivos, como node -v, recebem workspace temporário vazio;
+- quando o comando entra explicitamente em uma subpasta com cd/chdir/pushd/Set-Location, somente a subárvore permitida é materializada;
+- alterações feitas pelo comando continuam isoladas e descartadas;
+- shadow changes relevantes continuam materializadas;
+- arquivos sensíveis permanecem filtrados.
+
+Rail:
+- API Keys, Terminal e MCP agora existem no HTML base desde o primeiro frame;
+- módulos passam a apenas conectar comportamento a botões já existentes;
+- MCP usa SVG Lucide Computer fornecido pelo usuário;
+- Terminal/API Keys também possuem SVG real no rail base;
+- pseudo-elementos antigos ficam desativados para esses três botões;
+- foi adicionado teste visual explícito que falha se qualquer um dos três ícones não estiver visível no primeiro frame.
+
+INCONSISTÊNCIA EXTRA ENCONTRADA PELO CI VISUAL
+
+Visual #984 inicialmente falhou no cenário LM Studio.
+A primeira correção removeu dependência rígida de framenavigated, mas o segundo passe revelou um bug real:
+- o backend persistia provider/model;
+- local-ai-unified-chat-ui emitia auto-codez-chat-settings-updated;
+- renderer principal não escutava esse evento;
+- se location.reload() não acontecesse ou não fosse observado, header/lista permaneciam com provider antigo.
+
+Correção:
+- renderer agora escuta auto-codez-chat-settings-updated;
+- atualiza chats, activeChat, intelligence e re-renderiza nav/header/messages/composer imediatamente;
+- teste LM Studio passa a validar estado real + UI, sem depender de um evento de navegação.
+
+COMMITS PRINCIPAIS
+
+- 902de55d323aa52375a240064ea67146bdfc645d
+  fix(ui): render utility rail icons from first frame
+- ed27bdb0d4435d95119b5def27d41e6591f39f19
+  fix(ui): stabilize utility rail SVG icons
+- d5d938bec0336e1b3e95dd8ba895c8bcc636c522
+  fix(ui): bind terminal to pre-rendered rail button
+- 0b6411ff1c2704a779f67555c037263d3db1cb16
+  fix(ui): bind API key manager to pre-rendered rail button
+- 85aff48f9c20bb9654c7f9ac72e74124da08de97
+  fix(mcp): bind mode to pre-rendered computer button
+- ef45266af4b92e2651bf94d08640363927d9ca3a
+  fix(agent): allow harmless version probes without shell approval
+- 3acb5494efd4175a708e2c587b4b2f8c6c59dac9
+  fix(agent): sparsely materialize system command workspace
+- 11647425006047849353e672b76179babcd39949
+  test(agent): cover unrestricted harmless command probes
+- 52695395933036f84ec9f4d7d039ab24855e481c
+  test(agent): cover sparse system command sandbox
+- f4d36a6822c8830c2e7dab74dc50ffdb3a9cf027
+  test(agent): align system command test with sparse sandbox
+- 0f8854f47b57adc6d976e8ce7242e91ed5136641
+  test(visual): make LM Studio save verification navigation-resilient
+- b29c0cc80d1ac815cca9367a034b8b80d192900b
+  test(visual): assert utility rail icons on first frame
+- 33fd9e1cf72edfb15a168f7a57b3025012c3d3e1
+  fix(ui): apply chat settings updates without reload
+- 720d622943469f5f43172f6147c883b15e4af9e4
+  test(visual): verify LM Studio UI state directly
+
+VALIDAÇÃO DO HEAD 720d622943469f5f43172f6147c883b15e4af9e4
+
+- Validate Auto CodeZ #4332: SUCCESS
+- Validate Auto CodeZ push #4331: SUCCESS
+- Validate Account API #133: SUCCESS
+- Visual Auto CodeZ #988: SUCCESS
+
+Visual #988 confirmou também:
+- Capture visual flow: SUCCESS
+- unified local AI: SUCCESS
+- unavailable local runtime recovery: SUCCESS
+- secure local runtime settings: SUCCESS
+- LM Studio chat: SUCCESS
+- passwordless account onboarding: SUCCESS
+- screenshots upload: SUCCESS
+
+PR #9:
+- OPEN
+- DRAFT
+- mergeable
+- não mesclado
+- head: 720d622943469f5f43172f6147c883b15e4af9e4
+- base: 7933f68b613141e75a6cdd65229c34332fb1c8b7
+
+PRÓXIMO TESTE MANUAL
+
+Depois de atualizar a branch:
+1. abrir o app e confirmar, antes de clicar em qualquer chat, que API Keys, Terminal e MCP aparecem com ícone;
+2. manter Acesso irrestrito;
+3. pedir "execute node -v";
+4. confirmar que node -v não pede aprovação e retorna rapidamente;
+5. depois repetir uma tarefa longa/multi-etapas com Kimi para validar conjuntamente command sandbox, atividades e Foundry long-run;
+6. não fazer merge do PR #9.
