@@ -184,17 +184,21 @@ async function verifyUnifiedChat() {
   const save = page.locator('#save-available-ai-settings');
   await page.waitForFunction(() => !document.querySelector('#save-available-ai-settings')?.hasAttribute('disabled'));
   await page.screenshot({ path: path.join(outputDir, 'funcional-ia-local-unificada.png'), animations: 'disabled' });
-  const reloaded = page.waitForEvent('framenavigated', {
-    predicate: (frame) => frame === page.mainFrame(),
-    timeout: 30_000,
-  });
   await save.click();
-  await reloaded;
-  await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
   await page.waitForFunction(
     async (chatId) => {
       const chat = (await window.autoCodez.getState()).chats.find((item) => item.id === chatId);
       return chat?.providerId === 'ollama' && chat.model === 'qwen3:8b';
+    },
+    created.id,
+    { timeout: 30_000 },
+  );
+  await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
+  await page.waitForFunction(
+    (chatId) => {
+      const selected = document.querySelector(`.chat-item.selected[data-chat="${CSS.escape(chatId)}"]`);
+      const header = document.querySelector('#chat-header');
+      return Boolean(selected && header?.textContent?.includes('qwen3:8b'));
     },
     created.id,
     { timeout: 20_000 },
