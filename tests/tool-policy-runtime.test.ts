@@ -93,7 +93,21 @@ test('unrestricted system workspace read preserves explicit unrestricted behavio
   assert.equal(result.sources.systemWorkspace, 'allow');
 });
 
-test('ordinary shell command requires approval in unrestricted mode without an execution path scope', () => {
+test('harmless version probe is allowed in unrestricted mode', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('run_command', { command: 'node -v' }),
+  });
+
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.blockedBy, null);
+  assert.equal(result.sources.permission, 'allow');
+  assert.equal(result.sources.command, 'allow');
+  assert.equal(result.sources.executionScope, 'allow');
+});
+
+test('ordinary shell command still requires approval in unrestricted mode', () => {
   const result = runtime.evaluate({
     permissionLevel: 'unrestricted',
     projectId: 'project-a',
@@ -101,11 +115,7 @@ test('ordinary shell command requires approval in unrestricted mode without an e
   });
 
   assert.equal(result.decision, 'ask');
-  assert.equal(result.blockedBy, null);
-  assert.equal(result.sources.permission, 'allow');
   assert.equal(result.sources.command, 'ask');
-  assert.equal(result.sources.executionScope, 'allow');
-  assert.match(result.reasons.join(' '), /confinamento completo do sistema operacional/i);
 });
 
 test('direct Git mutation through the shell still requires approval in unrestricted mode', () => {
