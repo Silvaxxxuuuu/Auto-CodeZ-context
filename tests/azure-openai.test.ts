@@ -145,3 +145,124 @@ test('Azure OpenAI refuses missing resource endpoint before making a request', a
     /exige a URL base do recurso/i,
   );
 });
+
+
+test('Azure Foundry sends Kimi deployments through chat completions with api-key auth', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+
+  await withMockedFetch(async (input, init) => {
+    assert.equal(String(input), 'https://example.services.ai.azure.com/openai/v1/chat/completions');
+    assert.equal(init?.method, 'POST');
+    const headers = init?.headers as Record<string, string>;
+    assert.equal(headers['api-key'], 'azure-test-key');
+
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    assert.equal(body.model, 'Kimi-K2.6');
+    assert.ok(Array.isArray(body.messages));
+    assert.ok(Array.isArray(body.tools));
+    assert.equal('input' in body, false);
+    assert.equal('reasoning' in body, false);
+
+    return jsonResponse({
+      choices: [{
+        message: {
+          content: 'Kimi pronto',
+          tool_calls: [{
+            id: 'call_kimi_1',
+            type: 'function',
+            function: {
+              name: 'read_file',
+              arguments: '{"path":"src/main.ts"}',
+            },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+      usage: {
+        prompt_tokens: 12,
+        completion_tokens: 7,
+        total_tokens: 19,
+      },
+    });
+  }, async () => {
+    const response = await adapter.send(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    );
+    assert.equal(response.providerId, 'azure-openai');
+    assert.equal(response.content, 'Kimi pronto');
+    assert.deepEqual(response.usage, {
+      inputTokens: 12,
+      outputTokens: 7,
+      totalTokens: 19,
+    });
+    assert.deepEqual(response.toolCalls, [{
+      id: 'call_kimi_1',
+      name: 'read_file',
+      input: { path: 'src/main.ts' },
+    }]);
+  });
+});
+
+test('Azure Foundry streams Kimi chat completions and tool calls', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"Olá "},"finish_reason":null}]}',
+    '',
+    'data: {"choices":[{"delta":{"content":"do Kimi"},"finish_reason":null}]}',
+    '',
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_stream_1","function":{"name":"read_file","arguments":"{\\"path\\":\\"README.md\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}',
+    '',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+
+  await withMockedFetch(async (input, init) => {
+    assert.equal(String(input), 'https://example.services.ai.azure.com/openai/v1/chat/completions');
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    assert.equal(body.stream, true);
+    return new Response(sse, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  }, async () => {
+    const events = [];
+    for await (const event of adapter.stream!(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    )) {
+      events.push(event);
+    }
+
+    assert.deepEqual(
+      events.filter((event) => event.type === 'delta').map((event) => event.text),
+      ['Olá ', 'do Kimi'],
+    );
+    assert.deepEqual(
+      events.filter((event) => event.type === 'tool_call').map((event) => event.toolCall),
+      [{
+        id: 'call_stream_1',
+        name: 'read_file',
+        input: { path: 'README.md' },
+      }],
+    );
+    const complete = events.find((event) => event.type === 'complete');
+    assert.equal(complete?.response?.content, 'Olá do Kimi');
+    assert.deepEqual(complete?.usage, {
+      inputTokens: 4,
+      outputTokens: 3,
+      totalTokens: 7,
+    });
+  });
+});
