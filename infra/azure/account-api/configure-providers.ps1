@@ -47,7 +47,8 @@ function Get-StableSuffix {
   try {
     $bytes = [Text.Encoding]::UTF8.GetBytes($Value)
     $hash = $sha.ComputeHash($bytes)
-    return ([Convert]::ToHexString($hash).Substring(0, 8)).ToLowerInvariant()
+    $hex = [System.BitConverter]::ToString($hash).Replace('-', '')
+    return $hex.Substring(0, 8).ToLowerInvariant()
   } finally {
     $sha.Dispose()
   }
