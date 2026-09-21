@@ -41,7 +41,7 @@ test('account auth factory fails closed without blocking local app on invalid co
 });
 
 
-test('account auth discovery disables blocking login when configured backend is unavailable', async () => {
+test('account auth discovery keeps blocking login when configured backend is unavailable', async () => {
   const result = createAccountAuthAdapter('https://accounts.autocodez.example');
   result.adapter.configuration = async () => {
     throw new Error('backend offline');
@@ -50,7 +50,7 @@ test('account auth discovery disables blocking login when configured backend is 
   assert.deepEqual(
     await resolveAccountAuthConfiguration(result),
     {
-      configured: false,
+      configured: true,
       methods: [],
       configurationError: 'backend offline',
     },
