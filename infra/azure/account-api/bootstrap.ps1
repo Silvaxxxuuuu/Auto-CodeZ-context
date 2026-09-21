@@ -6,7 +6,9 @@ param(
   [string]$NamePrefix = 'autocodezacct',
   [string]$PostgresAdmin = 'autocodezadmin',
   [ValidateRange(0, 1)]
-  [int]$MinReplicas = 1
+  [int]$MinReplicas = 1,
+  [ValidateSet('AcrTask', 'LocalDocker')]
+  [string]$ImageBuildMode = 'AcrTask'
 )
 
 Set-StrictMode -Version Latest
@@ -187,14 +189,38 @@ Invoke-Az -Arguments @(
 
 Push-Location $accountApiRoot
 try {
-  Invoke-Az -Arguments @(
-    'acr', 'build',
-    '--registry', $acrName,
-    '--image', $imageName,
-    '--file', 'Dockerfile',
-    '.',
-    '--output', 'none'
-  )
+  if ($ImageBuildMode -eq 'LocalDocker') {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+      throw 'Docker não foi encontrado para ImageBuildMode=LocalDocker.'
+    }
+
+    $registryServer = "$acrName.azurecr.io"
+    Write-Host "Build local no runner: $registryServer/$imageName"
+    Invoke-Az -Arguments @(
+      'acr', 'login',
+      '--name', $acrName,
+      '--output', 'none'
+    )
+
+    & docker build --tag "$registryServer/$imageName" --file Dockerfile .
+    if ($LASTEXITCODE -ne 0) {
+      throw "docker build falhou com exit code $LASTEXITCODE."
+    }
+
+    & docker push "$registryServer/$imageName"
+    if ($LASTEXITCODE -ne 0) {
+      throw "docker push falhou com exit code $LASTEXITCODE."
+    }
+  } else {
+    Invoke-Az -Arguments @(
+      'acr', 'build',
+      '--registry', $acrName,
+      '--image', $imageName,
+      '--file', 'Dockerfile',
+      '.',
+      '--output', 'none'
+    )
+  }
 } finally {
   Pop-Location
 }

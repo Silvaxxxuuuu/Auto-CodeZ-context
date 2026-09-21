@@ -122,3 +122,22 @@ Account Core V1 só fecha depois desses testes essenciais serem aprovados.
 - deep link continua usando apenas código/token one-time.
 - access token do desktop continua apenas em memória.
 - private Ed25519 key continua local ao dispositivo.
+
+
+## 10. Deploy sem Docker local
+
+Se ACR Tasks estiver bloqueado na assinatura ou Docker não estiver instalado no Windows, use o workflow manual:
+
+    Deploy Account API Azure
+
+Ele executa o mesmo bootstrap com `-ImageBuildMode LocalDocker` dentro do runner Ubuntu do GitHub. O Docker usado é o do runner, não o computador local.
+
+O workflow usa Azure Login com OIDC. Configure estes repository secrets antes da primeira execução:
+
+- AZURE_CLIENT_ID
+- AZURE_TENANT_ID
+- AZURE_SUBSCRIPTION_ID
+
+A identidade federada precisa ter permissões suficientes no escopo usado pelo laboratório para criar e atualizar Resource Group, ACR, Managed Identity, PostgreSQL Flexible Server e Container Apps. Não armazene client secret para este fluxo.
+
+Depois do workflow, o Summary da execução mostra o HTTPS do Account API e as três callback URLs OAuth.
