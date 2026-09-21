@@ -318,6 +318,7 @@ function renderComposer(): void {
   sendButton.dataset.executionLocked = String(busy);
   sendButton.disabled = !activeChat || !prompt.value.trim() || busy || pendingApprovals.length > 0;
   prompt.disabled = busy;
+  resizePrompt();
   renderIntelligenceMenu();
 }
 
@@ -602,9 +603,21 @@ intelligenceMenu.addEventListener('click', async (event) => {
   if (option) await setComposerIntelligence(option.dataset.intelligenceOption as IntelligenceLevel);
 });
 
-prompt.addEventListener('input', () => {
+function resizePrompt(): void {
+  const style = getComputedStyle(prompt);
+  const lineHeight = Number.parseFloat(style.lineHeight) || 20;
+  const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+  const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+  const maxHeight = Math.ceil((lineHeight * 10) + paddingTop + paddingBottom);
+
   prompt.style.height = 'auto';
-  prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`;
+  const nextHeight = Math.min(prompt.scrollHeight, maxHeight);
+  prompt.style.height = `${nextHeight}px`;
+  prompt.style.overflowY = prompt.scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
+
+prompt.addEventListener('input', () => {
+  resizePrompt();
   renderComposer();
 });
 prompt.addEventListener('keydown', (event) => {

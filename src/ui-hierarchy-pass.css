@@ -504,3 +504,60 @@
   .intelligence-current{display:none!important}
   .composer-hint{font-size:9px!important}
 }
+
+
+/* Compact edge rail and ten-line composer */
+.messages{
+  padding-left:20px!important;
+  padding-right:20px!important;
+}
+.message{
+  width:100%!important;
+  max-width:none!important;
+}
+.message.assistant .message-content,
+.message.tool .message-content,
+.message.system .message-content{
+  max-width:none!important;
+}
+.ac-live-activity{
+  width:100%!important;
+  max-width:none!important;
+  margin-left:0!important;
+  margin-right:0!important;
+}
+.composer-wrap{
+  padding-left:20px!important;
+  padding-right:20px!important;
+}
+.composer{
+  width:100%!important;
+  height:auto!important;
+  min-height:56px!important;
+  align-items:end!important;
+  padding-top:5px!important;
+  padding-bottom:5px!important;
+}
+.composer textarea{
+  height:auto!important;
+  min-height:40px!important;
+  max-height:218px!important;
+  padding-top:9px!important;
+  padding-bottom:9px!important;
+  overflow-y:hidden;
+  align-self:end!important;
+}
+.attach-button,
+.send-button,
+.intelligence-control,
+.composer-divider{
+  align-self:end!important;
+  margin-bottom:5px!important;
+}
+@media(max-width:720px){
+  .messages,
+  .composer-wrap{
+    padding-left:14px!important;
+    padding-right:14px!important;
+  }
+}

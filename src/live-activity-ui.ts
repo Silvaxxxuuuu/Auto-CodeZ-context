@@ -21,14 +21,14 @@ style.id = 'auto-codez-live-activity-style';
 style.textContent = `
   #messages > .activity-card{display:none!important}
   #messages > .ac-internal-transcript{display:none!important}
-  .ac-live-activity{width:min(860px,calc(100% - 56px));margin:4px auto;display:flex;align-items:center;gap:8px;color:#7f8997;font:11px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:20px}
+  .ac-live-activity{width:100%;margin:4px 0;display:flex;align-items:center;gap:8px;color:#7f8997;font:11px/1.5 Inter,ui-sans-serif,system-ui,sans-serif;min-height:20px}
   .ac-live-activity:first-of-type{margin-top:6px}.ac-live-activity:last-of-type{margin-bottom:12px}
   .ac-live-activity[hidden]{display:none}.ac-live-activity.status-failed{color:#d58e96}.ac-live-activity.status-success{color:#8995a4}.ac-live-activity.status-pending{color:#a89b7d}
   .ac-live-activity-icon{display:grid;place-items:center;width:16px;height:16px;flex:0 0 16px;color:currentColor}.ac-live-activity-icon svg{display:block;width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .ac-live-activity-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ac-live-activity-dots{display:inline-flex;margin-left:1px;letter-spacing:1px;opacity:.7}.ac-live-activity-dots span{animation:ac-live-dot 1.05s infinite;opacity:.25}.ac-live-activity-dots span:nth-child(2){animation-delay:.15s}.ac-live-activity-dots span:nth-child(3){animation-delay:.3s}
   .ac-live-activity.status-success .ac-live-activity-dots,.ac-live-activity.status-failed .ac-live-activity-dots,.ac-live-activity.status-pending .ac-live-activity-dots{display:none}
   #messages.ac-has-live-activity .ac-thinking-status{display:none!important}@keyframes ac-live-dot{0%,100%{opacity:.25}40%{opacity:1}70%{opacity:.25}}
-  @media(max-width:720px){.ac-live-activity{width:calc(100% - 24px)}}@media(prefers-reduced-motion:reduce){.ac-live-activity-dots span{animation:none;opacity:.65}}
+  @media(max-width:720px){.ac-live-activity{width:100%}}@media(prefers-reduced-motion:reduce){.ac-live-activity-dots span{animation:none;opacity:.65}}
 `;
 document.head.appendChild(style);
 
