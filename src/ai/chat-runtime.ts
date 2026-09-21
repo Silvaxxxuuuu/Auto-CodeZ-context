@@ -303,7 +303,7 @@ export class ChatRuntime {
     if (groundedAnswerOnly) {
       systemMessages.push({
         role: 'system' as const,
-        content: 'Este turno é uma consulta informativa já grounded. Responda diretamente em texto normal com base nas fontes recuperadas. Não planeje ações, não tente chamar ferramentas e nunca emita tokens de controle, pseudo-tool-calls, tags <|toolcall...|> ou JSON de ferramentas. O request não possui ferramentas disponíveis.',
+        content: 'Este turno é uma consulta informativa já grounded. Responda diretamente em texto normal com base nas fontes recuperadas. Não planeje ações, não tente chamar ferramentas e não emita protocolo interno, pseudo-chamadas, nomes de funções ou argumentos JSON de ferramentas. O request não possui ferramentas disponíveis.',
       });
       messages.splice(0, messages.length, ...systemMessages, ...compactedHistory.messages);
     }

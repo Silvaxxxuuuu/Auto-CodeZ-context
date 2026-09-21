@@ -218,7 +218,7 @@ function retryWithoutToolProtocol(request: AIRequest): AIRequest {
       ...request.messages,
       {
         role: 'system',
-        content: 'A tentativa anterior tentou emitir um protocolo interno de ferramenta, mas este request não possui ferramentas. Responda agora somente com a resposta final em texto normal. Não escreva tags <|toolcall...|>, nomes de funções, argumentos JSON ou qualquer formato de chamada de ferramenta.',
+        content: 'A tentativa anterior tentou emitir um protocolo interno de ferramenta, mas este request não possui ferramentas. Responda agora somente com a resposta final em texto normal. Não escreva tokens de controle, nomes de funções, argumentos JSON ou qualquer formato de chamada de ferramenta.',
       },
     ],
     toolsEnabled: false,
@@ -815,10 +815,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         const text = contentText(delta?.content);
         if (text) {
           content += text;
-          if (guardEmbeddedProtocol) {
-            continue;
-          }
-          if (!embeddedProtocolStarted) {
+          if (!guardEmbeddedProtocol && !embeddedProtocolStarted) {
             visibleBuffer += text;
             const markerIndex = embeddedMarkers
               .map((marker) => visibleBuffer.indexOf(marker))
