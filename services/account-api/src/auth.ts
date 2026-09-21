@@ -24,6 +24,15 @@ export function createBetterAuth(
     emailAndPassword: {
       enabled: false,
     },
+    account: {
+      accountLinking: {
+        enabled: true,
+        disableImplicitLinking: false,
+        allowDifferentEmails: false,
+        requireLocalEmailVerified: true,
+        updateUserInfoOnLink: false,
+      },
+    },
     socialProviders,
     plugins: [
       magicLink({

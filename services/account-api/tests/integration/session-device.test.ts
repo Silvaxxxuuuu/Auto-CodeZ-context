@@ -362,3 +362,49 @@ test('Device Registry isolates the same physical device id between accounts', as
     await database.close();
   }
 });
+
+
+test('desktop account keeps multiple linked authentication identities for the same Better Auth user', async () => {
+  const env = environment();
+  const database = new Database(env);
+  try {
+    await migrateDesktopSchema(database);
+    await reset(database);
+
+    let now = 1_800_000_000_000;
+    const sessions = new DesktopSessionService(database, env, () => now);
+    const user = {
+      id: 'user-multi-identity-1',
+      email: 'linked@example.com',
+      name: 'Linked User',
+    };
+
+    const github = await sessions.issue({
+      user,
+      provider: 'github',
+      deviceId: 'device-linked-1',
+    });
+
+    now += 1_000;
+    const google = await sessions.issue({
+      user,
+      provider: 'google',
+      deviceId: 'device-linked-1',
+    });
+
+    assert.equal(github.account.id, user.id);
+    assert.equal(google.account.id, user.id);
+    assert.deepEqual(
+      google.account.identities.map((identity) => identity.provider).sort(),
+      ['github', 'google'],
+    );
+
+    const rows = await database.query<{ provider: string }>(
+      'SELECT provider FROM desktop_identity WHERE user_id = $1 ORDER BY provider ASC',
+      [user.id],
+    );
+    assert.deepEqual(rows.map((row) => row.provider), ['github', 'google']);
+  } finally {
+    await database.close();
+  }
+});
