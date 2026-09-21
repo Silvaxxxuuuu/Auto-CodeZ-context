@@ -326,11 +326,60 @@ test('successful automatic grounding suppresses duplicate web tools but keeps no
     undefined,
     grounding,
   );
-  const value = chat('test-model', undefined, 'Pesquise na web o ranking atual.');
+  const value = chat('test-model', undefined, 'Pesquise na web o ranking atual e salve um resumo.');
 
   await runtime.send(config, value);
 
   assert.equal(requests.length, 1);
   assert.deepEqual(requests[0].tools?.map((item) => item.name), ['read_file']);
   assert.equal(requests[0].messages.some((message) => /grounding Web deste turno já foi concluído/i.test(message.content)), true);
+});
+
+
+test('pure informational grounded turn disables all agent tools for a one-call answer', async () => {
+  const registry = new ProviderRegistry();
+  const requests: Array<{ tools?: Array<{ name: string }>; toolsEnabled: boolean; messages: Array<{ role: string; content: string }> }> = [];
+  registry.register({
+    id: config.id,
+    displayName: config.displayName,
+    async listModels() {
+      return [{ id: 'test-model', name: 'Test Model', providerId: config.id, capabilities: ['text', 'tools'] }];
+    },
+    async send(_config, request) {
+      requests.push(request);
+      return { content: 'Ranking grounded', model: 'test-model', providerId: config.id };
+    },
+  });
+  const groundingRuntime = new WebRetrievalRuntime({
+    searchAdapter: {
+      id: 'fixture',
+      displayName: 'Fixture',
+      async search() {
+        return [{ title: 'Ranking atual', url: 'https://example.com/ranking', snippet: 'Top 1, Top 2, Top 3.' }];
+      },
+    },
+  });
+  const grounding = new WebGroundingCoordinator({ runtime: groundingRuntime, fetchLimit: 0 });
+  const runtime = new ChatRuntime(
+    registry,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    [
+      tool('web_search', false, false),
+      tool('web_fetch', false, false),
+      tool('read_file', false, false),
+      tool('run_command', false, true),
+    ],
+    undefined,
+    grounding,
+  );
+
+  await runtime.send(config, chat('test-model', undefined, 'Pode pesquisar na internet quais são os tops globais de Fortnite?'));
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].toolsEnabled, false);
+  assert.equal(requests[0].tools, undefined);
+  assert.equal(requests[0].messages.some((message) => /consulta informativa já grounded/i.test(message.content)), true);
 });

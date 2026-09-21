@@ -146,6 +146,7 @@ Important distinction:
 
 const SYSTEM_CHAT_TOOL_NAMES = new Set(['plan_execution', 'complete_plan_step', 'read_file', 'read_symbol', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'web_search', 'web_fetch', 'run_command', 'plugin_list_tools', 'plugin_call']);
 const LIGHTWEIGHT_TURN_PATTERN = /^(?:oi+|ol[aá]+|opa+|e(?:\s|-)a[ií]|hello|hi|hey|bom dia|boa tarde|boa noite|valeu|obrigad[oa]|thanks?|thank you)[!.?\s]*$/i;
+const ACTIONABLE_TOOL_TURN_PATTERN = /\b(?:crie|criar|fa[cç]a|fazer|gere|gerar|altere|alterar|edite|editar|corrija|corrigir|implemente|implementar|execute|executar|rode|rodar|instale|instalar|salve|salvar|escreva|escrever|delete|delete|rename|create|build|install|run|execute|edit|modify|fix|implement|write|save)\b/i;
 
 function runtimePlatform(): string {
   if (process.platform === 'win32') return 'Windows';
@@ -294,10 +295,24 @@ export class ChatRuntime {
     const messages = [...systemMessages, ...compactedHistory.messages];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
     if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
+    const groundedAnswerOnly = Boolean(
+      webContext
+      && currentUserMessage
+      && !ACTIONABLE_TOOL_TURN_PATTERN.test(currentUserMessage.content),
+    );
+    if (groundedAnswerOnly) {
+      systemMessages.push({
+        role: 'system' as const,
+        content: 'Este turno é uma consulta informativa já grounded. Responda diretamente com base nas fontes recuperadas. Não há necessidade de planejamento, ferramentas locais ou novas ações.',
+      });
+      messages.splice(0, messages.length, ...systemMessages, ...compactedHistory.messages);
+    }
     const scopedTools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => SYSTEM_CHAT_TOOL_NAMES.has(tool.name));
-    const tools = webContext
-      ? scopedTools.filter((tool) => tool.name !== 'web_search' && tool.name !== 'web_fetch')
-      : scopedTools;
+    const tools = groundedAnswerOnly
+      ? []
+      : webContext
+        ? scopedTools.filter((tool) => tool.name !== 'web_search' && tool.name !== 'web_fetch')
+        : scopedTools;
     const toolsEnabled = !lightweightTurn && this.capabilities.supports(model, 'tools') && tools.length > 0;
     return {
       adapter,
