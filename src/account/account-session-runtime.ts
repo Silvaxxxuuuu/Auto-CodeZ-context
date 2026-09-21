@@ -99,6 +99,53 @@ export class AccountSessionRuntime {
     }
   }
 
+  async refreshSession(): Promise<AccountRuntimeSnapshot> {
+    const current = this.state ?? await this.hydrate();
+    const device = await this.deviceIdentity.getOrCreate();
+    const refreshToken = await this.credentials.get(REFRESH_TOKEN_CREDENTIAL);
+
+    if (!current.account || !current.session || !refreshToken) {
+      await this.clearPersistedSession();
+      this.accessToken = null;
+      return this.setState({ state: 'signed_out', device });
+    }
+
+    try {
+      const grant = await this.auth.refresh({ refreshToken, deviceId: device.id });
+      return await this.establish(grant, device);
+    } catch (error) {
+      if (error instanceof AuthAdapterError && error.code === 'offline') {
+        this.accessToken = null;
+        return this.setState({
+          state: 'offline',
+          account: cloneProfile(current.account),
+          session: cloneSession(current.session),
+          device,
+          lastError: error.message,
+        });
+      }
+
+      if (error instanceof AuthAdapterError && (error.code === 'revoked' || error.code === 'invalid_grant')) {
+        await this.clearPersistedSession();
+        this.accessToken = null;
+        return this.setState({
+          state: 'revoked',
+          device,
+          lastError: error.message,
+        });
+      }
+
+      this.accessToken = null;
+      return this.setState({
+        state: 'error',
+        account: cloneProfile(current.account),
+        session: cloneSession(current.session),
+        device,
+        lastError: error instanceof Error ? error.message : 'Falha ao renovar a sessão.',
+      });
+    }
+  }
+
   async establish(grant: AuthGrant, deviceOverride?: DeviceRecord): Promise<AccountRuntimeSnapshot> {
     if (!grant.accessToken.trim() || !grant.refreshToken.trim()) throw new Error('Credenciais de sessão inválidas.');
     let device = deviceOverride ?? await this.deviceIdentity.getOrCreate();

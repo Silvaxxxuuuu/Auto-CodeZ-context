@@ -500,3 +500,109 @@ test('AccountSessionRuntime fails closed when session metadata persistence fails
   assert.equal(credentials.values.has('account.session.refresh-token'), false);
   assert.equal(storage.values.has('account-session.json'), false);
 });
+
+
+test('AccountSessionRuntime refreshSession rotates credentials and updates the live session', async () => {
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => 100,
+    },
+  );
+  const device = await devices.getOrCreate();
+  let refreshCalls = 0;
+
+  const adapter: SessionAuthAdapter = {
+    async refresh(input): Promise<AuthGrant> {
+      refreshCalls += 1;
+      assert.equal(input.refreshToken, 'refresh-old');
+      assert.equal(input.deviceId, device.id);
+      return {
+        account: profile(),
+        session: { ...session(device.id), id: 'session-2', accessExpiresAt: 90_000 },
+        accessToken: 'access-new',
+        refreshToken: 'refresh-new',
+      };
+    },
+    async revoke(): Promise<void> {
+      return;
+    },
+  };
+
+  const runtime = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+
+  await runtime.establish({
+    account: profile(),
+    session: session(device.id),
+    accessToken: 'access-old',
+    refreshToken: 'refresh-old',
+  });
+
+  const refreshed = await runtime.refreshSession();
+
+  assert.equal(refreshCalls, 1);
+  assert.equal(refreshed.state, 'authenticated');
+  assert.equal(refreshed.session?.id, 'session-2');
+  assert.equal(runtime.getAccessToken(), 'access-new');
+  assert.equal(credentials.values.get('account.session.refresh-token'), 'refresh-new');
+});
+
+test('AccountSessionRuntime refreshSession preserves cached account while temporarily offline', async () => {
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => 100,
+    },
+  );
+  const device = await devices.getOrCreate();
+
+  const adapter: SessionAuthAdapter = {
+    async refresh(): Promise<AuthGrant> {
+      throw new AuthAdapterError('offline', 'Sem conexão.');
+    },
+    async revoke(): Promise<void> {
+      return;
+    },
+  };
+
+  const runtime = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+
+  await runtime.establish({
+    account: profile(),
+    session: session(device.id),
+    accessToken: 'access-old',
+    refreshToken: 'refresh-old',
+  });
+
+  const refreshed = await runtime.refreshSession();
+
+  assert.equal(refreshed.state, 'offline');
+  assert.equal(refreshed.account?.id, 'acct-1');
+  assert.equal(refreshed.session?.id, 'session-1');
+  assert.equal(runtime.getAccessToken(), null);
+  assert.equal(credentials.values.get('account.session.refresh-token'), 'refresh-old');
+});

@@ -264,6 +264,10 @@ executionShadowWorkspaceRuntime.subscribe((snapshots) => {
 const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
 const approvalRunLocks = new Set<string>();
 let mainWindow: BrowserWindow | null = null;
+let accountRefreshTimer: NodeJS.Timeout | undefined;
+const ACCOUNT_REFRESH_SKEW_MS = 120_000;
+const ACCOUNT_OFFLINE_RETRY_MS = 60_000;
+const ACCOUNT_MIN_REFRESH_DELAY_MS = 5_000;
 
 function isRecoverableExecution(chatId: string, runId: string): boolean {
   return agentRuntime.listPendingRuns().some((run) => run.chatId === chatId && run.runId === runId)
@@ -309,8 +313,40 @@ function sendDeviceRegistryState(snapshot: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('account-device-registry:event', snapshot);
 }
 
+function clearAccountRefreshTimer(): void {
+  if (!accountRefreshTimer) return;
+  clearTimeout(accountRefreshTimer);
+  accountRefreshTimer = undefined;
+}
+
+function scheduleAccountRefresh(snapshot: ReturnType<AccountSessionRuntime['snapshot']>): void {
+  clearAccountRefreshTimer();
+
+  let delayMs: number | undefined;
+  if (snapshot.state === 'authenticated' && snapshot.session) {
+    delayMs = Math.max(
+      ACCOUNT_MIN_REFRESH_DELAY_MS,
+      snapshot.session.accessExpiresAt - Date.now() - ACCOUNT_REFRESH_SKEW_MS,
+    );
+  } else if (snapshot.state === 'offline' && snapshot.account && snapshot.session) {
+    delayMs = ACCOUNT_OFFLINE_RETRY_MS;
+  }
+
+  if (delayMs === undefined) return;
+  accountRefreshTimer = setTimeout(() => {
+    accountRefreshTimer = undefined;
+    void accountSessionRuntime.refreshSession().then((next) => {
+      if (next.state === 'authenticated') void deviceRegistryRuntime.ensureRegistered();
+    }).catch((error) => {
+      console.error('[Auto CodeZ account refresh]', error);
+    });
+  }, Math.min(delayMs, 2_147_000_000));
+  accountRefreshTimer.unref?.();
+}
+
 accountSessionRuntime.subscribe((snapshot) => {
   sendAccountState(snapshot);
+  scheduleAccountRefresh(snapshot);
   if (snapshot.state === 'authenticated') void deviceRegistryRuntime.ensureRegistered();
 });
 
@@ -1388,7 +1424,9 @@ app.whenReady().then(async () => {
     app.setAsDefaultProtocolClient('autocodez');
   }
   await storage.init();
-  await accountSessionRuntime.hydrate();
+  const initialAccountState = await accountSessionRuntime.hydrate();
+  scheduleAccountRefresh(initialAccountState);
+  if (initialAccountState.state === 'authenticated') await deviceRegistryRuntime.ensureRegistered();
   operationalLedger.restore(await operationalLedgerStore.load());
   await providerManager.init();
   await chatManager.init();
@@ -1506,6 +1544,7 @@ app.on('before-quit', (event) => {
   shutdownCleanupStarted = true;
   event.preventDefault();
   void (async () => {
+    clearAccountRefreshTimer();
     await mcpTunnelRuntime.stop().catch((): undefined => undefined);
     await mcpGatewayServer.stop().catch((): undefined => undefined);
     app.quit();
