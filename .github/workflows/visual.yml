@@ -45,7 +45,21 @@ jobs:
         run: npx electron-rebuild -f -w node-pty -v 44.0.0 -a x64 --build-from-source
 
       - name: Build Electron application
-        run: npm run package
+        shell: pwsh
+        run: |
+          $maxAttempts = 3
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "Electron Forge package attempt $attempt/$maxAttempts"
+            & npm.cmd run package
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            if ($attempt -lt $maxAttempts) {
+              Write-Warning "Electron Forge package failed with exit code $LASTEXITCODE. Retrying after 20 seconds."
+              Start-Sleep -Seconds 20
+            }
+          }
+          throw "Electron Forge package failed after $maxAttempts attempts."
 
       - name: Resolve packaged executable
         shell: pwsh
