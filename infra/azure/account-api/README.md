@@ -132,7 +132,7 @@ Se ACR Tasks estiver bloqueado na assinatura ou Docker não estiver instalado no
 
 Ele executa o mesmo bootstrap com `-ImageBuildMode LocalDocker` dentro do runner Ubuntu do GitHub. O Docker usado é o do runner, não o computador local.
 
-O workflow usa Azure Login com OIDC. Configure estes repository secrets antes da primeira execução:
+O workflow usa Azure Login com OIDC. Configure estas repository variables antes da primeira execução:
 
 - AZURE_CLIENT_ID
 - AZURE_TENANT_ID
@@ -149,9 +149,9 @@ Execute uma vez:
 
     pwsh ./infra/azure/account-api/configure-github-oidc.ps1
 
-O script cria ou reutiliza uma aplicação Entra ID, cria a credencial federada restrita ao repositório Silvaxxxuuuu/Auto-CodeZ-context e à branch feature/ui-hierarchy-polish, e atribui Contributor + User Access Administrator na assinatura usada para o laboratório.
+O script cria ou reutiliza uma aplicação Entra ID, cria a credencial federada restrita ao repositório Silvaxxxuuuu/Auto-CodeZ-context e à branch feature/ui-hierarchy-polish, registra os resource providers necessários com a identidade local autenticada e atribui Contributor + User Access Administrator somente no resource group do laboratório.
 
-Esses papéis permitem ao workflow criar os recursos e conceder AcrPull à Managed Identity do Container App.
+Esses papéis permitem ao workflow criar os recursos do laboratório e conceder AcrPull à Managed Identity do Container App sem receber administração na assinatura inteira.
 
 Se o GitHub CLI estiver autenticado, o script grava automaticamente estas repository variables:
 
