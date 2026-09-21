@@ -559,7 +559,7 @@ Invoke-Az -Arguments @(
   '--memory', '0.5Gi',
   '--min-replicas', [string]$MinReplicas,
   '--max-replicas', '2',
-  '--replace-env-vars',
+  '--set-env-vars',
   "ACCOUNT_PUBLIC_URL=$publicUrl",
   'PORT=8080',
   'DATABASE_URL=secretref:database-url',
