@@ -97,7 +97,13 @@ function renderLogin(): void {
   const target = ensureRoot();
   const magic = configuration.methods.includes('magic_link');
   const passkey = configuration.methods.includes('passkey');
-  const error = flowState.status === 'error' ? flowState.lastError : accountState?.state === 'revoked' ? 'Sua sessão foi revogada. Entre novamente.' : '';
+  const error = flowState.status === 'error'
+    ? flowState.lastError
+    : accountState?.state === 'revoked'
+      ? 'Sua sessão foi revogada. Entre novamente.'
+      : accountState?.state === 'error'
+        ? accountState.lastError
+        : configuration.configurationError;
 
   target.innerHTML = `
     <div class="account-backdrop-glow"></div>
@@ -128,6 +134,7 @@ function renderLogin(): void {
       </div>
       ${passkey ? '<button type="button" class="account-passkey" data-account-passkey '+(busy ? 'disabled' : '')+'><span class="account-passkey-icon">'+passkeyIcon()+'</span> Entrar com passkey</button>' : ''}
       ${error ? `<div class="account-inline-error" role="alert">${escapeHtml(error)}</div>` : ''}
+      ${configuration.configurationError ? '<button type="button" class="account-secondary" data-account-retry-configuration '+(busy ? 'disabled' : '')+'>Tentar novamente</button>' : ''}
       <p class="account-security-note">Sem senhas. Suas credenciais sensíveis permanecem protegidas pelo sistema operacional.</p>
     </main>
   `;
@@ -221,6 +228,26 @@ function render(): void {
   renderLogin();
 }
 
+async function refreshConfiguration(): Promise<void> {
+  if (!bridge) return;
+  busy = true;
+  render();
+  try {
+    configuration = await bridge.accountAuthConfiguration();
+    accountState = await bridge.accountState();
+  } catch (error) {
+    configuration = {
+      ...configuration,
+      configured: true,
+      methods: [],
+      configurationError: error instanceof Error ? error.message : 'Serviço de autenticação indisponível.',
+    };
+  } finally {
+    busy = false;
+    render();
+  }
+}
+
 async function beginMagicLink(email: string): Promise<void> {
   if (!bridge) return;
   busy = true;
@@ -306,6 +333,10 @@ document.addEventListener('click', (event) => {
   }
   if (target.closest('[data-account-passkey]')) {
     void beginPasskey();
+    return;
+  }
+  if (target.closest('[data-account-retry-configuration]')) {
+    void refreshConfiguration();
     return;
   }
   if (target.closest('[data-account-back]')) {
