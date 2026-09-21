@@ -428,7 +428,7 @@ if (-not $databaseExists) {
     'postgres', 'flexible-server', 'db', 'create',
     '--resource-group', $ResourceGroup,
     '--server-name', $postgresName,
-    '--database-name', 'autocodez',
+    '--name', 'autocodez',
     '--output', 'none'
   )
 }
