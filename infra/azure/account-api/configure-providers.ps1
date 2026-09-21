@@ -184,10 +184,28 @@ Write-Host "Google:    $publicUrl/api/auth/callback/google"
 Write-Host "Microsoft: $publicUrl/api/auth/callback/microsoft"
 Write-Host ''
 
-Start-Sleep -Seconds 5
-try {
-  $configuration = Invoke-RestMethod -Uri "$publicUrl/v1/auth/configuration" -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 15
-  Write-Host ('Métodos anunciados pelo backend: ' + (($configuration.methods | ForEach-Object { [string]$_ }) -join ', '))
-} catch {
-  Write-Warning 'Configuração atualizada, mas o endpoint ainda não respondeu. Aguarde a nova revision ficar pronta.'
-}
+$expectedMethods = @('passkey')
+if ($GitHubClientId) { $expectedMethods += 'github' }
+if ($GoogleClientId) { $expectedMethods += 'google' }
+if ($MicrosoftClientId) { $expectedMethods += 'microsoft' }
+if ($AzureEmailSender) { $expectedMethods += 'magic_link' }
+
+$deadline = (Get-Date).AddMinutes(2)
+$lastMethods = @()
+do {
+  Start-Sleep -Seconds 5
+  try {
+    $configuration = Invoke-RestMethod -Uri "$publicUrl/v1/auth/configuration" -Method Post -ContentType 'application/json' -Body '{}' -TimeoutSec 15
+    $lastMethods = @($configuration.methods | ForEach-Object { [string]$_ })
+    $missing = @($expectedMethods | Where-Object { $_ -notin $lastMethods })
+    if ($missing.Count -eq 0) {
+      Write-Host ('Métodos anunciados pelo backend: ' + ($lastMethods -join ', '))
+      return
+    }
+    Write-Host ('Aguardando nova revision. Métodos atuais: ' + ($lastMethods -join ', '))
+  } catch {
+    Write-Host 'Aguardando nova revision responder...'
+  }
+} while ((Get-Date) -lt $deadline)
+
+throw ('A nova revision não anunciou todos os métodos esperados dentro de 2 minutos. Métodos atuais: ' + ($lastMethods -join ', '))
