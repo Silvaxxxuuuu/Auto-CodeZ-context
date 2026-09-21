@@ -43,6 +43,34 @@ function Invoke-Az {
   }
 }
 
+function Invoke-AzOptional {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Arguments
+  )
+
+  $operation = if ($Arguments.Count -ge 2) {
+    "az $($Arguments[0]) $($Arguments[1])"
+  } elseif ($Arguments.Count -eq 1) {
+    "az $($Arguments[0])"
+  } else {
+    'az'
+  }
+
+  $output = & az @Arguments 2>$null
+  $exitCode = $LASTEXITCODE
+
+  if ($exitCode -eq 0) {
+    return ($output -join [Environment]::NewLine).Trim()
+  }
+
+  if ($exitCode -eq 3) {
+    return ''
+  }
+
+  throw "Azure CLI failed during optional $operation (exit code $exitCode). Arguments were intentionally omitted."
+}
+
 function New-UrlSafeSecret {
   param([int]$Bytes = 48)
   $buffer = New-Object byte[] $Bytes
@@ -182,13 +210,13 @@ Invoke-Az -Arguments @(
   '--output', 'none'
 )
 
-$acrExists = Invoke-Az -Arguments @(
+$acrExists = Invoke-AzOptional -Arguments @(
   'acr', 'show',
   '--resource-group', $ResourceGroup,
   '--name', $acrName,
   '--query', 'name',
   '--output', 'tsv'
-) -Capture 2>$null
+)
 
 if (-not $acrExists) {
   Invoke-Az -Arguments @(
@@ -277,7 +305,7 @@ try {
   Pop-Location
 }
 
-$identityJsonRaw = Invoke-Az -Arguments @(
+$identityJsonRaw = Invoke-AzOptional -Arguments @(
   'identity', 'show',
   '--resource-group', $ResourceGroup,
   '--name', $identityName,
@@ -298,7 +326,7 @@ if ($identityJsonRaw) {
 
 $identityId = [string]$identityJson.id
 $identityPrincipalId = [string]$identityJson.principalId
-$acrId = Invoke-Az -Arguments @(
+$acrId = Invoke-AzOptional -Arguments @(
   'acr', 'show',
   '--resource-group', $ResourceGroup,
   '--name', $acrName,
@@ -329,13 +357,13 @@ if (-not $acrPullAssignment) {
   Start-Sleep -Seconds 20
 }
 
-$containerEnvExists = Invoke-Az -Arguments @(
+$containerEnvExists = Invoke-AzOptional -Arguments @(
   'containerapp', 'env', 'show',
   '--name', $containerEnvName,
   '--resource-group', $ResourceGroup,
   '--query', 'name',
   '--output', 'tsv'
-) -Capture 2>$null
+)
 
 if (-not $containerEnvExists) {
   Invoke-Az -Arguments @(
@@ -351,13 +379,13 @@ $postgresPassword = (New-UrlSafeSecret 30) + 'aA1!'
 $betterAuthSecret = New-UrlSafeSecret 48
 $accessTokenSecret = New-UrlSafeSecret 48
 
-$postgresExists = Invoke-Az -Arguments @(
+$postgresExists = Invoke-AzOptional -Arguments @(
   'postgres', 'flexible-server', 'show',
   '--resource-group', $ResourceGroup,
   '--name', $postgresName,
   '--query', 'name',
   '--output', 'tsv'
-) -Capture 2>$null
+)
 
 if (-not $postgresExists) {
   Invoke-Az -Arguments @(
@@ -377,15 +405,24 @@ if (-not $postgresExists) {
     '--output', 'none'
   )
 }
+else {
+  Invoke-Az -Arguments @(
+    'postgres', 'flexible-server', 'update',
+    '--resource-group', $ResourceGroup,
+    '--name', $postgresName,
+    '--admin-password', $postgresPassword,
+    '--output', 'none'
+  )
+}
 
-$databaseExists = Invoke-Az -Arguments @(
+$databaseExists = Invoke-AzOptional -Arguments @(
   'postgres', 'flexible-server', 'db', 'show',
   '--resource-group', $ResourceGroup,
   '--server-name', $postgresName,
   '--database-name', 'autocodez',
   '--query', 'name',
   '--output', 'tsv'
-) -Capture 2>$null
+)
 
 if (-not $databaseExists) {
   Invoke-Az -Arguments @(
