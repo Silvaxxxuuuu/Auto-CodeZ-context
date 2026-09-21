@@ -3,7 +3,9 @@ param(
   [string]$SubscriptionId,
   [string]$Repository = 'Silvaxxxuuuu/Auto-CodeZ-context',
   [string]$Branch = 'feature/ui-hierarchy-polish',
-  [string]$ApplicationName = 'auto-codez-account-deploy'
+  [string]$ApplicationName = 'auto-codez-account-deploy',
+  [string]$ResourceGroup = 'rg-autocodez-account-test',
+  [string]$Location = 'brazilsouth'
 )
 
 Set-StrictMode -Version Latest
@@ -117,7 +119,31 @@ if (-not $existingFederation) {
   }
 }
 
-$scope = "/subscriptions/$SubscriptionId"
+Write-Host 'Preparando resource providers com a identidade local autenticada...'
+foreach ($providerNamespace in @(
+  'Microsoft.App',
+  'Microsoft.ContainerRegistry',
+  'Microsoft.DBforPostgreSQL',
+  'Microsoft.ManagedIdentity',
+  'Microsoft.OperationalInsights'
+)) {
+  Invoke-Az -Arguments @(
+    'provider', 'register',
+    '--namespace', $providerNamespace,
+    '--wait',
+    '--output', 'none'
+  )
+}
+
+Invoke-Az -Arguments @(
+  'group', 'create',
+  '--name', $ResourceGroup,
+  '--location', $Location,
+  '--tags', 'project=AutoCodeZ', 'purpose=account-v1-test',
+  '--output', 'none'
+)
+
+$scope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup"
 foreach ($role in @('Contributor', 'User Access Administrator')) {
   $existingRole = Invoke-Az -Arguments @(
     'role', 'assignment', 'list',
@@ -147,6 +173,7 @@ Write-Host "Branch:          $Branch"
 Write-Host "AZURE_CLIENT_ID: $appId"
 Write-Host "AZURE_TENANT_ID: $tenantId"
 Write-Host "AZURE_SUBSCRIPTION_ID: $SubscriptionId"
+Write-Host "Resource group scope: $ResourceGroup"
 Write-Host ''
 
 if (Get-Command gh -ErrorAction SilentlyContinue) {

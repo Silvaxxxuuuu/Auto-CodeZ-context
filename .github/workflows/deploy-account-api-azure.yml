@@ -63,7 +63,8 @@ jobs:
             -ResourceGroup "${{ inputs.resource_group }}" \
             -NamePrefix "${{ inputs.name_prefix }}" \
             -MinReplicas ${{ inputs.min_replicas }} \
-            -ImageBuildMode LocalDocker
+            -ImageBuildMode LocalDocker \
+            -SkipProviderRegistration
 
       - name: Show deployed Account API
         shell: pwsh
@@ -89,3 +90,9 @@ jobs:
           "- GitHub callback: https://$fqdn/api/auth/callback/github" >> $env:GITHUB_STEP_SUMMARY
           "- Google callback: https://$fqdn/api/auth/callback/google" >> $env:GITHUB_STEP_SUMMARY
           "- Microsoft callback: https://$fqdn/api/auth/callback/microsoft" >> $env:GITHUB_STEP_SUMMARY
+          "ACCOUNT_API_URL=https://$fqdn" >> $env:GITHUB_ENV
+
+      - name: Smoke test deployed Account API
+        shell: pwsh
+        run: |
+          ./infra/azure/account-api/smoke.ps1 -BaseUrl "$env:ACCOUNT_API_URL"

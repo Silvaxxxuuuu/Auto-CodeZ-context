@@ -8,7 +8,8 @@ param(
   [ValidateRange(0, 1)]
   [int]$MinReplicas = 1,
   [ValidateSet('AcrTask', 'LocalDocker')]
-  [string]$ImageBuildMode = 'AcrTask'
+  [string]$ImageBuildMode = 'AcrTask',
+  [switch]$SkipProviderRegistration
 )
 
 Set-StrictMode -Version Latest
@@ -111,22 +112,26 @@ if ($containerAppExtension -ne 'containerapp') {
   Write-Host 'Extensão containerapp já instalada. Pulando atualização forçada.'
 }
 
-Write-Host ''
-Write-Host 'Preparando resource providers da assinatura...'
-foreach ($providerNamespace in @(
-  'Microsoft.App',
-  'Microsoft.ContainerRegistry',
-  'Microsoft.DBforPostgreSQL',
-  'Microsoft.ManagedIdentity',
-  'Microsoft.OperationalInsights'
-)) {
-  Write-Host "Registrando resource provider $providerNamespace..."
-  Invoke-Az -Arguments @(
-    'provider', 'register',
-    '--namespace', $providerNamespace,
-    '--wait',
-    '--output', 'none'
-  )
+if (-not $SkipProviderRegistration) {
+  Write-Host ''
+  Write-Host 'Preparando resource providers da assinatura...'
+  foreach ($providerNamespace in @(
+    'Microsoft.App',
+    'Microsoft.ContainerRegistry',
+    'Microsoft.DBforPostgreSQL',
+    'Microsoft.ManagedIdentity',
+    'Microsoft.OperationalInsights'
+  )) {
+    Write-Host "Registrando resource provider $providerNamespace..."
+    Invoke-Az -Arguments @(
+      'provider', 'register',
+      '--namespace', $providerNamespace,
+      '--wait',
+      '--output', 'none'
+    )
+  }
+} else {
+  Write-Host 'Registro de resource providers já preparado fora do bootstrap. Pulando.'
 }
 
 $suffix = Get-StableSuffix "$SubscriptionId|$NamePrefix"

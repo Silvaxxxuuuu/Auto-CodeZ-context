@@ -162,3 +162,18 @@ Se o GitHub CLI estiver autenticado, o script grava automaticamente estas reposi
 Se o GitHub CLI não estiver autenticado, o script imprime os três IDs para cadastro manual em Settings > Secrets and variables > Actions > Variables.
 
 Nenhum client secret é criado.
+
+
+## 12. Escopo de permissões do deploy
+
+O workflow do GitHub não recebe Contributor nem User Access Administrator na assinatura inteira.
+
+O script configure-github-oidc.ps1 usa o login Azure local para:
+
+1. registrar os resource providers necessários;
+2. criar o resource group de teste;
+3. conceder Contributor e User Access Administrator ao service principal somente nesse resource group.
+
+O bootstrap executado no GitHub usa -SkipProviderRegistration e trabalha apenas dentro desse resource group.
+
+Depois do deploy, o workflow executa smoke.ps1 automaticamente. Um deploy só termina verde se /healthz responder e o endpoint de configuração anunciar Passkey.
