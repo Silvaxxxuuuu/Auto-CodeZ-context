@@ -432,6 +432,27 @@ function isRateLimitFailure(error: unknown): boolean {
   return /limite de requisi[cç][oõ]es|too many requests|rate[_ -]?limit|HTTP\s*429/i.test(message);
 }
 
+function isMalformedToolArgumentsFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /argumentos inv[aá]lidos para uma ferramenta|invalid tool (?:input|arguments)|malformed tool/i.test(message);
+}
+
+function isAutomaticProviderRecoveryFailure(error: unknown): boolean {
+  return isRateLimitFailure(error) || isMalformedToolArgumentsFailure(error);
+}
+
+function automaticProviderRecoveryDelayMs(error: unknown): number {
+  if (isMalformedToolArgumentsFailure(error)) return 750;
+  return rateLimitRecoveryDelayMs(error);
+}
+
+function automaticProviderRecoveryMessage(error: unknown, delayMs: number): string {
+  if (isMalformedToolArgumentsFailure(error)) {
+    return 'O provider retornou uma tool call incompleta. O Auto CodeZ preservou o trabalho preparado e está pedindo novamente argumentos válidos.';
+  }
+  return `Azure atingiu o limite temporário. A execução foi preservada e continua automaticamente em cerca de ${Math.max(1, Math.ceil(delayMs / 1000))}s.`;
+}
+
 function rateLimitRecoveryDelayMs(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   return Math.min(120_000, Math.max(1_000, retryAfterFromMessage(message) ?? 60_000));
@@ -825,12 +846,13 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
       let recoveryAttempts = 0;
       let recoveryWaitMs = 0;
       while (
-        isRateLimitFailure(recoveryError)
+        isAutomaticProviderRecoveryFailure(recoveryError)
         && agentRuntime.hasRecoverableForChat(chatId)
-        && recoveryAttempts < 2
+        && recoveryAttempts < 3
         && recoveryWaitMs < 180_000
       ) {
-        const delayMs = Math.min(rateLimitRecoveryDelayMs(recoveryError), 180_000 - recoveryWaitMs);
+        const desiredDelayMs = automaticProviderRecoveryDelayMs(recoveryError);
+        const delayMs = Math.min(desiredDelayMs, 180_000 - recoveryWaitMs);
         recoveryAttempts += 1;
         recoveryWaitMs += delayMs;
         emit({
@@ -841,7 +863,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
             runId,
             chatId,
             type: 'action',
-            message: `Azure atingiu o limite temporário. A execução foi preservada e continua automaticamente em cerca de ${Math.max(1, Math.ceil(delayMs / 1000))}s.`,
+            message: automaticProviderRecoveryMessage(recoveryError, delayMs),
             status: 'pending',
           },
         });

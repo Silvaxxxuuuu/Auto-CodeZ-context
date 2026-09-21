@@ -427,7 +427,7 @@
   opacity:.78!important;
 }
 .ac-live-activity{
-  width:min(900px,calc(100% - 56px))!important;
+  width:min(900px,100%)!important;
   min-height:20px!important;
   margin:2px auto 14px!important;
   gap:8px!important;

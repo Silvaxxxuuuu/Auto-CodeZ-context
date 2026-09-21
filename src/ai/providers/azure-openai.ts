@@ -840,7 +840,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid tool input');
         input = parsed as Record<string, unknown>;
       } catch {
-        throw new Error('Azure Foundry retornou argumentos inválidos para uma ferramenta.');
+        throw new Error(`Azure Foundry retornou argumentos inválidos para uma ferramenta (${call.name || 'desconhecida'}, ${call.arguments.length} caracteres recebidos).`);
       }
       const toolCall: AIToolCall = { id: call.id, name: call.name as AIToolCall['name'], input };
       toolCalls.push(toolCall);
