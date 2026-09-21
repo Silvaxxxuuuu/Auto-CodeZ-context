@@ -423,6 +423,10 @@ Write-Host ''
 Write-Host 'Desktop local:'
 Write-Host ('  $env:AUTO_CODEZ_ACCOUNT_API_BASE_URL="{0}"' -f $publicUrl)
 Write-Host ''
+Write-Host 'Build de release:'
+Write-Host ('  $env:AUTO_CODEZ_ACCOUNT_API_DEFAULT_URL="{0}"' -f $publicUrl)
+Write-Host '  npm run make'
+Write-Host ''
 
 for ($attempt = 1; $attempt -le 24; $attempt += 1) {
   try {

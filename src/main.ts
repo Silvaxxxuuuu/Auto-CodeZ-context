@@ -70,10 +70,12 @@ import { createAccountAuthAdapter, resolveAccountAuthConfiguration } from './acc
 import { DeviceRegistryRuntime } from './account/device-registry-runtime';
 import { AccountAuthFlowRuntime } from './account/account-auth-flow-runtime';
 import { findAccountAuthCallback, parseAccountAuthCallback } from './account/account-auth-callback';
+import { resolveAccountApiBaseUrl } from './account/account-endpoint';
 import type { OAuthProvider } from './account/auth-adapter';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
+declare const __AUTO_CODEZ_ACCOUNT_API_DEFAULT_URL__: string;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const storage = new LocalStorage();
@@ -88,7 +90,10 @@ const accountDeviceIdentity = new DeviceIdentityStore(
     defaultName: 'Este dispositivo',
   },
 );
-const accountAuth = createAccountAuthAdapter(process.env.AUTO_CODEZ_ACCOUNT_API_BASE_URL);
+const accountAuth = createAccountAuthAdapter(resolveAccountApiBaseUrl(
+  process.env.AUTO_CODEZ_ACCOUNT_API_BASE_URL,
+  __AUTO_CODEZ_ACCOUNT_API_DEFAULT_URL__,
+));
 const accountAuthAdapter = accountAuth.adapter;
 const accountSessionRuntime = new AccountSessionRuntime(
   storage,
