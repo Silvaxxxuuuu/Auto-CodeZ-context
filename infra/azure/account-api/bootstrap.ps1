@@ -415,14 +415,13 @@ else {
   )
 }
 
-$databaseExists = Invoke-AzOptional -Arguments @(
-  'postgres', 'flexible-server', 'db', 'show',
+$databaseExists = Invoke-Az -Arguments @(
+  'postgres', 'flexible-server', 'db', 'list',
   '--resource-group', $ResourceGroup,
   '--server-name', $postgresName,
-  '--database-name', 'autocodez',
-  '--query', 'name',
+  '--query', "[?name=='autocodez'].name | [0]",
   '--output', 'tsv'
-)
+) -Capture
 
 if (-not $databaseExists) {
   Invoke-Az -Arguments @(
