@@ -10,11 +10,31 @@ export function createBetterAuth(
   database: Database,
   email: MagicLinkEmailSender,
 ) {
-  const socialProviders: Record<string, { clientId: string; clientSecret: string; tenantId?: string }> = {};
+  const socialProviders: Record<string, {
+    clientId: string;
+    clientSecret: string;
+    tenantId?: string;
+    redirectURI: string;
+  }> = {};
 
-  if (environment.github) socialProviders.github = environment.github;
-  if (environment.google) socialProviders.google = environment.google;
-  if (environment.microsoft) socialProviders.microsoft = environment.microsoft;
+  if (environment.github) {
+    socialProviders.github = {
+      ...environment.github,
+      redirectURI: new URL('/api/auth/callback/github', environment.publicUrl).toString(),
+    };
+  }
+  if (environment.google) {
+    socialProviders.google = {
+      ...environment.google,
+      redirectURI: new URL('/api/auth/callback/google', environment.publicUrl).toString(),
+    };
+  }
+  if (environment.microsoft) {
+    socialProviders.microsoft = {
+      ...environment.microsoft,
+      redirectURI: new URL('/api/auth/callback/microsoft', environment.publicUrl).toString(),
+    };
+  }
 
   return betterAuth({
     database: database.pool,
