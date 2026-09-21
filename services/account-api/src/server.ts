@@ -150,23 +150,8 @@ app.post('/v1/auth/oauth/begin', async (request, response) => {
       codeChallenge,
     });
 
-    const callbackURL = absolute(
-      '/desktop/oauth/finish?flowId=' + encodeURIComponent(flow.flowId),
-    );
-
-    const result = await auth.api.signInSocial({
-      body: {
-        provider,
-        callbackURL,
-        errorCallbackURL: callbackURL,
-        disableRedirect: true,
-      },
-    });
-
-    if (!result.url) throw new Error('oauth_url_unavailable');
-
     response.json({
-      authorizationUrl: result.url,
+      authorizationUrl: absolute('/desktop/oauth/start?flowId=' + encodeURIComponent(flow.flowId)),
       flowId: flow.flowId,
       expiresAt: flow.expiresAt,
     });
@@ -340,6 +325,49 @@ app.post('/v1/auth/session/revoke', async (request, response) => {
     response.status(204).end();
   } catch (error) {
     sendError(response, error);
+  }
+});
+
+app.get('/desktop/oauth/start', async (request, response) => {
+  try {
+    const flowId = requireString(request.query.flowId, 'flowId', 256);
+    const flow = await flows.get(flowId);
+    if (flow.kind !== 'oauth') throw new Error('invalid_grant');
+    if (flow.provider !== 'github' && flow.provider !== 'google' && flow.provider !== 'microsoft') {
+      throw new Error('invalid_grant');
+    }
+
+    const callbackURL = absolute(
+      '/desktop/oauth/finish?flowId=' + encodeURIComponent(flow.id),
+    );
+
+    const authResponse = await auth.api.signInSocial({
+      headers: requestHeaders(request),
+      body: {
+        provider: flow.provider,
+        callbackURL,
+        errorCallbackURL: callbackURL,
+        disableRedirect: true,
+      },
+      asResponse: true,
+    });
+
+    if (!authResponse.ok) throw new Error('oauth_url_unavailable');
+
+    const payload = await authResponse.json() as { url?: unknown };
+    if (typeof payload.url !== 'string' || !payload.url) throw new Error('oauth_url_unavailable');
+
+    const getSetCookie = (authResponse.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+    const setCookies = typeof getSetCookie === 'function'
+      ? getSetCookie.call(authResponse.headers)
+      : [];
+    if (setCookies.length > 0) response.setHeader('Set-Cookie', setCookies);
+
+    response.redirect(302, payload.url);
+  } catch {
+    response.status(400).type('html').send(
+      errorPage('Não foi possível iniciar a autenticação. Volte ao Auto CodeZ e tente novamente.'),
+    );
   }
 });
 
