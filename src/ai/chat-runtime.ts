@@ -273,7 +273,13 @@ export class ChatRuntime {
         content: 'Regras de tool calling para Kimi-K2.6 no Azure Foundry: gere argumentos de ferramentas como JSON completo e estritamente válido. Para create_file, write_file, replace_range, replace_text, replace_symbol, insert_before ou insert_after com conteúdo substancial, emita no máximo uma mutação de arquivo com conteúdo grande por resposta. Aguarde o resultado dessa ferramenta e continue o próximo arquivo no ciclo seguinte. Não agrupe vários conteúdos completos de arquivos em tool calls paralelas. Nunca interrompa um objeto JSON no meio para caber na resposta.',
       });
     }
-    if (webContext) systemMessages.push({ role: 'system' as const, content: webContext });
+    if (webContext) {
+      systemMessages.push({ role: 'system' as const, content: webContext });
+      systemMessages.push({
+        role: 'system' as const,
+        content: 'O grounding Web deste turno já foi concluído pelo Auto CodeZ. Use as fontes e trechos acima diretamente. Não repita a mesma pesquisa. As ferramentas web_search e web_fetch ficam deliberadamente fora deste request quando o grounding já trouxe fontes suficientes, para reduzir latência e chamadas redundantes.',
+      });
+    }
     if (projectContext && !lightweightTurn) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
     const currentUserMessage = [...chat.messages].reverse().find((message) => message.role === 'user');
     const compactedHistory = lightweightTurn
@@ -288,7 +294,10 @@ export class ChatRuntime {
     const messages = [...systemMessages, ...compactedHistory.messages];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
     if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
-    const tools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => SYSTEM_CHAT_TOOL_NAMES.has(tool.name));
+    const scopedTools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => SYSTEM_CHAT_TOOL_NAMES.has(tool.name));
+    const tools = webContext
+      ? scopedTools.filter((tool) => tool.name !== 'web_search' && tool.name !== 'web_fetch')
+      : scopedTools;
     const toolsEnabled = !lightweightTurn && this.capabilities.supports(model, 'tools') && tools.length > 0;
     return {
       adapter,

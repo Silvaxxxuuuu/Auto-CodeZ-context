@@ -608,12 +608,15 @@ function resizePrompt(): void {
   const lineHeight = Number.parseFloat(style.lineHeight) || 20;
   const paddingTop = Number.parseFloat(style.paddingTop) || 0;
   const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+  const minHeight = Math.ceil(lineHeight + paddingTop + paddingBottom);
   const maxHeight = Math.ceil((lineHeight * 10) + paddingTop + paddingBottom);
 
-  prompt.style.height = 'auto';
-  const nextHeight = Math.min(prompt.scrollHeight, maxHeight);
-  prompt.style.height = `${nextHeight}px`;
-  prompt.style.overflowY = prompt.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  prompt.style.setProperty('height', 'auto', 'important');
+  prompt.style.setProperty('overflow-y', 'hidden', 'important');
+  const measuredHeight = Math.max(minHeight, prompt.scrollHeight);
+  const nextHeight = Math.min(measuredHeight, maxHeight);
+  prompt.style.setProperty('height', `${nextHeight}px`, 'important');
+  prompt.style.setProperty('overflow-y', measuredHeight > maxHeight ? 'auto' : 'hidden', 'important');
 }
 
 prompt.addEventListener('input', () => {

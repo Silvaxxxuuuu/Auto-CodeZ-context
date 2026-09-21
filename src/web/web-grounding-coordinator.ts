@@ -110,7 +110,7 @@ export class WebGroundingCoordinator {
     this.now = options.now ?? Date.now;
     this.cacheTtlMs = options.cacheTtlMs ?? 2 * 60_000;
     this.searchLimit = Math.min(Math.max(Math.trunc(options.searchLimit ?? 5), 1), 10);
-    this.fetchLimit = Math.min(Math.max(Math.trunc(options.fetchLimit ?? 3), 0), this.searchLimit);
+    this.fetchLimit = Math.min(Math.max(Math.trunc(options.fetchLimit ?? 1), 0), this.searchLimit);
   }
 
   classify(messages: AIMessage[]): WebGroundingDecision {

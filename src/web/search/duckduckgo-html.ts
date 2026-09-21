@@ -86,8 +86,8 @@ export class DuckDuckGoHtmlSearchAdapter implements WebSearchAdapter {
     return requestPublicText(url, {
       ...this.requestOptions,
       signal,
-      timeoutMs: 15_000,
-      maxBytes: 768 * 1024,
+      timeoutMs: 8_000,
+      maxBytes: 512 * 1024,
       maxRedirects: 3,
     });
   }

@@ -561,3 +561,31 @@
     padding-right:14px!important;
   }
 }
+
+
+/* ChatGPT-like elastic composer */
+.composer{
+  height:auto!important;
+  min-height:56px!important;
+  align-items:flex-end!important;
+  padding:6px 7px!important;
+}
+.composer textarea{
+  box-sizing:border-box!important;
+  height:40px;
+  min-height:40px!important;
+  max-height:none!important;
+  padding:10px 8px!important;
+  line-height:20px!important;
+  overflow-y:hidden;
+  resize:none!important;
+  align-self:flex-end!important;
+}
+.attach-button,
+.send-button,
+.intelligence-control,
+.composer-divider{
+  flex:none!important;
+  align-self:flex-end!important;
+  margin-bottom:3px!important;
+}

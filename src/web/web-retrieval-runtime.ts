@@ -32,8 +32,8 @@ export class WebRetrievalRuntime {
     const response = await requestPublicText(safeUrl, {
       ...this.requestOptions,
       signal,
-      timeoutMs: 15_000,
-      maxBytes: 1024 * 1024,
+      timeoutMs: 8_000,
+      maxBytes: 512 * 1024,
       maxRedirects: 5,
     });
     const extracted = extractReadableWebContent(response.text, response.contentType);
