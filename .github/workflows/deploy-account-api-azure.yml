@@ -68,14 +68,16 @@ jobs:
       - name: Bootstrap Account API
         shell: pwsh
         run: |
-          ./infra/azure/account-api/bootstrap.ps1 \
-            -SubscriptionId "${{ vars.AZURE_SUBSCRIPTION_ID }}" \
-            -Location "$env:DEPLOY_LOCATION" \
-            -ResourceGroup "$env:DEPLOY_RESOURCE_GROUP" \
-            -NamePrefix "$env:DEPLOY_NAME_PREFIX" \
-            -MinReplicas $env:DEPLOY_MIN_REPLICAS \
-            -ImageBuildMode LocalDocker \
-            -SkipProviderRegistration
+          $parameters = @{
+            SubscriptionId = "${{ vars.AZURE_SUBSCRIPTION_ID }}"
+            Location = $env:DEPLOY_LOCATION
+            ResourceGroup = $env:DEPLOY_RESOURCE_GROUP
+            NamePrefix = $env:DEPLOY_NAME_PREFIX
+            MinReplicas = [int]$env:DEPLOY_MIN_REPLICAS
+            ImageBuildMode = 'LocalDocker'
+            SkipProviderRegistration = $true
+          }
+          ./infra/azure/account-api/bootstrap.ps1 @parameters
 
       - name: Show deployed Account API
         shell: pwsh
