@@ -12,6 +12,7 @@ import type {
   DeviceRegistryAdapter,
   RemoteDeviceRecord,
 } from '../src/account/device-registry-adapter';
+import { DeviceRegistryAdapterError } from '../src/account/device-registry-adapter';
 import type { AuthGrant, SessionAuthAdapter } from '../src/account/auth-adapter';
 
 class MemoryStorage {
@@ -271,4 +272,17 @@ test('DeviceRegistryRuntime markOffline preserves the last remote device snapsho
   assert.equal(offline.currentDeviceId, localDevice.id);
   assert.equal(offline.devices.length, 1);
   assert.match(offline.lastError ?? '', /Sem conexão/);
+});
+
+
+test('DeviceRegistryRuntime reports adapter connectivity failures as offline', async () => {
+  const { registry, adapter } = await setup();
+  adapter.list = async () => {
+    throw new DeviceRegistryAdapterError('offline', 'Sem conexão.');
+  };
+
+  const snapshot = await registry.refresh();
+
+  assert.equal(snapshot.state, 'offline');
+  assert.match(snapshot.lastError ?? '', /Sem conexão/);
 });

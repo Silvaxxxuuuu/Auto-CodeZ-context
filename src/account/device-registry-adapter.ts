@@ -30,6 +30,18 @@ export interface CompleteDeviceRegistrationInput {
   signature: string;
 }
 
+export type DeviceRegistryAdapterErrorCode = 'offline' | 'unauthorized' | 'server' | 'not_configured';
+
+export class DeviceRegistryAdapterError extends Error {
+  constructor(
+    public readonly code: DeviceRegistryAdapterErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'DeviceRegistryAdapterError';
+  }
+}
+
 export interface DeviceRegistryAdapter {
   beginRegistration(input: BeginDeviceRegistrationInput): Promise<{
     registrationId: string;
@@ -44,7 +56,7 @@ export interface DeviceRegistryAdapter {
 
 export class UnavailableDeviceRegistryAdapter implements DeviceRegistryAdapter {
   private unavailable(): never {
-    throw new Error('Device Registry ainda não está configurado.');
+    throw new DeviceRegistryAdapterError('not_configured', 'Device Registry ainda não está configurado.');
   }
 
   async beginRegistration(): Promise<{ registrationId: string; challenge: string; expiresAt: number }> {

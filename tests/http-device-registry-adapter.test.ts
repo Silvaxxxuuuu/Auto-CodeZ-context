@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HttpDeviceRegistryAdapter } from '../src/account/http-device-registry-adapter';
+import { DeviceRegistryAdapterError } from '../src/account/device-registry-adapter';
 
 function json(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -64,4 +65,29 @@ test('HttpDeviceRegistryAdapter validates remote device list', async () => {
 test('HttpDeviceRegistryAdapter rejects insecure backend URLs', () => {
   assert.throws(() => new HttpDeviceRegistryAdapter('http://accounts.example.com'), /HTTPS/);
   assert.throws(() => new HttpDeviceRegistryAdapter('https://user:pass@accounts.example.com'), /inválida/);
+});
+
+
+test('HttpDeviceRegistryAdapter classifies network failures as offline', async () => {
+  const adapter = new HttpDeviceRegistryAdapter('https://accounts.example.com', {
+    fetch: async () => {
+      throw new TypeError('fetch failed');
+    },
+  });
+
+  await assert.rejects(
+    adapter.list('access-secret'),
+    (error: unknown) => error instanceof DeviceRegistryAdapterError && error.code === 'offline',
+  );
+});
+
+test('HttpDeviceRegistryAdapter classifies 401 as unauthorized', async () => {
+  const adapter = new HttpDeviceRegistryAdapter('https://accounts.example.com', {
+    fetch: async () => json({ code: 'invalid_grant' }, 401),
+  });
+
+  await assert.rejects(
+    adapter.list('access-secret'),
+    (error: unknown) => error instanceof DeviceRegistryAdapterError && error.code === 'unauthorized',
+  );
 });

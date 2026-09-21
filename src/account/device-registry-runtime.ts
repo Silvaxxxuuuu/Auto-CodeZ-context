@@ -1,8 +1,9 @@
 import type { AccountSessionRuntime } from './account-session-runtime';
 import type { DeviceIdentityStore } from './device-identity';
-import type {
-  DeviceRegistryAdapter,
-  RemoteDeviceRecord,
+import {
+  DeviceRegistryAdapterError,
+  type DeviceRegistryAdapter,
+  type RemoteDeviceRecord,
 } from './device-registry-adapter';
 
 export type DeviceRegistryState =
@@ -35,6 +36,13 @@ function normalizeDeviceName(value: string): string {
   const normalized = value.trim().replace(/\s+/g, ' ');
   if (!normalized) throw new Error('Nome do dispositivo inválido.');
   return normalized.slice(0, 80);
+}
+
+function registryFailureState(error: unknown): 'offline' | 'error' | 'unavailable' {
+  if (!(error instanceof DeviceRegistryAdapterError)) return 'error';
+  if (error.code === 'offline') return 'offline';
+  if (error.code === 'not_configured') return 'unavailable';
+  return 'error';
 }
 
 export class DeviceRegistryRuntime {
@@ -153,8 +161,11 @@ export class DeviceRegistryRuntime {
 
       return await this.refresh();
     } catch (error) {
+      if (error instanceof DeviceRegistryAdapterError && error.code === 'unauthorized') {
+        void this.sessions.refreshSession();
+      }
       return this.setState({
-        state: 'error',
+        state: registryFailureState(error),
         devices: this.state.devices,
         currentDeviceId: localDevice.id,
         lastError: error instanceof Error ? error.message : 'Falha ao registrar o dispositivo.',
@@ -184,8 +195,11 @@ export class DeviceRegistryRuntime {
         currentDeviceId: localDevice.id,
       });
     } catch (error) {
+      if (error instanceof DeviceRegistryAdapterError && error.code === 'unauthorized') {
+        void this.sessions.refreshSession();
+      }
       return this.setState({
-        state: 'error',
+        state: registryFailureState(error),
         devices: this.state.devices,
         currentDeviceId: localDevice.id,
         lastError: error instanceof Error ? error.message : 'Falha ao consultar dispositivos.',

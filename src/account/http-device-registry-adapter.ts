@@ -1,8 +1,9 @@
-import type {
-  BeginDeviceRegistrationInput,
-  CompleteDeviceRegistrationInput,
-  DeviceRegistryAdapter,
-  RemoteDeviceRecord,
+import {
+  DeviceRegistryAdapterError,
+  type BeginDeviceRegistrationInput,
+  type CompleteDeviceRegistrationInput,
+  type DeviceRegistryAdapter,
+  type RemoteDeviceRecord,
 } from './device-registry-adapter';
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -112,14 +113,27 @@ export class HttpDeviceRegistryAdapter implements DeviceRegistryAdapter {
         credentials: 'omit',
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error(`Device Registry respondeu HTTP ${response.status}.`);
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          throw new DeviceRegistryAdapterError('unauthorized', 'Sessão não autorizada pelo Device Registry.');
+        }
+        throw new DeviceRegistryAdapterError('server', `Device Registry respondeu HTTP ${response.status}.`);
+      }
       if (response.status === 204) return null;
       const contentType = response.headers.get('content-type') ?? '';
       if (!contentType.toLowerCase().includes('application/json')) throw new Error('Resposta não JSON do Device Registry.');
       return await response.json();
     } catch (error) {
-      if (controller.signal.aborted) throw new Error('Tempo limite ao conectar ao Device Registry.');
-      throw error;
+      if (error instanceof DeviceRegistryAdapterError) throw error;
+      if (controller.signal.aborted) {
+        throw new DeviceRegistryAdapterError('offline', 'Tempo limite ao conectar ao Device Registry.');
+      }
+      throw new DeviceRegistryAdapterError(
+        'offline',
+        error instanceof Error
+          ? `Não foi possível conectar ao Device Registry: ${error.message}`
+          : 'Não foi possível conectar ao Device Registry.',
+      );
     } finally {
       clearTimeout(timeout);
     }
