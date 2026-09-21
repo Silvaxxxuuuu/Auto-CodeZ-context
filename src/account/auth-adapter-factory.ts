@@ -80,7 +80,7 @@ export async function resolveAccountAuthConfiguration(
     };
   } catch (error) {
     return {
-      configured: false,
+      configured: true,
       methods: [],
       configurationError: error instanceof Error
         ? error.message

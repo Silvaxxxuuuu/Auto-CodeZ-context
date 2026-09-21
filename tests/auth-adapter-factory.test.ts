@@ -71,3 +71,17 @@ test('visual auth discovery uses deterministic configured capabilities without n
   assert.deepEqual(configuration.methods, ['magic_link', 'github', 'google', 'microsoft', 'passkey']);
   assert.equal(configuration.configurationError, undefined);
 });
+
+
+test('configured account endpoint stays gated when configuration discovery is temporarily offline', async () => {
+  const result = createAccountAuthAdapter('https://accounts.example.com');
+  result.adapter.configuration = async () => {
+    throw new Error('network unavailable');
+  };
+
+  const snapshot = await resolveAccountAuthConfiguration(result);
+
+  assert.equal(snapshot.configured, true);
+  assert.deepEqual(snapshot.methods, []);
+  assert.match(snapshot.configurationError ?? '', /network unavailable/);
+});
