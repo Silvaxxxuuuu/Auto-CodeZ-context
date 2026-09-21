@@ -247,3 +247,28 @@ test('DeviceRegistryRuntime rejects expired registration challenges', async () =
   assert.match(snapshot.lastError ?? '', /expirado/);
   assert.equal(adapter.lastComplete, undefined);
 });
+
+
+test('DeviceRegistryRuntime reset removes remote-account state without deleting local device identity', async () => {
+  const { registry, devices, localDevice } = await setup();
+  await registry.ensureRegistered();
+
+  const reset = registry.reset();
+
+  assert.equal(reset.state, 'idle');
+  assert.deepEqual(reset.devices, []);
+  assert.equal(reset.currentDeviceId, undefined);
+  assert.equal((await devices.getOrCreate()).id, localDevice.id);
+});
+
+test('DeviceRegistryRuntime markOffline preserves the last remote device snapshot for the same session', async () => {
+  const { registry, localDevice } = await setup();
+  await registry.ensureRegistered();
+
+  const offline = registry.markOffline();
+
+  assert.equal(offline.state, 'offline');
+  assert.equal(offline.currentDeviceId, localDevice.id);
+  assert.equal(offline.devices.length, 1);
+  assert.match(offline.lastError ?? '', /Sem conexão/);
+});

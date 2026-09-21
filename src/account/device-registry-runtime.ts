@@ -58,6 +58,21 @@ export class DeviceRegistryRuntime {
     return () => this.listeners.delete(listener);
   }
 
+  reset(): DeviceRegistrySnapshot {
+    this.registrationInFlight = undefined;
+    return this.setState({ state: 'idle', devices: [] });
+  }
+
+  markOffline(): DeviceRegistrySnapshot {
+    const currentDeviceId = this.state.currentDeviceId;
+    return this.setState({
+      state: 'offline',
+      devices: this.state.devices,
+      ...(currentDeviceId ? { currentDeviceId } : {}),
+      lastError: 'Sem conexão para atualizar o Device Registry.',
+    });
+  }
+
   async ensureRegistered(): Promise<DeviceRegistrySnapshot> {
     if (this.registrationInFlight) return await this.registrationInFlight;
     const operation = this.registerCurrentDevice();

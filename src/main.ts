@@ -347,7 +347,21 @@ function scheduleAccountRefresh(snapshot: ReturnType<AccountSessionRuntime['snap
 accountSessionRuntime.subscribe((snapshot) => {
   sendAccountState(snapshot);
   scheduleAccountRefresh(snapshot);
-  if (snapshot.state === 'authenticated') void deviceRegistryRuntime.ensureRegistered();
+
+  if (snapshot.state === 'authenticated') {
+    void deviceRegistryRuntime.ensureRegistered();
+    return;
+  }
+
+  if (snapshot.state === 'offline') {
+    deviceRegistryRuntime.markOffline();
+    return;
+  }
+
+  if (snapshot.state === 'signed_out' || snapshot.state === 'revoked') {
+    deviceRegistryRuntime.reset();
+    accountAuthFlowRuntime.reset();
+  }
 });
 
 accountAuthFlowRuntime.subscribe((snapshot) => {
