@@ -3,6 +3,8 @@ import test from 'node:test';
 import { ChatRuntime } from '../src/ai/chat-runtime';
 import { ProviderRegistry } from '../src/ai/provider-registry';
 import type { AIProviderAdapter, AIProviderConfig, AIResponse, AIStreamEvent, ChatRecord, ToolName } from '../src/ai/types';
+import { WebGroundingCoordinator } from '../src/web/web-grounding-coordinator';
+import { WebRetrievalRuntime } from '../src/web/web-retrieval-runtime';
 
 const config: AIProviderConfig = {
   id: 'test-provider',
