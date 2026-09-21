@@ -1,6 +1,11 @@
 name: Deploy Account API Azure
 
 on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - '.github/account-api-deploy-trigger'
   workflow_dispatch:
     inputs:
       location:
@@ -35,6 +40,12 @@ concurrency:
   group: deploy-account-api-azure
   cancel-in-progress: false
 
+env:
+  DEPLOY_LOCATION: ${{ inputs.location || 'brazilsouth' }}
+  DEPLOY_RESOURCE_GROUP: ${{ inputs.resource_group || 'rg-autocodez-account-test' }}
+  DEPLOY_NAME_PREFIX: ${{ inputs.name_prefix || 'autocodezacct' }}
+  DEPLOY_MIN_REPLICAS: ${{ inputs.min_replicas || '1' }}
+
 jobs:
   deploy:
     runs-on: ubuntu-24.04
@@ -59,10 +70,10 @@ jobs:
         run: |
           ./infra/azure/account-api/bootstrap.ps1 \
             -SubscriptionId "${{ vars.AZURE_SUBSCRIPTION_ID }}" \
-            -Location "${{ inputs.location }}" \
-            -ResourceGroup "${{ inputs.resource_group }}" \
-            -NamePrefix "${{ inputs.name_prefix }}" \
-            -MinReplicas ${{ inputs.min_replicas }} \
+            -Location "$env:DEPLOY_LOCATION" \
+            -ResourceGroup "$env:DEPLOY_RESOURCE_GROUP" \
+            -NamePrefix "$env:DEPLOY_NAME_PREFIX" \
+            -MinReplicas $env:DEPLOY_MIN_REPLICAS \
             -ImageBuildMode LocalDocker \
             -SkipProviderRegistration
 
@@ -70,7 +81,7 @@ jobs:
         shell: pwsh
         run: |
           $subscription = az account show --query id -o tsv
-          $value = "$subscription|${{ inputs.name_prefix }}"
+          $value = "$subscription|$env:DEPLOY_NAME_PREFIX"
           $sha = [System.Security.Cryptography.SHA256]::Create()
           try {
             $hash = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($value))
@@ -78,10 +89,10 @@ jobs:
           } finally {
             $sha.Dispose()
           }
-          $prefix = ("${{ inputs.name_prefix }}".ToLowerInvariant() -replace '[^a-z0-9]', '')
+          $prefix = ("$env:DEPLOY_NAME_PREFIX".ToLowerInvariant() -replace '[^a-z0-9]', '')
           $app = ("$prefix-$suffix-api").ToLowerInvariant()
           if ($app.Length -gt 31) { $app = $app.Substring(0, 31).TrimEnd('-') }
-          $fqdn = az containerapp show --name $app --resource-group "${{ inputs.resource_group }}" --query properties.configuration.ingress.fqdn -o tsv
+          $fqdn = az containerapp show --name $app --resource-group "$env:DEPLOY_RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv
           if (-not $fqdn) { throw 'Container App sem FQDN depois do deploy.' }
           "### Account API" >> $env:GITHUB_STEP_SUMMARY
           "" >> $env:GITHUB_STEP_SUMMARY

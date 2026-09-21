@@ -1,0 +1,4 @@
+# Auto CodeZ Account API deployment trigger
+# Updating this file intentionally starts the Azure Account API deployment from feature/ui-hierarchy-polish.
+# Triggered after Azure OIDC repository variables were configured.
+trigger=2026-09-21-account-core-v1
