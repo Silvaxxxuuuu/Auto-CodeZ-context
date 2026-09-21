@@ -141,3 +141,24 @@ O workflow usa Azure Login com OIDC. Configure estes repository secrets antes da
 A identidade federada precisa ter permissões suficientes no escopo usado pelo laboratório para criar e atualizar Resource Group, ACR, Managed Identity, PostgreSQL Flexible Server e Container Apps. Não armazene client secret para este fluxo.
 
 Depois do workflow, o Summary da execução mostra o HTTPS do Account API e as três callback URLs OAuth.
+
+
+## 11. Configurar GitHub OIDC sem client secret
+
+Execute uma vez:
+
+    pwsh ./infra/azure/account-api/configure-github-oidc.ps1
+
+O script cria ou reutiliza uma aplicação Entra ID, cria a credencial federada restrita ao repositório Silvaxxxuuuu/Auto-CodeZ-context e à branch feature/ui-hierarchy-polish, e atribui Contributor + User Access Administrator na assinatura usada para o laboratório.
+
+Esses papéis permitem ao workflow criar os recursos e conceder AcrPull à Managed Identity do Container App.
+
+Se o GitHub CLI estiver autenticado, o script grava automaticamente estas repository variables:
+
+- AZURE_CLIENT_ID
+- AZURE_TENANT_ID
+- AZURE_SUBSCRIPTION_ID
+
+Se o GitHub CLI não estiver autenticado, o script imprime os três IDs para cadastro manual em Settings > Secrets and variables > Actions > Variables.
+
+Nenhum client secret é criado.
