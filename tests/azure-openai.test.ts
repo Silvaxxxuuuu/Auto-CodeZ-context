@@ -601,3 +601,53 @@ test('Azure Foundry retries from rate-limit reset metadata when retry-after is a
     assert.equal(response.content, 'Reset header recuperado');
   });
 });
+
+
+test('Azure Foundry hides singular embedded Kimi tool protocol and retries as text when tools are disabled', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+    toolsEnabled: false,
+    tools: undefined,
+    messages: [
+      { role: 'system', content: 'Use as fontes grounded e responda em texto normal.' },
+      { role: 'user', content: 'Quais são os tops globais de Fortnite?' },
+    ],
+  };
+  let attempts = 0;
+
+  await withMockedFetch(async (_input, init) => {
+    attempts += 1;
+    const body = JSON.parse(String(init?.body)) as { messages?: Array<{ role?: string; content?: string }>; stream?: boolean };
+    if (attempts === 1) {
+      const raw = '<|toolcallsectionbegin|><|toolcallbegin|>functions.websearch:5<|toolcallargumentbegin|>{"query":"Fortnite top global players ranking leaderboard 2026","limit":8}<|toolcallend|><|toolcallsectionend|>';
+      const sse = [
+        'data: ' + JSON.stringify({ choices: [{ delta: { content: raw }, finish_reason: 'stop' }] }),
+        '',
+        'data: [DONE]',
+        '',
+      ].join('\n');
+      return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    }
+    assert.equal(body.stream, undefined);
+    assert.equal(body.messages?.some((message) => /tentativa anterior tentou emitir um protocolo interno/i.test(message.content || '')), true);
+    return jsonResponse({
+      choices: [{ message: { content: 'Os líderes globais atuais incluem jogadores listados nas fontes recuperadas.' }, finish_reason: 'stop' }],
+    });
+  }, async () => {
+    const events = [];
+    for await (const event of adapter.stream!(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    )) events.push(event);
+
+    assert.equal(attempts, 2);
+    const text = events.filter((event) => event.type === 'delta').map((event) => event.text || '').join('');
+    assert.equal(text.includes('<|toolcall'), false);
+    assert.equal(text, 'Os líderes globais atuais incluem jogadores listados nas fontes recuperadas.');
+    const complete = events.find((event) => event.type === 'complete');
+    assert.equal(complete?.response?.content, 'Os líderes globais atuais incluem jogadores listados nas fontes recuperadas.');
+  });
+});

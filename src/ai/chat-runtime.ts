@@ -283,7 +283,12 @@ export class ChatRuntime {
     }
     if (projectContext && !lightweightTurn) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
     const currentUserMessage = [...chat.messages].reverse().find((message) => message.role === 'user');
-    const compactedHistory = lightweightTurn
+    const groundedAnswerOnly = Boolean(
+      webContext
+      && currentUserMessage
+      && !ACTIONABLE_TOOL_TURN_PATTERN.test(currentUserMessage.content),
+    );
+    const compactedHistory = lightweightTurn || groundedAnswerOnly
       ? { messages: currentUserMessage ? [currentUserMessage] : [], compacted: false }
       : compactToolHistoryForProvider(chat.messages);
     if (compactedHistory.compacted) {
@@ -295,15 +300,10 @@ export class ChatRuntime {
     const messages = [...systemMessages, ...compactedHistory.messages];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
     if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
-    const groundedAnswerOnly = Boolean(
-      webContext
-      && currentUserMessage
-      && !ACTIONABLE_TOOL_TURN_PATTERN.test(currentUserMessage.content),
-    );
     if (groundedAnswerOnly) {
       systemMessages.push({
         role: 'system' as const,
-        content: 'Este turno é uma consulta informativa já grounded. Responda diretamente com base nas fontes recuperadas. Não há necessidade de planejamento, ferramentas locais ou novas ações.',
+        content: 'Este turno é uma consulta informativa já grounded. Responda diretamente em texto normal com base nas fontes recuperadas. Não planeje ações, não tente chamar ferramentas e nunca emita tokens de controle, pseudo-tool-calls, tags <|toolcall...|> ou JSON de ferramentas. O request não possui ferramentas disponíveis.',
       });
       messages.splice(0, messages.length, ...systemMessages, ...compactedHistory.messages);
     }

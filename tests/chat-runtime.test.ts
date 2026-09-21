@@ -376,10 +376,24 @@ test('pure informational grounded turn disables all agent tools for a one-call a
     grounding,
   );
 
-  await runtime.send(config, chat('test-model', undefined, 'Pode pesquisar na internet quais são os tops globais de Fortnite?'));
+  const value = chat('test-model', undefined, 'Pode pesquisar na internet quais são os tops globais de Fortnite?');
+  value.messages = [
+    { role: 'user', content: 'Crie um site sobre jogos.' },
+    { role: 'assistant', content: '<|toolcallssectionbegin|><|toolcallbegin|>functions.createfile:5<|toolcallargumentbegin|>{"path":"Desktop/GameHub/index.html"}<|toolcallend|><|toolcallssectionend|>' },
+    { role: 'tool', content: 'Arquivo preparado', toolCallId: 'old-call', toolName: 'create_file' },
+    { role: 'user', content: 'Pode pesquisar na internet quais são os tops globais de Fortnite?' },
+  ];
+
+  await runtime.send(config, value);
 
   assert.equal(requests.length, 1);
   assert.equal(requests[0].toolsEnabled, false);
   assert.equal(requests[0].tools, undefined);
   assert.equal(requests[0].messages.some((message) => /consulta informativa já grounded/i.test(message.content)), true);
+  assert.deepEqual(
+    requests[0].messages.filter((message) => message.role === 'user').map((message) => message.content),
+    ['Pode pesquisar na internet quais são os tops globais de Fortnite?'],
+  );
+  assert.equal(requests[0].messages.some((message) => message.role === 'tool'), false);
+  assert.equal(requests[0].messages.some((message) => message.content.includes('<|toolcall')), false);
 });

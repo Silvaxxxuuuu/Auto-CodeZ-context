@@ -207,6 +207,25 @@ function normalizeEmbeddedToolInput(name: string, input: Record<string, unknown>
   };
 }
 
+function containsEmbeddedToolProtocol(content: string): boolean {
+  return /<\|toolcalls?sectionbegin\|>|<\|toolcallbegin\|>/i.test(content);
+}
+
+function retryWithoutToolProtocol(request: AIRequest): AIRequest {
+  return {
+    ...request,
+    messages: [
+      ...request.messages,
+      {
+        role: 'system',
+        content: 'A tentativa anterior tentou emitir um protocolo interno de ferramenta, mas este request não possui ferramentas. Responda agora somente com a resposta final em texto normal. Não escreva tags <|toolcall...|>, nomes de funções, argumentos JSON ou qualquer formato de chamada de ferramenta.',
+      },
+    ],
+    toolsEnabled: false,
+    tools: undefined,
+  };
+}
+
 function extractEmbeddedToolCalls(content: string, request: AIRequest): { content: string; toolCalls: AIToolCall[] } {
   if (!content.includes('<|toolcall')) return { content, toolCalls: [] };
   const calls: AIToolCall[] = [];
@@ -231,8 +250,8 @@ function extractEmbeddedToolCalls(content: string, request: AIRequest): { conten
   }
 
   const visible = content
-    .replace(/<\|toolcallssectionbegin\|>[\s\S]*?<\|toolcallssectionend\|>/g, '')
-    .replace(/<\|toolcallbegin\|>[\s\S]*?<\|toolcallend\|>/g, '')
+    .replace(/<\|toolcalls?sectionbegin\|>[\s\S]*?<\|toolcalls?sectionend\|>/gi, '')
+    .replace(/<\|toolcallbegin\|>[\s\S]*?<\|toolcallend\|>/gi, '')
     .trim();
   return { content: visible, toolCalls: calls };
 }
@@ -595,7 +614,12 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     };
   }
 
-  private async sendChatCompletion(config: AIProviderConfig, request: AIRequest, signal?: AbortSignal): Promise<AIResponse> {
+  private async sendChatCompletion(
+    config: AIProviderConfig,
+    request: AIRequest,
+    signal?: AbortSignal,
+    protocolRetry = false,
+  ): Promise<AIResponse> {
     const response = await fetchFoundryWithRateLimitRetry(
       `${normalizeBaseUrl(config.baseUrl)}/chat/completions`,
       {
@@ -621,13 +645,21 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     const choice = asRecord(choices[0]);
     const message = asRecord(choice?.message);
     const rawContent = contentText(message?.content);
+    const nativeToolCalls = parseChatToolCalls(message?.tool_calls);
+    const protocolAttempt = containsEmbeddedToolProtocol(rawContent) || nativeToolCalls.length > 0;
+    if (!request.toolsEnabled && protocolAttempt) {
+      if (protocolRetry) {
+        throw new Error('Azure Foundry insistiu em emitir uma chamada de ferramenta em um request textual sem ferramentas.');
+      }
+      return this.sendChatCompletion(config, retryWithoutToolProtocol(request), signal, true);
+    }
     const embedded = extractEmbeddedToolCalls(rawContent, request);
     return {
       content: embedded.content,
       model: request.model,
       providerId: this.id,
       usage: chatUsage(data.usage),
-      toolCalls: mergeToolCalls(parseChatToolCalls(message?.tool_calls), embedded.toolCalls),
+      toolCalls: mergeToolCalls(nativeToolCalls, embedded.toolCalls),
     };
   }
 
@@ -766,7 +798,8 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     let terminal = false;
     let visibleBuffer = '';
     let embeddedProtocolStarted = false;
-    const embeddedMarkers = ['<|toolcallssectionbegin|>', '<|toolcallbegin|>'];
+    const guardEmbeddedProtocol = !request.toolsEnabled && /^Kimi-K2\.6(?:$|[-_.])/i.test(request.model.trim());
+    const embeddedMarkers = ['<|toolcallssectionbegin|>', '<|toolcallsectionbegin|>', '<|toolcallbegin|>'];
     const pendingCalls = new Map<number, { id: string; name: string; arguments: string }>();
     yield { type: 'start' };
 
@@ -782,6 +815,9 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         const text = contentText(delta?.content);
         if (text) {
           content += text;
+          if (guardEmbeddedProtocol) {
+            continue;
+          }
           if (!embeddedProtocolStarted) {
             visibleBuffer += text;
             const markerIndex = embeddedMarkers
@@ -826,7 +862,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
       }
     }
 
-    if (!embeddedProtocolStarted && visibleBuffer) {
+    if (!guardEmbeddedProtocol && !embeddedProtocolStarted && visibleBuffer) {
       yield { type: 'delta', text: visibleBuffer };
       visibleBuffer = '';
     }
@@ -848,6 +884,16 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
     }
 
     const embedded = extractEmbeddedToolCalls(content, request);
+    const protocolAttempt = containsEmbeddedToolProtocol(content) || toolCalls.length > 0;
+    if (guardEmbeddedProtocol && protocolAttempt) {
+      const retry = await this.sendChatCompletion(config, retryWithoutToolProtocol(request), signal, true);
+      if (retry.content) yield { type: 'delta', text: retry.content };
+      yield { type: 'complete', response: retry, usage: retry.usage };
+      return;
+    }
+    if (guardEmbeddedProtocol && embedded.content) {
+      yield { type: 'delta', text: embedded.content };
+    }
     for (const toolCall of embedded.toolCalls) yield { type: 'tool_call', toolCall };
     const result: AIResponse = {
       content: embedded.content,
