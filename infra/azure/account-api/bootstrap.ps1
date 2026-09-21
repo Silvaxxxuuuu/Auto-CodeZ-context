@@ -197,19 +197,56 @@ try {
     $registryServer = "$acrName.azurecr.io"
     Write-Host "Build local no runner: $registryServer/$imageName"
     Invoke-Az -Arguments @(
-      'acr', 'login',
+      'acr', 'update',
       '--name', $acrName,
+      '--resource-group', $ResourceGroup,
+      '--admin-enabled', 'true',
       '--output', 'none'
     )
 
-    & docker build --tag "$registryServer/$imageName" --file Dockerfile .
-    if ($LASTEXITCODE -ne 0) {
-      throw "docker build falhou com exit code $LASTEXITCODE."
-    }
+    try {
+      $registryUsername = Invoke-Az -Arguments @(
+        'acr', 'credential', 'show',
+        '--name', $acrName,
+        '--resource-group', $ResourceGroup,
+        '--query', 'username',
+        '--output', 'tsv'
+      ) -Capture
+      $registryPassword = Invoke-Az -Arguments @(
+        'acr', 'credential', 'show',
+        '--name', $acrName,
+        '--resource-group', $ResourceGroup,
+        '--query', 'passwords[0].value',
+        '--output', 'tsv'
+      ) -Capture
 
-    & docker push "$registryServer/$imageName"
-    if ($LASTEXITCODE -ne 0) {
-      throw "docker push falhou com exit code $LASTEXITCODE."
+      if (-not $registryUsername -or -not $registryPassword) {
+        throw 'O ACR não retornou credenciais temporárias para o push.'
+      }
+
+      $registryPassword | & docker login $registryServer --username $registryUsername --password-stdin
+      if ($LASTEXITCODE -ne 0) {
+        throw "docker login falhou com exit code $LASTEXITCODE."
+      }
+
+      & docker build --tag "$registryServer/$imageName" --file Dockerfile .
+      if ($LASTEXITCODE -ne 0) {
+        throw "docker build falhou com exit code $LASTEXITCODE."
+      }
+
+      & docker push "$registryServer/$imageName"
+      if ($LASTEXITCODE -ne 0) {
+        throw "docker push falhou com exit code $LASTEXITCODE."
+      }
+    } finally {
+      & docker logout $registryServer 2>$null | Out-Null
+      Invoke-Az -Arguments @(
+        'acr', 'update',
+        '--name', $acrName,
+        '--resource-group', $ResourceGroup,
+        '--admin-enabled', 'false',
+        '--output', 'none'
+      )
     }
   } else {
     Invoke-Az -Arguments @(

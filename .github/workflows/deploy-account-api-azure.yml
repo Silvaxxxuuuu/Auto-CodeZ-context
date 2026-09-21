@@ -47,9 +47,9 @@ jobs:
       - name: Azure login with OIDC
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Install Container Apps CLI extension
         run: az extension add --name containerapp --upgrade --only-show-errors
@@ -58,7 +58,7 @@ jobs:
         shell: pwsh
         run: |
           ./infra/azure/account-api/bootstrap.ps1 \
-            -SubscriptionId "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -SubscriptionId "${{ vars.AZURE_SUBSCRIPTION_ID }}" \
             -Location "${{ inputs.location }}" \
             -ResourceGroup "${{ inputs.resource_group }}" \
             -NamePrefix "${{ inputs.name_prefix }}" \
