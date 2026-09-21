@@ -310,7 +310,7 @@ $identityJsonRaw = Invoke-AzOptional -Arguments @(
   '--resource-group', $ResourceGroup,
   '--name', $identityName,
   '--output', 'json'
-) -Capture 2>$null
+)
 
 if ($identityJsonRaw) {
   $identityJson = $identityJsonRaw | ConvertFrom-Json
@@ -326,7 +326,7 @@ if ($identityJsonRaw) {
 
 $identityId = [string]$identityJson.id
 $identityPrincipalId = [string]$identityJson.principalId
-$acrId = Invoke-AzOptional -Arguments @(
+$acrId = Invoke-Az -Arguments @(
   'acr', 'show',
   '--resource-group', $ResourceGroup,
   '--name', $acrName,
