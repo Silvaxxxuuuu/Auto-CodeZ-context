@@ -182,15 +182,25 @@ Invoke-Az -Arguments @(
   '--output', 'none'
 )
 
-Invoke-Az -Arguments @(
-  'acr', 'create',
+$acrExists = Invoke-Az -Arguments @(
+  'acr', 'show',
   '--resource-group', $ResourceGroup,
   '--name', $acrName,
-  '--location', $Location,
-  '--sku', 'Basic',
-  '--admin-enabled', 'false',
-  '--output', 'none'
-)
+  '--query', 'name',
+  '--output', 'tsv'
+) -Capture 2>$null
+
+if (-not $acrExists) {
+  Invoke-Az -Arguments @(
+    'acr', 'create',
+    '--resource-group', $ResourceGroup,
+    '--name', $acrName,
+    '--location', $Location,
+    '--sku', 'Basic',
+    '--admin-enabled', 'false',
+    '--output', 'none'
+  )
+}
 
 Push-Location $accountApiRoot
 try {
@@ -267,13 +277,24 @@ try {
   Pop-Location
 }
 
-$identityJson = Invoke-Az -Arguments @(
-  'identity', 'create',
+$identityJsonRaw = Invoke-Az -Arguments @(
+  'identity', 'show',
   '--resource-group', $ResourceGroup,
   '--name', $identityName,
-  '--location', $Location,
   '--output', 'json'
-) -Capture | ConvertFrom-Json
+) -Capture 2>$null
+
+if ($identityJsonRaw) {
+  $identityJson = $identityJsonRaw | ConvertFrom-Json
+} else {
+  $identityJson = Invoke-Az -Arguments @(
+    'identity', 'create',
+    '--resource-group', $ResourceGroup,
+    '--name', $identityName,
+    '--location', $Location,
+    '--output', 'json'
+  ) -Capture | ConvertFrom-Json
+}
 
 $identityId = [string]$identityJson.id
 $identityPrincipalId = [string]$identityJson.principalId
@@ -285,47 +306,96 @@ $acrId = Invoke-Az -Arguments @(
   '--output', 'tsv'
 ) -Capture
 
-Invoke-Az -Arguments @(
-  'role', 'assignment', 'create',
+$acrPullAssignment = Invoke-Az -Arguments @(
+  'role', 'assignment', 'list',
   '--assignee-object-id', $identityPrincipalId,
-  '--assignee-principal-type', 'ServicePrincipal',
-  '--role', 'AcrPull',
   '--scope', $acrId,
-  '--output', 'none'
-)
+  '--role', 'AcrPull',
+  '--query', '[0].id',
+  '--output', 'tsv'
+) -Capture
 
-Write-Host 'Aguardando propagação inicial do AcrPull...'
-Start-Sleep -Seconds 20
+if (-not $acrPullAssignment) {
+  Invoke-Az -Arguments @(
+    'role', 'assignment', 'create',
+    '--assignee-object-id', $identityPrincipalId,
+    '--assignee-principal-type', 'ServicePrincipal',
+    '--role', 'AcrPull',
+    '--scope', $acrId,
+    '--output', 'none'
+  )
 
-Invoke-Az -Arguments @(
-  'containerapp', 'env', 'create',
+  Write-Host 'Aguardando propagação inicial do AcrPull...'
+  Start-Sleep -Seconds 20
+}
+
+$containerEnvExists = Invoke-Az -Arguments @(
+  'containerapp', 'env', 'show',
   '--name', $containerEnvName,
   '--resource-group', $ResourceGroup,
-  '--location', $Location,
-  '--output', 'none'
-)
+  '--query', 'name',
+  '--output', 'tsv'
+) -Capture 2>$null
+
+if (-not $containerEnvExists) {
+  Invoke-Az -Arguments @(
+    'containerapp', 'env', 'create',
+    '--name', $containerEnvName,
+    '--resource-group', $ResourceGroup,
+    '--location', $Location,
+    '--output', 'none'
+  )
+}
 
 $postgresPassword = (New-UrlSafeSecret 30) + 'aA1!'
 $betterAuthSecret = New-UrlSafeSecret 48
 $accessTokenSecret = New-UrlSafeSecret 48
 
-Invoke-Az -Arguments @(
-  'postgres', 'flexible-server', 'create',
+$postgresExists = Invoke-Az -Arguments @(
+  'postgres', 'flexible-server', 'show',
   '--resource-group', $ResourceGroup,
   '--name', $postgresName,
-  '--location', $Location,
-  '--admin-user', $PostgresAdmin,
-  '--admin-password', $postgresPassword,
+  '--query', 'name',
+  '--output', 'tsv'
+) -Capture 2>$null
+
+if (-not $postgresExists) {
+  Invoke-Az -Arguments @(
+    'postgres', 'flexible-server', 'create',
+    '--resource-group', $ResourceGroup,
+    '--name', $postgresName,
+    '--location', $Location,
+    '--admin-user', $PostgresAdmin,
+    '--admin-password', $postgresPassword,
+    '--version', '16',
+    '--tier', 'Burstable',
+    '--sku-name', 'Standard_B1ms',
+    '--storage-size', '32',
+    '--backup-retention', '7',
+    '--public-access', '0.0.0.0',
+    '--yes',
+    '--output', 'none'
+  )
+}
+
+$databaseExists = Invoke-Az -Arguments @(
+  'postgres', 'flexible-server', 'db', 'show',
+  '--resource-group', $ResourceGroup,
+  '--server-name', $postgresName,
   '--database-name', 'autocodez',
-  '--version', '16',
-  '--tier', 'Burstable',
-  '--sku-name', 'Standard_B1ms',
-  '--storage-size', '32',
-  '--backup-retention', '7',
-  '--public-access', '0.0.0.0',
-  '--yes',
-  '--output', 'none'
-)
+  '--query', 'name',
+  '--output', 'tsv'
+) -Capture 2>$null
+
+if (-not $databaseExists) {
+  Invoke-Az -Arguments @(
+    'postgres', 'flexible-server', 'db', 'create',
+    '--resource-group', $ResourceGroup,
+    '--server-name', $postgresName,
+    '--database-name', 'autocodez',
+    '--output', 'none'
+  )
+}
 
 Invoke-Az -Arguments @(
   'containerapp', 'create',
