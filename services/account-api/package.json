@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node -e \"require('node:fs').rmSync('.test-dist',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node --test .test-dist/tests/*.test.js",
     "test:integration": "node -e \"require('node:fs').rmSync('.integration-dist',{recursive:true,force:true})\" && tsc -p tsconfig.integration.json && node --test .integration-dist/tests/integration/*.test.js",
-    "migrate": "npm run build:server && node dist/migrate.js",
+    "migrate:build": "npm run build:server && node dist/migrate.js",
+    "migrate": "node dist/migrate.js",
     "start": "node dist/server.js"
   },
   "dependencies": {
