@@ -1,3 +1,3 @@
 # Auto CodeZ Account API deployment trigger
 # Updating this file intentionally starts the Azure Account API deployment from feature/ui-hierarchy-polish.
-trigger=2026-09-21-preserve-oauth-env
+trigger=2026-09-21-oauth-explicit-redirect-uri
