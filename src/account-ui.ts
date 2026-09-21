@@ -46,6 +46,14 @@ let root: HTMLElement | null = null;
 let busy = false;
 let unsubAccount: (() => void) | undefined;
 let unsubFlow: (() => void) | undefined;
+let initialAccountStateResolved = false;
+
+function markAccountReady(): void {
+  if (initialAccountStateResolved) return;
+  initialAccountStateResolved = true;
+  document.documentElement.dataset.autoCodezAccountReady = 'true';
+  window.dispatchEvent(new CustomEvent('auto-codez-account-ready'));
+}
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
@@ -346,22 +354,37 @@ document.addEventListener('click', (event) => {
 }, true);
 
 async function initialize(): Promise<void> {
-  if (!bridge) return;
-  [configuration, accountState, flowState] = await Promise.all([
-    bridge.accountAuthConfiguration(),
-    bridge.accountState(),
-    bridge.accountAuthFlowState(),
-  ]);
-  render();
+  if (!bridge) {
+    markAccountReady();
+    return;
+  }
 
-  unsubAccount = bridge.onAccountState((state) => {
-    accountState = state;
+  try {
+    [configuration, accountState, flowState] = await Promise.all([
+      bridge.accountAuthConfiguration(),
+      bridge.accountState(),
+      bridge.accountAuthFlowState(),
+    ]);
     render();
-  });
-  unsubFlow = bridge.onAccountAuthFlowState((state) => {
-    flowState = state;
+
+    unsubAccount = bridge.onAccountState((state) => {
+      accountState = state;
+      render();
+    });
+    unsubFlow = bridge.onAccountAuthFlowState((state) => {
+      flowState = state;
+      render();
+    });
+  } catch (error) {
+    configuration = {
+      configured: true,
+      methods: [],
+      configurationError: error instanceof Error ? error.message : 'Não foi possível inicializar a conta.',
+    };
     render();
-  });
+  } finally {
+    markAccountReady();
+  }
 }
 
 window.addEventListener('beforeunload', () => {

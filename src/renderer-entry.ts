@@ -81,16 +81,29 @@ function waitForCoreReady(): Promise<void> {
   });
 }
 
+function waitForAccountReady(): Promise<void> {
+  if (
+    document.documentElement.dataset.autoCodezAccountReady === 'true'
+    || failures.has('account-ui')
+  ) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    window.addEventListener('auto-codez-account-ready', () => resolve(), { once: true });
+  });
+}
+
 async function initializeEnhancements(): Promise<void> {
   const coreReady = waitForCoreReady();
-
   const criticalLoads = criticalEnhancements.map((enhancement) => loadEnhancement(enhancement));
+
   await coreReady;
+  await Promise.all(criticalLoads);
+  await waitForAccountReady();
 
   document.documentElement.dataset.autoCodezBootstrapReady = 'true';
   window.dispatchEvent(new CustomEvent('auto-codez-bootstrap-ready'));
 
-  await Promise.all(criticalLoads);
   for (const enhancement of secondaryEnhancements) void loadEnhancement(enhancement);
 }
 
