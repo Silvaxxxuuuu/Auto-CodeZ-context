@@ -55,7 +55,7 @@ test('Descope hosted auth uses public-client PKCE and custom desktop callback', 
   assert.equal(authorize.searchParams.get('code_challenge_method'), 'S256');
   assert.equal(authorize.searchParams.get('state'), 'outer-state');
   assert.equal(authorize.searchParams.get('nonce'), 'outer-nonce');
-  assert.match(authorize.searchParams.get('redirect_uri') ?? '', /^autocodez:\/\/auth\/hosted\?flowId=/);
+  assert.equal(authorize.searchParams.get('redirect_uri'), 'autocodez://auth/hosted');
 
   const completeHosted = adapter.completeHosted;
   assert.ok(completeHosted);
@@ -84,7 +84,7 @@ test('Descope hosted auth uses public-client PKCE and custom desktop callback', 
   assert.equal(body.get('client_id'), 'P2abcDEF_123');
   assert.equal(body.get('code'), 'authorization-code');
   assert.equal(body.get('code_verifier'), 'verifier');
-  assert.match(body.get('redirect_uri') ?? '', /^autocodez:\/\/auth\/hosted\?flowId=/);
+  assert.equal(body.get('redirect_uri'), 'autocodez://auth/hosted');
 });
 
 test('Descope refresh keeps a non-rotated refresh token', async () => {
