@@ -16,6 +16,12 @@ export type AccountAuthCallback =
       flowId: string;
       code: string;
       state: string;
+    }
+  | {
+      type: 'hosted';
+      flowId: string;
+      code: string;
+      state: string;
     };
 
 function requiredParam(url: URL, name: string, max = 16_384): string {
@@ -54,6 +60,15 @@ export function parseAccountAuthCallback(rawUrl: string): AccountAuthCallback {
   if (url.pathname === '/passkey') {
     return {
       type: 'passkey',
+      flowId: requiredParam(url, 'flowId', 256),
+      code: requiredParam(url, 'code'),
+      state: requiredParam(url, 'state', 512),
+    };
+  }
+
+  if (url.pathname === '/hosted') {
+    return {
+      type: 'hosted',
       flowId: requiredParam(url, 'flowId', 256),
       code: requiredParam(url, 'code'),
       state: requiredParam(url, 'state', 512),
