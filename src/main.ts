@@ -70,12 +70,10 @@ import { createAccountAuthAdapter, resolveAccountAuthConfiguration } from './acc
 import { DeviceRegistryRuntime } from './account/device-registry-runtime';
 import { AccountAuthFlowRuntime } from './account/account-auth-flow-runtime';
 import { findAccountAuthCallback, parseAccountAuthCallback } from './account/account-auth-callback';
-import { resolveAccountApiBaseUrl } from './account/account-endpoint';
 import type { OAuthProvider } from './account/auth-adapter';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
-declare const __AUTO_CODEZ_ACCOUNT_API_DEFAULT_URL__: string;
 declare const __AUTO_CODEZ_DESCOPE_PROJECT_ID__: string;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -94,10 +92,6 @@ const accountDeviceIdentity = new DeviceIdentityStore(
 const accountAuth = createAccountAuthAdapter({
   descopeProjectId: process.env.AUTO_CODEZ_DESCOPE_PROJECT_ID?.trim() || __AUTO_CODEZ_DESCOPE_PROJECT_ID__,
   descopeBaseUrl: process.env.AUTO_CODEZ_DESCOPE_BASE_URL,
-  legacyBaseUrl: resolveAccountApiBaseUrl(
-    process.env.AUTO_CODEZ_ACCOUNT_API_BASE_URL,
-    __AUTO_CODEZ_ACCOUNT_API_DEFAULT_URL__,
-  ),
 });
 const accountAuthAdapter = accountAuth.adapter;
 const accountSessionRuntime = new AccountSessionRuntime(
