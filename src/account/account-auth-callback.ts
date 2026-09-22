@@ -19,7 +19,6 @@ export type AccountAuthCallback =
     }
   | {
       type: 'hosted';
-      flowId: string;
       code: string;
       state: string;
     };
@@ -69,7 +68,6 @@ export function parseAccountAuthCallback(rawUrl: string): AccountAuthCallback {
   if (url.pathname === '/hosted') {
     return {
       type: 'hosted',
-      flowId: requiredParam(url, 'flowId', 256),
       code: requiredParam(url, 'code'),
       state: requiredParam(url, 'state', 512),
     };
