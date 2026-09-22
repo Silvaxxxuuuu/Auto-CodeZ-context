@@ -301,7 +301,6 @@ test('Hosted flow keeps PKCE state and nonce private and completes once', async 
   assert.ok(!publicJson.includes(adapter.lastHostedBegin.codeChallenge));
 
   const completed = await flows.completeHosted({
-    flowId: 'hosted-flow',
     code: 'hosted-code',
     state: adapter.lastHostedBegin.state,
   });
@@ -318,7 +317,6 @@ test('Hosted state mismatch is rejected before token exchange', async () => {
   await flows.beginHosted();
 
   const result = await flows.completeHosted({
-    flowId: 'hosted-flow',
     code: 'hosted-code',
     state: 'wrong-state',
   });
