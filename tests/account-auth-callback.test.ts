@@ -69,3 +69,23 @@ test('parseAccountAuthCallback accepts hosted identity callbacks', () => {
     },
   );
 });
+
+
+test('parseAccountAuthCallback accepts hosted provider cancellation safely', () => {
+  assert.deepEqual(
+    parseAccountAuthCallback('autocodez://auth/hosted?error=access_denied&error_description=User%20cancelled&state=state-1'),
+    {
+      type: 'hosted_error',
+      error: 'access_denied',
+      errorDescription: 'User cancelled',
+      state: 'state-1',
+    },
+  );
+  assert.deepEqual(
+    parseAccountAuthCallback('autocodez://auth/hosted?error=server_error'),
+    {
+      type: 'hosted_error',
+      error: 'server_error',
+    },
+  );
+});
