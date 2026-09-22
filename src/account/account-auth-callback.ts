@@ -21,6 +21,12 @@ export type AccountAuthCallback =
       type: 'hosted';
       code: string;
       state: string;
+    }
+  | {
+      type: 'hosted_error';
+      error: string;
+      errorDescription?: string;
+      state?: string;
     };
 
 function requiredParam(url: URL, name: string, max = 16_384): string {
@@ -66,6 +72,20 @@ export function parseAccountAuthCallback(rawUrl: string): AccountAuthCallback {
   }
 
   if (url.pathname === '/hosted') {
+    const error = url.searchParams.get('error')?.trim() ?? '';
+    if (error) {
+      if (error.length > 256) throw new Error('Parâmetro de autenticação inválido: error.');
+      const description = url.searchParams.get('error_description')?.trim() ?? '';
+      const state = url.searchParams.get('state')?.trim() ?? '';
+      if (description.length > 2_048) throw new Error('Parâmetro de autenticação inválido: error_description.');
+      if (state.length > 512) throw new Error('Parâmetro de autenticação inválido: state.');
+      return {
+        type: 'hosted_error',
+        error,
+        ...(description ? { errorDescription: description } : {}),
+        ...(state ? { state } : {}),
+      };
+    }
     return {
       type: 'hosted',
       code: requiredParam(url, 'code'),
