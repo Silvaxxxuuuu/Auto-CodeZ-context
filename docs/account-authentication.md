@@ -37,8 +37,9 @@ In Descope Console:
    - Email Magic Link
 5. Register the native redirect URI exactly as:
    `autocodez://auth/hosted`
-6. Add the Auto CodeZ mobile/custom URI scheme to the project's trusted mobile app schemes as required by Descope.
-7. Keep PKCE enabled. The desktop app never stores a Descope client secret.
+6. In **Project Settings > Security > Approved Domains**, keep redirect validation enabled and add the custom native callback under **Mobile App Schemes** using the identifier Descope requires for the `autocodez://auth/hosted` callback.
+7. If **Apply Trusted Domains on Flow Execution** is enabled, also allow the Descope-hosted authentication domain used by the project.
+8. Keep PKCE enabled. The desktop app never stores a Descope client secret.
 
 For development, Descope's built-in Google, GitHub and Microsoft OAuth applications can be used immediately. Descope currently limits its shared test social applications to 100 total logins per month across providers. Before public production, configure Auto CodeZ-owned OAuth applications for each social provider so the consent screens use Auto CodeZ branding.
 
@@ -73,6 +74,9 @@ Never embed:
 - Static callback URI: `autocodez://auth/hosted`.
 - Cryptographically random state and nonce.
 - State validation before token exchange.
+- RS256 ID token signature validation against the project's JWKS.
+- ID token issuer, audience, authorized-party, expiration and nonce validation before the account is accepted.
+- UserInfo `sub` must match the verified ID token `sub` on the initial authorization grant.
 - Pending hosted PKCE state is kept in protected local credential storage so a browser callback can complete after an app restart.
 - Pending auth state is deleted after success, cancellation, mismatch or terminal failure.
 - Access token is memory-only.
