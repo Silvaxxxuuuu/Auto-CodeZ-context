@@ -118,6 +118,15 @@ export class AccountAuthFlowRuntime {
     return this.setState({ status: 'idle' });
   }
 
+  async cancel(): Promise<AuthFlowSnapshot> {
+    this.pendingOAuth = undefined;
+    this.pendingMagicLink = undefined;
+    this.pendingPasskey = undefined;
+    this.pendingHosted = undefined;
+    await this.clearPersistedHosted();
+    return this.setState({ status: 'idle' });
+  }
+
   async beginMagicLink(email: string): Promise<AuthFlowSnapshot> {
     this.assertCanBegin();
     const normalizedEmail = normalizeEmail(email);
