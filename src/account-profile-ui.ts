@@ -116,6 +116,17 @@ function identityRows(): string {
 }
 
 function deviceRows(): string {
+  if (registry?.state === 'unavailable' && account) {
+    return `
+      <div class="account-profile-device">
+        <div class="account-profile-device-main">
+          <strong>${escapeHtml(account.device.name)} <em>Este dispositivo</em></strong>
+          <span>${escapeHtml(account.device.platform)} · ${escapeHtml(account.device.arch)} · ${escapeHtml(account.device.appVersion)}</span>
+          <small>Identidade do dispositivo protegida localmente.</small>
+        </div>
+      </div>
+    `;
+  }
   if (!registry || registry.state === 'registering' || registry.state === 'idle') {
     return '<div class="account-profile-empty">Carregando dispositivos...</div>';
   }
@@ -180,11 +191,11 @@ function panelMarkup(): string {
 
       <div class="account-profile-subsection">
         <div class="account-profile-subheading row">
-          <div><strong>Dispositivos</strong><span>Revogue qualquer instalação que você não reconheça.</span></div>
-          <button type="button" class="profile-secondary-button enabled" data-account-refresh-devices>Atualizar</button>
+          <div><strong>Dispositivos</strong><span>${registry?.state === 'unavailable' ? 'Este dispositivo é protegido localmente. O sync entre dispositivos será ativado pelo backend de sincronização.' : 'Revogue qualquer instalação que você não reconheça.'}</span></div>
+          ${registry?.state === 'unavailable' ? '' : '<button type="button" class="profile-secondary-button enabled" data-account-refresh-devices>Atualizar</button>'}
         </div>
         <div class="account-profile-devices">${deviceRows()}</div>
-        ${registry?.lastError ? `<div class="account-profile-warning">${escapeHtml(registry.lastError)}</div>` : ''}
+        ${registry?.state !== 'unavailable' && registry?.lastError ? `<div class="account-profile-warning">${escapeHtml(registry.lastError)}</div>` : ''}
       </div>
 
       <div class="account-profile-session">
