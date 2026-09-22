@@ -9487,3 +9487,105 @@ Visual #994:
 - Verify passwordless account onboarding: SUCCESS
 
 PR #9 permanece OPEN / DRAFT / sem merge.
+
+
+------------------------------------------------------------
+24.55. ACCOUNT CORE, DESCOPE OIDC E SEPARAÇÃO DEFINITIVA DO AZURE AUTH
+------------------------------------------------------------
+
+DIREÇÃO DE PRODUTO CONFIRMADA:
+- Azure NÃO é o sistema de autenticação do Auto CodeZ;
+- Azure permanece reservado para testes de IA/inferência, ferramentas e experimentos futuros de Cloud AI;
+- o desktop usa Descope Auth Hosting como camada de identidade hospedada;
+- GitHub, Google, Microsoft, Passkey e Magic Link ficam no mesmo fluxo hospedado;
+- nenhum client secret Descope/social é armazenado no desktop.
+
+FLUXO DESKTOP:
+Auto CodeZ
+  -> Descope Auth Hosting
+     -> GitHub
+     -> Google
+     -> Microsoft
+     -> Passkey
+     -> Magic Link
+  -> autocodez://auth/hosted
+  -> Auto CodeZ
+
+PROTOCOLO:
+- OAuth 2.0 / OIDC Authorization Code;
+- PKCE S256;
+- client_id = Descope Project ID para o Federated OIDC App;
+- callback nativo fixo: autocodez://auth/hosted;
+- state e nonce criptograficamente aleatórios;
+- refresh token em ProtectedCredentialStore;
+- access token somente em memória;
+- pending hosted PKCE persistido no storage protegido para sobreviver a restart.
+
+SEGURANÇA DO CALLBACK:
+- state é validado antes da troca do authorization code;
+- callback forjado/mismatched é rejeitado sem destruir a transação legítima pendente;
+- cancelamento explícito limpa o pending flow;
+- erro/cancelamento do provider é tratado;
+- conclusão, expiração e falha terminal limpam o material PKCE persistido.
+
+VALIDAÇÃO OIDC ADICIONADA:
+- ID token obrigatório no grant inicial;
+- assinatura RS256 validada contra o JWKS do projeto Descope;
+- issuer validado contra https://api.descope.com/<PROJECT_ID>, ou base URL Descope configurada;
+- audience precisa conter o Project ID;
+- azp, quando presente, precisa corresponder ao Project ID;
+- com múltiplas audiences, azp correto é obrigatório;
+- exp validado;
+- iat futuro excessivo rejeitado;
+- nonce do ID token precisa corresponder ao nonce do fluxo pendente;
+- sub de UserInfo precisa corresponder ao sub verificado do ID token;
+- rotação de JWKS possui retry após cache miss de kid;
+- JWKS RSA possui cache local curto.
+
+SESSÃO:
+- refresh preserva refresh token quando o servidor não o rotaciona;
+- refresh token rotacionado substitui o anterior quando retornado;
+- restart tenta restaurar a sessão;
+- indisponibilidade de rede preserva estado local de conta sem expor token;
+- grant revogado limpa estado e credenciais;
+- logout limpa sessão local mesmo se revogação remota estiver offline.
+
+DEVICE REGISTRY:
+- registro remoto fica indisponível no modo Descope atual;
+- identidade local do dispositivo permanece funcional;
+- backend remoto de devices/sync pode voltar no futuro como serviço independente de autenticação.
+
+AZURE ACCOUNT API:
+- código legado/futuro continua no repositório para não destruir trabalho anterior;
+- src/main.ts não injeta legacyBaseUrl no auth factory;
+- AUTO_CODEZ_ACCOUNT_API_BASE_URL não participa do login atual do desktop;
+- não reintroduzir Azure no login sem decisão explícita de arquitetura.
+
+CONFIGURAÇÃO EXTERNA DESCOPE:
+- build/runtime recebe AUTO_CODEZ_DESCOPE_PROJECT_ID;
+- configurar um único hosted Sign Up / Sign In Flow com os cinco métodos;
+- registrar autocodez://auth/hosted;
+- configurar Approved Domains / Mobile App Schemes conforme o console Descope;
+- providers sociais compartilhados servem para desenvolvimento;
+- produção deve usar OAuth apps próprios do Auto CodeZ para branding e limites adequados.
+
+COMMITS DESTE HARDENING:
+- e9888223a0142f908d9dad306410353b390b1066
+  fix(account): validate Descope OIDC id tokens
+- 7917d82954f3b1c5e25052e7572d7f078abb13d5
+  test(account): cover Descope ID token validation
+- 26244687f47935ec2e7b692256bba408b63fd383
+  docs(account): document Descope trust and token checks
+- ffe0bc8edb963b3daf2ffcf2a524b0fbf11ff575
+  fix(account): clarify OIDC authorized-party validation
+- 8bae6a289d3735991cfb3606b487c24651de0ee7
+  test(account): align Descope OIDC token fixtures
+- 33d46926ab238be0bdafac8c2dbdc60c52114064
+  docs(account): match forged callback preservation semantics
+
+VALIDAÇÃO:
+- um primeiro run após o hardening encontrou 2 falhas somente nos fixtures novos de azp;
+- o problema foi corrigido antes de considerar o lote pronto;
+- TypeScript já havia passado com a implementação de verificação OIDC;
+- validação final do HEAD posterior a esta seção deve ser registrada somente após CI real;
+- PR #9 deve permanecer OPEN / DRAFT / sem merge.
