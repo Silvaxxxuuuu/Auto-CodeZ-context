@@ -96,6 +96,9 @@ export interface CompletePasskeyInput {
   codeVerifier: string;
 }
 
+export type BeginHostedInput = BeginPasskeyInput;
+export type CompleteHostedInput = CompletePasskeyInput;
+
 export interface SessionAuthAdapter {
   refresh(input: RefreshSessionInput): Promise<AuthGrant>;
   revoke(input: RevokeSessionInput): Promise<void>;
@@ -124,6 +127,13 @@ export interface AuthAdapter extends SessionAuthAdapter {
     expiresAt: number;
   }>;
   completePasskey(input: CompletePasskeyInput): Promise<AuthGrant>;
+
+  beginHosted?(input: BeginHostedInput): Promise<{
+    authorizationUrl: string;
+    flowId: string;
+    expiresAt: number;
+  }>;
+  completeHosted?(input: CompleteHostedInput): Promise<AuthGrant>;
 }
 
 export class UnavailableAuthAdapter implements AuthAdapter {
