@@ -451,7 +451,10 @@ export class DescopeAuthAdapter implements AuthAdapter {
     if (!audience.includes(this.projectId)) {
       throw new AuthAdapterError('invalid_grant', 'Audience do ID token inválida.');
     }
-    if ((audience.length > 1 || claims.azp) && claims.azp !== this.projectId) {
+    if (audience.length > 1 && claims.azp !== this.projectId) {
+      throw new AuthAdapterError('invalid_grant', 'Authorized party do ID token inválido.');
+    }
+    if (claims.azp !== undefined && claims.azp !== this.projectId) {
       throw new AuthAdapterError('invalid_grant', 'Authorized party do ID token inválido.');
     }
     if (claims.nonce !== expectedNonce) {
