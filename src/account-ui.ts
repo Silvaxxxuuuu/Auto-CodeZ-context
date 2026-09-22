@@ -27,6 +27,7 @@ type AuthConfiguration = {
 type AccountBridge = {
   accountState: () => Promise<AccountState>;
   accountAuthFlowState: () => Promise<AuthFlowState>;
+  cancelAccountAuthFlow: () => Promise<AuthFlowState>;
   accountAuthConfiguration: () => Promise<AuthConfiguration>;
   beginAccountMagicLink: (email: string) => Promise<AuthFlowState>;
   beginAccountOAuth: (provider: 'github' | 'google' | 'microsoft') => Promise<AuthFlowState>;
@@ -400,8 +401,14 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (target.closest('[data-account-back]')) {
-    flowState = { status: 'idle' };
-    render();
+    void (async () => {
+      try {
+        flowState = await bridge?.cancelAccountAuthFlow() ?? { status: 'idle' };
+      } catch {
+        flowState = { status: 'idle' };
+      }
+      render();
+    })();
   }
 }, true);
 
