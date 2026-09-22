@@ -78,7 +78,7 @@ Never embed:
 - ID token issuer, audience, authorized-party, expiration and nonce validation before the account is accepted.
 - UserInfo `sub` must match the verified ID token `sub` on the initial authorization grant.
 - Pending hosted PKCE state is kept in protected local credential storage so a browser callback can complete after an app restart.
-- Pending auth state is deleted after success, cancellation, mismatch or terminal failure.
+- Pending auth state is deleted after success, explicit cancellation, expiry or terminal failure. A forged or mismatched callback is rejected without destroying the legitimate pending transaction.
 - Access token is memory-only.
 - Refresh token is OS-protected.
 - OAuth cancellation/error callbacks are handled without accepting an authorization grant.
