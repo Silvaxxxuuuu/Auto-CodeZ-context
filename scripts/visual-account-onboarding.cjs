@@ -62,7 +62,7 @@ function environment() {
     ...process.env,
     HOME: stateRoot,
     AUTO_CODEZ_VISUAL_TEST: '1',
-    AUTO_CODEZ_ACCOUNT_API_BASE_URL: 'https://accounts.example.test',
+    AUTO_CODEZ_DESCOPE_PROJECT_ID: 'P2abcDEF_123',
     ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
   };
   if (process.platform === 'win32') {
@@ -131,16 +131,13 @@ async function main() {
   await login.waitFor({ state: 'visible', timeout: 20_000 });
 
   await login.getByRole('heading', { name: 'Bem-vindo ao Auto CodeZ', exact: true }).waitFor();
-  await login.locator('#account-email').waitFor({ state: 'visible' });
-  await login.getByRole('button', { name: 'Enviar link', exact: true }).waitFor();
-  await login.getByRole('button', { name: 'Continuar com GitHub', exact: true }).waitFor();
-  await login.getByRole('button', { name: 'Continuar com Google', exact: true }).waitFor();
-  await login.getByRole('button', { name: 'Continuar com Microsoft', exact: true }).waitFor();
-  await login.getByRole('button', { name: 'Entrar com passkey', exact: true }).waitFor();
+  await login.getByRole('button', { name: 'Entrar ou criar conta', exact: true }).waitFor();
 
   const bodyText = await login.textContent();
-  if (!bodyText?.includes('Sem senhas')) {
-    throw new Error('Mensagem passwordless não apareceu no onboarding.');
+  for (const method of ['GitHub', 'Google', 'Microsoft', 'Passkey', 'Magic Link']) {
+    if (!bodyText?.includes(method)) {
+      throw new Error('Método hospedado ausente no onboarding: ' + method);
+    }
   }
 
   await page.screenshot({
