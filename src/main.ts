@@ -1456,8 +1456,12 @@ ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; 
 ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(requireNonEmptyString(url, 'URL externa')));
 
 app.whenReady().then(async () => {
-  if (app.isPackaged && process.env.AUTO_CODEZ_VISUAL_TEST !== '1') {
-    app.setAsDefaultProtocolClient('autocodez');
+  if (process.env.AUTO_CODEZ_VISUAL_TEST !== '1') {
+    if (process.defaultApp && process.argv[1]) {
+      app.setAsDefaultProtocolClient('autocodez', process.execPath, [path.resolve(process.argv[1])]);
+    } else {
+      app.setAsDefaultProtocolClient('autocodez');
+    }
   }
   await storage.init();
   const initialAccountState = await accountSessionRuntime.hydrate();
