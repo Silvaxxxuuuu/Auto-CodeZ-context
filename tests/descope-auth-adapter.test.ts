@@ -36,7 +36,9 @@ test('Descope hosted auth uses public-client PKCE and custom desktop callback', 
     },
   });
 
-  const begin = await adapter.beginPasskey({
+  const beginHosted = adapter.beginHosted;
+  assert.ok(beginHosted);
+  const begin = await beginHosted.call(adapter, {
     deviceId: 'device-1',
     state: 'outer-state',
     nonce: 'outer-nonce',
@@ -46,16 +48,18 @@ test('Descope hosted auth uses public-client PKCE and custom desktop callback', 
 
   const authorize = new URL(begin.authorizationUrl);
   assert.equal(authorize.origin, 'https://api.descope.com');
-  assert.equal(authorize.pathname, '/P2abcDEF_123/oauth2/v1/authorize');
+  assert.equal(authorize.pathname, '/oauth2/v1/authorize');
   assert.equal(authorize.searchParams.get('response_type'), 'code');
   assert.equal(authorize.searchParams.get('client_id'), 'P2abcDEF_123');
   assert.equal(authorize.searchParams.get('code_challenge'), 'challenge');
   assert.equal(authorize.searchParams.get('code_challenge_method'), 'S256');
   assert.equal(authorize.searchParams.get('state'), 'outer-state');
   assert.equal(authorize.searchParams.get('nonce'), 'outer-nonce');
-  assert.match(authorize.searchParams.get('redirect_uri') ?? '', /^autocodez:\/\/auth\/passkey\?flowId=/);
+  assert.match(authorize.searchParams.get('redirect_uri') ?? '', /^autocodez:\/\/auth\/hosted\?flowId=/);
 
-  const grant = await adapter.completePasskey({
+  const completeHosted = adapter.completeHosted;
+  assert.ok(completeHosted);
+  const grant = await completeHosted.call(adapter, {
     flowId: begin.flowId,
     deviceId: 'device-1',
     code: 'authorization-code',
@@ -80,7 +84,7 @@ test('Descope hosted auth uses public-client PKCE and custom desktop callback', 
   assert.equal(body.get('client_id'), 'P2abcDEF_123');
   assert.equal(body.get('code'), 'authorization-code');
   assert.equal(body.get('code_verifier'), 'verifier');
-  assert.match(body.get('redirect_uri') ?? '', /^autocodez:\/\/auth\/passkey\?flowId=/);
+  assert.match(body.get('redirect_uri') ?? '', /^autocodez:\/\/auth\/hosted\?flowId=/);
 });
 
 test('Descope refresh keeps a non-rotated refresh token', async () => {
