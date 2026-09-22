@@ -139,6 +139,7 @@ export class AccountAuthFlowRuntime {
       };
       this.pendingOAuth = undefined;
       this.pendingPasskey = undefined;
+      this.pendingHosted = undefined;
 
       return this.setState({
         status: 'waiting_magic_link',
@@ -226,6 +227,7 @@ export class AccountAuthFlowRuntime {
       };
       this.pendingMagicLink = undefined;
       this.pendingPasskey = undefined;
+      this.pendingHosted = undefined;
 
       return {
         snapshot: this.setState({
@@ -320,6 +322,7 @@ export class AccountAuthFlowRuntime {
       };
       this.pendingOAuth = undefined;
       this.pendingMagicLink = undefined;
+      this.pendingHosted = undefined;
 
       return {
         snapshot: this.setState({
