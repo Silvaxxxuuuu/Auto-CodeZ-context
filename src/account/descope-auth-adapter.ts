@@ -196,7 +196,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', this.projectId);
     url.searchParams.set('redirect_uri', redirectUri);
-    url.searchParams.set('scope', 'openid profile email');
+    url.searchParams.set('scope', 'openid profile email offline_access');
     url.searchParams.set('code_challenge', codeChallenge);
     url.searchParams.set('code_challenge_method', 'S256');
     url.searchParams.set('state', state);
