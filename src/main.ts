@@ -136,6 +136,8 @@ async function completeAccountAuthCallback(rawUrl: string): Promise<void> {
     await accountAuthFlowRuntime.completeOAuth(callback);
   } else if (callback.type === 'passkey') {
     await accountAuthFlowRuntime.completePasskey(callback);
+  } else if (callback.type === 'hosted') {
+    await accountAuthFlowRuntime.completeHosted(callback);
   } else {
     await accountAuthFlowRuntime.completeMagicLink(callback);
   }
@@ -723,6 +725,11 @@ ipcMain.handle('account-auth:begin-oauth', async (_event, provider: unknown) => 
 });
 ipcMain.handle('account-auth:begin-passkey', async () => {
   const result = await accountAuthFlowRuntime.beginPasskey();
+  if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
+  return result.snapshot;
+});
+ipcMain.handle('account-auth:begin-hosted', async () => {
+  const result = await accountAuthFlowRuntime.beginHosted();
   if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
   return result.snapshot;
 });
