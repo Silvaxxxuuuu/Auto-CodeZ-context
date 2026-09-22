@@ -110,7 +110,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
   private readonly now: () => number;
-  private readonly redirectByFlowId = new Map<string, string>();
+  private readonly redirectUri = 'autocodez://auth/hosted';
 
   constructor(projectId: string, options: DescopeAuthAdapterOptions = {}) {
     this.projectId = requireProjectId(projectId);
@@ -190,8 +190,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
     expiresAt: number;
   } {
     const flowId = crypto.randomUUID();
-    const redirectUri = `autocodez://auth/hosted?flowId=${encodeURIComponent(flowId)}`;
-    this.redirectByFlowId.set(flowId, redirectUri);
+    const redirectUri = this.redirectUri;
 
     const url = this.endpoint('/oauth2/v1/authorize');
     url.searchParams.set('response_type', 'code');
@@ -216,9 +215,8 @@ export class DescopeAuthAdapter implements AuthAdapter {
     code: string,
     codeVerifier: string,
   ): Promise<AuthGrant> {
-    const redirectUri = this.redirectByFlowId.get(flowId);
-    if (!redirectUri) throw new AuthAdapterError('invalid_grant', 'Fluxo de autenticação não encontrado.');
-    this.redirectByFlowId.delete(flowId);
+    if (!flowId.trim()) throw new AuthAdapterError('invalid_grant', 'Fluxo de autenticação não encontrado.');
+    const redirectUri = this.redirectUri;
 
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
