@@ -2,7 +2,7 @@ import './account-profile-ui.css';
 
 type LinkedIdentity = {
   id: string;
-  provider: 'google' | 'github' | 'microsoft' | 'passkey' | 'magic_link';
+  provider: 'google' | 'github' | 'microsoft' | 'passkey' | 'magic_link' | 'descope';
   email?: string;
   displayName?: string;
   linkedAt: number;
@@ -79,6 +79,7 @@ function providerName(provider: LinkedIdentity['provider']): string {
   if (provider === 'google') return 'Google';
   if (provider === 'microsoft') return 'Microsoft';
   if (provider === 'passkey') return 'Passkey';
+  if (provider === 'descope') return 'Auto CodeZ';
   return 'Magic Link';
 }
 
@@ -172,7 +173,7 @@ function panelMarkup(): string {
       <div class="account-profile-subsection">
         <div class="account-profile-subheading row">
           <div><strong>Métodos de acesso</strong><span>Vincule métodos passwordless à sua conta.</span></div>
-          ${account.state === 'authenticated' ? '<button type="button" class="profile-secondary-button enabled" data-account-add-passkey>Adicionar passkey</button>' : ''}
+          ${account.state === 'authenticated' && session?.identityProvider !== 'descope' ? '<button type="button" class="profile-secondary-button enabled" data-account-add-passkey>Adicionar passkey</button>' : ''}
         </div>
         <div class="account-profile-methods">${identityRows()}</div>
       </div>
