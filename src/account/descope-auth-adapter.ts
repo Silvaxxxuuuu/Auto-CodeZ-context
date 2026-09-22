@@ -4,9 +4,11 @@ import {
   type AuthAdapter,
   type AuthGrant,
   type AuthMethod,
+  type BeginHostedInput,
   type BeginMagicLinkInput,
   type BeginOAuthInput,
   type BeginPasskeyInput,
+  type CompleteHostedInput,
   type CompleteMagicLinkInput,
   type CompleteOAuthInput,
   type CompletePasskeyInput,
@@ -125,12 +127,20 @@ export class DescopeAuthAdapter implements AuthAdapter {
     return { methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'] };
   }
 
+  async beginHosted(input: BeginHostedInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
+    return this.beginHostedFlow(input.state, input.nonce, input.codeChallenge);
+  }
+
+  async completeHosted(input: CompleteHostedInput): Promise<AuthGrant> {
+    return await this.completeHostedFlow(input.flowId, input.deviceId, input.code, input.codeVerifier);
+  }
+
   async beginOAuth(input: BeginOAuthInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
-    return this.beginHosted(input.state, input.nonce, input.codeChallenge);
+    return this.beginHostedFlow(input.state, input.nonce, input.codeChallenge);
   }
 
   async completeOAuth(input: CompleteOAuthInput): Promise<AuthGrant> {
-    return await this.completeHosted(input.flowId, input.deviceId, input.code, input.codeVerifier);
+    return await this.completeHostedFlow(input.flowId, input.deviceId, input.code, input.codeVerifier);
   }
 
   async beginMagicLink(_input: BeginMagicLinkInput): Promise<{ flowId: string; expiresAt: number }> {
@@ -145,11 +155,11 @@ export class DescopeAuthAdapter implements AuthAdapter {
   }
 
   async beginPasskey(input: BeginPasskeyInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
-    return this.beginHosted(input.state, input.nonce, input.codeChallenge);
+    return this.beginHostedFlow(input.state, input.nonce, input.codeChallenge);
   }
 
   async completePasskey(input: CompletePasskeyInput): Promise<AuthGrant> {
-    return await this.completeHosted(input.flowId, input.deviceId, input.code, input.codeVerifier);
+    return await this.completeHostedFlow(input.flowId, input.deviceId, input.code, input.codeVerifier);
   }
 
   async refresh(input: RefreshSessionInput): Promise<AuthGrant> {
@@ -174,13 +184,13 @@ export class DescopeAuthAdapter implements AuthAdapter {
     await this.formRequest('/oauth2/v1/revoke', body, true);
   }
 
-  private beginHosted(state: string, nonce: string, codeChallenge: string): {
+  private beginHostedFlow(state: string, nonce: string, codeChallenge: string): {
     authorizationUrl: string;
     flowId: string;
     expiresAt: number;
   } {
     const flowId = crypto.randomUUID();
-    const redirectUri = `autocodez://auth/passkey?flowId=${encodeURIComponent(flowId)}`;
+    const redirectUri = `autocodez://auth/hosted?flowId=${encodeURIComponent(flowId)}`;
     this.redirectByFlowId.set(flowId, redirectUri);
 
     const url = this.endpoint('/oauth2/v1/authorize');
@@ -200,7 +210,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
     };
   }
 
-  private async completeHosted(
+  private async completeHostedFlow(
     flowId: string,
     deviceId: DeviceId,
     code: string,
