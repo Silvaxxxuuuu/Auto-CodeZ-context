@@ -448,6 +448,49 @@ test('Cancelling hosted auth clears persisted PKCE material and rejects a later 
   );
 });
 
+test('Forged hosted callback state cannot cancel the valid protected transaction', async () => {
+  const now = 100;
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => now,
+    },
+  );
+  const adapter = new FakeAuthAdapter((deviceId) => grant(deviceId, 'descope'));
+  const sessions = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+  const runtime = new AccountAuthFlowRuntime(adapter, sessions, devices, () => now, credentials);
+
+  await runtime.beginHosted();
+  assert.ok(adapter.lastHostedBegin);
+
+  const rejected = await runtime.failHostedCallback({
+    error: 'access_denied',
+    state: 'forged-state',
+  });
+  assert.equal(rejected.status, 'error');
+  assert.match(rejected.lastError ?? '', /Estado de autenticação inválido/);
+  assert.ok(await credentials.get('account.auth.pending-hosted'));
+
+  const completed = await runtime.completeHosted({
+    code: 'real-code',
+    state: adapter.lastHostedBegin.state,
+  });
+  assert.equal(completed.status, 'authenticated');
+  assert.equal(await credentials.get('account.auth.pending-hosted'), null);
+});
+
 test('Hosted state mismatch is rejected before token exchange', async () => {
   const { adapter, flows } = setup();
   await flows.beginHosted();
