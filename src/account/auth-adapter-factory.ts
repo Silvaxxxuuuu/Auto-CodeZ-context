@@ -1,6 +1,7 @@
 import type { AuthAdapter } from './auth-adapter';
 import { UnavailableAuthAdapter } from './auth-adapter';
 import { HttpAuthAdapter } from './http-auth-adapter';
+import { DescopeAuthAdapter } from './descope-auth-adapter';
 import type { DeviceRegistryAdapter } from './device-registry-adapter';
 import { UnavailableDeviceRegistryAdapter } from './device-registry-adapter';
 import { HttpDeviceRegistryAdapter } from './http-device-registry-adapter';
@@ -8,6 +9,7 @@ import { HttpDeviceRegistryAdapter } from './http-device-registry-adapter';
 export interface AccountAuthConfigurationSnapshot {
   configured: boolean;
   methods: Array<'magic_link' | 'github' | 'google' | 'microsoft' | 'passkey'>;
+  hosted?: boolean;
   configurationError?: string;
 }
 
@@ -18,10 +20,45 @@ export interface AccountAuthAdapterFactoryResult {
   configuration: AccountAuthConfigurationSnapshot;
 }
 
+export interface AccountAuthFactoryOptions {
+  descopeProjectId?: string;
+  descopeBaseUrl?: string;
+  legacyBaseUrl?: string;
+}
+
 export function createAccountAuthAdapter(
-  baseUrl: string | undefined,
+  input: string | undefined | AccountAuthFactoryOptions,
 ): AccountAuthAdapterFactoryResult {
-  const value = baseUrl?.trim();
+  const options: AccountAuthFactoryOptions = typeof input === 'string' || input === undefined
+    ? { legacyBaseUrl: input }
+    : input;
+  const descopeProjectId = options.descopeProjectId?.trim();
+  if (descopeProjectId) {
+    try {
+      const adapter = new DescopeAuthAdapter(descopeProjectId, { baseUrl: options.descopeBaseUrl });
+      return {
+        adapter,
+        deviceRegistry: new UnavailableDeviceRegistryAdapter(),
+        configuration: {
+          configured: true,
+          hosted: true,
+          methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'],
+        },
+      };
+    } catch (error) {
+      return {
+        adapter: new UnavailableAuthAdapter(),
+        deviceRegistry: new UnavailableDeviceRegistryAdapter(),
+        configuration: {
+          configured: false,
+          methods: [],
+          configurationError: error instanceof Error ? error.message : 'Configuração de identidade inválida.',
+        },
+      };
+    }
+  }
+
+  const value = options.legacyBaseUrl?.trim();
   if (!value) {
     return {
       adapter: new UnavailableAuthAdapter(),
@@ -77,6 +114,7 @@ export async function resolveAccountAuthConfiguration(
     return {
       configured: true,
       methods: [...discovered.methods],
+      ...(result.configuration.hosted ? { hosted: true } : {}),
     };
   } catch (error) {
     return {
