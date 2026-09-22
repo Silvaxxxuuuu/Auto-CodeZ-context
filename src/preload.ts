@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   beginAccountMagicLink: (email: string) => invoke('account-auth:begin-magic-link', requireNonEmptyString(email, 'E-mail')),
   beginAccountOAuth: (provider: string) => invoke('account-auth:begin-oauth', requireIdentifier(provider, 'Provider OAuth')),
   beginAccountPasskey: () => invoke('account-auth:begin-passkey'),
+  beginAccountHosted: () => invoke('account-auth:begin-hosted'),
   openAccountPasskeyEnrollment: () => invoke<{ opened: boolean }>('account-auth:open-passkey-enrollment'),
   onAccountAuthFlowState: (listener: (state: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
