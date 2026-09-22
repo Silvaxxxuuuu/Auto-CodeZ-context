@@ -61,10 +61,9 @@ test('parseAccountAuthCallback accepts browser passkey callbacks', () => {
 
 test('parseAccountAuthCallback accepts hosted identity callbacks', () => {
   assert.deepEqual(
-    parseAccountAuthCallback('autocodez://auth/hosted?flowId=hosted-1&code=authorization-code&state=state-1'),
+    parseAccountAuthCallback('autocodez://auth/hosted?code=authorization-code&state=state-1'),
     {
       type: 'hosted',
-      flowId: 'hosted-1',
       code: 'authorization-code',
       state: 'state-1',
     },
