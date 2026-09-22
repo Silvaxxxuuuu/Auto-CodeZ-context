@@ -407,6 +407,47 @@ test('Hosted provider cancellation validates state and clears protected pending 
   assert.equal(await credentials.get('account.auth.pending-hosted'), null);
 });
 
+test('Cancelling hosted auth clears persisted PKCE material and rejects a later callback', async () => {
+  const now = 100;
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => now,
+    },
+  );
+  const adapter = new FakeAuthAdapter((deviceId) => grant(deviceId, 'descope'));
+  const sessions = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+  const runtime = new AccountAuthFlowRuntime(adapter, sessions, devices, () => now, credentials);
+
+  await runtime.beginHosted();
+  assert.ok(adapter.lastHostedBegin);
+  assert.ok(await credentials.get('account.auth.pending-hosted'));
+
+  const cancelled = await runtime.cancel();
+  assert.equal(cancelled.status, 'idle');
+  assert.equal(await credentials.get('account.auth.pending-hosted'), null);
+
+  await assert.rejects(
+    runtime.completeHosted({
+      code: 'late-code',
+      state: adapter.lastHostedBegin.state,
+    }),
+    /inválido ou expirado/,
+  );
+});
+
 test('Hosted state mismatch is rejected before token exchange', async () => {
   const { adapter, flows } = setup();
   await flows.beginHosted();
