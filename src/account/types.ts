@@ -16,7 +16,8 @@ export type IdentityProvider =
   | 'github'
   | 'microsoft'
   | 'passkey'
-  | 'magic_link';
+  | 'magic_link'
+  | 'descope';
 
 export interface LinkedIdentity {
   id: IdentityId;
