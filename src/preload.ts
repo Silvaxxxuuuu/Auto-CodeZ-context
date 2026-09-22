@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   },
   accountAuthFlowState: () => invoke('account-auth-flow:get-state'),
   resetAccountAuthFlow: () => invoke('account-auth-flow:reset'),
+  cancelAccountAuthFlow: () => invoke('account-auth-flow:cancel'),
   accountAuthConfiguration: () => invoke('account-auth:get-configuration'),
   beginAccountMagicLink: (email: string) => invoke('account-auth:begin-magic-link', requireNonEmptyString(email, 'E-mail')),
   beginAccountOAuth: (provider: string) => invoke('account-auth:begin-oauth', requireIdentifier(provider, 'Provider OAuth')),
