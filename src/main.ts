@@ -711,6 +711,7 @@ ipcMain.handle('account:logout', async () => accountSessionRuntime.logout());
 ipcMain.handle('account:rename-device', async (_event, name: string) => accountSessionRuntime.renameDevice(requireNonEmptyString(name, 'Nome do dispositivo')));
 ipcMain.handle('account-auth-flow:get-state', async () => accountAuthFlowRuntime.snapshot());
 ipcMain.handle('account-auth-flow:reset', async () => accountAuthFlowRuntime.reset());
+ipcMain.handle('account-auth-flow:cancel', async () => accountAuthFlowRuntime.cancel());
 ipcMain.handle('account-auth:get-configuration', async () => resolveAccountAuthConfiguration(
   accountAuth,
   process.env.AUTO_CODEZ_VISUAL_TEST === '1',
