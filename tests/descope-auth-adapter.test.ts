@@ -56,6 +56,7 @@ test('Descope hosted auth uses public-client PKCE and custom desktop callback', 
   assert.equal(authorize.searchParams.get('state'), 'outer-state');
   assert.equal(authorize.searchParams.get('nonce'), 'outer-nonce');
   assert.equal(authorize.searchParams.get('redirect_uri'), 'autocodez://auth/hosted');
+  assert.equal(authorize.searchParams.get('scope'), 'openid profile email offline_access');
 
   const completeHosted = adapter.completeHosted;
   assert.ok(completeHosted);
