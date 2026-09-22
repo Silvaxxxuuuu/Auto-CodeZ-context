@@ -41,6 +41,33 @@ type UserInfo = {
   picture?: string;
 };
 
+type IdTokenHeader = {
+  alg: string;
+  kid: string;
+};
+
+type IdTokenClaims = {
+  iss: string;
+  sub: string;
+  aud: string | string[];
+  exp: number;
+  iat?: number;
+  nonce?: string;
+  azp?: string;
+};
+
+type CachedJwks = {
+  expiresAt: number;
+  keys: Array<{
+    kty: 'RSA';
+    kid: string;
+    n: string;
+    e: string;
+    alg?: string;
+    use?: string;
+  }>;
+};
+
 function requireProjectId(value: string): string {
   const projectId = value.trim();
   if (!/^[A-Za-z0-9_-]{6,256}$/.test(projectId)) {
@@ -104,6 +131,23 @@ function sessionId(refreshToken: string): string {
   return crypto.createHash('sha256').update(refreshToken, 'utf8').digest('hex').slice(0, 40);
 }
 
+function parseJwtObject<T>(segment: string, label: string): T {
+  try {
+    const decoded = Buffer.from(segment, 'base64url').toString('utf8');
+    return readJsonObject(JSON.parse(decoded), label) as T;
+  } catch {
+    throw new AuthAdapterError('invalid_grant', `${label} inválido.`);
+  }
+}
+
+function parseNumericClaim(value: unknown, label: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new AuthAdapterError('invalid_grant', `${label} inválido no ID token.`);
+  }
+  return parsed;
+}
+
 export class DescopeAuthAdapter implements AuthAdapter {
   private readonly projectId: string;
   private readonly origin: string;
@@ -111,6 +155,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
   private readonly timeoutMs: number;
   private readonly now: () => number;
   private readonly redirectUri = 'autocodez://auth/hosted';
+  private jwksCache?: CachedJwks;
 
   constructor(projectId: string, options: DescopeAuthAdapterOptions = {}) {
     this.projectId = requireProjectId(projectId);
@@ -132,7 +177,13 @@ export class DescopeAuthAdapter implements AuthAdapter {
   }
 
   async completeHosted(input: CompleteHostedInput): Promise<AuthGrant> {
-    return await this.completeHostedFlow(input.flowId, input.deviceId, input.code, input.codeVerifier);
+    return await this.completeHostedFlow(
+      input.flowId,
+      input.deviceId,
+      input.code,
+      input.codeVerifier,
+      input.nonce,
+    );
   }
 
   async beginOAuth(input: BeginOAuthInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
@@ -140,7 +191,13 @@ export class DescopeAuthAdapter implements AuthAdapter {
   }
 
   async completeOAuth(input: CompleteOAuthInput): Promise<AuthGrant> {
-    return await this.completeHostedFlow(input.flowId, input.deviceId, input.code, input.codeVerifier);
+    return await this.completeHostedFlow(
+      input.flowId,
+      input.deviceId,
+      input.code,
+      input.codeVerifier,
+      input.nonce,
+    );
   }
 
   async beginMagicLink(_input: BeginMagicLinkInput): Promise<{ flowId: string; expiresAt: number }> {
@@ -159,7 +216,13 @@ export class DescopeAuthAdapter implements AuthAdapter {
   }
 
   async completePasskey(input: CompletePasskeyInput): Promise<AuthGrant> {
-    return await this.completeHostedFlow(input.flowId, input.deviceId, input.code, input.codeVerifier);
+    return await this.completeHostedFlow(
+      input.flowId,
+      input.deviceId,
+      input.code,
+      input.codeVerifier,
+      input.nonce,
+    );
   }
 
   async refresh(input: RefreshSessionInput): Promise<AuthGrant> {
@@ -214,6 +277,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
     deviceId: DeviceId,
     code: string,
     codeVerifier: string,
+    nonce: string,
   ): Promise<AuthGrant> {
     if (!flowId.trim()) throw new AuthAdapterError('invalid_grant', 'Fluxo de autenticação não encontrado.');
     const redirectUri = this.redirectUri;
@@ -229,16 +293,27 @@ export class DescopeAuthAdapter implements AuthAdapter {
     if (!tokens.refresh_token) {
       throw new AuthAdapterError('server', 'O serviço de identidade não retornou refresh token.');
     }
-    return await this.grantFromTokens(tokens, deviceId);
+    if (!tokens.id_token) {
+      throw new AuthAdapterError('invalid_grant', 'O serviço de identidade não retornou ID token.');
+    }
+    const verifiedSubject = await this.verifyIdToken(tokens.id_token, nonce);
+    return await this.grantFromTokens(tokens, deviceId, verifiedSubject);
   }
 
-  private async grantFromTokens(tokens: TokenResponse, deviceId: DeviceId): Promise<AuthGrant> {
+  private async grantFromTokens(
+    tokens: TokenResponse,
+    deviceId: DeviceId,
+    verifiedSubject?: string,
+  ): Promise<AuthGrant> {
     const refreshToken = tokens.refresh_token;
     if (!refreshToken) throw new AuthAdapterError('server', 'Refresh token ausente.');
 
     const user = parseUserInfo(await this.jsonRequest('/oauth2/v1/userinfo', {
       authorization: `Bearer ${tokens.access_token}`,
     }));
+    if (verifiedSubject && user.sub !== verifiedSubject) {
+      throw new AuthAdapterError('invalid_grant', 'Subject do UserInfo não corresponde ao ID token.');
+    }
     const now = this.now();
     const expiresAt = now + Math.max(60, tokens.expires_in ?? 3_600) * 1000;
 
@@ -281,6 +356,162 @@ export class DescopeAuthAdapter implements AuthAdapter {
       accessToken: tokens.access_token,
       refreshToken,
     };
+  }
+
+  private async verifyIdToken(idToken: string, expectedNonce: string): Promise<string> {
+    const parts = idToken.split('.');
+    if (parts.length !== 3 || parts.some((part) => !part)) {
+      throw new AuthAdapterError('invalid_grant', 'ID token malformado.');
+    }
+
+    const headerSource = parseJwtObject<Record<string, unknown>>(parts[0], 'Header do ID token');
+    const claimsSource = parseJwtObject<Record<string, unknown>>(parts[1], 'Payload do ID token');
+    const header: IdTokenHeader = {
+      alg: requiredString(headerSource.alg, 'Algoritmo do ID token', 32),
+      kid: requiredString(headerSource.kid, 'Key ID do ID token', 512),
+    };
+    if (header.alg !== 'RS256') {
+      throw new AuthAdapterError('invalid_grant', 'Algoritmo do ID token não permitido.');
+    }
+
+    const keys = await this.jwks();
+    const jwk = keys.find((candidate) =>
+      candidate.kid === header.kid
+      && (!candidate.alg || candidate.alg === 'RS256')
+      && (!candidate.use || candidate.use === 'sig'));
+    if (!jwk) {
+      this.jwksCache = undefined;
+      const refreshed = await this.jwks();
+      const rotated = refreshed.find((candidate) =>
+        candidate.kid === header.kid
+        && (!candidate.alg || candidate.alg === 'RS256')
+        && (!candidate.use || candidate.use === 'sig'));
+      if (!rotated) {
+        throw new AuthAdapterError('invalid_grant', 'Chave de assinatura do ID token não encontrada.');
+      }
+      return this.verifyIdTokenWithKey(parts, claimsSource, rotated, expectedNonce);
+    }
+
+    return this.verifyIdTokenWithKey(parts, claimsSource, jwk, expectedNonce);
+  }
+
+  private verifyIdTokenWithKey(
+    parts: string[],
+    claimsSource: Record<string, unknown>,
+    jwk: CachedJwks['keys'][number],
+    expectedNonce: string,
+  ): string {
+    let publicKey: crypto.KeyObject;
+    try {
+      publicKey = crypto.createPublicKey({
+        key: {
+          kty: 'RSA',
+          n: jwk.n,
+          e: jwk.e,
+          ...(jwk.alg ? { alg: jwk.alg } : {}),
+          ...(jwk.use ? { use: jwk.use } : {}),
+          kid: jwk.kid,
+        },
+        format: 'jwk',
+      });
+    } catch {
+      throw new AuthAdapterError('invalid_grant', 'Chave pública do ID token inválida.');
+    }
+
+    const signatureValid = crypto.verify(
+      'RSA-SHA256',
+      Buffer.from(`${parts[0]}.${parts[1]}`, 'utf8'),
+      publicKey,
+      Buffer.from(parts[2], 'base64url'),
+    );
+    if (!signatureValid) {
+      throw new AuthAdapterError('invalid_grant', 'Assinatura do ID token inválida.');
+    }
+
+    const audienceValue = claimsSource.aud;
+    const audience = Array.isArray(audienceValue)
+      ? audienceValue.filter((entry): entry is string => typeof entry === 'string')
+      : typeof audienceValue === 'string'
+        ? audienceValue
+        : [];
+    const claims: IdTokenClaims = {
+      iss: requiredString(claimsSource.iss, 'Issuer do ID token', 2_048),
+      sub: requiredString(claimsSource.sub, 'Subject do ID token', 512),
+      aud: audience,
+      exp: parseNumericClaim(claimsSource.exp, 'Expiração'),
+      ...(claimsSource.iat !== undefined ? { iat: parseNumericClaim(claimsSource.iat, 'Emissão') } : {}),
+      ...(typeof claimsSource.nonce === 'string' ? { nonce: claimsSource.nonce } : {}),
+      ...(typeof claimsSource.azp === 'string' ? { azp: claimsSource.azp } : {}),
+    };
+
+    const expectedIssuer = `${this.origin}/${this.projectId}`;
+    if (claims.iss !== expectedIssuer) {
+      throw new AuthAdapterError('invalid_grant', 'Issuer do ID token inválido.');
+    }
+    if (!audience.includes(this.projectId)) {
+      throw new AuthAdapterError('invalid_grant', 'Audience do ID token inválida.');
+    }
+    if ((audience.length > 1 || claims.azp) && claims.azp !== this.projectId) {
+      throw new AuthAdapterError('invalid_grant', 'Authorized party do ID token inválido.');
+    }
+    if (claims.nonce !== expectedNonce) {
+      throw new AuthAdapterError('invalid_grant', 'Nonce do ID token inválido.');
+    }
+
+    const nowSeconds = Math.floor(this.now() / 1_000);
+    if (claims.exp <= nowSeconds - 60) {
+      throw new AuthAdapterError('expired', 'ID token expirado.');
+    }
+    if (claims.iat !== undefined && claims.iat > nowSeconds + 300) {
+      throw new AuthAdapterError('invalid_grant', 'ID token emitido no futuro.');
+    }
+
+    return claims.sub;
+  }
+
+  private async jwks(): Promise<CachedJwks['keys']> {
+    const now = this.now();
+    if (this.jwksCache && this.jwksCache.expiresAt > now) {
+      return this.jwksCache.keys;
+    }
+
+    const source = readJsonObject(
+      await this.jsonRequest(
+        `/${encodeURIComponent(this.projectId)}/.well-known/jwks.json`,
+        {},
+      ),
+      'JWKS',
+    );
+    if (!Array.isArray(source.keys)) {
+      throw new AuthAdapterError('server', 'JWKS inválido retornado pelo serviço de identidade.');
+    }
+
+    const keys: CachedJwks['keys'] = [];
+    for (const entry of source.keys) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      const candidate = entry as Record<string, unknown>;
+      if (candidate.kty !== 'RSA') continue;
+      if (typeof candidate.kid !== 'string' || !candidate.kid) continue;
+      if (typeof candidate.n !== 'string' || !candidate.n) continue;
+      if (typeof candidate.e !== 'string' || !candidate.e) continue;
+      keys.push({
+        kty: 'RSA',
+        kid: candidate.kid,
+        n: candidate.n,
+        e: candidate.e,
+        ...(typeof candidate.alg === 'string' ? { alg: candidate.alg } : {}),
+        ...(typeof candidate.use === 'string' ? { use: candidate.use } : {}),
+      });
+    }
+    if (keys.length === 0) {
+      throw new AuthAdapterError('server', 'Nenhuma chave RSA válida encontrada no JWKS.');
+    }
+
+    this.jwksCache = {
+      expiresAt: now + 5 * 60 * 1000,
+      keys,
+    };
+    return keys;
   }
 
   private endpoint(pathname: string): URL {
