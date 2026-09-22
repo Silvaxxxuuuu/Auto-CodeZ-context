@@ -17,6 +17,7 @@ function idToken(nonce: string, subject = 'user-123'): string {
     iss: 'https://api.descope.com/P2abcDEF_123',
     sub: subject,
     aud: 'P2abcDEF_123',
+    azp: 'P2abcDEF_123',
     exp: 1_700_003_600,
     iat: 1_700_000_000,
     nonce,
@@ -180,6 +181,67 @@ test('Descope hosted auth rejects an ID token with the wrong nonce before UserIn
     /Nonce do ID token inválido/,
   );
   assert.equal(userInfoRequested, false);
+});
+
+test('Descope hosted auth rejects an ID token for a different authorized party', async () => {
+  const header = Buffer.from(JSON.stringify({
+    alg: 'RS256',
+    kid: 'test-key',
+    typ: 'JWT',
+  }), 'utf8').toString('base64url');
+  const payload = Buffer.from(JSON.stringify({
+    iss: 'https://api.descope.com/P2abcDEF_123',
+    sub: 'user-123',
+    aud: 'P2abcDEF_123',
+    azp: 'different-client',
+    exp: 1_700_003_600,
+    iat: 1_700_000_000,
+    nonce: 'outer-nonce',
+  }), 'utf8').toString('base64url');
+  const signed = `${header}.${payload}`;
+  const signature = crypto.sign('RSA-SHA256', Buffer.from(signed, 'utf8'), signingKey.privateKey).toString('base64url');
+
+  const adapter = new DescopeAuthAdapter('P2abcDEF_123', {
+    now: () => 1_700_000_000_000,
+    fetch: async (input) => {
+      if (String(input).endsWith('/oauth2/v1/token')) {
+        return jsonResponse({
+          access_token: 'access-token',
+          refresh_token: 'refresh-token',
+          expires_in: 3600,
+          id_token: `${signed}.${signature}`,
+        });
+      }
+      if (String(input).endsWith('/P2abcDEF_123/.well-known/jwks.json')) {
+        return jsonResponse(jwks());
+      }
+      throw new Error('unexpected request');
+    },
+  });
+
+  const beginHosted = adapter.beginHosted;
+  const completeHosted = adapter.completeHosted;
+  assert.ok(beginHosted);
+  assert.ok(completeHosted);
+  const begin = await beginHosted.call(adapter, {
+    deviceId: 'device-1',
+    state: 'outer-state',
+    nonce: 'outer-nonce',
+    codeChallenge: 'challenge',
+    codeChallengeMethod: 'S256',
+  });
+
+  await assert.rejects(
+    completeHosted.call(adapter, {
+      flowId: begin.flowId,
+      deviceId: 'device-1',
+      code: 'authorization-code',
+      state: 'outer-state',
+      nonce: 'outer-nonce',
+      codeVerifier: 'verifier',
+    }),
+    /Authorized party do ID token inválido/,
+  );
 });
 
 test('Descope refresh keeps a non-rotated refresh token', async () => {
