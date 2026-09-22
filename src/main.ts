@@ -76,6 +76,7 @@ import type { OAuthProvider } from './account/auth-adapter';
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
 declare const __AUTO_CODEZ_ACCOUNT_API_DEFAULT_URL__: string;
+declare const __AUTO_CODEZ_DESCOPE_PROJECT_ID__: string;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const storage = new LocalStorage();
@@ -90,10 +91,14 @@ const accountDeviceIdentity = new DeviceIdentityStore(
     defaultName: 'Este dispositivo',
   },
 );
-const accountAuth = createAccountAuthAdapter(resolveAccountApiBaseUrl(
-  process.env.AUTO_CODEZ_ACCOUNT_API_BASE_URL,
-  __AUTO_CODEZ_ACCOUNT_API_DEFAULT_URL__,
-));
+const accountAuth = createAccountAuthAdapter({
+  descopeProjectId: process.env.AUTO_CODEZ_DESCOPE_PROJECT_ID?.trim() || __AUTO_CODEZ_DESCOPE_PROJECT_ID__,
+  descopeBaseUrl: process.env.AUTO_CODEZ_DESCOPE_BASE_URL,
+  legacyBaseUrl: resolveAccountApiBaseUrl(
+    process.env.AUTO_CODEZ_ACCOUNT_API_BASE_URL,
+    __AUTO_CODEZ_ACCOUNT_API_DEFAULT_URL__,
+  ),
+});
 const accountAuthAdapter = accountAuth.adapter;
 const accountSessionRuntime = new AccountSessionRuntime(
   storage,
@@ -722,6 +727,11 @@ ipcMain.handle('account-auth:begin-passkey', async () => {
   return result.snapshot;
 });
 ipcMain.handle('account-auth:open-passkey-enrollment', async () => {
+  if (accountAuth.configuration.hosted) {
+    const result = await accountAuthFlowRuntime.beginPasskey();
+    if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
+    return { opened: true };
+  }
   if (!accountAuth.publicOrigin) throw new Error('Serviço de autenticação não configurado.');
   const enrollmentUrl = new URL('/desktop/passkey/enroll', accountAuth.publicOrigin).toString();
   await shell.openExternal(enrollmentUrl);
