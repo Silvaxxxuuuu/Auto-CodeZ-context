@@ -442,12 +442,11 @@ export class AccountAuthFlowRuntime {
   }
 
   async completeHosted(input: {
-    flowId: string;
     code: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
     const pending = this.pendingHosted;
-    if (!pending || pending.flowId !== input.flowId) throw new Error('Fluxo hospedado inválido.');
+    if (!pending) throw new Error('Fluxo hospedado inválido.');
     this.assertNotExpired(pending.expiresAt);
 
     if (input.state !== pending.state) {
