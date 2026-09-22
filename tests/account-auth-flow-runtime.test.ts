@@ -312,6 +312,101 @@ test('Hosted flow keeps PKCE state and nonce private and completes once', async 
   assert.equal(adapter.lastHostedComplete?.codeVerifier.length > 40, true);
 });
 
+test('Hosted flow survives an app restart with PKCE material in protected storage', async () => {
+  const now = 100;
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => now,
+    },
+  );
+  const adapter = new FakeAuthAdapter((deviceId) => grant(deviceId, 'descope'));
+  const firstSessions = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+  const firstRuntime = new AccountAuthFlowRuntime(
+    adapter,
+    firstSessions,
+    devices,
+    () => now,
+    credentials,
+  );
+
+  await firstRuntime.beginHosted();
+  assert.ok(adapter.lastHostedBegin);
+
+  const secondSessions = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+  await secondSessions.hydrate();
+  const secondRuntime = new AccountAuthFlowRuntime(
+    adapter,
+    secondSessions,
+    devices,
+    () => now,
+    credentials,
+  );
+
+  const completed = await secondRuntime.completeHosted({
+    code: 'hosted-code-after-restart',
+    state: adapter.lastHostedBegin.state,
+  });
+
+  assert.equal(completed.status, 'authenticated');
+  assert.equal(secondSessions.snapshot().state, 'authenticated');
+  assert.equal(adapter.lastHostedComplete?.code, 'hosted-code-after-restart');
+  assert.equal(adapter.lastHostedComplete?.codeVerifier.length > 40, true);
+  assert.equal(await credentials.get('account.auth.pending-hosted'), null);
+});
+
+test('Hosted provider cancellation validates state and clears protected pending state', async () => {
+  const now = 100;
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => now,
+    },
+  );
+  const adapter = new FakeAuthAdapter((deviceId) => grant(deviceId, 'descope'));
+  const sessions = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+  const runtime = new AccountAuthFlowRuntime(adapter, sessions, devices, () => now, credentials);
+
+  await runtime.beginHosted();
+  assert.ok(adapter.lastHostedBegin);
+  const cancelled = await runtime.failHostedCallback({
+    error: 'access_denied',
+    state: adapter.lastHostedBegin.state,
+  });
+  assert.equal(cancelled.status, 'error');
+  assert.equal(cancelled.lastError, 'Autenticação cancelada.');
+  assert.equal(await credentials.get('account.auth.pending-hosted'), null);
+});
+
 test('Hosted state mismatch is rejected before token exchange', async () => {
   const { adapter, flows } = setup();
   await flows.beginHosted();
