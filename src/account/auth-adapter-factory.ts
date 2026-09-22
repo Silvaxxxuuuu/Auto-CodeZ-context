@@ -29,9 +29,10 @@ export interface AccountAuthFactoryOptions {
 export function createAccountAuthAdapter(
   input: string | undefined | AccountAuthFactoryOptions,
 ): AccountAuthAdapterFactoryResult {
-  const options: AccountAuthFactoryOptions = typeof input === 'string' || input === undefined
-    ? { legacyBaseUrl: input }
-    : input;
+  let options: AccountAuthFactoryOptions;
+  if (typeof input === 'string') options = { legacyBaseUrl: input };
+  else if (input === undefined) options = {};
+  else options = input;
   const descopeProjectId = options.descopeProjectId?.trim();
   if (descopeProjectId) {
     try {
