@@ -12,7 +12,7 @@ export type AuthFlowStatus =
   | 'authenticated'
   | 'error';
 
-export type AuthFlowMethod = 'magic_link' | 'oauth' | 'passkey';
+export type AuthFlowMethod = 'magic_link' | 'oauth' | 'passkey' | 'hosted';
 
 export interface AuthFlowSnapshot {
   status: AuthFlowStatus;
@@ -41,6 +41,14 @@ interface PendingMagicLinkFlow {
 }
 
 interface PendingPasskeyFlow {
+  flowId: string;
+  state: string;
+  nonce: string;
+  codeVerifier: string;
+  expiresAt: number;
+}
+
+interface PendingHostedFlow {
   flowId: string;
   state: string;
   nonce: string;
@@ -79,6 +87,7 @@ export class AccountAuthFlowRuntime {
   private pendingOAuth?: PendingOAuthFlow;
   private pendingMagicLink?: PendingMagicLinkFlow;
   private pendingPasskey?: PendingPasskeyFlow;
+  private pendingHosted?: PendingHostedFlow;
   private readonly listeners = new Set<(snapshot: AuthFlowSnapshot) => void>();
 
   constructor(
@@ -101,6 +110,7 @@ export class AccountAuthFlowRuntime {
     this.pendingOAuth = undefined;
     this.pendingMagicLink = undefined;
     this.pendingPasskey = undefined;
+    this.pendingHosted = undefined;
     return this.setState({ status: 'idle' });
   }
 
@@ -372,6 +382,109 @@ export class AccountAuthFlowRuntime {
     }
   }
 
+  async beginHosted(): Promise<{
+    snapshot: AuthFlowSnapshot;
+    authorizationUrl: string;
+  }> {
+    this.assertCanBegin();
+    const begin = this.auth.beginHosted;
+    if (!begin) {
+      return {
+        snapshot: this.fail(new AuthAdapterError('not_configured', 'Login hospedado não está configurado.')),
+        authorizationUrl: '',
+      };
+    }
+
+    const device = await this.requirePersistentDevice();
+    const state = randomBase64Url();
+    const nonce = randomBase64Url();
+    const codeVerifier = randomBase64Url(48);
+    const codeChallenge = pkceChallenge(codeVerifier);
+
+    try {
+      const result = await begin.call(this.auth, {
+        deviceId: device.id,
+        state,
+        nonce,
+        codeChallenge,
+        codeChallengeMethod: 'S256',
+      });
+
+      this.pendingHosted = {
+        flowId: result.flowId,
+        state,
+        nonce,
+        codeVerifier,
+        expiresAt: result.expiresAt,
+      };
+      this.pendingOAuth = undefined;
+      this.pendingMagicLink = undefined;
+      this.pendingPasskey = undefined;
+
+      return {
+        snapshot: this.setState({
+          status: 'waiting_browser',
+          method: 'hosted',
+          flowId: result.flowId,
+          expiresAt: result.expiresAt,
+        }),
+        authorizationUrl: result.authorizationUrl,
+      };
+    } catch (error) {
+      return {
+        snapshot: this.fail(error),
+        authorizationUrl: '',
+      };
+    }
+  }
+
+  async completeHosted(input: {
+    flowId: string;
+    code: string;
+    state: string;
+  }): Promise<AuthFlowSnapshot> {
+    const pending = this.pendingHosted;
+    if (!pending || pending.flowId !== input.flowId) throw new Error('Fluxo hospedado inválido.');
+    this.assertNotExpired(pending.expiresAt);
+
+    if (input.state !== pending.state) {
+      this.clearPending();
+      return this.setState({
+        status: 'error',
+        method: 'hosted',
+        lastError: 'Estado de autenticação inválido.',
+      });
+    }
+
+    const complete = this.auth.completeHosted;
+    if (!complete) throw new AuthAdapterError('not_configured', 'Login hospedado não está configurado.');
+
+    const code = input.code.trim();
+    if (!code || code.length > 16_384) throw new Error('Código de autenticação inválido.');
+    const device = await this.requirePersistentDevice();
+
+    this.setState({
+      status: 'completing',
+      method: 'hosted',
+      flowId: pending.flowId,
+      expiresAt: pending.expiresAt,
+    });
+
+    try {
+      const grant = await complete.call(this.auth, {
+        flowId: pending.flowId,
+        deviceId: device.id,
+        code,
+        state: pending.state,
+        nonce: pending.nonce,
+        codeVerifier: pending.codeVerifier,
+      });
+      return await this.finishGrant(grant);
+    } catch (error) {
+      return this.fail(error);
+    }
+  }
+
   private async finishGrant(grant: AuthGrant): Promise<AuthFlowSnapshot> {
     await this.sessions.establish(grant);
     this.clearPending();
@@ -413,6 +526,7 @@ export class AccountAuthFlowRuntime {
     this.pendingOAuth = undefined;
     this.pendingMagicLink = undefined;
     this.pendingPasskey = undefined;
+    this.pendingHosted = undefined;
   }
 
   private setState(snapshot: AuthFlowSnapshot): AuthFlowSnapshot {
