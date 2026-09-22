@@ -469,8 +469,6 @@ export class AccountAuthFlowRuntime {
     }
 
     if (input.state !== pending.state) {
-      this.clearPending();
-      await this.clearPersistedHosted();
       return this.setState({
         status: 'error',
         method: 'hosted',
@@ -515,9 +513,7 @@ export class AccountAuthFlowRuntime {
     state?: string;
   }): Promise<AuthFlowSnapshot> {
     const pending = this.pendingHosted ?? await this.restorePendingHosted();
-    if (pending && input.state && input.state !== pending.state) {
-      this.clearPending();
-      await this.clearPersistedHosted();
+    if (pending && input.state !== pending.state) {
       return this.setState({
         status: 'error',
         method: 'hosted',
