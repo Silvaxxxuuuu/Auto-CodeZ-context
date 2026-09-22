@@ -104,6 +104,8 @@ const accountAuthFlowRuntime = new AccountAuthFlowRuntime(
   accountAuthAdapter,
   accountSessionRuntime,
   accountDeviceIdentity,
+  Date.now,
+  accountCredentials,
 );
 const deviceRegistryRuntime = new DeviceRegistryRuntime(
   accountSessionRuntime,
@@ -132,6 +134,8 @@ async function completeAccountAuthCallback(rawUrl: string): Promise<void> {
     await accountAuthFlowRuntime.completePasskey(callback);
   } else if (callback.type === 'hosted') {
     await accountAuthFlowRuntime.completeHosted(callback);
+  } else if (callback.type === 'hosted_error') {
+    await accountAuthFlowRuntime.failHostedCallback(callback);
   } else {
     await accountAuthFlowRuntime.completeMagicLink(callback);
   }
