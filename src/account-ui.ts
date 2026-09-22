@@ -20,6 +20,7 @@ type AuthFlowState = {
 type AuthConfiguration = {
   configured: boolean;
   methods: Array<'magic_link' | 'github' | 'google' | 'microsoft' | 'passkey'>;
+  hosted?: boolean;
   configurationError?: string;
 };
 
@@ -103,6 +104,38 @@ function providerButton(provider: 'github' | 'google' | 'microsoft', label: stri
 
 function renderLogin(): void {
   const target = ensureRoot();
+
+  if (configuration.hosted) {
+    const error = flowState.status === 'error'
+      ? flowState.lastError
+      : accountState?.state === 'revoked'
+        ? 'Sua sessão foi revogada. Entre novamente.'
+        : accountState?.state === 'error'
+          ? accountState.lastError
+          : configuration.configurationError;
+
+    target.innerHTML = `
+      <div class="account-backdrop-glow"></div>
+      <main class="account-card" data-account-screen="login">
+        <div class="account-brand">
+          <div class="account-brand-mark">&gt;_</div>
+          <span>Auto CodeZ</span>
+        </div>
+        <header class="account-header">
+          <span class="account-eyebrow">Sua conta Auto CodeZ</span>
+          <h1>Bem-vindo ao Auto CodeZ</h1>
+          <p>Entre ou crie sua conta em uma única tela segura.</p>
+        </header>
+        <button type="button" class="account-primary full" data-account-hosted ${busy ? 'disabled' : ''}>
+          Entrar ou criar conta
+        </button>
+        <p class="account-security-note">GitHub, Google, Microsoft, Passkey e Magic Link disponíveis no mesmo fluxo.</p>
+        ${error ? `<div class="account-inline-error" role="alert">${escapeHtml(error)}</div>` : ''}
+        ${configuration.configurationError ? '<button type="button" class="account-secondary" data-account-retry-configuration '+(busy ? 'disabled' : '')+'>Tentar novamente</button>' : ''}
+      </main>
+    `;
+    return;
+  }
   const magic = configuration.methods.includes('magic_link');
   const passkey = configuration.methods.includes('passkey');
   const error = flowState.status === 'error'
@@ -337,6 +370,10 @@ document.addEventListener('click', (event) => {
   const provider = target.closest<HTMLElement>('[data-account-provider]')?.dataset.accountProvider;
   if (provider === 'github' || provider === 'google' || provider === 'microsoft') {
     void beginOAuth(provider);
+    return;
+  }
+  if (target.closest('[data-account-hosted]')) {
+    void beginPasskey();
     return;
   }
   if (target.closest('[data-account-passkey]')) {
