@@ -286,7 +286,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
   }
 
   private endpoint(pathname: string): URL {
-    return new URL(`${this.origin}/${encodeURIComponent(this.projectId)}${pathname}`);
+    return new URL(pathname, this.origin + '/');
   }
 
   private async formRequest(pathname: string, body: URLSearchParams, allowEmpty = false): Promise<unknown> {
