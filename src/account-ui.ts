@@ -9,7 +9,7 @@ type AccountState = {
 
 type AuthFlowState = {
   status: 'idle' | 'waiting_magic_link' | 'waiting_browser' | 'completing' | 'authenticated' | 'error';
-  method?: 'magic_link' | 'oauth' | 'passkey';
+  method?: 'magic_link' | 'oauth' | 'passkey' | 'hosted';
   provider?: 'github' | 'google' | 'microsoft';
   flowId?: string;
   emailHint?: string;
@@ -31,6 +31,7 @@ type AccountBridge = {
   beginAccountMagicLink: (email: string) => Promise<AuthFlowState>;
   beginAccountOAuth: (provider: 'github' | 'google' | 'microsoft') => Promise<AuthFlowState>;
   beginAccountPasskey: () => Promise<AuthFlowState>;
+  beginAccountHosted: () => Promise<AuthFlowState>;
   renameAccountDevice: (name: string) => Promise<AccountState>;
   renameAccountDeviceRegistryCurrent: (name: string) => Promise<unknown>;
   onAccountState: (listener: (state: AccountState) => void) => () => void;
@@ -331,6 +332,20 @@ async function beginPasskey(): Promise<void> {
   }
 }
 
+async function beginHosted(): Promise<void> {
+  if (!bridge) return;
+  busy = true;
+  render();
+  try {
+    flowState = await bridge.beginAccountHosted();
+  } catch (error) {
+    flowState = { status: 'error', lastError: error instanceof Error ? error.message : 'Não foi possível abrir o login.' };
+  } finally {
+    busy = false;
+    render();
+  }
+}
+
 async function finishDevice(name: string): Promise<void> {
   if (!bridge || !accountState) return;
   busy = true;
@@ -373,7 +388,7 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (target.closest('[data-account-hosted]')) {
-    void beginPasskey();
+    void beginHosted();
     return;
   }
   if (target.closest('[data-account-passkey]')) {
