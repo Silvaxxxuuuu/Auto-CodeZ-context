@@ -15,6 +15,8 @@ import type {
   CompleteMagicLinkInput,
   CompleteOAuthInput,
   CompletePasskeyInput,
+  BeginHostedInput,
+  CompleteHostedInput,
   OAuthProvider,
   RefreshSessionInput,
   RevokeSessionInput,
@@ -65,6 +67,8 @@ class FakeAuthAdapter implements AuthAdapter {
   lastMagicComplete?: CompleteMagicLinkInput;
   lastPasskeyBegin?: BeginPasskeyInput;
   lastPasskeyComplete?: CompletePasskeyInput;
+  lastHostedBegin?: BeginHostedInput;
+  lastHostedComplete?: CompleteHostedInput;
 
   constructor(private readonly grantFactory: (deviceId: string) => AuthGrant) {}
 
@@ -117,6 +121,20 @@ class FakeAuthAdapter implements AuthAdapter {
     this.lastPasskeyComplete = input;
     return this.grantFactory(input.deviceId);
   }
+
+  async beginHosted(input: BeginHostedInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
+    this.lastHostedBegin = input;
+    return {
+      authorizationUrl: 'https://auth.example.test/hosted',
+      flowId: 'hosted-flow',
+      expiresAt: 10_000,
+    };
+  }
+
+  async completeHosted(input: CompleteHostedInput): Promise<AuthGrant> {
+    this.lastHostedComplete = input;
+    return this.grantFactory(input.deviceId);
+  }
 }
 
 function profile(): AccountProfile {
@@ -131,7 +149,7 @@ function profile(): AccountProfile {
   };
 }
 
-function grant(deviceId: string, provider: OAuthProvider | 'magic_link' | 'passkey' = 'github'): AuthGrant {
+function grant(deviceId: string, provider: OAuthProvider | 'magic_link' | 'passkey' | 'descope' = 'github'): AuthGrant {
   const session: AccountSession = {
     id: 'session-1',
     accountId: 'acct-1',
@@ -266,6 +284,48 @@ test('Passkey flow keeps PKCE material private and completes through browser cal
   assert.equal(adapter.lastPasskeyComplete?.nonce, adapter.lastPasskeyBegin.nonce);
   assert.equal(adapter.lastPasskeyComplete?.codeVerifier.length > 40, true);
   assert.equal(sessions.snapshot().state, 'authenticated');
+});
+
+test('Hosted flow keeps PKCE state and nonce private and completes once', async () => {
+  const { adapter, flows, sessions } = setup();
+
+  const started = await flows.beginHosted();
+  assert.equal(started.snapshot.status, 'waiting_browser');
+  assert.equal(started.snapshot.method, 'hosted');
+  assert.equal(started.authorizationUrl, 'https://auth.example.test/hosted');
+  assert.ok(adapter.lastHostedBegin);
+
+  const publicJson = JSON.stringify(started.snapshot);
+  assert.ok(!publicJson.includes(adapter.lastHostedBegin.state));
+  assert.ok(!publicJson.includes(adapter.lastHostedBegin.nonce));
+  assert.ok(!publicJson.includes(adapter.lastHostedBegin.codeChallenge));
+
+  const completed = await flows.completeHosted({
+    flowId: 'hosted-flow',
+    code: 'hosted-code',
+    state: adapter.lastHostedBegin.state,
+  });
+
+  assert.equal(completed.status, 'authenticated');
+  assert.equal(sessions.snapshot().state, 'authenticated');
+  assert.equal(adapter.lastHostedComplete?.code, 'hosted-code');
+  assert.equal(adapter.lastHostedComplete?.nonce, adapter.lastHostedBegin.nonce);
+  assert.equal(adapter.lastHostedComplete?.codeVerifier.length > 40, true);
+});
+
+test('Hosted state mismatch is rejected before token exchange', async () => {
+  const { adapter, flows } = setup();
+  await flows.beginHosted();
+
+  const result = await flows.completeHosted({
+    flowId: 'hosted-flow',
+    code: 'hosted-code',
+    state: 'wrong-state',
+  });
+
+  assert.equal(result.status, 'error');
+  assert.match(result.lastError ?? '', /Estado de autenticação inválido/);
+  assert.equal(adapter.lastHostedComplete, undefined);
 });
 
 test('Auth flow refuses persistent login when device secure storage is unavailable', async () => {
