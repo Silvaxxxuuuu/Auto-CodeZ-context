@@ -1,6 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { DescopeAuthAdapter } from '../src/account/descope-auth-adapter';
+
+const signingKey = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+const publicJwk = signingKey.publicKey.export({ format: 'jwk' });
+if (!publicJwk.n || !publicJwk.e) throw new Error('Falha ao gerar chave RSA de teste.');
+
+function idToken(nonce: string, subject = 'user-123'): string {
+  const header = Buffer.from(JSON.stringify({
+    alg: 'RS256',
+    kid: 'test-key',
+    typ: 'JWT',
+  }), 'utf8').toString('base64url');
+  const payload = Buffer.from(JSON.stringify({
+    iss: 'https://api.descope.com/P2abcDEF_123',
+    sub: subject,
+    aud: 'P2abcDEF_123',
+    exp: 1_700_003_600,
+    iat: 1_700_000_000,
+    nonce,
+  }), 'utf8').toString('base64url');
+  const signed = `${header}.${payload}`;
+  const signature = crypto.sign('RSA-SHA256', Buffer.from(signed, 'utf8'), signingKey.privateKey).toString('base64url');
+  return `${signed}.${signature}`;
+}
+
+function jwks() {
+  return {
+    keys: [{
+      kty: 'RSA',
+      kid: 'test-key',
+      alg: 'RS256',
+      use: 'sig',
+      n: publicJwk.n,
+      e: publicJwk.e,
+    }],
+  };
+}
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -20,8 +57,11 @@ test('Descope hosted auth uses public-client PKCE and custom desktop callback', 
           access_token: 'access-token',
           refresh_token: 'refresh-token',
           expires_in: 3600,
-          id_token: 'id-token',
+          id_token: idToken('outer-nonce'),
         });
+      }
+      if (String(input).endsWith('/P2abcDEF_123/.well-known/jwks.json')) {
+        return jsonResponse(jwks());
       }
       if (String(input).endsWith('/oauth2/v1/userinfo')) {
         return jsonResponse({
@@ -86,6 +126,60 @@ test('Descope hosted auth uses public-client PKCE and custom desktop callback', 
   assert.equal(body.get('code'), 'authorization-code');
   assert.equal(body.get('code_verifier'), 'verifier');
   assert.equal(body.get('redirect_uri'), 'autocodez://auth/hosted');
+});
+
+test('Descope hosted auth rejects an ID token with the wrong nonce before UserInfo', async () => {
+  let userInfoRequested = false;
+  const adapter = new DescopeAuthAdapter('P2abcDEF_123', {
+    now: () => 1_700_000_000_000,
+    fetch: async (input) => {
+      if (String(input).endsWith('/oauth2/v1/token')) {
+        return jsonResponse({
+          access_token: 'access-token',
+          refresh_token: 'refresh-token',
+          expires_in: 3600,
+          id_token: idToken('wrong-nonce'),
+        });
+      }
+      if (String(input).endsWith('/P2abcDEF_123/.well-known/jwks.json')) {
+        return jsonResponse(jwks());
+      }
+      if (String(input).endsWith('/oauth2/v1/userinfo')) {
+        userInfoRequested = true;
+        return jsonResponse({
+          sub: 'user-123',
+          email: 'user@example.com',
+        });
+      }
+      throw new Error('unexpected request');
+    },
+  });
+
+  const beginHosted = adapter.beginHosted;
+  const completeHosted = adapter.completeHosted;
+  assert.ok(beginHosted);
+  assert.ok(completeHosted);
+
+  const begin = await beginHosted.call(adapter, {
+    deviceId: 'device-1',
+    state: 'outer-state',
+    nonce: 'outer-nonce',
+    codeChallenge: 'challenge',
+    codeChallengeMethod: 'S256',
+  });
+
+  await assert.rejects(
+    completeHosted.call(adapter, {
+      flowId: begin.flowId,
+      deviceId: 'device-1',
+      code: 'authorization-code',
+      state: 'outer-state',
+      nonce: 'outer-nonce',
+      codeVerifier: 'verifier',
+    }),
+    /Nonce do ID token inválido/,
+  );
+  assert.equal(userInfoRequested, false);
 });
 
 test('Descope refresh keeps a non-rotated refresh token', async () => {
