@@ -1,53 +1,85 @@
 # Auto CodeZ Authentication
 
-Status: hosted identity architecture. Azure is not part of the desktop authentication path.
+Status: native passwordless Descope integration. Azure is not part of the desktop authentication path.
 
 ## Architecture
 
-Auto CodeZ is a native/public OAuth client. Authentication is delegated to Descope Auth Hosting and uses OAuth 2.0 / OIDC Authorization Code with PKCE.
+Auto CodeZ now exposes the five passwordless methods directly in its own onboarding UI:
 
-Desktop flow:
+- GitHub
+- Google
+- Microsoft
+- Passkey
+- email Magic Link
 
-1. Auto CodeZ generates state, nonce, a PKCE verifier and an S256 challenge.
-2. The system browser opens Descope Auth Hosting.
-3. One hosted Descope Flow presents GitHub, Google, Microsoft, Passkey and email Magic Link.
-4. Descope redirects to the static native callback:
-   `autocodez://auth/hosted`
-5. Auto CodeZ validates state and exchanges the authorization code with the PKCE verifier.
-6. The access token stays in memory.
-7. The refresh token is stored through the OS-protected credential vault.
-8. The local device identity remains local. A remote device/sync backend is optional future infrastructure, not part of authentication.
+The desktop uses Descope as the identity service, but it no longer forces every method through one generic hosted login screen.
+
+### Social login
+
+GitHub, Google and Microsoft use Descope's native OAuth REST flow:
+
+1. Auto CodeZ generates a cryptographically random transaction state.
+2. The app asks Descope for the provider authorization URL.
+3. The system browser opens the selected provider.
+4. Descope returns to the provider-specific native callback:
+   `autocodez://auth/oauth?flowId=...&state=...`
+5. Auto CodeZ validates the protected pending transaction before exchanging the one-time code.
+6. The returned Descope Session JWT is verified with the project's signing keys before the account is accepted.
+
+### Magic Link
+
+Magic Link uses Descope's sign-up-or-in email API directly:
+
+1. The user enters an email in Auto CodeZ.
+2. Descope sends the one-time link.
+3. The link returns to:
+   `autocodez://auth/magic-link?flowId=...&state=...`
+4. Auto CodeZ validates the protected transaction and verifies the one-time token with Descope.
+5. The returned Session JWT is signature-checked before the account is established.
+
+### Passkey
+
+Passkey keeps an OIDC Authorization Code + PKCE S256 ceremony in the system browser, with a dedicated callback:
+
+`autocodez://auth/passkey`
+
+The app generates state, nonce and a PKCE verifier, validates the callback, exchanges the code, verifies the RS256 ID token, and requires UserInfo `sub` to match the verified ID token subject.
+
+A hosted OIDC path using `autocodez://auth/hosted` remains implemented as a compatibility/fallback path, but it is not the default onboarding surface.
+
+## Session model
+
+- Access/session token is memory-only.
+- Refresh token is stored through the OS-protected credential vault.
+- Direct Descope sessions and OIDC sessions are tagged locally so refresh/logout use the correct protocol without exposing provider secrets.
+- Provider identity is preserved across refresh.
+- Pending OAuth, Magic Link, Passkey and hosted transactions are stored in protected local credential storage so a browser callback can survive an app restart.
+- A mismatched/forged callback is rejected without destroying the legitimate pending transaction.
+- Successful completion, explicit cancellation, expiry or a terminal exchange failure clears the matching protected transaction.
+- Local device identity remains local. Remote device/sync infrastructure is independent from authentication.
 
 The former Azure Account API remains in the repository only as legacy/future backend code. The desktop runtime does not use Azure for sign-in.
 
-## Descope project setup
+## Descope project requirements
 
-Use one Descope project. The Free Forever plan currently includes one OIDC federated app and all authentication methods, which is enough for development and early testing.
+The desktop only needs the public Descope Project ID at runtime/build time. It never embeds a Descope management key, access key, social client secret or email-provider credential.
 
-In Descope Console:
+For social development, Descope's shared social provider configuration can be used where available. Production should use Auto CodeZ-owned provider applications for branding and production limits.
 
-1. Open **Applications** and use the **Default OIDC** application.
-2. Configure its hosted authentication Flow.
-3. Use **Hosted by Descope** for Flow Hosting.
-4. Select or build one Sign Up / Sign In flow containing:
-   - GitHub social login
-   - Google social login
-   - Microsoft social login
-   - Passkey / WebAuthn
-   - Email Magic Link
-5. Register the native redirect URI exactly as:
-   `autocodez://auth/hosted`
-6. In **Project Settings > Security > Approved Domains**, keep redirect validation enabled and add the custom native callback under **Mobile App Schemes** using the identifier Descope requires for the `autocodez://auth/hosted` callback.
-7. If **Apply Trusted Domains on Flow Execution** is enabled, also allow the Descope-hosted authentication domain used by the project.
-8. Keep PKCE enabled. The desktop app never stores a Descope client secret.
+The Descope project must permit the Auto CodeZ native callback scheme. The relevant native callback routes are:
 
-For development, Descope's built-in Google, GitHub and Microsoft OAuth applications can be used immediately. Descope currently limits its shared test social applications to 100 total logins per month across providers. Before public production, configure Auto CodeZ-owned OAuth applications for each social provider so the consent screens use Auto CodeZ branding.
+- `autocodez://auth/oauth`
+- `autocodez://auth/magic-link`
+- `autocodez://auth/passkey`
+- `autocodez://auth/hosted` (compatibility/fallback)
 
-Passkeys and Magic Link are configured inside the same Descope Flow. No Azure Communication Services email transport is needed for this authentication architecture.
+Because OAuth and Magic Link append a protected `flowId` and `state` query to their callback URI, scheme/domain validation must allow those query parameters while keeping the callback host/path fixed.
+
+For passkey/OIDC, keep PKCE enabled and configure the Descope identity application/flow used by the project to allow passkey authentication and the exact native redirect `autocodez://auth/passkey`.
 
 ## Local development
 
-Project ID is a public client identifier, not a client secret.
+Project ID is a public client/project identifier, not a secret.
 
 In PowerShell:
 
@@ -62,6 +94,7 @@ The legacy Azure account endpoint environment variable is intentionally ignored 
 Set `AUTO_CODEZ_DESCOPE_PROJECT_ID` while building the application. Vite embeds only the public Descope Project ID.
 
 Never embed:
+
 - Descope management keys
 - Descope access keys
 - social provider client secrets
@@ -69,36 +102,38 @@ Never embed:
 
 ## Security invariants
 
-- System browser for hosted authentication.
-- Authorization Code + PKCE S256.
-- Static callback URI: `autocodez://auth/hosted`.
-- Cryptographically random state and nonce.
-- State validation before token exchange.
-- RS256 ID token signature validation against the project's JWKS.
-- ID token issuer, audience, authorized-party, expiration and nonce validation before the account is accepted.
-- UserInfo `sub` must match the verified ID token `sub` on the initial authorization grant.
-- Pending hosted PKCE state is kept in protected local credential storage so a browser callback can complete after an app restart.
-- Pending auth state is deleted after success, explicit cancellation, expiry or terminal failure. A forged or mismatched callback is rejected without destroying the legitimate pending transaction.
-- Access token is memory-only.
-- Refresh token is OS-protected.
-- OAuth cancellation/error callbacks are handled without accepting an authorization grant.
-- Password authentication is not part of the Auto CodeZ account model.
+- System browser for external provider/passkey authentication.
+- Native UI chooses GitHub, Google, Microsoft, Passkey or Magic Link explicitly.
+- Direct social and Magic Link responses are accepted only after the protected transaction matches.
+- Direct Descope Session JWT signatures are validated using `/v2/keys/<PROJECT_ID>`.
+- Session JWT issuer must belong to the configured Descope project.
+- OIDC passkey/hosted ID tokens use RS256 verification against the project OIDC JWKS.
+- OIDC issuer, audience, authorized-party, expiration, issued-at and nonce are validated.
+- UserInfo `sub` must match the verified OIDC ID token subject.
+- Unknown signing-key IDs cause one fresh JWKS fetch to tolerate normal key rotation.
+- Pending auth state remains in OS-protected storage across restart.
+- Forged state does not consume a legitimate pending transaction.
+- Refresh tokens remain OS-protected.
+- Logout clears local session state even if remote revocation is temporarily offline.
+- Password authentication and SMS OTP are not part of the Auto CodeZ account model.
 
 ## Acceptance checklist
 
-Before closing Account Core authentication:
+Before closing Account Core authentication, perform real provider acceptance on the exact validated branch head:
 
 1. GitHub login completes and returns to Auto CodeZ.
 2. Google login completes and returns to Auto CodeZ.
 3. Microsoft login completes and returns to Auto CodeZ.
-4. Magic Link completes through the hosted flow.
-5. A passkey can be created in the hosted flow and used for a later sign-in.
-6. Cancelling a provider returns a clean error state.
-7. Closing/restarting Auto CodeZ while the browser login is open still allows the callback to complete before flow expiry.
-8. App restart restores the authenticated session using the protected refresh token.
-9. Temporary network loss preserves the cached account state.
-10. Refresh works after access-token expiry.
-11. Logout clears local session credentials and revokes the refresh token when reachable.
+4. Magic Link is delivered, opens the callback and establishes the account.
+5. Passkey can complete through the dedicated passkey callback.
+6. Cancelling GitHub/Google/Microsoft returns a clean error state.
+7. Cancelling Passkey returns a clean error state.
+8. Closing/restarting Auto CodeZ while OAuth, Magic Link or Passkey is pending still allows the valid callback to complete before expiry.
+9. A forged callback does not invalidate the real pending transaction.
+10. App restart restores an authenticated session using the protected refresh token.
+11. Temporary network loss preserves cached account metadata without exposing secrets.
+12. Refresh succeeds after access/session expiry and preserves the original identity provider.
+13. Logout clears local session credentials and revokes the active refresh session when reachable.
 
 ## Azure
 
