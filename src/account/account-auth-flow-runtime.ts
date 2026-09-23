@@ -57,6 +57,11 @@ interface PendingHostedFlow {
   expiresAt: number;
 }
 
+const PENDING_OAUTH_CREDENTIAL = 'account.auth.pending-oauth';
+const PENDING_MAGIC_CREDENTIAL = 'account.auth.pending-magic-link';
+const PENDING_PASSKEY_CREDENTIAL = 'account.auth.pending-passkey';
+const PENDING_HOSTED_CREDENTIAL = 'account.auth.pending-hosted';
+
 function randomBase64Url(bytes = 32): string {
   return crypto.randomBytes(bytes).toString('base64url');
 }
@@ -79,10 +84,23 @@ function emailHint(email: string): string {
   return `${visibleLocal}${'*'.repeat(Math.max(2, local.length - visibleLocal.length))}@${domain}`;
 }
 
-const PENDING_HOSTED_CREDENTIAL = 'account.auth.pending-hosted';
-
 function cloneSnapshot(snapshot: AuthFlowSnapshot): AuthFlowSnapshot {
   return { ...snapshot };
+}
+
+function validBasePending(value: Record<string, unknown>, now: number): boolean {
+  return typeof value.flowId === 'string'
+    && value.flowId.length > 0
+    && value.flowId.length <= 256
+    && typeof value.state === 'string'
+    && value.state.length >= 16
+    && value.state.length <= 512
+    && typeof value.codeVerifier === 'string'
+    && value.codeVerifier.length >= 40
+    && value.codeVerifier.length <= 256
+    && typeof value.expiresAt === 'number'
+    && Number.isFinite(value.expiresAt)
+    && value.expiresAt > now;
 }
 
 export class AccountAuthFlowRuntime {
@@ -111,19 +129,14 @@ export class AccountAuthFlowRuntime {
   }
 
   reset(): AuthFlowSnapshot {
-    this.pendingOAuth = undefined;
-    this.pendingMagicLink = undefined;
-    this.pendingPasskey = undefined;
-    this.pendingHosted = undefined;
+    this.clearPending();
+    void this.clearAllPersisted();
     return this.setState({ status: 'idle' });
   }
 
   async cancel(): Promise<AuthFlowSnapshot> {
-    this.pendingOAuth = undefined;
-    this.pendingMagicLink = undefined;
-    this.pendingPasskey = undefined;
-    this.pendingHosted = undefined;
-    await this.clearPersistedHosted();
+    this.clearPending();
+    await this.clearAllPersisted();
     return this.setState({ status: 'idle' });
   }
 
@@ -136,6 +149,7 @@ export class AccountAuthFlowRuntime {
     const codeChallenge = pkceChallenge(codeVerifier);
 
     try {
+      await this.clearAllPersisted();
       const result = await this.auth.beginMagicLink({
         email: normalizedEmail,
         deviceId: device.id,
@@ -144,15 +158,15 @@ export class AccountAuthFlowRuntime {
         codeChallengeMethod: 'S256',
       });
 
-      this.pendingMagicLink = {
+      const pending: PendingMagicLinkFlow = {
         flowId: result.flowId,
         state,
         codeVerifier,
         expiresAt: result.expiresAt,
       };
-      this.pendingOAuth = undefined;
-      this.pendingPasskey = undefined;
-      this.pendingHosted = undefined;
+      this.clearPending();
+      this.pendingMagicLink = pending;
+      await this.persist(PENDING_MAGIC_CREDENTIAL, pending);
 
       return this.setState({
         status: 'waiting_magic_link',
@@ -171,12 +185,15 @@ export class AccountAuthFlowRuntime {
     token: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
-    const pending = this.pendingMagicLink;
-    if (!pending || pending.flowId !== input.flowId) throw new Error('Fluxo de Magic Link inválido.');
-    this.assertNotExpired(pending.expiresAt);
+    const pending = this.pendingMagicLink ?? await this.restoreMagicLink();
+    if (!pending || pending.flowId !== input.flowId) {
+      throw new Error('Fluxo de Magic Link inválido.');
+    }
+    if (await this.expired(pending.expiresAt, PENDING_MAGIC_CREDENTIAL)) {
+      throw new AuthAdapterError('expired', 'Fluxo de autenticação expirado.');
+    }
 
     if (input.state !== pending.state) {
-      this.clearPending();
       return this.setState({
         status: 'error',
         method: 'magic_link',
@@ -205,6 +222,7 @@ export class AccountAuthFlowRuntime {
       });
       return await this.finishGrant(grant);
     } catch (error) {
+      await this.removePersisted(PENDING_MAGIC_CREDENTIAL);
       return this.fail(error);
     }
   }
@@ -221,6 +239,7 @@ export class AccountAuthFlowRuntime {
     const codeChallenge = pkceChallenge(codeVerifier);
 
     try {
+      await this.clearAllPersisted();
       const result = await this.auth.beginOAuth({
         provider,
         deviceId: device.id,
@@ -230,7 +249,7 @@ export class AccountAuthFlowRuntime {
         codeChallengeMethod: 'S256',
       });
 
-      this.pendingOAuth = {
+      const pending: PendingOAuthFlow = {
         flowId: result.flowId,
         provider,
         state,
@@ -238,9 +257,9 @@ export class AccountAuthFlowRuntime {
         codeVerifier,
         expiresAt: result.expiresAt,
       };
-      this.pendingMagicLink = undefined;
-      this.pendingPasskey = undefined;
-      this.pendingHosted = undefined;
+      this.clearPending();
+      this.pendingOAuth = pending;
+      await this.persist(PENDING_OAUTH_CREDENTIAL, pending);
 
       return {
         snapshot: this.setState({
@@ -265,12 +284,13 @@ export class AccountAuthFlowRuntime {
     code: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
-    const pending = this.pendingOAuth;
+    const pending = this.pendingOAuth ?? await this.restoreOAuth();
     if (!pending || pending.flowId !== input.flowId) throw new Error('Fluxo OAuth inválido.');
-    this.assertNotExpired(pending.expiresAt);
+    if (await this.expired(pending.expiresAt, PENDING_OAUTH_CREDENTIAL)) {
+      throw new AuthAdapterError('expired', 'Fluxo de autenticação expirado.');
+    }
 
     if (input.state !== pending.state) {
-      this.clearPending();
       return this.setState({
         status: 'error',
         method: 'oauth',
@@ -303,6 +323,7 @@ export class AccountAuthFlowRuntime {
       });
       return await this.finishGrant(grant);
     } catch (error) {
+      await this.removePersisted(PENDING_OAUTH_CREDENTIAL);
       return this.fail(error);
     }
   }
@@ -319,6 +340,7 @@ export class AccountAuthFlowRuntime {
     const codeChallenge = pkceChallenge(codeVerifier);
 
     try {
+      await this.clearAllPersisted();
       const result = await this.auth.beginPasskey({
         deviceId: device.id,
         state,
@@ -326,16 +348,17 @@ export class AccountAuthFlowRuntime {
         codeChallenge,
         codeChallengeMethod: 'S256',
       });
-      this.pendingPasskey = {
+
+      const pending: PendingPasskeyFlow = {
         flowId: result.flowId,
         state,
         nonce,
         codeVerifier,
         expiresAt: result.expiresAt,
       };
-      this.pendingOAuth = undefined;
-      this.pendingMagicLink = undefined;
-      this.pendingHosted = undefined;
+      this.clearPending();
+      this.pendingPasskey = pending;
+      await this.persist(PENDING_PASSKEY_CREDENTIAL, pending);
 
       return {
         snapshot: this.setState({
@@ -355,16 +378,19 @@ export class AccountAuthFlowRuntime {
   }
 
   async completePasskey(input: {
-    flowId: string;
+    flowId?: string;
     code: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
-    const pending = this.pendingPasskey;
-    if (!pending || pending.flowId !== input.flowId) throw new Error('Fluxo Passkey inválido.');
-    this.assertNotExpired(pending.expiresAt);
+    const pending = this.pendingPasskey ?? await this.restorePasskey();
+    if (!pending || (input.flowId !== undefined && pending.flowId !== input.flowId)) {
+      throw new Error('Fluxo Passkey inválido.');
+    }
+    if (await this.expired(pending.expiresAt, PENDING_PASSKEY_CREDENTIAL)) {
+      throw new AuthAdapterError('expired', 'Fluxo de autenticação expirado.');
+    }
 
     if (input.state !== pending.state) {
-      this.clearPending();
       return this.setState({
         status: 'error',
         method: 'passkey',
@@ -394,6 +420,7 @@ export class AccountAuthFlowRuntime {
       });
       return await this.finishGrant(grant);
     } catch (error) {
+      await this.removePersisted(PENDING_PASSKEY_CREDENTIAL);
       return this.fail(error);
     }
   }
@@ -418,6 +445,7 @@ export class AccountAuthFlowRuntime {
     const codeChallenge = pkceChallenge(codeVerifier);
 
     try {
+      await this.clearAllPersisted();
       const result = await begin.call(this.auth, {
         deviceId: device.id,
         state,
@@ -426,17 +454,16 @@ export class AccountAuthFlowRuntime {
         codeChallengeMethod: 'S256',
       });
 
-      this.pendingHosted = {
+      const pending: PendingHostedFlow = {
         flowId: result.flowId,
         state,
         nonce,
         codeVerifier,
         expiresAt: result.expiresAt,
       };
-      await this.persistPendingHosted(this.pendingHosted);
-      this.pendingOAuth = undefined;
-      this.pendingMagicLink = undefined;
-      this.pendingPasskey = undefined;
+      this.clearPending();
+      this.pendingHosted = pending;
+      await this.persist(PENDING_HOSTED_CREDENTIAL, pending);
 
       return {
         snapshot: this.setState({
@@ -459,13 +486,10 @@ export class AccountAuthFlowRuntime {
     code: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
-    const pending = this.pendingHosted ?? await this.restorePendingHosted();
+    const pending = this.pendingHosted ?? await this.restoreHosted();
     if (!pending) throw new Error('Fluxo hospedado inválido ou expirado.');
-    try {
-      this.assertNotExpired(pending.expiresAt);
-    } catch (error) {
-      await this.clearPersistedHosted();
-      throw error;
+    if (await this.expired(pending.expiresAt, PENDING_HOSTED_CREDENTIAL)) {
+      throw new AuthAdapterError('expired', 'Fluxo de autenticação expirado.');
     }
 
     if (input.state !== pending.state) {
@@ -499,10 +523,9 @@ export class AccountAuthFlowRuntime {
         nonce: pending.nonce,
         codeVerifier: pending.codeVerifier,
       });
-      await this.clearPersistedHosted();
       return await this.finishGrant(grant);
     } catch (error) {
-      await this.clearPersistedHosted();
+      await this.removePersisted(PENDING_HOSTED_CREDENTIAL);
       return this.fail(error);
     }
   }
@@ -512,7 +535,7 @@ export class AccountAuthFlowRuntime {
     errorDescription?: string;
     state?: string;
   }): Promise<AuthFlowSnapshot> {
-    const pending = this.pendingHosted ?? await this.restorePendingHosted();
+    const pending = this.pendingHosted ?? await this.restoreHosted();
     if (pending && input.state !== pending.state) {
       return this.setState({
         status: 'error',
@@ -522,7 +545,7 @@ export class AccountAuthFlowRuntime {
     }
 
     this.clearPending();
-    await this.clearPersistedHosted();
+    await this.clearAllPersisted();
     const cancelled = input.error === 'access_denied' || input.error === 'cancelled';
     const safeDescription = input.errorDescription?.trim().slice(0, 512);
     return this.setState({
@@ -534,51 +557,120 @@ export class AccountAuthFlowRuntime {
     });
   }
 
-  private async persistPendingHosted(pending: PendingHostedFlow): Promise<void> {
-    if (!this.pendingCredentials) return;
-    await this.pendingCredentials.set(PENDING_HOSTED_CREDENTIAL, JSON.stringify(pending));
+  private async restoreOAuth(): Promise<PendingOAuthFlow | undefined> {
+    const value = await this.readPersisted(PENDING_OAUTH_CREDENTIAL);
+    if (!value || !validBasePending(value, this.now())) return undefined;
+    if (
+      value.provider !== 'github'
+      && value.provider !== 'google'
+      && value.provider !== 'microsoft'
+    ) return undefined;
+    if (typeof value.nonce !== 'string' || value.nonce.length < 16 || value.nonce.length > 512) return undefined;
+
+    const restored: PendingOAuthFlow = {
+      flowId: value.flowId as string,
+      provider: value.provider,
+      state: value.state as string,
+      nonce: value.nonce,
+      codeVerifier: value.codeVerifier as string,
+      expiresAt: value.expiresAt as number,
+    };
+    this.pendingOAuth = restored;
+    return restored;
   }
 
-  private async restorePendingHosted(): Promise<PendingHostedFlow | undefined> {
+  private async restoreMagicLink(): Promise<PendingMagicLinkFlow | undefined> {
+    const value = await this.readPersisted(PENDING_MAGIC_CREDENTIAL);
+    if (!value || !validBasePending(value, this.now())) return undefined;
+    const restored: PendingMagicLinkFlow = {
+      flowId: value.flowId as string,
+      state: value.state as string,
+      codeVerifier: value.codeVerifier as string,
+      expiresAt: value.expiresAt as number,
+    };
+    this.pendingMagicLink = restored;
+    return restored;
+  }
+
+  private async restorePasskey(): Promise<PendingPasskeyFlow | undefined> {
+    const value = await this.readPersisted(PENDING_PASSKEY_CREDENTIAL);
+    if (!value || !validBasePending(value, this.now())) return undefined;
+    if (typeof value.nonce !== 'string' || value.nonce.length < 16 || value.nonce.length > 512) return undefined;
+    const restored: PendingPasskeyFlow = {
+      flowId: value.flowId as string,
+      state: value.state as string,
+      nonce: value.nonce,
+      codeVerifier: value.codeVerifier as string,
+      expiresAt: value.expiresAt as number,
+    };
+    this.pendingPasskey = restored;
+    return restored;
+  }
+
+  private async restoreHosted(): Promise<PendingHostedFlow | undefined> {
+    const value = await this.readPersisted(PENDING_HOSTED_CREDENTIAL);
+    if (!value || !validBasePending(value, this.now())) return undefined;
+    if (typeof value.nonce !== 'string' || value.nonce.length < 16 || value.nonce.length > 512) return undefined;
+    const restored: PendingHostedFlow = {
+      flowId: value.flowId as string,
+      state: value.state as string,
+      nonce: value.nonce,
+      codeVerifier: value.codeVerifier as string,
+      expiresAt: value.expiresAt as number,
+    };
+    this.pendingHosted = restored;
+    return restored;
+  }
+
+  private async persist(key: string, value: object): Promise<void> {
+    if (!this.pendingCredentials) return;
+    await this.pendingCredentials.set(key, JSON.stringify(value));
+  }
+
+  private async readPersisted(key: string): Promise<Record<string, unknown> | undefined> {
     if (!this.pendingCredentials) return undefined;
-    const raw = await this.pendingCredentials.get(PENDING_HOSTED_CREDENTIAL);
+    const raw = await this.pendingCredentials.get(key);
     if (!raw) return undefined;
     try {
-      const value = JSON.parse(raw) as Partial<PendingHostedFlow>;
-      if (
-        typeof value.flowId !== 'string' || !value.flowId
-        || typeof value.state !== 'string' || !value.state
-        || typeof value.nonce !== 'string' || !value.nonce
-        || typeof value.codeVerifier !== 'string' || value.codeVerifier.length < 40
-        || typeof value.expiresAt !== 'number' || !Number.isFinite(value.expiresAt)
-        || value.expiresAt <= this.now()
-      ) {
-        await this.clearPersistedHosted();
+      const value = JSON.parse(raw);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        await this.removePersisted(key);
         return undefined;
       }
-      const restored: PendingHostedFlow = {
-        flowId: value.flowId,
-        state: value.state,
-        nonce: value.nonce,
-        codeVerifier: value.codeVerifier,
-        expiresAt: value.expiresAt,
-      };
-      this.pendingHosted = restored;
-      return restored;
+      return value as Record<string, unknown>;
     } catch {
-      await this.clearPersistedHosted();
+      await this.removePersisted(key);
       return undefined;
     }
   }
 
-  private async clearPersistedHosted(): Promise<void> {
+  private async removePersisted(key: string): Promise<void> {
     if (!this.pendingCredentials) return;
-    await this.pendingCredentials.remove(PENDING_HOSTED_CREDENTIAL);
+    await this.pendingCredentials.remove(key);
+  }
+
+  private async clearAllPersisted(): Promise<void> {
+    if (!this.pendingCredentials) return;
+    await Promise.all([
+      this.pendingCredentials.remove(PENDING_OAUTH_CREDENTIAL),
+      this.pendingCredentials.remove(PENDING_MAGIC_CREDENTIAL),
+      this.pendingCredentials.remove(PENDING_PASSKEY_CREDENTIAL),
+      this.pendingCredentials.remove(PENDING_HOSTED_CREDENTIAL),
+    ]);
+  }
+
+  private async expired(expiresAt: number, key: string): Promise<boolean> {
+    if (Number.isFinite(expiresAt) && expiresAt > this.now()) return false;
+    this.clearPending();
+    await this.removePersisted(key);
+    this.setState({ status: 'error', lastError: 'Fluxo de autenticação expirado.' });
+    return true;
   }
 
   private async finishGrant(grant: AuthGrant): Promise<AuthFlowSnapshot> {
     await this.sessions.establish(grant);
     this.clearPending();
+    await this.clearAllPersisted();
     return this.setState({ status: 'authenticated' });
   }
 
@@ -593,14 +685,6 @@ export class AccountAuthFlowRuntime {
   private assertCanBegin(): void {
     if (this.snapshotState.status === 'completing') {
       throw new Error('Uma autenticação já está sendo concluída.');
-    }
-  }
-
-  private assertNotExpired(expiresAt: number): void {
-    if (!Number.isFinite(expiresAt) || expiresAt <= this.now()) {
-      this.clearPending();
-      this.setState({ status: 'error', lastError: 'Fluxo de autenticação expirado.' });
-      throw new AuthAdapterError('expired', 'Fluxo de autenticação expirado.');
     }
   }
 
