@@ -86,6 +86,14 @@ type CachedJwks = {
 
 const DIRECT_TOKEN_PREFIX = 'descope-direct:';
 const OIDC_TOKEN_PREFIX = 'descope-oidc:';
+const IDENTITY_PROVIDERS: readonly IdentityProvider[] = [
+  'google',
+  'github',
+  'microsoft',
+  'passkey',
+  'magic_link',
+  'descope',
+];
 
 function requireProjectId(value: string): string {
   const projectId = value.trim();
@@ -202,18 +210,38 @@ function parseNumericClaim(value: unknown, label: string): number {
   return parsed;
 }
 
-function unwrapRefreshToken(value: string): { mode: 'direct' | 'oidc'; token: string } {
-  if (value.startsWith(DIRECT_TOKEN_PREFIX)) {
-    return { mode: 'direct', token: value.slice(DIRECT_TOKEN_PREFIX.length) };
+function parseTaggedToken(
+  mode: 'direct' | 'oidc',
+  raw: string,
+): { mode: 'direct' | 'oidc'; provider: IdentityProvider; token: string } {
+  const separator = raw.indexOf(':');
+  if (separator > 0) {
+    const candidate = raw.slice(0, separator) as IdentityProvider;
+    if (IDENTITY_PROVIDERS.includes(candidate)) {
+      return { mode, provider: candidate, token: raw.slice(separator + 1) };
+    }
   }
-  if (value.startsWith(OIDC_TOKEN_PREFIX)) {
-    return { mode: 'oidc', token: value.slice(OIDC_TOKEN_PREFIX.length) };
-  }
-  return { mode: 'oidc', token: value };
+  return { mode, provider: 'descope', token: raw };
 }
 
-function wrapRefreshToken(mode: 'direct' | 'oidc', value: string): string {
-  return (mode === 'direct' ? DIRECT_TOKEN_PREFIX : OIDC_TOKEN_PREFIX) + value;
+function unwrapRefreshToken(
+  value: string,
+): { mode: 'direct' | 'oidc'; provider: IdentityProvider; token: string } {
+  if (value.startsWith(DIRECT_TOKEN_PREFIX)) {
+    return parseTaggedToken('direct', value.slice(DIRECT_TOKEN_PREFIX.length));
+  }
+  if (value.startsWith(OIDC_TOKEN_PREFIX)) {
+    return parseTaggedToken('oidc', value.slice(OIDC_TOKEN_PREFIX.length));
+  }
+  return { mode: 'oidc', provider: 'descope', token: value };
+}
+
+function wrapRefreshToken(
+  mode: 'direct' | 'oidc',
+  provider: IdentityProvider,
+  value: string,
+): string {
+  return `${mode === 'direct' ? DIRECT_TOKEN_PREFIX : OIDC_TOKEN_PREFIX}${provider}:${value}`;
 }
 
 function isSupportedIssuer(issuer: string, projectId: string): boolean {
@@ -234,7 +262,8 @@ export class DescopeAuthAdapter implements AuthAdapter {
   private readonly timeoutMs: number;
   private readonly now: () => number;
   private readonly hostedRedirectUri = 'autocodez://auth/hosted';
-  private jwksCache?: CachedJwks;
+  private oidcJwksCache?: CachedJwks;
+  private sessionJwksCache?: CachedJwks;
 
   constructor(projectId: string, options: DescopeAuthAdapterOptions = {}) {
     this.projectId = requireProjectId(projectId);
@@ -374,7 +403,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
         await this.formRequest('/oauth2/v1/token', body),
         refresh.token,
       );
-      return await this.grantFromOidc(tokens, input.deviceId, undefined, 'descope');
+      return await this.grantFromOidc(tokens, input.deviceId, undefined, refresh.provider);
     }
 
     const direct = parseDirectAuthResponse(
@@ -384,7 +413,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
       }, refresh.token),
       refresh.token,
     );
-    return await this.grantFromDirect(direct, input.deviceId, 'descope', refresh.token);
+    return await this.grantFromDirect(direct, input.deviceId, refresh.provider, refresh.token);
   }
 
   async revoke(input: RevokeSessionInput): Promise<void> {
@@ -486,7 +515,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
       throw new AuthAdapterError('invalid_grant', 'Usuário da sessão não corresponde ao Session JWT.');
     }
 
-    const wrappedRefresh = wrapRefreshToken('direct', refreshToken);
+    const wrappedRefresh = wrapRefreshToken('direct', provider, refreshToken);
     return this.buildGrant(
       user,
       deviceId,
@@ -526,7 +555,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
       deviceId,
       provider,
       tokens.access_token,
-      wrapRefreshToken('oidc', refreshToken),
+      wrapRefreshToken('oidc', provider, refreshToken),
       now + Math.max(60, tokens.expires_in ?? 3_600) * 1000,
       userInfo.preferred_username,
     );
@@ -585,7 +614,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
   }
 
   private async verifyOidcIdToken(idToken: string, expectedNonce: string): Promise<string> {
-    const verified = await this.verifySignedJwt(idToken, 'ID token');
+    const verified = await this.verifySignedJwt(idToken, 'ID token', 'oidc');
     const claims = verified.claims;
     const audienceValue = claims.aud;
     const audience = Array.isArray(audienceValue)
@@ -613,7 +642,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
   }
 
   private async verifySessionJwt(token: string): Promise<{ subject: string; expiresAt: number }> {
-    const verified = await this.verifySignedJwt(token, 'Session JWT');
+    const verified = await this.verifySignedJwt(token, 'Session JWT', 'session');
     if (!isSupportedIssuer(verified.claims.iss, this.projectId)) {
       throw new AuthAdapterError('invalid_grant', 'Issuer do Session JWT inválido.');
     }
@@ -626,6 +655,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
   private async verifySignedJwt(
     token: string,
     label: string,
+    keySet: 'oidc' | 'session',
   ): Promise<{ claims: JwtClaims; subject: string; expiresAt: number }> {
     const parts = token.split('.');
     if (parts.length !== 3 || parts.some((part) => !part)) {
@@ -642,15 +672,16 @@ export class DescopeAuthAdapter implements AuthAdapter {
       throw new AuthAdapterError('invalid_grant', `Algoritmo do ${label} não permitido.`);
     }
 
-    let keys = await this.jwks();
+    let keys = await this.jwks(keySet);
     let jwk = keys.find((candidate) =>
       candidate.kid === header.kid
       && (!candidate.alg || candidate.alg === 'RS256')
       && (!candidate.use || candidate.use === 'sig'));
 
     if (!jwk) {
-      this.jwksCache = undefined;
-      keys = await this.jwks();
+      if (keySet === 'oidc') this.oidcJwksCache = undefined;
+      else this.sessionJwksCache = undefined;
+      keys = await this.jwks(keySet);
       jwk = keys.find((candidate) =>
         candidate.kid === header.kid
         && (!candidate.alg || candidate.alg === 'RS256')
@@ -714,12 +745,16 @@ export class DescopeAuthAdapter implements AuthAdapter {
     };
   }
 
-  private async jwks(): Promise<CachedJwks['keys']> {
+  private async jwks(keySet: 'oidc' | 'session'): Promise<CachedJwks['keys']> {
     const now = this.now();
-    if (this.jwksCache && this.jwksCache.expiresAt > now) return this.jwksCache.keys;
+    const cache = keySet === 'oidc' ? this.oidcJwksCache : this.sessionJwksCache;
+    if (cache && cache.expiresAt > now) return cache.keys;
 
+    const pathname = keySet === 'oidc'
+      ? `/${encodeURIComponent(this.projectId)}/.well-known/jwks.json`
+      : `/v2/keys/${encodeURIComponent(this.projectId)}`;
     const source = readJsonObject(
-      await this.jsonRequest(`/${encodeURIComponent(this.projectId)}/.well-known/jwks.json`, {}),
+      await this.jsonRequest(pathname, {}),
       'JWKS',
     );
     if (!Array.isArray(source.keys)) {
@@ -747,7 +782,9 @@ export class DescopeAuthAdapter implements AuthAdapter {
       throw new AuthAdapterError('server', 'Nenhuma chave RSA válida encontrada no JWKS.');
     }
 
-    this.jwksCache = { expiresAt: now + 5 * 60 * 1000, keys };
+    const nextCache = { expiresAt: now + 5 * 60 * 1000, keys };
+    if (keySet === 'oidc') this.oidcJwksCache = nextCache;
+    else this.sessionJwksCache = nextCache;
     return keys;
   }
 
