@@ -9677,13 +9677,22 @@ COMMITS PRINCIPAIS DESTE LOTE:
 - 24abfd26d11d727f3bb3d3d7e1377d7e0ed04d74
   test(account): initialize baseline session before restart assertion
 
-VALIDAÇÃO INTERMEDIÁRIA:
+VALIDAÇÃO E HARDENING FINAL DO LOTE:
 - no HEAD 366c93b, Visual Auto CodeZ e Validate Account API estavam verdes;
 - Validate Auto CodeZ encontrou 1 falha apenas no teste de restart porque a instância baseline de AccountSessionRuntime ainda não havia sido hydrate() antes da assertiva;
 - implementação/runtime não falhou;
-- teste foi corrigido em 24abfd2;
-- no mesmo HEAD corrigido, Core tests, TypeScript, ESLint e Azure deployment script syntax já passaram;
-- registrar SUCCESS final somente no HEAD de documentação depois do CI real.
+- o fixture foi corrigido em 24abfd26d11d727f3bb3d3d7e1377d7e0ed04d74;
+- a revisão posterior encontrou uma corrida real em reset(): a limpeza assíncrona fire-and-forget do pending auth poderia apagar uma transação nova iniciada imediatamente depois;
+- 5852887fd4b721a002e7fce3c7b7c442907ca24d serializa a limpeza protegida antes de novas operações e remove pending persistido inválido/expirado durante restore;
+- b26d097b58d17013c8d57f0ca745416e0e5dfc66 adiciona regressões para a corrida de cleanup e stale pending expirado;
+- 4a970ded35df59e6fb82350831d44c2cda9e673b corrige a anotação TypeScript estrita da promise de cleanup;
+- no HEAD 4a970ded35df59e6fb82350831d44c2cda9e673b:
+  - Validate Auto CodeZ #35826149711: SUCCESS;
+  - Validate Account API #35826149636: SUCCESS;
+  - Visual Auto CodeZ #35826149617: SUCCESS;
+  - passwordless account onboarding visual: SUCCESS;
+  - TypeScript, Core tests, ESLint, packaging e Electron startup smoke: SUCCESS.
+- o commit desta atualização de contexto passa a ser o novo HEAD e precisa receber a validação exata final antes de encerrar o lote.
 
 PR #9:
 - deve continuar OPEN;
