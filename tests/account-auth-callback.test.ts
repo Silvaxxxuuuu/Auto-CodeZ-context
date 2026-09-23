@@ -88,3 +88,33 @@ test('parseAccountAuthCallback accepts hosted provider cancellation safely', () 
     },
   );
 });
+
+
+test('parseAccountAuthCallback accepts native OAuth cancellation without exposing a code', () => {
+  assert.deepEqual(
+    parseAccountAuthCallback(
+      'autocodez://auth/oauth?flowId=flow-1&error=access_denied&error_description=User%20cancelled&state=state-1',
+    ),
+    {
+      type: 'oauth_error',
+      flowId: 'flow-1',
+      error: 'access_denied',
+      errorDescription: 'User cancelled',
+      state: 'state-1',
+    },
+  );
+});
+
+test('parseAccountAuthCallback accepts passkey cancellation on its dedicated callback', () => {
+  assert.deepEqual(
+    parseAccountAuthCallback(
+      'autocodez://auth/passkey?error=access_denied&error_description=User%20cancelled&state=state-1',
+    ),
+    {
+      type: 'passkey_error',
+      error: 'access_denied',
+      errorDescription: 'User cancelled',
+      state: 'state-1',
+    },
+  );
+});
