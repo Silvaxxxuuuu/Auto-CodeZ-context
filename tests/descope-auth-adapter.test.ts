@@ -491,6 +491,7 @@ test('direct logout revokes only the current Descope refresh session', async () 
   });
 
   await adapter.revoke({
+    sessionId: 'session-1',
     refreshToken: 'descope-direct:github:refresh-secret',
     deviceId: 'device-1',
   });
