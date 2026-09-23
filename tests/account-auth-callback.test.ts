@@ -20,7 +20,7 @@ test('parseAccountAuthCallback accepts OAuth callbacks only on the Auto CodeZ sc
 
 test('parseAccountAuthCallback accepts Magic Link callbacks and rejects missing secrets', () => {
   assert.deepEqual(
-    parseAccountAuthCallback('autocodez://auth/magic-link?flowId=magic-1&token=one-time-token&state=state-1'),
+    parseAccountAuthCallback('autocodez://auth/magic-link?flowId=magic-1&t=one-time-token&state=state-1'),
     {
       type: 'magic_link',
       flowId: 'magic-1',
@@ -49,10 +49,9 @@ test('findAccountAuthCallback extracts callback URL from desktop argv', () => {
 
 test('parseAccountAuthCallback accepts browser passkey callbacks', () => {
   assert.deepEqual(
-    parseAccountAuthCallback('autocodez://auth/passkey?flowId=passkey-1&code=one-time-code&state=state-1'),
+    parseAccountAuthCallback('autocodez://auth/passkey?code=one-time-code&state=state-1'),
     {
       type: 'passkey',
-      flowId: 'passkey-1',
       code: 'one-time-code',
       state: 'state-1',
     },
