@@ -154,6 +154,26 @@ async function main() {
     animations: 'disabled',
   });
 
+  await page.evaluate(() => document.querySelector('#account-onboarding')?.remove());
+  await page.locator('[data-action="profile"]').click();
+  const profile = page.locator('.profile-overlay');
+  await profile.waitFor({ state: 'visible', timeout: 10_000 });
+  await profile.getByRole('heading', { name: 'Perfil', exact: true }).waitFor();
+  const profileText = await profile.textContent();
+  if (profileText?.includes('Em breve')) {
+    throw new Error('Perfil ainda exibe placeholders de autenticação marcados como Em breve.');
+  }
+  if (profileText?.includes('Planejado, não simulado')) {
+    throw new Error('Perfil ainda exibe a seção legada de autenticação planejada.');
+  }
+  if (profileText?.includes('base da futura conta Auto CodeZ')) {
+    throw new Error('Perfil ainda descreve a conta Auto CodeZ como recurso futuro.');
+  }
+  await page.screenshot({
+    path: path.join(outputDir, 'funcional-profile-account-cleanup.png'),
+    animations: 'disabled',
+  });
+
   if (pageErrors.length || consoleErrors.length) {
     throw new Error(
       'Erros no renderer: page=' + JSON.stringify(pageErrors) +
