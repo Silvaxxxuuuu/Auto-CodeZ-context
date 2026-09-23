@@ -131,13 +131,22 @@ async function main() {
   await login.waitFor({ state: 'visible', timeout: 20_000 });
 
   await login.getByRole('heading', { name: 'Bem-vindo ao Auto CodeZ', exact: true }).waitFor();
-  await login.getByRole('button', { name: 'Entrar ou criar conta', exact: true }).waitFor();
+  await login.getByLabel('Magic Link', { exact: true }).waitFor();
+  await login.getByRole('button', { name: 'Enviar link', exact: true }).waitFor();
+  await login.getByRole('button', { name: 'Continuar com GitHub', exact: true }).waitFor();
+  await login.getByRole('button', { name: 'Continuar com Google', exact: true }).waitFor();
+  await login.getByRole('button', { name: 'Continuar com Microsoft', exact: true }).waitFor();
+  await login.getByRole('button', { name: /Entrar com passkey/i }).waitFor();
 
   const bodyText = await login.textContent();
-  for (const method of ['GitHub', 'Google', 'Microsoft', 'Passkey', 'Magic Link']) {
+  for (const method of ['GitHub', 'Google', 'Microsoft', 'passkey', 'Magic Link']) {
     if (!bodyText?.includes(method)) {
-      throw new Error('Método hospedado ausente no onboarding: ' + method);
+      throw new Error('Método nativo ausente no onboarding: ' + method);
     }
+  }
+
+  if (await login.getByRole('button', { name: 'Entrar ou criar conta', exact: true }).count()) {
+    throw new Error('O onboarding regrediu para a tela hospedada genérica.');
   }
 
   await page.screenshot({
