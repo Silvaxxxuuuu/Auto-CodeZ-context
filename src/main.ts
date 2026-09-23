@@ -130,8 +130,12 @@ async function completeAccountAuthCallback(rawUrl: string): Promise<void> {
   const callback = parseAccountAuthCallback(rawUrl);
   if (callback.type === 'oauth') {
     await accountAuthFlowRuntime.completeOAuth(callback);
+  } else if (callback.type === 'oauth_error') {
+    await accountAuthFlowRuntime.failOAuthCallback(callback);
   } else if (callback.type === 'passkey') {
     await accountAuthFlowRuntime.completePasskey(callback);
+  } else if (callback.type === 'passkey_error') {
+    await accountAuthFlowRuntime.failPasskeyCallback(callback);
   } else if (callback.type === 'hosted') {
     await accountAuthFlowRuntime.completeHosted(callback);
   } else if (callback.type === 'hosted_error') {
