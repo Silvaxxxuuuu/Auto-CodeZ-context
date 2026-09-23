@@ -9692,7 +9692,13 @@ VALIDAÇÃO E HARDENING FINAL DO LOTE:
   - Visual Auto CodeZ #35826149617: SUCCESS;
   - passwordless account onboarding visual: SUCCESS;
   - TypeScript, Core tests, ESLint, packaging e Electron startup smoke: SUCCESS.
-- o commit desta atualização de contexto passa a ser o novo HEAD e precisa receber a validação exata final antes de encerrar o lote.
+- HEAD de fechamento deste lote antes desta atualização: e745eb31f877864c0d7eace0096694c325ebb120;
+- validação EXATA desse HEAD concluída:
+  - Validate Auto CodeZ #35826680343: SUCCESS;
+  - Validate Account API #35826680380: SUCCESS;
+  - Visual Auto CodeZ #35826680411: SUCCESS;
+- portanto o lote de autenticação nativa Descope está fechado no código e validado em CI/E2E;
+- próximo passo é somente teste real com o Project ID real do Descope e os providers reais habilitados; não redesenhar a UI e não voltar ao Auth Hosting genérico.
 
 PR #9:
 - deve continuar OPEN;
