@@ -252,7 +252,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
   }
 
   async beginHosted(input: BeginHostedInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
-    return this.beginHostedFlow(input.state, input.nonce, input.codeChallenge);
+    return this.beginHostedFlow(input.state, input.nonce, input.codeChallenge, this.hostedRedirectUri);
   }
 
   async completeHosted(input: CompleteHostedInput): Promise<AuthGrant> {
@@ -263,6 +263,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
       input.codeVerifier,
       input.nonce,
       'descope',
+      this.hostedRedirectUri,
     );
   }
 
@@ -340,7 +341,13 @@ export class DescopeAuthAdapter implements AuthAdapter {
   }
 
   async beginPasskey(input: BeginPasskeyInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
-    return this.beginHostedFlow(input.state, input.nonce, input.codeChallenge, 'passkey');
+    return this.beginHostedFlow(
+      input.state,
+      input.nonce,
+      input.codeChallenge,
+      'autocodez://auth/passkey',
+      'passkey',
+    );
   }
 
   async completePasskey(input: CompletePasskeyInput): Promise<AuthGrant> {
@@ -351,6 +358,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
       input.codeVerifier,
       input.nonce,
       'passkey',
+      'autocodez://auth/passkey',
     );
   }
 
@@ -403,6 +411,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
     state: string,
     nonce: string,
     codeChallenge: string,
+    redirectUri: string,
     requestedMethod?: 'passkey',
   ): {
     authorizationUrl: string;
@@ -413,7 +422,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
     const url = this.endpoint('/oauth2/v1/authorize');
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', this.projectId);
-    url.searchParams.set('redirect_uri', this.hostedRedirectUri);
+    url.searchParams.set('redirect_uri', redirectUri);
     url.searchParams.set('scope', 'openid profile email offline_access');
     url.searchParams.set('code_challenge', codeChallenge);
     url.searchParams.set('code_challenge_method', 'S256');
@@ -435,13 +444,14 @@ export class DescopeAuthAdapter implements AuthAdapter {
     codeVerifier: string,
     nonce: string,
     provider: IdentityProvider,
+    redirectUri: string,
   ): Promise<AuthGrant> {
     if (!flowId.trim()) throw new AuthAdapterError('invalid_grant', 'Fluxo de autenticação não encontrado.');
 
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      redirect_uri: this.hostedRedirectUri,
+      redirect_uri: redirectUri,
       client_id: this.projectId,
       code_verifier: codeVerifier,
     });
@@ -761,7 +771,6 @@ export class DescopeAuthAdapter implements AuthAdapter {
         'content-type': 'application/json',
         authorization,
         'x-descope-project-id': this.projectId,
-        ...(init.headers ?? {}),
       },
     }, allowEmpty);
   }
