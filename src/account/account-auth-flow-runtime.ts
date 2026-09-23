@@ -748,7 +748,7 @@ export class AccountAuthFlowRuntime {
       () => this.clearAllPersisted(),
       () => this.clearAllPersisted(),
     );
-    this.cleanupPromise = cleanup.catch(() => undefined);
+    this.cleanupPromise = cleanup.catch((): void => undefined);
   }
 
   private async clearAllPersisted(): Promise<void> {
