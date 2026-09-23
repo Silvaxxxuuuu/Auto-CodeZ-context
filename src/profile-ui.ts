@@ -1,11 +1,5 @@
 import { getAppPreferences, updateAppPreferences } from './app-preferences';
 
-const profileProviders = [
-  { id: 'google', name: 'Google', description: 'Login e sincronização via conta Google.', icon: 'globe-2' },
-  { id: 'github', name: 'GitHub', description: 'Identidade GitHub vinculada à mesma conta Auto CodeZ.', icon: 'github' },
-  { id: 'microsoft', name: 'Microsoft', description: 'Identidade Microsoft vinculada à mesma conta Auto CodeZ.', icon: 'monitor' },
-];
-
 type ProfileState = {
   providers: Array<{ id: string; displayName: string; configured?: boolean; requiresApiKey?: boolean }>;
   chats: Array<{ id: string; providerId: string; model: string; projectId?: string }>;
@@ -89,7 +83,7 @@ async function renderProfile(): Promise<void> {
   const overlay = document.createElement('section');
   overlay.className = 'profile-overlay';
   overlay.setAttribute('aria-label', 'Perfil e conta');
-  overlay.innerHTML = `<div class="profile-page"><header class="profile-header"><div><div class="profile-eyebrow">CONTA</div><h1>Perfil</h1><p>Identidade local, ambiente real e a base da futura conta Auto CodeZ.</p></div><button class="profile-close" type="button" data-profile-close title="Fechar perfil" aria-label="Fechar perfil">${icon('x')}</button></header><div class="profile-content"><section class="profile-card profile-identity-card"><div class="profile-avatar">${icon('user-round')}</div><div class="profile-identity-copy"><strong data-profile-display-name>${displayName}</strong><span>Perfil local</span><small>Seu perfil funciona offline hoje e será vinculado à conta Auto CodeZ quando a autenticação cloud entrar.</small></div><span class="profile-status profile-status-neutral">Local</span></section><section class="profile-section"><div class="profile-section-heading"><div class="profile-section-icon">${icon('sparkles')}</div><div><h2>Carregando seu ambiente</h2><p>Lendo projetos, conversas, IAs e hardware local.</p></div></div></section></div></div>`;
+  overlay.innerHTML = `<div class="profile-page"><header class="profile-header"><div><div class="profile-eyebrow">CONTA</div><h1>Perfil</h1><p>Identidade, ambiente local e sua conta Auto CodeZ.</p></div><button class="profile-close" type="button" data-profile-close title="Fechar perfil" aria-label="Fechar perfil">${icon('x')}</button></header><div class="profile-content"><section class="profile-card profile-identity-card"><div class="profile-avatar">${icon('user-round')}</div><div class="profile-identity-copy"><strong data-profile-display-name>${displayName}</strong><span>Perfil neste dispositivo</span><small>Seu perfil funciona offline hoje e será vinculado à conta Auto CodeZ quando a autenticação cloud entrar.</small></div><span class="profile-status profile-status-neutral">Local</span></section><section class="profile-section"><div class="profile-section-heading"><div class="profile-section-icon">${icon('sparkles')}</div><div><h2>Carregando seu ambiente</h2><p>Lendo projetos, conversas, IAs e hardware local.</p></div></div></section></div></div>`;
   shell.appendChild(overlay);
   document.querySelector<HTMLElement>('.rail-button[data-action="profile"]')?.classList.add('active');
   overlay.querySelector<HTMLButtonElement>('[data-profile-close]')?.focus();
@@ -112,7 +106,7 @@ async function renderProfile(): Promise<void> {
       <div class="profile-avatar">${icon('user-round')}</div>
       <div class="profile-identity-copy">
         <strong data-profile-display-name>${displayName}</strong>
-        <span>Perfil local</span>
+        <span>Perfil neste dispositivo</span>
         <small>${escapeHtml(platform)} · ${escapeHtml(architecture)}${hardware?.totalRamBytes ? ` · ${escapeHtml(formatBytes(hardware.totalRamBytes))} RAM` : ''}</small>
       </div>
       <span class="profile-status profile-status-neutral">Local</span>
@@ -155,24 +149,9 @@ async function renderProfile(): Promise<void> {
       </section>
     </div>
 
-    <section class="profile-section">
-      <div class="profile-section-heading"><div class="profile-section-icon">${icon('globe-2')}</div><div><h2>Conta Auto CodeZ</h2><p>Essas opções permanecem visíveis porque serão ligadas ao backend de conta antes do lançamento.</p></div></div>
-      <div class="profile-provider-list">
-        ${profileProviders.map((provider) => `<div class="profile-provider-row"><div class="profile-provider-icon">${icon(provider.icon)}</div><div class="profile-provider-copy"><strong>${provider.name}</strong><span>${provider.description}</span></div><button class="profile-secondary-button" type="button" disabled title="Será conectado ao serviço de conta Auto CodeZ.">Em breve</button></div>`).join('')}
-      </div>
-    </section>
-
-    <section class="profile-section">
-      <div class="profile-section-heading"><div class="profile-section-icon">${icon('shield')}</div><div><h2>Métodos de acesso</h2><p>Base passwordless-first planejada para a conta sincronizada.</p></div></div>
-      <div class="profile-method-list">
-        <div class="profile-method-row"><div class="profile-method-icon">${icon('fingerprint')}</div><div><strong>Passkeys</strong><span>Chaves de acesso seguras, sem senha tradicional.</span></div><span class="profile-method-state">Em breve</span></div>
-        <div class="profile-method-row"><div class="profile-method-icon">${icon('mail')}</div><div><strong>Magic Link</strong><span>Acesso temporário por e-mail para recuperação e entrada rápida.</span></div><span class="profile-method-state">Em breve</span></div>
-      </div>
-    </section>
-
     <section class="profile-note">
       ${icon('shield')}
-      <div><strong>Planejado, não simulado</strong><span>Google, GitHub, Microsoft, Passkeys e Magic Link continuam na interface como recursos planejados. Eles só serão habilitados quando autenticação, sessão e backend de sincronização estiverem realmente conectados.</span></div>
+      <div><strong>Conta protegida</strong><span>Login, sessão e métodos de acesso são exibidos acima a partir do estado real da sua conta. Credenciais sensíveis permanecem fora desta interface.</span></div>
       <button class="profile-secondary-button enabled" type="button" data-profile-action="privacy">Privacidade</button>
     </section>`;
 }
