@@ -358,8 +358,11 @@ async function runScenarios() {
     await waitForText('.profile-header h1', 'Perfil');
     await waitForText('.profile-content', 'Seu espaço de trabalho');
     const text = (await page.locator('.profile-content').innerText()).replace(/\s+/g, ' ');
-    for (const expected of ['Ambiente de IA', 'Este dispositivo', 'Google', 'GitHub', 'Microsoft', 'Passkeys', 'Magic Link']) {
+    for (const expected of ['Ambiente de IA', 'Este dispositivo', 'Identidade neste dispositivo', 'Conta protegida']) {
       if (!text.includes(expected)) throw new Error(`Perfil não exibiu ${expected}.`);
+    }
+    for (const stale of ['Em breve', 'Planejado, não simulado', 'base da futura conta Auto CodeZ', 'quando a autenticação cloud entrar']) {
+      if (text.includes(stale)) throw new Error(`Perfil ainda exibiu estado legado: ${stale}.`);
     }
   });
 
