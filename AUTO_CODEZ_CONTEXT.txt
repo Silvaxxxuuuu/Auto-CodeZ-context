@@ -9589,3 +9589,103 @@ VALIDAÇÃO:
 - TypeScript já havia passado com a implementação de verificação OIDC;
 - validação final do HEAD posterior a esta seção deve ser registrada somente após CI real;
 - PR #9 deve permanecer OPEN / DRAFT / sem merge.
+
+------------------------------------------------------------
+24.56. ACCOUNT CORE NATIVO: DESCOPE SOCIAL + MAGIC LINK + PASSKEY
+------------------------------------------------------------
+
+DIREÇÃO FINAL DE UX DESTE LOTE:
+- o onboarding não usa mais uma única tela hospedada genérica como caminho padrão;
+- Auto CodeZ expõe diretamente GitHub, Google, Microsoft, Passkey e Magic Link na UI;
+- Descope continua sendo o identity service;
+- Azure continua FORA da autenticação.
+
+SOCIAL LOGIN:
+- GitHub, Google e Microsoft usam os endpoints REST nativos do Descope;
+- Auto CodeZ chama /v1/auth/oauth/authorize com o provider selecionado;
+- callback fixo de rota: autocodez://auth/oauth;
+- flowId e state seguem na query protegida da transação;
+- o code retornado é trocado em /v1/auth/oauth/exchange;
+- Session JWT retornado é validado antes de estabelecer a sessão.
+
+MAGIC LINK:
+- usa /v1/auth/magiclink/signup-in/email;
+- callback: autocodez://auth/magic-link;
+- flowId/state são validados antes de aceitar o token one-time;
+- token é verificado em /v1/auth/magiclink/verify;
+- Session JWT retornado também é validado.
+
+PASSKEY:
+- mantém OIDC Authorization Code + PKCE S256;
+- callback dedicado: autocodez://auth/passkey;
+- state, nonce e verifier ficam protegidos;
+- ID token RS256 é verificado;
+- issuer/audience/azp/exp/iat/nonce são validados;
+- UserInfo sub precisa bater com ID token sub;
+- autocodez://auth/hosted permanece somente como caminho compat/fallback, não como UX padrão.
+
+PERSISTÊNCIA DE FLOWS:
+- OAuth, Magic Link, Passkey e hosted possuem pending transaction separada;
+- material pendente é armazenado no ProtectedCredentialStore;
+- restart durante autenticação não perde a transação;
+- callback forjado/mismatched é rejeitado sem consumir o pending legítimo;
+- cancelamento válido limpa o pending correspondente;
+- sucesso, expiração e falha terminal também limpam o pending.
+
+SESSÕES DESCOPE:
+- tokens diretos recebem tag local descope-direct:<provider>:<refresh>;
+- OIDC recebe tag local descope-oidc:<provider>:<refresh>;
+- a tag é apenas metadado local para escolher o protocolo correto em refresh/logout;
+- provider original é preservado através de refresh;
+- direct refresh usa /v1/auth/refresh com Authorization Bearer PROJECT_ID:refresh;
+- direct logout usa /v1/auth/logout e revoga somente a sessão atual;
+- OIDC refresh/revoke continuam nos endpoints oauth2/v1.
+
+VALIDAÇÃO DE CHAVES:
+- Session JWT direto usa JWKS /v2/keys/<PROJECT_ID>;
+- ID token OIDC usa /<PROJECT_ID>/.well-known/jwks.json;
+- caches separados evitam misturar keysets de sessão e OIDC;
+- kid ausente no cache provoca uma nova leitura antes de rejeitar;
+- somente RSA/RS256 de assinatura é aceito.
+
+UI:
+- Descope factory não marca mais hosted=true no caminho principal;
+- account-ui renderiza campo Magic Link;
+- botões Continuar com GitHub / Google / Microsoft;
+- botão Entrar com passkey;
+- visual E2E exige essa superfície nativa e rejeita regressão para "Entrar ou criar conta" genérico.
+
+COMMITS PRINCIPAIS DESTE LOTE:
+- 3aeda98e7468a750f9db9a60f397fc26968edb84
+  feat(account): wire native login UI to Descope auth APIs
+- 36a2ff229306c222a2bc533db0542c9768800506
+  fix(account): isolate passkey OIDC callback path
+- c2f0c44e9082561f94ea109ec8ef53a9f872879a
+  fix(account): accept native Descope callbacks
+- 9a76c37751f60e216de215420a2b6ba91f2df110
+  fix(account): persist native auth transactions safely
+- f7e56fb60bf1ade9e44ff0fdd9978b19f8ab2d81
+  feat(account): expose native passwordless login controls
+- d8c88a67d7eca4653d05a7e05b6946dbe1eea3d3
+  fix(account): preserve provider and validate Descope session keys
+- fb232f5901b4f98d7a6034951de389ee27256f5c
+  fix(account): handle OAuth and passkey cancellation callbacks
+- e930724d3453b61893ff071baf5811bc714020c5
+  fix(account): make native auth cancellation terminal and safe
+- 355086b2c8da9679b6200a0666187203c25a2e1d
+  fix(account): dispatch native auth cancellation safely
+- 24abfd26d11d727f3bb3d3d7e1377d7e0ed04d74
+  test(account): initialize baseline session before restart assertion
+
+VALIDAÇÃO INTERMEDIÁRIA:
+- no HEAD 366c93b, Visual Auto CodeZ e Validate Account API estavam verdes;
+- Validate Auto CodeZ encontrou 1 falha apenas no teste de restart porque a instância baseline de AccountSessionRuntime ainda não havia sido hydrate() antes da assertiva;
+- implementação/runtime não falhou;
+- teste foi corrigido em 24abfd2;
+- no mesmo HEAD corrigido, Core tests, TypeScript, ESLint e Azure deployment script syntax já passaram;
+- registrar SUCCESS final somente no HEAD de documentação depois do CI real.
+
+PR #9:
+- deve continuar OPEN;
+- deve continuar DRAFT;
+- não fazer merge sem autorização explícita.
