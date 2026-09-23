@@ -583,6 +583,7 @@ test('Expired auth flow cannot be completed', async () => {
 
 test('native OAuth survives app restart and preserves the valid transaction after a forged callback', async () => {
   const { storage, credentials, devices, adapter, sessions, flows } = setup();
+  await sessions.hydrate();
   await flows.beginOAuth('github');
   assert.ok(adapter.lastOAuthBegin);
   assert.ok(await credentials.get('account.auth.pending-oauth'));
