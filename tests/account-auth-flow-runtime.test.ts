@@ -188,7 +188,7 @@ function setup(now = 100) {
     devices,
     adapter,
   );
-  const flows = new AccountAuthFlowRuntime(adapter, sessions, devices, () => now);
+  const flows = new AccountAuthFlowRuntime(adapter, sessions, devices, () => now, credentials);
   return { storage, credentials, devices, adapter, sessions, flows };
 }
 
@@ -578,4 +578,121 @@ test('Expired auth flow cannot be completed', async () => {
     /expirado/,
   );
   assert.equal(flows.snapshot().status, 'error');
+});
+
+
+test('native OAuth survives app restart and preserves the valid transaction after a forged callback', async () => {
+  const { storage, credentials, devices, adapter, sessions, flows } = setup();
+  await flows.beginOAuth('github');
+  assert.ok(adapter.lastOAuthBegin);
+  assert.ok(await credentials.get('account.auth.pending-oauth'));
+
+  const forged = await flows.completeOAuth({
+    flowId: 'oauth-flow',
+    code: 'forged-code',
+    state: 'forged-state',
+  });
+  assert.equal(forged.status, 'error');
+  assert.match(forged.lastError ?? '', /Estado OAuth inválido/);
+  assert.ok(await credentials.get('account.auth.pending-oauth'));
+  assert.equal(adapter.lastOAuthComplete, undefined);
+
+  const restoredSessions = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+  await restoredSessions.hydrate();
+  const restored = new AccountAuthFlowRuntime(
+    adapter,
+    restoredSessions,
+    devices,
+    () => 100,
+    credentials,
+  );
+  const completed = await restored.completeOAuth({
+    flowId: 'oauth-flow',
+    code: 'real-code',
+    state: adapter.lastOAuthBegin.state,
+  });
+
+  assert.equal(completed.status, 'authenticated');
+  assert.equal(adapter.lastOAuthComplete?.code, 'real-code');
+  assert.equal(restoredSessions.snapshot().state, 'authenticated');
+  assert.equal(await credentials.get('account.auth.pending-oauth'), null);
+  assert.equal(sessions.snapshot().state, 'signed_out');
+});
+
+test('Magic Link survives app restart and consumes protected pending state exactly once', async () => {
+  const { storage, credentials, devices, adapter, flows } = setup();
+  await flows.beginMagicLink('user@example.com');
+  assert.ok(adapter.lastMagicBegin);
+  assert.ok(await credentials.get('account.auth.pending-magic-link'));
+
+  const restoredSessions = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+  await restoredSessions.hydrate();
+  const restored = new AccountAuthFlowRuntime(
+    adapter,
+    restoredSessions,
+    devices,
+    () => 100,
+    credentials,
+  );
+  const completed = await restored.completeMagicLink({
+    flowId: 'magic-flow',
+    token: 'one-time-token',
+    state: adapter.lastMagicBegin.state,
+  });
+
+  assert.equal(completed.status, 'authenticated');
+  assert.equal(adapter.lastMagicComplete?.token, 'one-time-token');
+  assert.equal(await credentials.get('account.auth.pending-magic-link'), null);
+
+  await assert.rejects(
+    new AccountAuthFlowRuntime(adapter, restoredSessions, devices, () => 100, credentials)
+      .completeMagicLink({
+        flowId: 'magic-flow',
+        token: 'replay-token',
+        state: adapter.lastMagicBegin.state,
+      }),
+    /Fluxo de Magic Link inválido/,
+  );
+});
+
+test('Passkey PKCE transaction survives app restart without exposing verifier', async () => {
+  const { storage, credentials, devices, adapter, flows } = setup();
+  const started = await flows.beginPasskey();
+  assert.ok(adapter.lastPasskeyBegin);
+  const persisted = await credentials.get('account.auth.pending-passkey');
+  assert.ok(persisted);
+  assert.ok(!JSON.stringify(started.snapshot).includes(adapter.lastPasskeyBegin.codeChallenge));
+
+  const restoredSessions = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+  await restoredSessions.hydrate();
+  const restored = new AccountAuthFlowRuntime(
+    adapter,
+    restoredSessions,
+    devices,
+    () => 100,
+    credentials,
+  );
+
+  const completed = await restored.completePasskey({
+    code: 'passkey-code',
+    state: adapter.lastPasskeyBegin.state,
+  });
+  assert.equal(completed.status, 'authenticated');
+  assert.equal(adapter.lastPasskeyComplete?.codeVerifier.length > 40, true);
+  assert.equal(await credentials.get('account.auth.pending-passkey'), null);
 });
