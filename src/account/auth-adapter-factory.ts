@@ -42,7 +42,6 @@ export function createAccountAuthAdapter(
         deviceRegistry: new UnavailableDeviceRegistryAdapter(),
         configuration: {
           configured: true,
-          hosted: true,
           methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'],
         },
       };
