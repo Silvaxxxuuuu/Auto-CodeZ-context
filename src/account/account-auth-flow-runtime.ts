@@ -109,6 +109,7 @@ export class AccountAuthFlowRuntime {
   private pendingMagicLink?: PendingMagicLinkFlow;
   private pendingPasskey?: PendingPasskeyFlow;
   private pendingHosted?: PendingHostedFlow;
+  private cleanupPromise: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<(snapshot: AuthFlowSnapshot) => void>();
 
   constructor(
@@ -130,18 +131,20 @@ export class AccountAuthFlowRuntime {
 
   reset(): AuthFlowSnapshot {
     this.clearPending();
-    void this.clearAllPersisted();
+    this.schedulePersistedCleanup();
     return this.setState({ status: 'idle' });
   }
 
   async cancel(): Promise<AuthFlowSnapshot> {
     this.clearPending();
+    await this.cleanupPromise;
     await this.clearAllPersisted();
     return this.setState({ status: 'idle' });
   }
 
   async beginMagicLink(email: string): Promise<AuthFlowSnapshot> {
     this.assertCanBegin();
+    await this.cleanupPromise;
     const normalizedEmail = normalizeEmail(email);
     const device = await this.requirePersistentDevice();
     const state = randomBase64Url();
@@ -185,6 +188,7 @@ export class AccountAuthFlowRuntime {
     token: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
+    await this.cleanupPromise;
     const pending = this.pendingMagicLink ?? await this.restoreMagicLink();
     if (!pending || pending.flowId !== input.flowId) {
       throw new Error('Fluxo de Magic Link inválido.');
@@ -232,6 +236,7 @@ export class AccountAuthFlowRuntime {
     authorizationUrl: string;
   }> {
     this.assertCanBegin();
+    await this.cleanupPromise;
     const device = await this.requirePersistentDevice();
     const state = randomBase64Url();
     const nonce = randomBase64Url();
@@ -284,6 +289,7 @@ export class AccountAuthFlowRuntime {
     code: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
+    await this.cleanupPromise;
     const pending = this.pendingOAuth ?? await this.restoreOAuth();
     if (!pending || pending.flowId !== input.flowId) throw new Error('Fluxo OAuth inválido.');
     if (await this.expired(pending.expiresAt, PENDING_OAUTH_CREDENTIAL)) {
@@ -334,6 +340,7 @@ export class AccountAuthFlowRuntime {
     errorDescription?: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
+    await this.cleanupPromise;
     const pending = this.pendingOAuth ?? await this.restoreOAuth();
     if (!pending || pending.flowId !== input.flowId) {
       throw new Error('Fluxo OAuth inválido.');
@@ -366,6 +373,7 @@ export class AccountAuthFlowRuntime {
     authorizationUrl: string;
   }> {
     this.assertCanBegin();
+    await this.cleanupPromise;
     const device = await this.requirePersistentDevice();
     const state = randomBase64Url();
     const nonce = randomBase64Url();
@@ -415,6 +423,7 @@ export class AccountAuthFlowRuntime {
     code: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
+    await this.cleanupPromise;
     const pending = this.pendingPasskey ?? await this.restorePasskey();
     if (!pending || (input.flowId !== undefined && pending.flowId !== input.flowId)) {
       throw new Error('Fluxo Passkey inválido.');
@@ -463,6 +472,7 @@ export class AccountAuthFlowRuntime {
     errorDescription?: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
+    await this.cleanupPromise;
     const pending = this.pendingPasskey ?? await this.restorePasskey();
     if (!pending) throw new Error('Fluxo Passkey inválido.');
     if (input.state !== pending.state) {
@@ -491,6 +501,7 @@ export class AccountAuthFlowRuntime {
     authorizationUrl: string;
   }> {
     this.assertCanBegin();
+    await this.cleanupPromise;
     const begin = this.auth.beginHosted;
     if (!begin) {
       return {
@@ -547,6 +558,7 @@ export class AccountAuthFlowRuntime {
     code: string;
     state: string;
   }): Promise<AuthFlowSnapshot> {
+    await this.cleanupPromise;
     const pending = this.pendingHosted ?? await this.restoreHosted();
     if (!pending) throw new Error('Fluxo hospedado inválido ou expirado.');
     if (await this.expired(pending.expiresAt, PENDING_HOSTED_CREDENTIAL)) {
@@ -596,6 +608,7 @@ export class AccountAuthFlowRuntime {
     errorDescription?: string;
     state?: string;
   }): Promise<AuthFlowSnapshot> {
+    await this.cleanupPromise;
     const pending = this.pendingHosted ?? await this.restoreHosted();
     if (pending && input.state !== pending.state) {
       return this.setState({
@@ -619,14 +632,20 @@ export class AccountAuthFlowRuntime {
   }
 
   private async restoreOAuth(): Promise<PendingOAuthFlow | undefined> {
-    const value = await this.readPersisted(PENDING_OAUTH_CREDENTIAL);
-    if (!value || !validBasePending(value, this.now())) return undefined;
+    const value = await this.readValidPersisted(PENDING_OAUTH_CREDENTIAL);
+    if (!value) return undefined;
     if (
       value.provider !== 'github'
       && value.provider !== 'google'
       && value.provider !== 'microsoft'
-    ) return undefined;
-    if (typeof value.nonce !== 'string' || value.nonce.length < 16 || value.nonce.length > 512) return undefined;
+    ) {
+      await this.removePersisted(PENDING_OAUTH_CREDENTIAL);
+      return undefined;
+    }
+    if (typeof value.nonce !== 'string' || value.nonce.length < 16 || value.nonce.length > 512) {
+      await this.removePersisted(PENDING_OAUTH_CREDENTIAL);
+      return undefined;
+    }
 
     const restored: PendingOAuthFlow = {
       flowId: value.flowId as string,
@@ -641,8 +660,8 @@ export class AccountAuthFlowRuntime {
   }
 
   private async restoreMagicLink(): Promise<PendingMagicLinkFlow | undefined> {
-    const value = await this.readPersisted(PENDING_MAGIC_CREDENTIAL);
-    if (!value || !validBasePending(value, this.now())) return undefined;
+    const value = await this.readValidPersisted(PENDING_MAGIC_CREDENTIAL);
+    if (!value) return undefined;
     const restored: PendingMagicLinkFlow = {
       flowId: value.flowId as string,
       state: value.state as string,
@@ -654,9 +673,12 @@ export class AccountAuthFlowRuntime {
   }
 
   private async restorePasskey(): Promise<PendingPasskeyFlow | undefined> {
-    const value = await this.readPersisted(PENDING_PASSKEY_CREDENTIAL);
-    if (!value || !validBasePending(value, this.now())) return undefined;
-    if (typeof value.nonce !== 'string' || value.nonce.length < 16 || value.nonce.length > 512) return undefined;
+    const value = await this.readValidPersisted(PENDING_PASSKEY_CREDENTIAL);
+    if (!value) return undefined;
+    if (typeof value.nonce !== 'string' || value.nonce.length < 16 || value.nonce.length > 512) {
+      await this.removePersisted(PENDING_PASSKEY_CREDENTIAL);
+      return undefined;
+    }
     const restored: PendingPasskeyFlow = {
       flowId: value.flowId as string,
       state: value.state as string,
@@ -669,9 +691,12 @@ export class AccountAuthFlowRuntime {
   }
 
   private async restoreHosted(): Promise<PendingHostedFlow | undefined> {
-    const value = await this.readPersisted(PENDING_HOSTED_CREDENTIAL);
-    if (!value || !validBasePending(value, this.now())) return undefined;
-    if (typeof value.nonce !== 'string' || value.nonce.length < 16 || value.nonce.length > 512) return undefined;
+    const value = await this.readValidPersisted(PENDING_HOSTED_CREDENTIAL);
+    if (!value) return undefined;
+    if (typeof value.nonce !== 'string' || value.nonce.length < 16 || value.nonce.length > 512) {
+      await this.removePersisted(PENDING_HOSTED_CREDENTIAL);
+      return undefined;
+    }
     const restored: PendingHostedFlow = {
       flowId: value.flowId as string,
       state: value.state as string,
@@ -705,9 +730,25 @@ export class AccountAuthFlowRuntime {
     }
   }
 
+  private async readValidPersisted(key: string): Promise<Record<string, unknown> | undefined> {
+    const value = await this.readPersisted(key);
+    if (!value) return undefined;
+    if (validBasePending(value, this.now())) return value;
+    await this.removePersisted(key);
+    return undefined;
+  }
+
   private async removePersisted(key: string): Promise<void> {
     if (!this.pendingCredentials) return;
     await this.pendingCredentials.remove(key);
+  }
+
+  private schedulePersistedCleanup(): void {
+    const cleanup = this.cleanupPromise.then(
+      () => this.clearAllPersisted(),
+      () => this.clearAllPersisted(),
+    );
+    this.cleanupPromise = cleanup.catch(() => undefined);
   }
 
   private async clearAllPersisted(): Promise<void> {
