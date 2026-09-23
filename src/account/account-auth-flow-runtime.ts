@@ -328,6 +328,39 @@ export class AccountAuthFlowRuntime {
     }
   }
 
+  async failOAuthCallback(input: {
+    flowId: string;
+    error: string;
+    errorDescription?: string;
+    state: string;
+  }): Promise<AuthFlowSnapshot> {
+    const pending = this.pendingOAuth ?? await this.restoreOAuth();
+    if (!pending || pending.flowId !== input.flowId) {
+      throw new Error('Fluxo OAuth inválido.');
+    }
+    if (input.state !== pending.state) {
+      return this.setState({
+        status: 'error',
+        method: 'oauth',
+        provider: pending.provider,
+        lastError: 'Estado OAuth inválido.',
+      });
+    }
+
+    this.clearPending();
+    await this.clearAllPersisted();
+    const cancelled = input.error === 'access_denied' || input.error === 'cancelled';
+    const safeDescription = input.errorDescription?.trim().slice(0, 512);
+    return this.setState({
+      status: 'error',
+      method: 'oauth',
+      provider: pending.provider,
+      lastError: cancelled
+        ? 'Autenticação cancelada.'
+        : safeDescription || 'Não foi possível concluir a autenticação OAuth.',
+    });
+  }
+
   async beginPasskey(): Promise<{
     snapshot: AuthFlowSnapshot;
     authorizationUrl: string;
@@ -423,6 +456,34 @@ export class AccountAuthFlowRuntime {
       await this.removePersisted(PENDING_PASSKEY_CREDENTIAL);
       return this.fail(error);
     }
+  }
+
+  async failPasskeyCallback(input: {
+    error: string;
+    errorDescription?: string;
+    state: string;
+  }): Promise<AuthFlowSnapshot> {
+    const pending = this.pendingPasskey ?? await this.restorePasskey();
+    if (!pending) throw new Error('Fluxo Passkey inválido.');
+    if (input.state !== pending.state) {
+      return this.setState({
+        status: 'error',
+        method: 'passkey',
+        lastError: 'Estado Passkey inválido.',
+      });
+    }
+
+    this.clearPending();
+    await this.clearAllPersisted();
+    const cancelled = input.error === 'access_denied' || input.error === 'cancelled';
+    const safeDescription = input.errorDescription?.trim().slice(0, 512);
+    return this.setState({
+      status: 'error',
+      method: 'passkey',
+      lastError: cancelled
+        ? 'Autenticação cancelada.'
+        : safeDescription || 'Não foi possível concluir a autenticação com passkey.',
+    });
   }
 
   async beginHosted(): Promise<{
