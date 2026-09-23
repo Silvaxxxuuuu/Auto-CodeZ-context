@@ -169,6 +169,9 @@ async function main() {
   if (profileText?.includes('base da futura conta Auto CodeZ')) {
     throw new Error('Perfil ainda descreve a conta Auto CodeZ como recurso futuro.');
   }
+  if (profileText?.includes('quando a autenticação cloud entrar')) {
+    throw new Error('Perfil ainda exibe copy legado anterior à autenticação real.');
+  }
   await page.screenshot({
     path: path.join(outputDir, 'funcional-profile-account-cleanup.png'),
     animations: 'disabled',
