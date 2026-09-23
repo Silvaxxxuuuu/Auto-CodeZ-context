@@ -87,14 +87,14 @@ test('configured account endpoint stays gated when configuration discovery is te
   assert.match(snapshot.configurationError ?? '', /network unavailable/);
 });
 
-test('account auth factory prefers hosted Descope identity when project id is configured', async () => {
+test('account auth factory exposes native Descope identity methods when project id is configured', async () => {
   const result = createAccountAuthAdapter({
     descopeProjectId: 'P2abcDEF_123',
     legacyBaseUrl: 'https://accounts.autocodez.example',
   });
 
   assert.equal(result.configuration.configured, true);
-  assert.equal(result.configuration.hosted, true);
+  assert.equal(result.configuration.hosted, undefined);
   assert.deepEqual(result.configuration.methods, [
     'magic_link',
     'github',
@@ -107,7 +107,6 @@ test('account auth factory prefers hosted Descope identity when project id is co
 
   assert.deepEqual(await resolveAccountAuthConfiguration(result), {
     configured: true,
-    hosted: true,
     methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'],
   });
 });
