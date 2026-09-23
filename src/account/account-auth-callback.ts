@@ -13,7 +13,6 @@ export type AccountAuthCallback =
     }
   | {
       type: 'passkey';
-      flowId: string;
       code: string;
       state: string;
     }
@@ -54,10 +53,14 @@ export function parseAccountAuthCallback(rawUrl: string): AccountAuthCallback {
   }
 
   if (url.pathname === '/magic-link') {
+    const token = url.searchParams.get('t')?.trim() || url.searchParams.get('token')?.trim() || '';
+    if (!token || token.length > 16_384) {
+      throw new Error('Parâmetro de autenticação inválido: token.');
+    }
     return {
       type: 'magic_link',
       flowId: requiredParam(url, 'flowId', 256),
-      token: requiredParam(url, 'token'),
+      token,
       state: requiredParam(url, 'state', 512),
     };
   }
@@ -65,7 +68,6 @@ export function parseAccountAuthCallback(rawUrl: string): AccountAuthCallback {
   if (url.pathname === '/passkey') {
     return {
       type: 'passkey',
-      flowId: requiredParam(url, 'flowId', 256),
       code: requiredParam(url, 'code'),
       state: requiredParam(url, 'state', 512),
     };
