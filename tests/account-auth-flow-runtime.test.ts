@@ -737,3 +737,53 @@ test('valid passkey cancellation clears protected PKCE material', async () => {
   assert.equal(cancelled.lastError, 'Autenticação cancelada.');
   assert.equal(await credentials.get('account.auth.pending-passkey'), null);
 });
+
+test('reset cleanup is serialized before a new protected OAuth transaction is persisted', async () => {
+  const { credentials, adapter, flows } = setup();
+  let releaseCleanup: (() => void) | undefined;
+  const cleanupGate = new Promise<void>((resolve) => {
+    releaseCleanup = resolve;
+  });
+  const originalRemove = credentials.remove.bind(credentials);
+  let blockCleanup = true;
+  credentials.remove = async (key: string): Promise<boolean> => {
+    if (blockCleanup) await cleanupGate;
+    return await originalRemove(key);
+  };
+
+  flows.reset();
+  const startedPromise = flows.beginOAuth('github');
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(adapter.lastOAuthBegin, undefined);
+
+  blockCleanup = false;
+  releaseCleanup?.();
+  const started = await startedPromise;
+
+  assert.equal(started.snapshot.status, 'waiting_browser');
+  assert.ok(adapter.lastOAuthBegin);
+  assert.ok(await credentials.get('account.auth.pending-oauth'));
+});
+
+test('expired protected OAuth transaction is removed during restart restoration', async () => {
+  const { credentials, flows } = setup(200);
+  await credentials.set('account.auth.pending-oauth', JSON.stringify({
+    flowId: 'oauth-flow',
+    provider: 'github',
+    state: 'state-12345678901234567890',
+    nonce: 'nonce-12345678901234567890',
+    codeVerifier: 'verifier-12345678901234567890123456789012345678901234567890',
+    expiresAt: 150,
+  }));
+
+  await assert.rejects(
+    flows.completeOAuth({
+      flowId: 'oauth-flow',
+      code: 'late-code',
+      state: 'state-12345678901234567890',
+    }),
+    /Fluxo OAuth inválido/,
+  );
+  assert.equal(await credentials.get('account.auth.pending-oauth'), null);
+});
+
