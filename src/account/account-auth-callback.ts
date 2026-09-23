@@ -6,6 +6,13 @@ export type AccountAuthCallback =
       state: string;
     }
   | {
+      type: 'oauth_error';
+      flowId: string;
+      error: string;
+      errorDescription?: string;
+      state: string;
+    }
+  | {
       type: 'magic_link';
       flowId: string;
       token: string;
@@ -14,6 +21,12 @@ export type AccountAuthCallback =
   | {
       type: 'passkey';
       code: string;
+      state: string;
+    }
+  | {
+      type: 'passkey_error';
+      error: string;
+      errorDescription?: string;
       state: string;
     }
   | {
@@ -44,6 +57,19 @@ export function parseAccountAuthCallback(rawUrl: string): AccountAuthCallback {
   }
 
   if (url.pathname === '/oauth') {
+    const error = url.searchParams.get('error')?.trim() ?? '';
+    if (error) {
+      if (error.length > 256) throw new Error('Parâmetro de autenticação inválido: error.');
+      const description = url.searchParams.get('error_description')?.trim() ?? '';
+      if (description.length > 2_048) throw new Error('Parâmetro de autenticação inválido: error_description.');
+      return {
+        type: 'oauth_error',
+        flowId: requiredParam(url, 'flowId', 256),
+        error,
+        ...(description ? { errorDescription: description } : {}),
+        state: requiredParam(url, 'state', 512),
+      };
+    }
     return {
       type: 'oauth',
       flowId: requiredParam(url, 'flowId', 256),
@@ -66,6 +92,18 @@ export function parseAccountAuthCallback(rawUrl: string): AccountAuthCallback {
   }
 
   if (url.pathname === '/passkey') {
+    const error = url.searchParams.get('error')?.trim() ?? '';
+    if (error) {
+      if (error.length > 256) throw new Error('Parâmetro de autenticação inválido: error.');
+      const description = url.searchParams.get('error_description')?.trim() ?? '';
+      if (description.length > 2_048) throw new Error('Parâmetro de autenticação inválido: error_description.');
+      return {
+        type: 'passkey_error',
+        error,
+        ...(description ? { errorDescription: description } : {}),
+        state: requiredParam(url, 'state', 512),
+      };
+    }
     return {
       type: 'passkey',
       code: requiredParam(url, 'code'),
