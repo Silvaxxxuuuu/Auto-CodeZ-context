@@ -696,3 +696,43 @@ test('Passkey PKCE transaction survives app restart without exposing verifier', 
   assert.equal(adapter.lastPasskeyComplete?.codeVerifier.length > 40, true);
   assert.equal(await credentials.get('account.auth.pending-passkey'), null);
 });
+
+
+test('valid native OAuth cancellation clears protected state but forged cancellation does not', async () => {
+  const { credentials, adapter, flows } = setup();
+  await flows.beginOAuth('microsoft');
+  assert.ok(adapter.lastOAuthBegin);
+
+  const forged = await flows.failOAuthCallback({
+    flowId: 'oauth-flow',
+    error: 'access_denied',
+    state: 'forged-state',
+  });
+  assert.equal(forged.status, 'error');
+  assert.match(forged.lastError ?? '', /Estado OAuth inválido/);
+  assert.ok(await credentials.get('account.auth.pending-oauth'));
+
+  const cancelled = await flows.failOAuthCallback({
+    flowId: 'oauth-flow',
+    error: 'access_denied',
+    state: adapter.lastOAuthBegin.state,
+  });
+  assert.equal(cancelled.status, 'error');
+  assert.equal(cancelled.lastError, 'Autenticação cancelada.');
+  assert.equal(await credentials.get('account.auth.pending-oauth'), null);
+});
+
+test('valid passkey cancellation clears protected PKCE material', async () => {
+  const { credentials, adapter, flows } = setup();
+  await flows.beginPasskey();
+  assert.ok(adapter.lastPasskeyBegin);
+  assert.ok(await credentials.get('account.auth.pending-passkey'));
+
+  const cancelled = await flows.failPasskeyCallback({
+    error: 'access_denied',
+    state: adapter.lastPasskeyBegin.state,
+  });
+  assert.equal(cancelled.status, 'error');
+  assert.equal(cancelled.lastError, 'Autenticação cancelada.');
+  assert.equal(await credentials.get('account.auth.pending-passkey'), null);
+});
