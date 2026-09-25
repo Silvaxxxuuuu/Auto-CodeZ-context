@@ -907,6 +907,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   const value = requireObject(input, 'Mensagem');
   const chatId = requireIdentifier(value.chatId, 'Chat');
   const content = requireNonEmptyString(value.content, 'Mensagem');
+  const attachments = await requireStoredAttachments(value.attachments);
   const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
   const { chat, config } = await getChatContext(chatId);
   const lastMessage = chat.messages.at(-1);
@@ -947,9 +948,17 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
     captureExecutionTaskCapsule(chat, runId, content);
     await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
     const projectContext = await buildExecutionContext(chat, runId, content);
-    if (!isRetryOfPersistedUserMessage) await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
-    const workingChat = (await chatManager.list()).find((item) => item.id === chat.id);
-    if (!workingChat) throw new Error('Chat desapareceu durante a execução.');
+    if (!isRetryOfPersistedUserMessage) {
+      await chatManager.addMessage(chat.id, {
+        role: 'user',
+        content,
+        createdAt: Date.now(),
+        ...(attachments.length ? { attachments } : {}),
+      });
+    }
+    const persistedWorkingChat = (await chatManager.list()).find((item) => item.id === chat.id);
+    if (!persistedWorkingChat) throw new Error('Chat desapareceu durante a execução.');
+    const workingChat = await hydrateChatAttachments(persistedWorkingChat);
     let result;
     try {
       result = await runWithAbortSignal(controller.signal, () => agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId));
