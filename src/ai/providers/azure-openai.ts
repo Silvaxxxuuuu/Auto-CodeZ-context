@@ -10,6 +10,7 @@ import type {
 } from '../types';
 import { classifyProviderError, createProviderRequestError, retryAfterFromMessage } from '../provider-errors';
 import { fetchWithTimeout, parseSSE } from '../sse';
+import { imageDataUrl, nativeImageAttachments } from '../provider-attachments';
 
 const MODEL_LIST_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 120_000;
@@ -56,6 +57,10 @@ function supportsReasoning(model: string): boolean {
   return reasoningLevels(model).some((level) => level !== 'normal');
 }
 
+function supportsVision(model: string): boolean {
+  return /(?:^|[-_.])(?:gpt-4o|gpt-4\.1|gpt-5(?:\.\d+)?|gpt-5\.6|chatgpt)(?:[-_.]|$)/i.test(model);
+}
+
 function reasoningEffort(level: AIRequest['intelligence'], model: string): string | undefined {
   if (!supportsReasoning(model) || level === 'normal') return undefined;
   if (level === 'low') return 'low';
@@ -78,7 +83,13 @@ function buildResponsesInput(messages: AIMessage[]): Array<Record<string, unknow
       }
       continue;
     }
-    input.push({ role: message.role, content: [{ type: 'input_text', text: message.content }] });
+    const content: Array<Record<string, unknown>> = [{ type: 'input_text', text: message.content }];
+    if (message.role === 'user') {
+      for (const attachment of nativeImageAttachments(message)) {
+        content.push({ type: 'input_image', image_url: imageDataUrl(attachment), detail: 'auto' });
+      }
+    }
+    input.push({ role: message.role, content });
   }
   return input;
 }
@@ -113,6 +124,19 @@ function buildChatMessages(messages: AIMessage[]): Array<Record<string, unknown>
         ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
       });
       continue;
+    }
+    if (message.role === 'user') {
+      const images = nativeImageAttachments(message);
+      if (images.length) {
+        mapped.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: message.content },
+            ...images.map((attachment) => ({ type: 'image_url', image_url: { url: imageDataUrl(attachment) } })),
+          ],
+        });
+        continue;
+      }
     }
     mapped.push({ role: message.role, content: message.content });
   }
@@ -544,7 +568,7 @@ export class AzureOpenAIAdapter implements AIProviderAdapter {
         id,
         name: id,
         providerId: this.id,
-        capabilities: ['text', 'streaming', 'tools', ...(supportsReasoning(id) ? ['reasoning'] : [])] as AIModel['capabilities'],
+        capabilities: ['text', 'streaming', 'tools', ...(supportsReasoning(id) ? ['reasoning'] : []), ...(supportsVision(id) ? ['vision'] : [])] as AIModel['capabilities'],
         reasoningLevels: reasoningLevels(id),
       }));
   }
