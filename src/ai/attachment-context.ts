@@ -1,4 +1,4 @@
-import type { AIAttachment, AIAttachmentContext, Capability } from './types';
+import type { AIAttachment, AIAttachmentContext, AIMessage, Capability } from './types';
 
 export type AttachmentDelivery =
   | { mode: 'native'; attachment: AIAttachment }
@@ -52,4 +52,31 @@ export function attachmentFallbackContext(
     .filter((delivery): delivery is Extract<AttachmentDelivery, { mode: 'text' }> => delivery.mode === 'text')
     .map((delivery) => delivery.text)
     .join('\n\n');
+}
+
+
+export function prepareMessagesForAttachments(
+  messages: readonly AIMessage[],
+  capabilities: readonly Capability[],
+): AIMessage[] {
+  return messages.map((message) => {
+    if (!message.attachments?.length) return { ...message };
+
+    const nativeAttachments: AIAttachment[] = [];
+    const fallback: string[] = [];
+    for (const attachment of message.attachments) {
+      const delivery = resolveAttachmentDelivery(attachment, capabilities);
+      if (delivery.mode === 'native') nativeAttachments.push({ ...delivery.attachment });
+      else fallback.push(delivery.text);
+    }
+
+    const suffix = fallback.length
+      ? `\n\n--- Contexto de anexos indexado pelo Auto CodeZ ---\n${fallback.join('\n\n')}`
+      : '';
+    return {
+      ...message,
+      content: `${message.content}${suffix}`,
+      ...(nativeAttachments.length ? { attachments: nativeAttachments } : {}),
+    };
+  });
 }
