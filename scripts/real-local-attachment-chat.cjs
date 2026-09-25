@@ -12,12 +12,13 @@ const outputDir = path.resolve(root, process.env.AUTO_CODEZ_LOCAL_ATTACHMENT_DIR
 const executable = (process.env.AUTO_CODEZ_ELECTRON_EXECUTABLE || '').trim();
 const llamaServerExe = (process.env.AUTO_CODEZ_LOCAL_TEXT_SERVER_EXE || '').trim();
 const textModelPath = (process.env.AUTO_CODEZ_LOCAL_TEXT_MODEL || '').trim();
-const modelId = 'smollm2-360m-real';
+const modelId = 'qwen2.5-0.5b-real';
 const sourceUrl = 'https://en.wikipedia.org/wiki/Electron_(software_framework)';
 
 let stateRoot, appProcess, browser, page, proxyServer, textProcess;
 let textPort = 0;
 let lastInferenceRequest;
+let lastInferenceRawResponse = '';
 let appStderr = '';
 
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -80,6 +81,23 @@ async function startTextModel() {
     void stderr.close().catch(() => {});
   });
   await waitHealth('http://127.0.0.1:' + textPort + '/health', textProcess, 90000);
+  const warmup = await fetch('http://127.0.0.1:' + textPort + '/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: modelId,
+      stream: false,
+      temperature: 0,
+      max_tokens: 96,
+      messages: [{ role: 'user', content: 'Explique em uma frase o que é um framework de software.' }]
+    }),
+    signal: AbortSignal.timeout(60000)
+  });
+  const warmupData = await warmup.json().catch(() => ({}));
+  const warmupText = warmupData?.choices?.[0]?.message?.content;
+  if (!warmup.ok || typeof warmupText !== 'string' || warmupText.trim().length < 10) {
+    throw new Error('Modelo textual local não respondeu ao warm-up: ' + JSON.stringify(warmupData));
+  }
 }
 
 async function readBody(req) {
@@ -97,11 +115,11 @@ async function startLmStudioProxy() {
           models: [{
             type: 'llm',
             key: modelId,
-            display_name: 'SmolLM2 360M · inferência real',
-            architecture: 'smollm2',
-            quantization: { name: 'Q8_0', bits_per_weight: 8 },
-            size_bytes: 405000000,
-            params_string: '360M',
+            display_name: 'Qwen2.5 0.5B · inferência real',
+            architecture: 'qwen2',
+            quantization: { name: 'Q4_K_M', bits_per_weight: 4 },
+            size_bytes: 398000000,
+            params_string: '0.5B',
             max_context_length: 8192,
             capabilities: { vision: false, trained_for_tool_use: false }
           }]
@@ -122,7 +140,11 @@ async function startLmStudioProxy() {
         if (type) headers['Content-Type'] = type;
         res.writeHead(upstream.status, headers);
         if (!upstream.body) { res.end(); return; }
-        Readable.fromWeb(upstream.body).pipe(res);
+        const readable = Readable.fromWeb(upstream.body);
+        readable.on('data', (chunk) => {
+          lastInferenceRawResponse = (lastInferenceRawResponse + chunk.toString('utf8')).slice(-262144);
+        });
+        readable.pipe(res);
         return;
       }
       res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -260,7 +282,7 @@ async function selectModel() {
   await page.waitForFunction(() => document.querySelector('#chat-local-model-state')?.dataset.localUnifiedReady === 'true', undefined, { timeout: 20000 });
 
   const model = page.locator('#chat-model');
-  const option = model.locator('option').filter({ hasText: 'SmolLM2 360M' });
+  const option = model.locator('option').filter({ hasText: 'Qwen2.5 0.5B' });
   await option.waitFor({ state: 'attached', timeout: 15000 });
   const value = await option.getAttribute('value');
   if (!value) throw new Error('Modelo local real ficou sem ID.');
@@ -270,7 +292,7 @@ async function selectModel() {
   await page.waitForFunction(() => !document.querySelector('#modal-root')?.firstElementChild, undefined, { timeout: 15000 });
   await page.waitForFunction(async (chatId) => {
     const chat = (await window.autoCodez.getState()).chats.find((item) => item.id === chatId);
-    return chat?.providerId === 'lm-studio' && chat.model === 'smollm2-360m-real';
+    return chat?.providerId === 'lm-studio' && chat.model === 'qwen2.5-0.5b-real';
   }, created.id, { timeout: 30000 });
   return created.id;
 }
@@ -358,6 +380,9 @@ async function cleanup() {
     const message = error instanceof Error ? error.name + ': ' + error.message : String(error);
     if (page && !page.isClosed()) await page.screenshot({ path: path.join(outputDir, 'falha-real-local-attachment-chat.png'), animations: 'disabled', fullPage: true }).catch(() => {});
     await fs.writeFile(path.join(outputDir, 'erro.txt'), message + '\n\n' + appStderr, 'utf8').catch(() => {});
+    await fs.writeFile(path.join(outputDir, 'debug-request.json'), JSON.stringify(lastInferenceRequest || {}, null, 2), 'utf8').catch(() => {});
+    await fs.writeFile(path.join(outputDir, 'debug-response.txt'), lastInferenceRawResponse || '[sem resposta SSE capturada]', 'utf8').catch(() => {});
+    console.error('Última resposta SSE:', lastInferenceRawResponse.slice(-12000));
     console.error(error);
     process.exitCode = 1;
   } finally {
