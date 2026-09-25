@@ -1,6 +1,7 @@
 import type { AIMessage, AIModel, AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent, AIToolCall, Capability, IntelligenceLevel, ProviderId } from '../types';
 import { createProviderRequestError } from '../provider-errors';
 import { fetchWithTimeout, parseSSE } from '../sse';
+import { imageDataUrl, nativeImageAttachments } from '../provider-attachments';
 
 const MODEL_LIST_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 120_000;
@@ -158,6 +159,19 @@ function mapMessages(messages: AIMessage[]): Array<Record<string, unknown>> {
       }));
       mapped.push({ role: 'assistant', content: message.content || null, ...(toolCalls.length ? { tool_calls: toolCalls } : {}) });
       continue;
+    }
+    if (message.role === 'user') {
+      const images = nativeImageAttachments(message);
+      if (images.length) {
+        mapped.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: message.content },
+            ...images.map((attachment) => ({ type: 'image_url', image_url: { url: imageDataUrl(attachment) } })),
+          ],
+        });
+        continue;
+      }
     }
     mapped.push({ role: message.role, content: message.content });
   }
