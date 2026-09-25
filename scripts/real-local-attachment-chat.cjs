@@ -325,6 +325,12 @@ async function testPasteAndAnswer(chatId, sourcePath) {
   await prompt.fill(question);
   await page.keyboard.press('Enter');
 
+  const sentPreview = page.locator('#messages .message.user .message-attachment-preview').last();
+  await sentPreview.waitFor({ state: 'visible', timeout: 30_000 });
+  const sentPreviewSrc = await sentPreview.getAttribute('src');
+  if (!sentPreviewSrc?.startsWith('data:image/')) throw new Error('Mensagem enviada não renderizou a miniatura persistida da imagem.');
+  await page.screenshot({ path: path.join(outputDir, 'funcional-imagem-enviada-no-historico.png'), animations: 'disabled', fullPage: true });
+
   const providerDeadline = Date.now() + 8 * 60_000;
   while (!lastInferenceRequest && Date.now() < providerDeadline) {
     await delay(500);
