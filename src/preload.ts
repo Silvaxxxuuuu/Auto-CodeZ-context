@@ -122,12 +122,14 @@ contextBridge.exposeInMainWorld('autoCodez', {
     });
   },
   pickChatAttachments: (kind: 'file' | 'image') => invoke('chat-attachments:pick', kind),
+  pasteChatImage: () => invoke('chat-attachments:paste-image'),
   streamChat: async (input: { chatId: string; content: string; attachments?: unknown[]; allowedPaths?: string[] }) => {
     const value = requireObject(input, 'Mensagem');
     const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
     const result = await invoke<{ pendingApprovalIds: string[]; chat: unknown; error?: string }>('chat:stream', {
       chatId: requireIdentifier(value.chatId, 'Chat'),
       content: requireNonEmptyString(value.content, 'Mensagem'),
+      ...(Array.isArray(value.attachments) && value.attachments.length ? { attachments: value.attachments } : {}),
       ...(allowedPaths === undefined ? {} : { allowedPaths }),
     });
     if (result.error) throw new Error(result.error);
