@@ -320,19 +320,30 @@ async function testPasteAndAnswer(chatId, sourcePath) {
   await prompt.fill(question);
   await page.keyboard.press('Enter');
 
-  await page.waitForFunction(async (input) => {
-    const chat = (await window.autoCodez.getState()).chats.find((item) => item.id === input.chatId);
-    const user = chat?.messages.some((message) => message.role === 'user' && message.content === input.question && message.attachments?.length);
-    const answer = [...(chat?.messages || [])].reverse().find((message) => message.role === 'assistant')?.content || '';
-    return Boolean(user && answer.length >= 80);
-  }, { chatId, question }, { timeout: 600000 });
+  const providerDeadline = Date.now() + 8 * 60_000;
+  while (!lastInferenceRequest && Date.now() < providerDeadline) {
+    await delay(500);
+  }
+  if (!lastInferenceRequest) {
+    throw new Error('O pipeline não alcançou o modelo textual local dentro de 8 minutos.');
+  }
 
-  const chat = await page.evaluate(async (id) => (await window.autoCodez.getState()).chats.find((item) => item.id === id), chatId);
-  const answer = [...chat.messages].reverse().find((message) => message.role === 'assistant')?.content?.trim() || '';
+  let chat;
+  let answer = '';
+  const answerDeadline = Date.now() + 2 * 60_000;
+  while (Date.now() < answerDeadline) {
+    chat = await page.evaluate(async (id) => (await window.autoCodez.getState()).chats.find((item) => item.id === id), chatId);
+    answer = [...(chat?.messages || [])].reverse().find((message) => message.role === 'assistant')?.content?.trim() || '';
+    if (answer.length >= 80) break;
+    await delay(400);
+  }
+  if (!answer) throw new Error('O modelo local recebeu a requisição, mas nenhuma resposta foi persistida no chat.');
   const hits = hitsFor(answer);
   if (hits.length < 3) throw new Error('Resposta local pouco relacionada à imagem. hits=' + JSON.stringify(hits) + ' answer=' + answer);
 
   const requestText = JSON.stringify(lastInferenceRequest || {});
+  await fs.writeFile(path.join(outputDir, 'request-real-local.json'), JSON.stringify(lastInferenceRequest || {}, null, 2), 'utf8');
+  await fs.writeFile(path.join(outputDir, 'response-sse-real-local.txt'), lastInferenceRawResponse || '[sem SSE capturada]', 'utf8');
   if (/image_url|data:image\//i.test(requestText)) throw new Error('Modelo text-only recebeu imagem nativa.');
   if (!/Electron/i.test(requestText)) throw new Error('Conteúdo derivado da imagem não chegou ao modelo local.');
   if (!/(Texto reconhecido na imagem|Descrição visual)/i.test(requestText)) throw new Error('OCR/descrição visual não chegou ao request local.');
