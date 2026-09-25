@@ -25,6 +25,7 @@ test('account auth factory enables all passwordless methods for a valid HTTPS ba
     'github',
     'google',
     'microsoft',
+    'passkey',
   ]);
   assert.equal(result.configuration.passkeyEnrollmentSupported, true);
   assert.ok(result.adapter instanceof HttpAuthAdapter);
@@ -102,7 +103,6 @@ test('account auth factory exposes native Descope identity methods when project 
     'github',
     'google',
     'microsoft',
-    'passkey',
   ]);
   assert.ok(result.adapter instanceof DescopeAuthAdapter);
   assert.ok(result.deviceRegistry instanceof UnavailableDeviceRegistryAdapter);
