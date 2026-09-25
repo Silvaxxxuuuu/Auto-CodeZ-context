@@ -70,6 +70,19 @@ A hosted OIDC path using `autocodez://auth/hosted` remains implemented as a comp
 
 The former Azure Account API remains in the repository only as legacy/future backend code. The desktop runtime does not use Azure for sign-in.
 
+## Account Data Service
+
+Authentication and product/account data are separate concerns.
+
+- Descope owns identity, sign-in, session issuance and refresh.
+- The optional Account Data Service owns Device Registry, future sync metadata, plan/product metadata and other Auto CodeZ-specific account data.
+- The desktop configures this service independently with `AUTO_CODEZ_ACCOUNT_DATA_BASE_URL`.
+- Enabling an Account Data Service does not change the authentication provider and does not route sign-in through Azure.
+- The service must use HTTPS and must validate the Descope session presented by the desktop before accepting device operations.
+- When no Account Data Service is configured, the account remains fully usable for authentication and the Device Registry stays unavailable rather than falling back to a legacy auth backend.
+
+This separation allows the Account Data Service to be hosted on any suitable provider later without coupling Auto CodeZ authentication to that infrastructure.
+
 ## Descope project requirements
 
 The desktop only needs the public Descope Project ID at runtime/build time. It never embeds a Descope management key, access key, social client secret or email-provider credential.
