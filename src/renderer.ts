@@ -374,7 +374,7 @@ function renderMessages(): void {
     messages.innerHTML = `<div class="welcome"><div class="welcome-mark"><span class="welcome-mark-eye"></span></div><h2>Como você quer trabalhar?</h2><p>Converse com uma IA, crie conteúdo ou abra um projeto para trabalhar em arquivos.</p><div class="welcome-grid"><button data-suggestion="Explique como o Auto CodeZ funciona.">Pergunte qualquer coisa</button><button data-suggestion="Analise meu projeto e explique a estrutura.">Analise um projeto</button><button data-suggestion="Crie uma ideia de interface moderna.">Crie conteúdo</button></div></div>`;
     return;
   }
-  const rendered = activeChat.messages.map((message) => `<article class="message ${message.role}"><div class="message-label">${message.role === 'user' ? 'Você' : message.role === 'tool' ? 'Ferramenta' : providerName(activeChat!.providerId)}</div><div class="message-content">${escapeHtml(message.content).replace(/\n/g, '<br>')}</div></article>`).join('');
+  const rendered = activeChat.messages.map((message) => `<article class="message ${message.role}"><div class="message-label">${message.role === 'user' ? 'Você' : message.role === 'tool' ? 'Ferramenta' : providerName(activeChat!.providerId)}</div>${attachmentListMarkup(message.attachments)}<div class="message-content">${escapeHtml(message.content).replace(/\n/g, '<br>')}</div></article>`).join('');
   const live = executionState === 'running' && streamingText ? `<article class="message assistant streaming"><div class="message-label">${escapeHtml(providerName(activeChat.providerId))}</div><div class="message-content">${escapeHtml(streamingText).replace(/\n/g, '<br>')}</div></article>` : '';
   const activityLines = [...streamingActivity];
   if (executionState === 'waiting_approval') activityLines.push('Aguardando sua aprovação.');
@@ -392,8 +392,10 @@ function renderComposer(): void {
   intelligenceButton.querySelector<HTMLElement>('.intelligence-current')!.textContent = intelligenceLabel(composerIntelligence);
   prompt.dataset.executionLocked = String(busy);
   sendButton.dataset.executionLocked = String(busy);
-  sendButton.disabled = !activeChat || !prompt.value.trim() || busy || pendingApprovals.length > 0;
+  sendButton.disabled = !activeChat || (!prompt.value.trim() && pendingAttachments.length === 0) || busy || pendingApprovals.length > 0;
   prompt.disabled = busy;
+  document.querySelector<HTMLButtonElement>('[data-action="attachments"]')?.toggleAttribute('disabled', busy || !activeChat);
+  renderAttachmentTray();
   resizePrompt();
   renderIntelligenceMenu();
 }
