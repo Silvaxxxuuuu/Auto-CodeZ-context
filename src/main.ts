@@ -343,7 +343,11 @@ function scheduleAccountRefresh(snapshot: ReturnType<AccountSessionRuntime['snap
       ACCOUNT_MIN_REFRESH_DELAY_MS,
       snapshot.session.accessExpiresAt - Date.now() - ACCOUNT_REFRESH_SKEW_MS,
     );
-  } else if (snapshot.state === 'offline' && snapshot.account && snapshot.session) {
+  } else if (
+    (snapshot.state === 'offline' || snapshot.state === 'error')
+    && snapshot.account
+    && snapshot.session
+  ) {
     delayMs = ACCOUNT_OFFLINE_RETRY_MS;
   }
 
