@@ -880,6 +880,29 @@ async function executeChat(chatId: string, content: string, allowedPaths?: strin
   }
 }
 
+ipcMain.handle('chat-attachments:pick', async (_event, kindInput?: unknown) => {
+  const kind = kindInput === undefined ? 'file' : requireIdentifier(kindInput, 'Tipo de anexo');
+  if (kind !== 'file' && kind !== 'image') throw new Error('Tipo de anexo inválido.');
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.');
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    filters: kind === 'image'
+      ? [{ name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif'] }]
+      : [
+          { name: 'Arquivos suportados', extensions: ['txt','md','json','js','jsx','ts','tsx','css','html','xml','yaml','yml','toml','ini','csv','log','sql','sh','ps1','py','java','c','cpp','h','hpp','cs','go','rs','pdf','png','jpg','jpeg','webp','gif','bmp','avif'] },
+          { name: 'Todos os arquivos', extensions: ['*'] },
+        ],
+  });
+  if (result.canceled || result.filePaths.length === 0) return [];
+  const attachments = await attachmentStore.importFiles(result.filePaths.slice(0, 12));
+  return await Promise.all(attachments.map(async (attachment) => ({
+    attachment,
+    ...(attachment.kind === 'image'
+      ? { previewDataUrl: await attachmentStore.previewDataUrl(attachment) }
+      : {}),
+  })));
+});
+
 ipcMain.handle('chat:send', async (_event, input: unknown) => {
   const value = requireObject(input, 'Mensagem');
   return executeChat(
