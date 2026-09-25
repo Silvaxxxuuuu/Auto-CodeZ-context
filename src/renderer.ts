@@ -506,7 +506,9 @@ async function refreshApprovals(): Promise<void> {
 }
 
 async function sendMessage(contentOverride?: string, isRetry = false): Promise<void> {
-  const content = (contentOverride ?? prompt.value).trim();
+  const attachments = isRetry ? [] : pendingAttachments.map((item) => item.attachment);
+  const typedContent = (contentOverride ?? prompt.value).trim();
+  const content = typedContent || (attachments.length ? 'Analise o conteúdo anexado.' : '');
   if (!content || !activeChat || (executionState !== 'idle' && executionState !== 'failed') || pendingApprovals.length) return;
   if (isRetry && !retryContent) return;
   if (executionState === 'failed') { executionState = 'idle'; lastError = ''; }
@@ -520,11 +522,21 @@ async function sendMessage(contentOverride?: string, isRetry = false): Promise<v
   activeRunId = undefined;
   if (!isRetry) {
     retryContent = '';
-    activeChat.messages = [...activeChat.messages, { role: 'user', content, createdAt: Date.now() }];
+    activeChat.messages = [...activeChat.messages, {
+      role: 'user',
+      content,
+      createdAt: Date.now(),
+      ...(attachments.length ? { attachments } : {}),
+    }];
+    pendingAttachments = [];
   }
   setExecutionState('running');
   try {
-    const result = await window.autoCodez.streamChat({ chatId, content });
+    const result = await window.autoCodez.streamChat({
+      chatId,
+      content,
+      ...(attachments.length ? { attachments } : {}),
+    });
     if (!activeChat || activeChat.id !== chatId) return;
     activeChat = result.chat;
     if (result.pendingApprovalIds.length) {
