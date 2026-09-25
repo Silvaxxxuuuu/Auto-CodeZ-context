@@ -25,8 +25,8 @@ if (-not (Test-Path $serverExe)) { throw 'llama-server.exe missing after verifie
 
 $modelPath = Join-Path $downloads 'SmolVLM-500M-Instruct-Q8_0.gguf'
 $projectorPath = Join-Path $downloads 'mmproj-SmolVLM-500M-Instruct-Q8_0.gguf'
-Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/SmolVLM-256M-Instruct-Q8_0.gguf?download=true' -Destination $modelPath -Sha256 '9d4612de6a42214499e301494a3ecc2be0abdd9de44e663bda63f1152fad1bf4' -Bytes 0
-Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-256M-Instruct-Q8_0.gguf?download=true' -Destination $projectorPath -Sha256 'd1eb8b6b23979205fdf63703ed10f788131a3f812c7b1f72e0119d5d81295150' -Bytes 108783360
+Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/SmolVLM-500M-Instruct-Q8_0.gguf?download=true' -Destination $modelPath -Sha256 '9d4612de6a42214499e301494a3ecc2be0abdd9de44e663bda63f1152fad1bf4' -Bytes 0
+Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf?download=true' -Destination $projectorPath -Sha256 'd1eb8b6b23979205fdf63703ed10f788131a3f812c7b1f72e0119d5d81295150' -Bytes 108783360
 
 Add-Type -AssemblyName System.Drawing
 
