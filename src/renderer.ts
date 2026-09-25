@@ -27,6 +27,7 @@ declare global {
       deleteChat: (chatId: string) => Promise<Chat[]>;
       updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
       pickChatAttachments: (kind: 'file' | 'image') => Promise<PickedAttachment[]>;
+      previewChatAttachment: (attachment: Attachment) => Promise<string | null>;
       pasteChatImage: (input: { name?: string; mediaType: string; bytes: Uint8Array }) => Promise<PickedAttachment | null>;
       streamChat: (input: { chatId: string; content: string; attachments?: Attachment[] }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
       stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
@@ -122,6 +123,8 @@ let streamingMessageElement: HTMLElement | null = null;
 let activityElement: HTMLElement | null = null;
 let stateRefreshToken = 0;
 let approvalRefreshToken = 0;
+const attachmentPreviewCache = new Map<string, string | null>();
+const attachmentPreviewRequests = new Map<string, Promise<void>>();
 
 app.innerHTML = `
 <div class="app-shell">
@@ -203,15 +206,43 @@ function attachmentIcon(kind: Attachment['kind']): string {
 
 function attachmentListMarkup(attachments: Attachment[] | undefined): string {
   if (!attachments?.length) return '';
-  return `<div class="message-attachments">${attachments.map((attachment) => `
-    <div class="message-attachment">
-      <span class="message-attachment-kind">${escapeHtml(attachmentIcon(attachment.kind))}</span>
-      <span class="message-attachment-copy">
-        <strong>${escapeHtml(attachment.name)}</strong>
-        <small>${escapeHtml(formatBytes(attachment.size))} · ${escapeHtml(attachment.mediaType)}</small>
-      </span>
-    </div>
-  `).join('')}</div>`;
+  return `<div class="message-attachments">${attachments.map((attachment) => {
+    const preview = attachment.kind === 'image' ? attachmentPreviewCache.get(attachment.sha256) : null;
+    const previewMarkup = attachment.kind === 'image' && preview
+      ? `<img src="${escapeHtml(preview)}" alt="${escapeHtml(attachment.name)}" class="message-attachment-preview">`
+      : `<span class="message-attachment-kind">${escapeHtml(attachmentIcon(attachment.kind))}</span>`;
+    return `
+      <div class="message-attachment ${attachment.kind === 'image' ? 'is-image' : ''}">
+        ${previewMarkup}
+        <span class="message-attachment-copy">
+          <strong>${escapeHtml(attachment.name)}</strong>
+          <small>${escapeHtml(formatBytes(attachment.size))} · ${escapeHtml(attachment.mediaType)}</small>
+        </span>
+      </div>
+    `;
+  }).join('')}</div>`;
+}
+
+function ensureAttachmentPreview(attachment: Attachment, chatId: string): void {
+  if (attachment.kind !== 'image' || attachmentPreviewCache.has(attachment.sha256) || attachmentPreviewRequests.has(attachment.sha256)) return;
+  const request = window.autoCodez.previewChatAttachment(attachment)
+    .then((preview) => {
+      attachmentPreviewCache.set(attachment.sha256, preview);
+      if (activeChat?.id === chatId) renderMessages();
+    })
+    .catch(() => {
+      attachmentPreviewCache.set(attachment.sha256, null);
+    })
+    .finally(() => {
+      attachmentPreviewRequests.delete(attachment.sha256);
+    });
+  attachmentPreviewRequests.set(attachment.sha256, request);
+}
+
+function ensureVisibleAttachmentPreviews(chat: Chat): void {
+  for (const message of chat.messages) {
+    for (const attachment of message.attachments ?? []) ensureAttachmentPreview(attachment, chat.id);
+  }
 }
 
 function renderAttachmentTray(): void {
@@ -415,6 +446,7 @@ function renderMessages(): void {
   if (wasNearBottom || executionState === 'running') messages.scrollTop = messages.scrollHeight;
   streamingMessageElement = messages.querySelector<HTMLElement>('.message.streaming');
   activityElement = messages.querySelector<HTMLElement>('.activity-card');
+  ensureVisibleAttachmentPreviews(activeChat);
 }
 
 function renderComposer(): void {
