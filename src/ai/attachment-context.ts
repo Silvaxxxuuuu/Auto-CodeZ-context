@@ -1,4 +1,5 @@
 import type { AIAttachment, AIAttachmentContext, AIMessage, Capability } from './types';
+import { isNativeImageMediaType } from './provider-attachments';
 
 export type AttachmentDelivery =
   | { mode: 'native'; attachment: AIAttachment }
@@ -22,7 +23,11 @@ export function resolveAttachmentDelivery(
   attachment: AIAttachment,
   capabilities: readonly Capability[],
 ): AttachmentDelivery {
-  if (attachment.kind === 'image' && capabilities.includes('vision')) {
+  if (
+    attachment.kind === 'image'
+    && capabilities.includes('vision')
+    && isNativeImageMediaType(attachment.mediaType)
+  ) {
     return { mode: 'native', attachment };
   }
 
