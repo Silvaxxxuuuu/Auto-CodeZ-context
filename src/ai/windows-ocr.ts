@@ -12,7 +12,7 @@ $null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, Cont
 $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
 $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
   $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 -and
-  $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1'
+  $_.GetParameters()[0].ParameterType.Name.StartsWith('IAsyncOperation')
 } | Select-Object -First 1)
 function Await-WinRt([object]$Operation, [Type]$ResultType) {
   $task = $asTask.MakeGenericMethod($ResultType).Invoke($null, @($Operation))
