@@ -27,7 +27,7 @@ declare global {
       deleteChat: (chatId: string) => Promise<Chat[]>;
       updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
       pickChatAttachments: (kind: 'file' | 'image') => Promise<PickedAttachment[]>;
-      pasteChatImage: () => Promise<PickedAttachment | null>;
+      pasteChatImage: (input: { name?: string; mediaType: string; bytes: Uint8Array }) => Promise<PickedAttachment | null>;
       streamChat: (input: { chatId: string; content: string; attachments?: Attachment[] }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
       stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
@@ -256,10 +256,26 @@ async function pickAttachments(kind: 'file' | 'image' = 'file'): Promise<void> {
   }
 }
 
-async function pasteClipboardImage(): Promise<void> {
+function clipboardImageName(mediaType: string): string {
+  const extension = mediaType === 'image/jpeg' ? 'jpg'
+    : mediaType === 'image/webp' ? 'webp'
+      : mediaType === 'image/gif' ? 'gif'
+        : mediaType === 'image/avif' ? 'avif'
+          : 'png';
+  return `clipboard-${Date.now()}.${extension}`;
+}
+
+async function pasteClipboardImage(file: File): Promise<void> {
   if (!activeChat || executionState === 'running' || executionState === 'waiting_approval') return;
   try {
-    const selected = await window.autoCodez.pasteChatImage();
+    if (file.size <= 0) throw new Error('A imagem da área de transferência está vazia.');
+    if (file.size > 64 * 1024 * 1024) throw new Error('A imagem da área de transferência excede o limite de 64 MB.');
+    const mediaType = file.type.startsWith('image/') ? file.type : 'image/png';
+    const selected = await window.autoCodez.pasteChatImage({
+      name: clipboardImageName(mediaType),
+      mediaType,
+      bytes: new Uint8Array(await file.arrayBuffer()),
+    });
     if (selected) appendPendingAttachments([selected]);
   } catch (error) {
     setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível colar a imagem.');
@@ -732,12 +748,14 @@ prompt.addEventListener('input', () => {
 document.addEventListener('paste', (event) => {
   const clipboard = event.clipboardData;
   if (!clipboard || !activeChat) return;
-  const hasImage = Array.from(clipboard.items).some((item) => item.kind === 'file' && item.type.startsWith('image/'))
-    || Array.from(clipboard.files).some((file) => file.type.startsWith('image/'));
-  if (!hasImage) return;
+  const itemFile = Array.from(clipboard.items)
+    .find((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    ?.getAsFile();
+  const imageFile = itemFile || Array.from(clipboard.files).find((file) => file.type.startsWith('image/'));
+  if (!imageFile) return;
   if (executionState === 'running' || executionState === 'waiting_approval') return;
   event.preventDefault();
-  void pasteClipboardImage();
+  void pasteClipboardImage(imageFile);
 });
 
 prompt.addEventListener('keydown', (event) => {
