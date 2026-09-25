@@ -63,25 +63,44 @@ export function attachmentFallbackContext(
 export function prepareMessagesForAttachments(
   messages: readonly AIMessage[],
   capabilities: readonly Capability[],
+  maximumDerivedChars = 120_000,
 ): AIMessage[] {
-  return messages.map((message) => {
-    if (!message.attachments?.length) return { ...message };
+  let remaining = Math.max(4_000, Math.floor(maximumDerivedChars));
+  const prepared = messages.map((message) => ({ ...message }));
+
+  for (let index = prepared.length - 1; index >= 0; index -= 1) {
+    const message = prepared[index];
+    if (!message.attachments?.length) continue;
 
     const nativeAttachments: AIAttachment[] = [];
     const fallback: string[] = [];
     for (const attachment of message.attachments) {
       const delivery = resolveAttachmentDelivery(attachment, capabilities);
-      if (delivery.mode === 'native') nativeAttachments.push({ ...delivery.attachment });
-      else fallback.push(delivery.text);
+      if (delivery.mode === 'native') {
+        nativeAttachments.push({ ...delivery.attachment });
+        continue;
+      }
+
+      if (remaining <= 0) continue;
+      const full = delivery.text;
+      const allowed = Math.min(full.length, remaining);
+      if (allowed <= 0) continue;
+      const clipped = allowed < full.length
+        ? `${full.slice(0, Math.max(0, allowed - 96))}\n[... contexto do anexo truncado para caber na janela do modelo ...]`
+        : full;
+      fallback.push(clipped);
+      remaining -= clipped.length;
     }
 
     const suffix = fallback.length
       ? `\n\n--- Contexto de anexos indexado pelo Auto CodeZ ---\n${fallback.join('\n\n')}`
       : '';
-    return {
+    prepared[index] = {
       ...message,
       content: `${message.content}${suffix}`,
-      ...(nativeAttachments.length ? { attachments: nativeAttachments } : {}),
+      ...(nativeAttachments.length ? { attachments: nativeAttachments } : { attachments: undefined }),
     };
-  });
+  }
+
+  return prepared;
 }
