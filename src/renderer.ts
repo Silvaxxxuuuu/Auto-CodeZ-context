@@ -794,7 +794,7 @@ app.addEventListener('click', async (event) => {
   if (action === 'ai-settings') { await openProviderSettings(); return; }
   if (action === 'close-modal') { closeModal(); return; }
   if (action === 'profile') { openModal(`<div class="modal-head"><div><div class="eyebrow">PERFIL</div><h2>Seu perfil</h2><p>O sistema de conta e sincronização será conectado em uma etapa própria.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="profile-preview"><div class="avatar">CZ</div><div><strong>Usuário local</strong><span>Configuração local do Auto CodeZ</span></div></div>`); return; }
-  if (action === 'attachments') { openModal(`<div class="modal-head"><div><div class="eyebrow">ANEXOS</div><h2>Anexar conteúdo</h2><p>Arquivos e multimídia serão conectados ao sistema de capacidades.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="attachment-options"><button>Arquivo</button><button>Imagem</button><button>Áudio</button><button>Vídeo</button></div>`); return; }
+  if (action === 'attachments') { await pickAttachments('file'); return; }
 });
 
 modalRoot.addEventListener('click', async (event) => {
