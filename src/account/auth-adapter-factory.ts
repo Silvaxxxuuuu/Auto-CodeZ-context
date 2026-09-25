@@ -24,6 +24,7 @@ export interface AccountAuthAdapterFactoryResult {
 export interface AccountAuthFactoryOptions {
   descopeProjectId?: string;
   descopeBaseUrl?: string;
+  descopePasskeyOidcFlowEnabled?: boolean;
   legacyBaseUrl?: string;
 }
 
@@ -37,13 +38,22 @@ export function createAccountAuthAdapter(
   const descopeProjectId = options.descopeProjectId?.trim();
   if (descopeProjectId) {
     try {
-      const adapter = new DescopeAuthAdapter(descopeProjectId, { baseUrl: options.descopeBaseUrl });
+      const adapter = new DescopeAuthAdapter(descopeProjectId, {
+        baseUrl: options.descopeBaseUrl,
+        passkeyOidcFlowEnabled: options.descopePasskeyOidcFlowEnabled === true,
+      });
       return {
         adapter,
         deviceRegistry: new UnavailableDeviceRegistryAdapter(),
         configuration: {
           configured: true,
-          methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'],
+          methods: [
+            'magic_link',
+            'github',
+            'google',
+            'microsoft',
+            ...(options.descopePasskeyOidcFlowEnabled === true ? ['passkey' as const] : []),
+          ],
           passkeyEnrollmentSupported: false,
         },
       };
