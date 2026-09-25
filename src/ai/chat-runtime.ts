@@ -12,6 +12,7 @@ import { runWithAbortSignal } from './request-cancellation';
 import { WebGroundingCoordinator } from '../web/web-grounding-coordinator';
 import { prepareMessagesForAttachments } from './attachment-context';
 import type { AttachmentIndexer } from './attachment-indexer';
+import { isNativeImageMediaType } from './provider-attachments';
 
 const PROVIDER_RECENT_TOOL_ROUNDS = 2;
 const PROVIDER_RECENT_TOOL_RESULT_CHARS = 12_000;
@@ -234,7 +235,7 @@ export class ChatRuntime {
     capabilities: readonly import('./types').Capability[],
     signal?: AbortSignal,
   ): Promise<AIMessage[]> {
-    if (capabilities.includes('vision') || !this.attachmentIndexer) return messages.map((message) => ({ ...message }));
+    if (!this.attachmentIndexer) return messages.map((message) => ({ ...message }));
 
     const prepared: AIMessage[] = [];
     for (const message of messages) {
@@ -245,8 +246,10 @@ export class ChatRuntime {
 
       const attachments = [];
       for (const attachment of message.attachments) {
+        const canUseNativeVision = capabilities.includes('vision') && isNativeImageMediaType(attachment.mediaType);
         if (
           attachment.kind !== 'image'
+          || canUseNativeVision
           || attachment.contexts?.some((context) =>
             (context.kind === 'caption' || context.kind === 'ocr') && context.text.trim(),
           )
