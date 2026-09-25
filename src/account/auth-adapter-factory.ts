@@ -25,6 +25,7 @@ export interface AccountAuthFactoryOptions {
   descopeProjectId?: string;
   descopeBaseUrl?: string;
   descopePasskeyOidcFlowEnabled?: boolean;
+  accountDataBaseUrl?: string;
   legacyBaseUrl?: string;
 }
 
@@ -42,9 +43,15 @@ export function createAccountAuthAdapter(
         baseUrl: options.descopeBaseUrl,
         passkeyOidcFlowEnabled: options.descopePasskeyOidcFlowEnabled === true,
       });
+      const deviceRegistry = options.accountDataBaseUrl?.trim()
+        ? new HttpDeviceRegistryAdapter(options.accountDataBaseUrl)
+        : new UnavailableDeviceRegistryAdapter();
       return {
         adapter,
-        deviceRegistry: new UnavailableDeviceRegistryAdapter(),
+        deviceRegistry,
+        ...(options.accountDataBaseUrl?.trim()
+          ? { publicOrigin: new URL(options.accountDataBaseUrl).origin }
+          : {}),
         configuration: {
           configured: true,
           methods: [
