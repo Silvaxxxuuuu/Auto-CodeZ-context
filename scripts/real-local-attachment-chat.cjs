@@ -325,11 +325,16 @@ async function testPasteAndAnswer(chatId, sourcePath) {
   await prompt.fill(question);
   await page.keyboard.press('Enter');
 
-  const analysisActivity = page.locator('.activity-line').filter({ hasText: 'Analisando imagem anexada' }).last();
+  const analysisActivity = page.locator('.ac-live-activity').filter({ hasText: 'Analisando imagem anexada' }).last();
   await analysisActivity.waitFor({ state: 'visible', timeout: 30_000 });
-  const activityText = await page.locator('.activity-card').innerText();
-  if (/OCR|llama\.cpp|visão local|indexando|clipboard|SmolVLM/i.test(activityText)) {
-    throw new Error('Timeline de imagem expôs detalhes técnicos internos: ' + activityText);
+  const visibleActivityTexts = (await page.locator('.ac-live-activity:visible .ac-live-activity-text').allInnerTexts())
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!visibleActivityTexts.includes('Analisando imagem anexada…')) {
+    throw new Error('Atividade de análise da imagem não apareceu na timeline nova: ' + JSON.stringify(visibleActivityTexts));
+  }
+  if (visibleActivityTexts.some((value) => /OCR|llama\.cpp|visão local|indexando|clipboard|SmolVLM/i.test(value))) {
+    throw new Error('Timeline de imagem expôs detalhes técnicos internos: ' + JSON.stringify(visibleActivityTexts));
   }
   await page.screenshot({ path: path.join(outputDir, 'funcional-atividade-imagem-unificada.png'), animations: 'disabled', fullPage: true });
 
