@@ -8,6 +8,7 @@ import { downloadVerifiedFile } from './verified-download';
 import type { AIAttachment, AIAttachmentContext } from './types';
 import { AttachmentStore } from './attachment-store';
 import { imageDataUrl } from './provider-attachments';
+import { recognizeImageTextWindows } from './windows-ocr';
 
 const START_TIMEOUT_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -124,11 +125,9 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
   ): Promise<AIAttachment> {
     if (attachment.kind !== 'image') return attachment;
     const hydrated = await this.store.hydrate(attachment);
-    const existing = hydrated.contexts?.find((context) =>
-      (context.kind === 'caption' || context.kind === 'ocr')
-      && context.text.trim(),
-    );
-    if (existing) return hydrated;
+    const hasCaption = hydrated.contexts?.some((context) => context.kind === 'caption' && context.text.trim());
+    const hasOcr = hydrated.contexts?.some((context) => context.kind === 'ocr' && context.text.trim());
+    if (hasCaption && (process.platform !== 'win32' || hasOcr)) return hydrated;
 
     const running = this.indexInFlight.get(hydrated.sha256);
     if (running) return await running;
@@ -248,7 +247,39 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
     if (!attachment.dataBase64) {
       attachment = await this.store.hydrate(attachment);
     }
-    const endpoint = await this.ensureServer(signal, onProgress);
+
+    let indexed = attachment;
+    let ocrAvailable = Boolean(indexed.contexts?.some((context) => context.kind === 'ocr' && context.text.trim()));
+    if (process.platform === 'win32' && !ocrAvailable) {
+      onProgress?.({ message: `Lendo texto de ${attachment.name} com OCR do Windows.` });
+      try {
+        const imagePath = await this.store.verifiedFilePath(attachment);
+        const text = await recognizeImageTextWindows(imagePath, signal);
+        if (text) {
+          indexed = await this.store.saveContext(indexed, {
+            kind: 'ocr',
+            text,
+            model: 'windows-media-ocr',
+            createdAt: Date.now(),
+          });
+          ocrAvailable = true;
+          onProgress?.({ message: `Texto de ${attachment.name} reconhecido localmente.`, percent: 100 });
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') throw error;
+      }
+    }
+
+    const captionAvailable = Boolean(indexed.contexts?.some((context) => context.kind === 'caption' && context.text.trim()));
+    if (captionAvailable) return indexed;
+
+    let endpoint: string;
+    try {
+      endpoint = await this.ensureServer(signal, onProgress);
+    } catch (error) {
+      if (ocrAvailable) return indexed;
+      throw error;
+    }
     onProgress?.({ message: `Indexando ${attachment.name} com visão local.` });
     const response = await fetch(`${endpoint}/v1/chat/completions`, {
       method: 'POST',
@@ -264,7 +295,7 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
               type: 'text',
               text: 'Create a dense factual representation of this image for another AI. Include every legible text verbatim, UI controls, code, errors, numbers, status indicators, visible objects, layout and spatial relationships. Do not guess hidden information. Plain text only.',
             },
-            { type: 'image_url', image_url: { url: imageDataUrl(attachment) } },
+            { type: 'image_url', image_url: { url: imageDataUrl(indexed) } },
           ],
         }],
       }),
@@ -281,7 +312,7 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
       createdAt: Date.now(),
     };
     onProgress?.({ message: `${attachment.name} indexado localmente.`, percent: 100 });
-    return await this.store.saveContext(attachment, context);
+    return await this.store.saveContext(indexed, context);
   }
 
   async stop(): Promise<void> {
