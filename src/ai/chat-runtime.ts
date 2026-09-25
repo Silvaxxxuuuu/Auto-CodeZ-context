@@ -10,6 +10,7 @@ import { formatProviderError, normalizeProviderError } from './provider-errors';
 import { SYSTEM_PROJECT_ID } from '../agent/command-runtime';
 import { runWithAbortSignal } from './request-cancellation';
 import { WebGroundingCoordinator } from '../web/web-grounding-coordinator';
+import { prepareMessagesForAttachments } from './attachment-context';
 
 const PROVIDER_RECENT_TOOL_ROUNDS = 2;
 const PROVIDER_RECENT_TOOL_RESULT_CHARS = 12_000;
@@ -233,15 +234,16 @@ export class ChatRuntime {
     signal?.throwIfAborted();
     if (!this.capabilities.supports(model, 'text')) throw new Error('O modelo selecionado não suporta texto.');
     const resolution = this.intelligence.resolve(model, chat.intelligence);
-    const lightweightTurn = isLightweightConversationTurn(chat);
+    const attachmentMessages = prepareMessagesForAttachments(chat.messages, model.capabilities);
+    const lightweightTurn = isLightweightConversationTurn({ ...chat, messages: attachmentMessages });
 
     let webContext: string | undefined;
     if (!lightweightTurn) {
-      const groundingDecision = this.webGrounding.classify(chat.messages);
+      const groundingDecision = this.webGrounding.classify(attachmentMessages);
       if (groundingDecision.required) {
         this.activity.emit({ type: 'action', message: 'Verificando informações atuais na web.', status: 'running' });
         try {
-          const grounding = await runWithAbortSignal(signal, () => this.webGrounding.ground(chat.messages, signal));
+          const grounding = await runWithAbortSignal(signal, () => this.webGrounding.ground(attachmentMessages, signal));
           if (grounding) {
             webContext = grounding.context;
             this.activity.emit({
@@ -282,7 +284,7 @@ export class ChatRuntime {
       });
     }
     if (projectContext && !lightweightTurn) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
-    const currentUserMessage = [...chat.messages].reverse().find((message) => message.role === 'user');
+    const currentUserMessage = [...attachmentMessages].reverse().find((message) => message.role === 'user');
     const groundedAnswerOnly = Boolean(
       webContext
       && currentUserMessage
@@ -290,7 +292,7 @@ export class ChatRuntime {
     );
     const compactedHistory = lightweightTurn || groundedAnswerOnly
       ? { messages: currentUserMessage ? [currentUserMessage] : [], compacted: false }
-      : compactToolHistoryForProvider(chat.messages);
+      : compactToolHistoryForProvider(attachmentMessages);
     if (compactedHistory.compacted) {
       systemMessages.push({
         role: 'system' as const,
