@@ -197,13 +197,11 @@ export class AttachmentStore {
     }
   }
 
-  async importFile(filePath: string): Promise<AIAttachment> {
-    const stat = await fs.stat(filePath);
-    if (!stat.isFile()) throw new Error('O anexo selecionado não é um arquivo.');
-    if (stat.size <= 0) throw new Error('O anexo está vazio.');
-    if (stat.size > MAX_ATTACHMENT_BYTES) throw new Error('O anexo excede o limite de 64 MB.');
+  private async importBytes(bytes: Buffer, fileName: string, mediaTypeOverride?: string): Promise<AIAttachment> {
+    if (bytes.byteLength <= 0) throw new Error('O anexo está vazio.');
+    if (bytes.byteLength > MAX_ATTACHMENT_BYTES) throw new Error('O anexo excede o limite de 64 MB.');
 
-    const bytes = await fs.readFile(filePath);
+    const safeName = path.basename(fileName.trim() || 'attachment.bin');
     const hash = crypto.createHash('sha256').update(bytes).digest('hex');
     const directory = this.directoryFor(hash);
     await fs.mkdir(directory, { recursive: true });
@@ -214,9 +212,9 @@ export class AttachmentStore {
       if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
     }
 
-    const mediaType = mimeFromExtension(filePath);
-    const kind = kindFrom(filePath, mediaType);
-    const ext = path.extname(filePath).toLowerCase();
+    const mediaType = mediaTypeOverride?.trim() || mimeFromExtension(safeName);
+    const kind = kindFrom(safeName, mediaType);
+    const ext = path.extname(safeName).toLowerCase();
     let contexts: AIAttachmentContext[] = [];
     if (kind === 'text') contexts = textContext(safeText(bytes.toString('utf8')));
     else if (ext === '.pdf') contexts = textContext(extractPdfText(bytes));
@@ -225,14 +223,25 @@ export class AttachmentStore {
     return {
       id: crypto.randomUUID(),
       kind,
-      name: path.basename(filePath),
+      name: safeName,
       mediaType,
-      size: stat.size,
+      size: bytes.byteLength,
       storageKey: hash,
       sha256: hash,
       createdAt: Date.now(),
       ...(contexts.length ? { contexts } : {}),
     };
+  }
+
+  async importFile(filePath: string): Promise<AIAttachment> {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) throw new Error('O anexo selecionado não é um arquivo.');
+    const bytes = await fs.readFile(filePath);
+    return await this.importBytes(bytes, path.basename(filePath));
+  }
+
+  async importBuffer(bytes: Buffer, fileName: string, mediaType?: string): Promise<AIAttachment> {
+    return await this.importBytes(Buffer.from(bytes), fileName, mediaType);
   }
 
   async importFiles(filePaths: readonly string[]): Promise<AIAttachment[]> {
