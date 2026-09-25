@@ -413,9 +413,32 @@ test('Magic Link uses Descope sign-up-or-in and verifies the one-time token', as
   assert.equal(calls.length, 3);
 });
 
-test('Passkey keeps the secure OIDC PKCE ceremony on a dedicated callback', async () => {
+test('Passkey stays disabled until a dedicated OIDC Flow is explicitly configured', async () => {
   const adapter = new DescopeAuthAdapter('P2abcDEF_123', {
     now: () => 1_700_000_000_000,
+    fetch: async () => { throw new Error('network should not be used during begin'); },
+  });
+
+  assert.deepEqual(await adapter.configuration(), {
+    methods: ['magic_link', 'github', 'google', 'microsoft'],
+  });
+
+  await assert.rejects(
+    adapter.beginPasskey({
+      deviceId: 'device-1',
+      state: 'passkey-state',
+      nonce: 'passkey-nonce',
+      codeChallenge: 'passkey-challenge',
+      codeChallengeMethod: 'S256',
+    }),
+    /Flow OIDC dedicado/,
+  );
+});
+
+test('Passkey keeps the secure OIDC PKCE ceremony once its dedicated Flow is enabled', async () => {
+  const adapter = new DescopeAuthAdapter('P2abcDEF_123', {
+    now: () => 1_700_000_000_000,
+    passkeyOidcFlowEnabled: true,
     fetch: async () => { throw new Error('network should not be used during begin'); },
   });
 
@@ -432,7 +455,10 @@ test('Passkey keeps the secure OIDC PKCE ceremony on a dedicated callback', asyn
   assert.equal(url.searchParams.get('state'), 'passkey-state');
   assert.equal(url.searchParams.get('nonce'), 'passkey-nonce');
   assert.equal(url.searchParams.get('code_challenge'), 'passkey-challenge');
-  assert.equal(url.searchParams.get('autocodez_method'), 'passkey');
+  assert.equal(url.searchParams.has('autocodez_method'), false);
+  assert.deepEqual(await adapter.configuration(), {
+    methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'],
+  });
 });
 
 test('direct refresh preserves provider, rotates refresh token, and uses Descope session auth header', async () => {
