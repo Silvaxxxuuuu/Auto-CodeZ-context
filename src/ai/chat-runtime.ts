@@ -258,32 +258,12 @@ export class ChatRuntime {
           continue;
         }
 
-        let lastStatus = '';
-        this.activity.emit({
-          type: 'action',
-          message: `Preparando visão local para ${attachment.name}.`,
-          status: 'running',
-        });
         try {
-          const indexed = await this.attachmentIndexer.index(attachment, signal, (progress) => {
-            if (!progress.message || progress.message === lastStatus) return;
-            lastStatus = progress.message;
-            this.activity.emit({
-              type: 'action',
-              message: progress.message,
-              status: progress.percent === 100 ? 'success' : 'running',
-            });
-          });
+          const indexed = await this.attachmentIndexer.index(attachment, signal);
           attachments.push(indexed);
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
-          this.activity.emit({
-            type: 'error',
-            message: `Falha ao indexar ${attachment.name} localmente.`,
-            status: 'failed',
-            error: reason,
-          });
-          throw new Error(`O modelo selecionado não possui visão e o indexador visual local falhou: ${reason}`);
+          throw new Error(`Não foi possível analisar a imagem anexada: ${reason}`);
         }
       }
       prepared.push({ ...message, attachments });
@@ -298,6 +278,15 @@ export class ChatRuntime {
     signal?.throwIfAborted();
     if (!this.capabilities.supports(model, 'text')) throw new Error('O modelo selecionado não suporta texto.');
     const resolution = this.intelligence.resolve(model, chat.intelligence);
+    const latestUserMessage = [...chat.messages].reverse().find((message) => message.role === 'user');
+    const latestImageCount = latestUserMessage?.attachments?.filter((attachment) => attachment.kind === 'image').length ?? 0;
+    if (latestImageCount > 0) {
+      this.activity.emit({
+        type: 'action',
+        message: latestImageCount === 1 ? 'Analisando imagem anexada…' : 'Analisando imagens anexadas…',
+        status: 'running',
+      });
+    }
     const indexedMessages = await this.indexAttachmentsForModel(chat.messages, model.capabilities, signal);
     const attachmentContextBudget = Math.min(
       160_000,
@@ -314,18 +303,12 @@ export class ChatRuntime {
     if (!lightweightTurn) {
       const groundingDecision = this.webGrounding.classify(attachmentMessages);
       if (groundingDecision.required) {
-        this.activity.emit({ type: 'action', message: 'Verificando informações atuais na web.', status: 'running' });
+        this.activity.emit({ type: 'action', message: 'Pesquisando informações relacionadas…', status: 'running' });
         try {
           const grounding = await runWithAbortSignal(signal, () => this.webGrounding.ground(attachmentMessages, signal));
           if (grounding) {
             webContext = grounding.context;
-            this.activity.emit({
-              type: 'action',
-              message: grounding.cached
-                ? `Contexto Web atual reutilizado: ${grounding.sources.length} fonte${grounding.sources.length === 1 ? '' : 's'}.`
-                : `Grounding Web concluído: ${grounding.sources.length} fonte${grounding.sources.length === 1 ? '' : 's'} consultada${grounding.sources.length === 1 ? '' : 's'}.`,
-              status: 'success',
-            });
+
           }
         } catch (error) {
           if (isAbortError(error)) throw error;
