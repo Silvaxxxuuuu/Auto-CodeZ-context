@@ -34,6 +34,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: auto-codez-real-vision-${{ github.run_id }}
-          path: artifacts/vision-real
+          path: |
+            artifacts/vision-real/fixtures
+            artifacts/vision-real/*.txt
+            artifacts/vision-real/*.log
           if-no-files-found: warn
           retention-days: 14
