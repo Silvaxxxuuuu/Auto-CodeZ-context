@@ -899,17 +899,26 @@ ipcMain.handle('chat-attachments:pick', async (_event, kindInput?: unknown) => {
   const kind = kindInput === undefined ? 'file' : requireIdentifier(kindInput, 'Tipo de anexo');
   if (kind !== 'file' && kind !== 'image') throw new Error('Tipo de anexo inválido.');
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.');
-  const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openFile', 'multiSelections'],
-    filters: kind === 'image'
-      ? [{ name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif'] }]
-      : [
-          { name: 'Arquivos suportados', extensions: ['txt','md','json','js','jsx','ts','tsx','css','html','xml','yaml','yml','toml','ini','csv','log','sql','sh','ps1','py','java','c','cpp','h','hpp','cs','go','rs','pdf','docx','pptx','xlsx','odt','ods','odp','png','jpg','jpeg','webp','gif','bmp','avif'] },
-          { name: 'Todos os arquivos', extensions: ['*'] },
-        ],
-  });
-  if (result.canceled || result.filePaths.length === 0) return [];
-  const attachments = await attachmentStore.importFiles(result.filePaths.slice(0, 12));
+  const visualFixture = process.env.AUTO_CODEZ_VISUAL_TEST === '1'
+    ? process.env.AUTO_CODEZ_VISUAL_ATTACHMENT_FIXTURE?.trim()
+    : undefined;
+  let filePaths: string[];
+  if (visualFixture) {
+    filePaths = [visualFixture];
+  } else {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: kind === 'image'
+        ? [{ name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif'] }]
+        : [
+            { name: 'Arquivos suportados', extensions: ['txt','md','json','js','jsx','ts','tsx','css','html','xml','yaml','yml','toml','ini','csv','log','sql','sh','ps1','py','java','c','cpp','h','hpp','cs','go','rs','pdf','docx','pptx','xlsx','odt','ods','odp','png','jpg','jpeg','webp','gif','bmp','avif'] },
+            { name: 'Todos os arquivos', extensions: ['*'] },
+          ],
+    });
+    if (result.canceled || result.filePaths.length === 0) return [];
+    filePaths = result.filePaths;
+  }
+  const attachments = await attachmentStore.importFiles(filePaths.slice(0, 12));
   return await Promise.all(attachments.map(async (attachment) => ({
     attachment,
     ...(attachment.kind === 'image'
