@@ -37,7 +37,7 @@ test('text-only models receive derived image context instead of pretending to se
 
   assert.equal(delivery.mode, 'text');
   assert.match(delivery.text, /Erro: provider unavailable/);
-  assert.doesNotMatch(delivery.text, /Tela de erro do aplicativo/);
+  assert.match(delivery.text, /Tela de erro do aplicativo/);
 });
 
 test('unindexed attachments are explicit instead of silently disappearing', () => {
