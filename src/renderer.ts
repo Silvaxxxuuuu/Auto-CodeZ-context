@@ -27,6 +27,7 @@ declare global {
       deleteChat: (chatId: string) => Promise<Chat[]>;
       updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
       pickChatAttachments: (kind: 'file' | 'image') => Promise<PickedAttachment[]>;
+      pasteChatImage: () => Promise<PickedAttachment | null>;
       streamChat: (input: { chatId: string; content: string; attachments?: Attachment[] }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
       stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
@@ -234,21 +235,34 @@ function renderAttachmentTray(): void {
   `).join('');
 }
 
+function appendPendingAttachments(selected: readonly PickedAttachment[]): void {
+  if (!selected.length) return;
+  const existing = new Set(pendingAttachments.map((item) => item.attachment.sha256));
+  for (const item of selected) {
+    if (existing.has(item.attachment.sha256)) continue;
+    if (pendingAttachments.length >= 12) break;
+    pendingAttachments.push(item);
+    existing.add(item.attachment.sha256);
+  }
+  renderComposer();
+}
+
 async function pickAttachments(kind: 'file' | 'image' = 'file'): Promise<void> {
   if (!activeChat || executionState === 'running' || executionState === 'waiting_approval') return;
   try {
-    const selected = await window.autoCodez.pickChatAttachments(kind);
-    if (!selected.length) return;
-    const existing = new Set(pendingAttachments.map((item) => item.attachment.sha256));
-    for (const item of selected) {
-      if (existing.has(item.attachment.sha256)) continue;
-      if (pendingAttachments.length >= 12) break;
-      pendingAttachments.push(item);
-      existing.add(item.attachment.sha256);
-    }
-    renderComposer();
+    appendPendingAttachments(await window.autoCodez.pickChatAttachments(kind));
   } catch (error) {
     setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível anexar o arquivo.');
+  }
+}
+
+async function pasteClipboardImage(): Promise<void> {
+  if (!activeChat || executionState === 'running' || executionState === 'waiting_approval') return;
+  try {
+    const selected = await window.autoCodez.pasteChatImage();
+    if (selected) appendPendingAttachments([selected]);
+  } catch (error) {
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível colar a imagem.');
   }
 }
 
@@ -715,6 +729,17 @@ prompt.addEventListener('input', () => {
   resizePrompt();
   renderComposer();
 });
+document.addEventListener('paste', (event) => {
+  const clipboard = event.clipboardData;
+  if (!clipboard || !activeChat) return;
+  const hasImage = Array.from(clipboard.items).some((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    || Array.from(clipboard.files).some((file) => file.type.startsWith('image/'));
+  if (!hasImage) return;
+  if (executionState === 'running' || executionState === 'waiting_approval') return;
+  event.preventDefault();
+  void pasteClipboardImage();
+});
+
 prompt.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
