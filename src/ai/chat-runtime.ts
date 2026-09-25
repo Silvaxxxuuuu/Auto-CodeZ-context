@@ -299,7 +299,15 @@ export class ChatRuntime {
     if (!this.capabilities.supports(model, 'text')) throw new Error('O modelo selecionado não suporta texto.');
     const resolution = this.intelligence.resolve(model, chat.intelligence);
     const indexedMessages = await this.indexAttachmentsForModel(chat.messages, model.capabilities, signal);
-    const attachmentMessages = prepareMessagesForAttachments(indexedMessages, model.capabilities);
+    const attachmentContextBudget = Math.min(
+      160_000,
+      Math.max(16_000, Math.floor((model.contextWindow ?? 32_000) * 2)),
+    );
+    const attachmentMessages = prepareMessagesForAttachments(
+      indexedMessages,
+      model.capabilities,
+      attachmentContextBudget,
+    );
     const lightweightTurn = isLightweightConversationTurn({ ...chat, messages: attachmentMessages });
 
     let webContext: string | undefined;
