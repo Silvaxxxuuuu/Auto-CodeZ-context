@@ -42,10 +42,10 @@ function New-TestImage {
   $textBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(235,240,247))
   $mutedBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(164,176,191))
   $accentBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(80,145,232))
-  $titleFont = New-Object System.Drawing.Font 'Segoe UI',30,[System.Drawing.FontStyle]::Bold
-  $lineFont = New-Object System.Drawing.Font 'Consolas',21,[System.Drawing.FontStyle]::Regular
-  $smallFont = New-Object System.Drawing.Font 'Segoe UI',17,[System.Drawing.FontStyle]::Regular
-  $accentFont = New-Object System.Drawing.Font 'Segoe UI',19,[System.Drawing.FontStyle]::Bold
+  $titleFont = [System.Drawing.Font]::new('Segoe UI',[single]30,[System.Drawing.FontStyle]::Bold)
+  $lineFont = [System.Drawing.Font]::new('Consolas',[single]21,[System.Drawing.FontStyle]::Regular)
+  $smallFont = [System.Drawing.Font]::new('Segoe UI',[single]17,[System.Drawing.FontStyle]::Regular)
+  $accentFont = [System.Drawing.Font]::new('Segoe UI',[single]19,[System.Drawing.FontStyle]::Bold)
   $graphics.FillRectangle($panelBrush,45,45,1190,710)
   $graphics.FillRectangle($panel2Brush,75,100,1130,86)
   $graphics.DrawString($Title,$titleFont,$textBrush,100,117)
