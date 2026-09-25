@@ -63,6 +63,7 @@ function environment() {
     HOME: stateRoot,
     AUTO_CODEZ_VISUAL_TEST: '1',
     AUTO_CODEZ_DESCOPE_PROJECT_ID: 'P2abcDEF_123',
+    AUTO_CODEZ_DESCOPE_PASSKEY_OIDC_FLOW_ENABLED: '1',
     ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
   };
   if (process.platform === 'win32') {
