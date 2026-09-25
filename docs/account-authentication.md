@@ -45,6 +45,16 @@ Passkey keeps an OIDC Authorization Code + PKCE S256 ceremony in the system brow
 
 The app generates state, nonce and a PKCE verifier, validates the callback, exchanges the code, verifies the RS256 ID token, and requires UserInfo `sub` to match the verified ID token subject.
 
+Passkey is intentionally hidden in native Descope mode until the project's default OIDC application is explicitly configured to run a Passkey-specific hosted Flow. The previous `autocodez_method=passkey` query flag was removed because it is not a Descope contract and does not force a Passkey Flow.
+
+For local development or release validation, set:
+
+    $env:AUTO_CODEZ_DESCOPE_PASSKEY_OIDC_FLOW_ENABLED="1"
+
+only after the Descope OIDC application's Flow Hosting URL is configured to the intended Passkey Flow. Without that configuration the app fails closed and does not advertise Passkey.
+
+Do not implement production Passkey ceremonies on `localhost`. Descope Passkeys are domain-specific; the credential belongs to the domain/origin where it was created. Enrollment and sign-in must therefore share a controlled, stable WebAuthn origin. A Descope-hosted Flow satisfies that requirement for login. Enrollment of an additional Passkey for an already-authenticated direct social/Magic-Link session remains disabled until a secure same-domain enrollment path is configured; the UI must not expose a fake or broken "Adicionar passkey" action.
+
 A hosted OIDC path using `autocodez://auth/hosted` remains implemented as a compatibility/fallback path, but it is not the default onboarding surface.
 
 ## Session model
