@@ -36,6 +36,7 @@ function cloneDevice(device: DeviceRecord): DeviceRecord {
 export class AccountSessionRuntime {
   private state: AccountRuntimeSnapshot | null = null;
   private accessToken: string | null = null;
+  private refreshInFlight?: Promise<AccountRuntimeSnapshot>;
   private readonly listeners = new Set<(snapshot: AccountRuntimeSnapshot) => void>();
 
   constructor(
@@ -100,6 +101,18 @@ export class AccountSessionRuntime {
   }
 
   async refreshSession(): Promise<AccountRuntimeSnapshot> {
+    if (this.refreshInFlight) return await this.refreshInFlight;
+
+    const operation = this.refreshSessionOnce();
+    this.refreshInFlight = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.refreshInFlight === operation) this.refreshInFlight = undefined;
+    }
+  }
+
+  private async refreshSessionOnce(): Promise<AccountRuntimeSnapshot> {
     const current = this.state ?? await this.hydrate();
     const device = await this.deviceIdentity.getOrCreate();
     const refreshToken = await this.credentials.get(REFRESH_TOKEN_CREDENTIAL);
@@ -215,6 +228,12 @@ export class AccountSessionRuntime {
   }
 
   async logout(): Promise<AccountRuntimeSnapshot> {
+    if (this.refreshInFlight) {
+      try {
+        await this.refreshInFlight;
+      } catch {
+      }
+    }
     const current = this.state ?? await this.hydrate();
     const refreshToken = await this.credentials.get(REFRESH_TOKEN_CREDENTIAL);
 
