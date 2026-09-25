@@ -77,6 +77,30 @@ Because OAuth and Magic Link append a protected `flowId` and `state` query to th
 
 For passkey/OIDC, keep PKCE enabled and configure the Descope identity application/flow used by the project to allow passkey authentication and the exact native redirect `autocodez://auth/passkey`.
 
+### Microsoft production provider
+
+Microsoft social login must use an Auto CodeZ-owned Microsoft Entra application in production rather than Descope's shared provider.
+
+Microsoft Entra configuration:
+
+- Supported account types: accounts in any organizational directory and personal Microsoft accounts.
+- Platform: Web.
+- Redirect URI: `https://api.descope.com/v1/oauth/callback` unless a Descope custom domain is configured later.
+- OAuth/OIDC scopes should remain minimal: `openid`, `email`, `profile`. Do not request Microsoft Graph permissions such as `User.Read` unless a product feature actually requires Graph access.
+- The client secret belongs only in Descope. It must never be embedded in the Electron application, repository, CI artifact, or local renderer configuration.
+
+Descope configuration:
+
+- Social Login -> Microsoft -> Use my own account.
+- Client ID: Microsoft Entra Application (client) ID.
+- Client Secret: the current Entra secret value.
+- Trigger methods: Enable All.
+- Keep email promotion restricted to verified email addresses.
+- Do not merge users purely from an unverified Microsoft email address.
+
+Microsoft can return an email that Descope does not consider verified. Auto CodeZ therefore treats the immutable Descope user ID as the account key. Email is profile/contact data and must not be used as the authoritative account identifier or as an unsafe account-merging key.
+
+
 ## Local development
 
 Project ID is a public client/project identifier, not a secret.
