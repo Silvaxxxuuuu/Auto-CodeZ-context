@@ -12,7 +12,7 @@ const outputDir = path.resolve(root, process.env.AUTO_CODEZ_LOCAL_ATTACHMENT_DIR
 const executable = (process.env.AUTO_CODEZ_ELECTRON_EXECUTABLE || '').trim();
 const llamaServerExe = (process.env.AUTO_CODEZ_LOCAL_TEXT_SERVER_EXE || '').trim();
 const textModelPath = (process.env.AUTO_CODEZ_LOCAL_TEXT_MODEL || '').trim();
-const modelId = 'qwen2.5-0.5b-real';
+const modelId = 'qwen2.5-1.5b-real';
 const sourceUrl = 'https://en.wikipedia.org/wiki/Electron_(software_framework)';
 
 let stateRoot, appProcess, browser, page, proxyServer, textProcess;
@@ -115,11 +115,11 @@ async function startLmStudioProxy() {
           models: [{
             type: 'llm',
             key: modelId,
-            display_name: 'Qwen2.5 0.5B · inferência real',
+            display_name: 'Qwen2.5 1.5B · inferência real',
             architecture: 'qwen2',
             quantization: { name: 'Q4_K_M', bits_per_weight: 4 },
-            size_bytes: 398000000,
-            params_string: '0.5B',
+            size_bytes: 1120000000,
+            params_string: '1.5B',
             max_context_length: 8192,
             capabilities: { vision: false, trained_for_tool_use: false }
           }]
@@ -129,10 +129,15 @@ async function startLmStudioProxy() {
       if (req.method === 'POST' && req.url === '/v1/chat/completions') {
         const raw = await readBody(req);
         lastInferenceRequest = JSON.parse(raw || '{}');
+        const boundedRequest = {
+          ...lastInferenceRequest,
+          max_tokens: 768,
+          temperature: 0.2,
+        };
         const upstream = await fetch('http://127.0.0.1:' + textPort + '/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: raw,
+          body: JSON.stringify(boundedRequest),
           signal: AbortSignal.timeout(180000)
         });
         const headers = {};
@@ -282,7 +287,7 @@ async function selectModel() {
   await page.waitForFunction(() => document.querySelector('#chat-local-model-state')?.dataset.localUnifiedReady === 'true', undefined, { timeout: 20000 });
 
   const model = page.locator('#chat-model');
-  const option = model.locator('option').filter({ hasText: 'Qwen2.5 0.5B' });
+  const option = model.locator('option').filter({ hasText: 'Qwen2.5 1.5B' });
   await option.waitFor({ state: 'attached', timeout: 15000 });
   const value = await option.getAttribute('value');
   if (!value) throw new Error('Modelo local real ficou sem ID.');
@@ -292,7 +297,7 @@ async function selectModel() {
   await page.waitForFunction(() => !document.querySelector('#modal-root')?.firstElementChild, undefined, { timeout: 15000 });
   await page.waitForFunction(async (chatId) => {
     const chat = (await window.autoCodez.getState()).chats.find((item) => item.id === chatId);
-    return chat?.providerId === 'lm-studio' && chat.model === 'qwen2.5-0.5b-real';
+    return chat?.providerId === 'lm-studio' && chat.model === 'qwen2.5-1.5b-real';
   }, created.id, { timeout: 30000 });
   return created.id;
 }
