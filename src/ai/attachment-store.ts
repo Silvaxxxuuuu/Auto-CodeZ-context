@@ -98,6 +98,59 @@ function textContext(text: string, kind: AIAttachmentContext['kind'] = 'text'): 
   return value ? [{ kind, text: value, createdAt: Date.now() }] : [];
 }
 
+
+function requireString(value: unknown, label: string, max: number): string {
+  if (typeof value !== 'string') throw new Error(`${label} inválido.`);
+  const normalized = value.trim();
+  if (!normalized || normalized.length > max) throw new Error(`${label} inválido.`);
+  return normalized;
+}
+
+function requireFiniteNumber(value: unknown, label: string, min = 0): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min) throw new Error(`${label} inválido.`);
+  return value;
+}
+
+export function normalizeAttachmentReference(value: unknown): AIAttachment {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Anexo inválido.');
+  const source = value as Record<string, unknown>;
+  const kind = requireString(source.kind, 'Tipo do anexo', 32);
+  if (!['image','document','text','audio','video','binary'].includes(kind)) throw new Error('Tipo do anexo inválido.');
+  const sha256 = requireString(source.sha256, 'Hash do anexo', 64).toLowerCase();
+  const storageKey = requireString(source.storageKey, 'Chave do anexo', 64).toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(sha256) || storageKey !== sha256) throw new Error('Referência do anexo inválida.');
+  const contexts = Array.isArray(source.contexts)
+    ? source.contexts.map((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Contexto do anexo inválido.');
+        const context = item as Record<string, unknown>;
+        const contextKind = requireString(context.kind, 'Tipo de contexto', 32);
+        if (!['native','text','ocr','caption','transcript','metadata'].includes(contextKind)) throw new Error('Tipo de contexto inválido.');
+        return {
+          kind: contextKind as AIAttachmentContext['kind'],
+          text: requireString(context.text, 'Conteúdo indexado', MAX_TEXT_CHARS),
+          createdAt: requireFiniteNumber(context.createdAt, 'Data do contexto'),
+          ...(typeof context.model === 'string' && context.model.trim()
+            ? { model: context.model.trim().slice(0, 256) }
+            : {}),
+        };
+      })
+    : undefined;
+  return {
+    id: requireString(source.id, 'ID do anexo', 256),
+    kind: kind as AIAttachmentKind,
+    name: path.basename(requireString(source.name, 'Nome do anexo', 255)),
+    mediaType: requireString(source.mediaType, 'MIME do anexo', 128),
+    size: requireFiniteNumber(source.size, 'Tamanho do anexo', 1),
+    storageKey,
+    sha256,
+    createdAt: requireFiniteNumber(source.createdAt, 'Data do anexo'),
+    ...(typeof source.width === 'number' ? { width: requireFiniteNumber(source.width, 'Largura', 1) } : {}),
+    ...(typeof source.height === 'number' ? { height: requireFiniteNumber(source.height, 'Altura', 1) } : {}),
+    ...(typeof source.durationMs === 'number' ? { durationMs: requireFiniteNumber(source.durationMs, 'Duração', 0) } : {}),
+    ...(contexts?.length ? { contexts } : {}),
+  };
+}
+
 export class AttachmentStore {
   constructor(private readonly root: () => string) {}
 
@@ -151,6 +204,12 @@ export class AttachmentStore {
     const attachments: AIAttachment[] = [];
     for (const filePath of filePaths) attachments.push(await this.importFile(filePath));
     return attachments;
+  }
+
+  async validateReference(value: unknown): Promise<AIAttachment> {
+    const attachment = normalizeAttachmentReference(value);
+    await this.readBytes(attachment);
+    return attachment;
   }
 
   async readBytes(attachment: AIAttachment): Promise<Buffer> {
