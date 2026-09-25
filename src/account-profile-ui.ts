@@ -52,8 +52,15 @@ type RegistrySnapshot = {
   lastError?: string;
 };
 
+type AuthConfiguration = {
+  configured: boolean;
+  methods: Array<'magic_link' | 'github' | 'google' | 'microsoft' | 'passkey'>;
+  passkeyEnrollmentSupported?: boolean;
+};
+
 type Bridge = {
   accountState: () => Promise<AccountSnapshot>;
+  accountAuthConfiguration: () => Promise<AuthConfiguration>;
   accountDeviceRegistryState: () => Promise<RegistrySnapshot>;
   refreshAccountDeviceRegistry: () => Promise<RegistrySnapshot>;
   revokeAccountDevice: (deviceId: string) => Promise<RegistrySnapshot>;
@@ -66,6 +73,7 @@ type Bridge = {
 const bridge = (window as unknown as { autoCodez?: Bridge }).autoCodez;
 let account: AccountSnapshot | undefined;
 let registry: RegistrySnapshot | undefined;
+let authConfiguration: AuthConfiguration | undefined;
 let confirmingAction = '';
 let unsubscribeAccount: (() => void) | undefined;
 let unsubscribeRegistry: (() => void) | undefined;
@@ -184,7 +192,7 @@ function panelMarkup(): string {
       <div class="account-profile-subsection">
         <div class="account-profile-subheading row">
           <div><strong>Métodos de acesso</strong><span>Vincule métodos passwordless à sua conta.</span></div>
-          ${account.state === 'authenticated' && session?.identityProvider !== 'descope' ? '<button type="button" class="profile-secondary-button enabled" data-account-add-passkey>Adicionar passkey</button>' : ''}
+          ${account.state === 'authenticated' && authConfiguration?.passkeyEnrollmentSupported === true ? '<button type="button" class="profile-secondary-button enabled" data-account-add-passkey>Adicionar passkey</button>' : ''}
         </div>
         <div class="account-profile-methods">${identityRows()}</div>
       </div>
@@ -299,12 +307,14 @@ observer.observe(document.documentElement, { subtree: true, childList: true });
 
 async function initialize(): Promise<void> {
   if (!bridge) return;
-  const [currentAccount, currentRegistry] = await Promise.all([
+  const [currentAccount, currentRegistry, currentAuthConfiguration] = await Promise.all([
     bridge.accountState(),
     bridge.accountDeviceRegistryState(),
+    bridge.accountAuthConfiguration(),
   ]);
   account = currentAccount;
   registry = currentRegistry;
+  authConfiguration = currentAuthConfiguration;
 
   unsubscribeAccount = bridge.onAccountState((snapshot) => {
     account = snapshot;
