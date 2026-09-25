@@ -325,6 +325,14 @@ async function testPasteAndAnswer(chatId, sourcePath) {
   await prompt.fill(question);
   await page.keyboard.press('Enter');
 
+  const analysisActivity = page.locator('.activity-line').filter({ hasText: 'Analisando imagem anexada' }).last();
+  await analysisActivity.waitFor({ state: 'visible', timeout: 30_000 });
+  const activityText = await page.locator('.activity-card').innerText();
+  if (/OCR|llama\.cpp|visão local|indexando|clipboard|SmolVLM/i.test(activityText)) {
+    throw new Error('Timeline de imagem expôs detalhes técnicos internos: ' + activityText);
+  }
+  await page.screenshot({ path: path.join(outputDir, 'funcional-atividade-imagem-unificada.png'), animations: 'disabled', fullPage: true });
+
   const sentPreview = page.locator('#messages .message.user .message-attachment-preview').last();
   await sentPreview.waitFor({ state: 'visible', timeout: 30_000 });
   const sentPreviewSrc = await sentPreview.getAttribute('src');
