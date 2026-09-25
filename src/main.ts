@@ -1557,6 +1557,15 @@ app.whenReady().then(async () => {
   operationalLedger.restore(await operationalLedgerStore.load());
   await providerManager.init();
   await chatManager.init();
+  const attachmentReferences = new Set(
+    (await chatManager.list())
+      .flatMap((chat) => chat.messages)
+      .flatMap((message) => message.attachments ?? [])
+      .map((attachment) => attachment.sha256),
+  );
+  void attachmentStore.cleanupUnreferenced(attachmentReferences).catch((error) => {
+    console.warn('[Auto CodeZ attachment cleanup]', error);
+  });
   await projectManager.init();
   await terminalService.init();
   await chatRuntime.init();
