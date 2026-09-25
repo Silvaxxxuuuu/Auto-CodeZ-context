@@ -1,11 +1,15 @@
 import type { AIAttachment, AIMessage } from './types';
 
+export function isNativeImageMediaType(mediaType: string): boolean {
+  return /^image\/(?:png|jpeg|webp|gif)$/i.test(mediaType);
+}
+
 export function nativeImageAttachments(message: AIMessage): AIAttachment[] {
   return (message.attachments ?? []).filter((attachment) =>
     attachment.kind === 'image'
     && typeof attachment.dataBase64 === 'string'
     && attachment.dataBase64.length > 0
-    && /^image\/(?:png|jpeg|webp|gif|avif|bmp)$/i.test(attachment.mediaType),
+    && isNativeImageMediaType(attachment.mediaType),
   );
 }
 
