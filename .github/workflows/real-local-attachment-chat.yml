@@ -79,9 +79,9 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
             }
             $item = Get-Item $Destination
-            if ($Bytes -gt 0 -and $item.Length -ne $Bytes) { throw "Unexpected size for $Destination: $($item.Length)" }
+            if ($Bytes -gt 0 -and $item.Length -ne $Bytes) { throw "Unexpected size for ${Destination}: $($item.Length)" }
             $actual = (Get-FileHash -Path $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($actual -ne $Sha256.ToLowerInvariant()) { throw "SHA-256 mismatch for $Destination: $actual" }
+            if ($actual -ne $Sha256.ToLowerInvariant()) { throw "SHA-256 mismatch for ${Destination}: $actual" }
           }
 
           $engineZip = Join-Path $downloads 'llama-b10837-bin-win-cpu-x64.zip'
