@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import type { AIAttachment, AIAttachmentContext, AIAttachmentKind } from './types';
+import { extractOfficeText } from './archive-text-extractor';
 
 const MAX_ATTACHMENT_BYTES = 64 * 1024 * 1024;
 const MAX_TEXT_CHARS = 300_000;
@@ -16,6 +17,7 @@ const TEXT_EXTENSIONS = new Set([
   '.gitignore','.gitattributes','.editorconfig',
 ]);
 const IMAGE_EXTENSIONS = new Set(['.png','.jpg','.jpeg','.webp','.gif','.bmp','.avif']);
+const OFFICE_EXTENSIONS = new Set(['.docx','.pptx','.xlsx','.odt','.ods','.odp']);
 const AUDIO_EXTENSIONS = new Set(['.mp3','.wav','.ogg','.m4a','.aac','.flac','.opus']);
 const VIDEO_EXTENSIONS = new Set(['.mp4','.webm','.mov','.mkv','.avi','.m4v']);
 
@@ -24,7 +26,7 @@ function mimeFromExtension(filePath: string): string {
   const map: Record<string, string> = {
     '.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp',
     '.gif':'image/gif','.bmp':'image/bmp','.avif':'image/avif',
-    '.pdf':'application/pdf','.json':'application/json','.csv':'text/csv',
+    '.pdf':'application/pdf','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','.odt':'application/vnd.oasis.opendocument.text','.ods':'application/vnd.oasis.opendocument.spreadsheet','.odp':'application/vnd.oasis.opendocument.presentation','.json':'application/json','.csv':'text/csv',
     '.html':'text/html','.htm':'text/html','.xml':'application/xml','.svg':'image/svg+xml',
     '.md':'text/markdown','.txt':'text/plain','.yaml':'application/yaml','.yml':'application/yaml',
     '.mp3':'audio/mpeg','.wav':'audio/wav','.ogg':'audio/ogg','.m4a':'audio/mp4',
@@ -40,7 +42,7 @@ function kindFrom(filePath: string, mediaType: string): AIAttachmentKind {
   if (mediaType.startsWith('audio/') || AUDIO_EXTENSIONS.has(ext)) return 'audio';
   if (mediaType.startsWith('video/') || VIDEO_EXTENSIONS.has(ext)) return 'video';
   if (mediaType.startsWith('text/') || TEXT_EXTENSIONS.has(ext) || ext === '.svg') return 'text';
-  if (ext === '.pdf' || /(?:json|xml|yaml)/i.test(mediaType)) return 'document';
+  if (ext === '.pdf' || OFFICE_EXTENSIONS.has(ext) || /(?:json|xml|yaml)/i.test(mediaType)) return 'document';
   return 'binary';
 }
 
@@ -218,6 +220,7 @@ export class AttachmentStore {
     let contexts: AIAttachmentContext[] = [];
     if (kind === 'text') contexts = textContext(safeText(bytes.toString('utf8')));
     else if (ext === '.pdf') contexts = textContext(extractPdfText(bytes));
+    else if (OFFICE_EXTENSIONS.has(ext)) contexts = textContext(safeText(extractOfficeText(bytes, ext)));
 
     return {
       id: crypto.randomUUID(),
