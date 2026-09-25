@@ -11,9 +11,9 @@ function Download-Verified {
   param([string]$Url,[string]$Destination,[string]$Sha256,[Int64]$Bytes)
   if (-not (Test-Path $Destination)) { Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing }
   $item = Get-Item $Destination
-  if ($item.Length -ne $Bytes) { throw "Unexpected size for $Destination: $($item.Length), expected $Bytes" }
+  if ($item.Length -ne $Bytes) { throw "Unexpected size for ${Destination}: $($item.Length), expected $Bytes" }
   $actual = (Get-FileHash -Path $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
-  if ($actual -ne $Sha256.ToLowerInvariant()) { throw "SHA-256 mismatch for $Destination: $actual" }
+  if ($actual -ne $Sha256.ToLowerInvariant()) { throw "SHA-256 mismatch for ${Destination}: $actual" }
 }
 
 $engineZip = Join-Path $downloads 'llama-b10837-bin-win-cpu-x64.zip'
