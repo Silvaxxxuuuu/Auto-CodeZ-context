@@ -454,6 +454,7 @@ async function newChat(projectId?: string): Promise<void> {
     const defaults = getAppPreferences().chatDefaults;
     activeChat = await window.autoCodez.createChat({ intelligence: defaults.intelligence, permissionLevel: defaults.permissionLevel, projectId });
     composerIntelligence = defaults.intelligence;
+    pendingAttachments = [];
     pendingApprovals = [];
     streamingActivity = [];
     lastError = '';
@@ -663,6 +664,7 @@ async function deleteChat(chatId: string): Promise<void> {
     await window.autoCodez.deleteChat(chatId);
     if (activeChat?.id === chatId) {
       activeChat = null;
+      pendingAttachments = [];
       activeRunId = undefined;
       pendingApprovals = [];
       streamingText = '';
