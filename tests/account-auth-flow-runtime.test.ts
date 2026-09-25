@@ -259,6 +259,32 @@ test('Magic Link normalizes email and only exposes a masked hint', async () => {
   assert.ok(!JSON.stringify(completed).includes('magic-token'));
 });
 
+test('forged Magic Link callback state cannot consume the valid protected transaction', async () => {
+  const { credentials, adapter, flows } = setup();
+  await flows.beginMagicLink('user@example.com');
+  assert.ok(adapter.lastMagicBegin);
+  assert.ok(await credentials.get('account.auth.pending-magic-link'));
+
+  const forged = await flows.completeMagicLink({
+    flowId: 'magic-flow',
+    token: 'forged-token',
+    state: 'forged-state',
+  });
+  assert.equal(forged.status, 'error');
+  assert.match(forged.lastError ?? '', /Estado Magic Link inválido/);
+  assert.equal(adapter.lastMagicComplete, undefined);
+  assert.ok(await credentials.get('account.auth.pending-magic-link'));
+
+  const completed = await flows.completeMagicLink({
+    flowId: 'magic-flow',
+    token: 'real-one-time-token',
+    state: adapter.lastMagicBegin.state,
+  });
+  assert.equal(completed.status, 'authenticated');
+  assert.equal(adapter.lastMagicComplete?.token, 'real-one-time-token');
+  assert.equal(await credentials.get('account.auth.pending-magic-link'), null);
+});
+
 test('Passkey flow keeps PKCE material private and completes through browser callback', async () => {
   const { adapter, flows, sessions } = setup();
 
