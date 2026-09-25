@@ -122,7 +122,17 @@ contextBridge.exposeInMainWorld('autoCodez', {
     });
   },
   pickChatAttachments: (kind: 'file' | 'image') => invoke('chat-attachments:pick', kind),
-  pasteChatImage: () => invoke('chat-attachments:paste-image'),
+  pasteChatImage: (input: { name?: string; mediaType: string; bytes: Uint8Array }) => {
+    const value = requireObject(input, 'Imagem da área de transferência');
+    if (!(value.bytes instanceof Uint8Array)) throw new Error('Bytes da imagem inválidos.');
+    const mediaType = requireNonEmptyString(value.mediaType, 'MIME da imagem');
+    if (!mediaType.toLowerCase().startsWith('image/')) throw new Error('O conteúdo colado não é uma imagem.');
+    return invoke('chat-attachments:paste-image', {
+      name: typeof value.name === 'string' ? value.name : undefined,
+      mediaType,
+      bytes: value.bytes,
+    });
+  },
   streamChat: async (input: { chatId: string; content: string; attachments?: unknown[]; allowedPaths?: string[] }) => {
     const value = requireObject(input, 'Mensagem');
     const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
