@@ -73,8 +73,11 @@ test('ChatRuntime injects current Web context even when selected model has no to
   assert.match(webMessage.content, /Meteorologia oficial/);
   assert.match(webMessage.content, /Hoje 28°C/);
   assert.match(webMessage.content, /URL: https:\/\/weather\.example\/forecast/);
-  assert.equal(activityMessages.some((message) => message === 'running:Verificando informações atuais na web.'), true);
-  assert.equal(activityMessages.some((message) => message.startsWith('success:Grounding Web concluído:')), true);
+  assert.deepEqual(
+    activityMessages.filter((message) => /web|grounding|pesquisando/i.test(message)),
+    ['running:Pesquisando informações relacionadas…'],
+  );
+  assert.equal(activityMessages.some((message) => /Grounding Web|Verificando informações atuais/i.test(message)), false);
 });
 
 test('ChatRuntime grounds explicit technical research for a text-only model that cannot call tools', async () => {
