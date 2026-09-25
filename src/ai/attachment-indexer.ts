@@ -99,7 +99,7 @@ function responseText(value: unknown): string {
 }
 
 export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
-  private readonly engine: AutoCodezLocalEngineManager;
+  private engine?: AutoCodezLocalEngineManager;
   private active?: ActiveServer;
   private startInFlight?: Promise<string>;
   private readonly indexInFlight = new Map<string, Promise<AIAttachment>>();
@@ -109,7 +109,12 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
     private readonly store: AttachmentStore,
     engine?: AutoCodezLocalEngineManager,
   ) {
-    this.engine = engine ?? new AutoCodezLocalEngineManager(path.join(this.root(), 'runtime'));
+    this.engine = engine;
+  }
+
+  private engineManager(): AutoCodezLocalEngineManager {
+    this.engine ??= new AutoCodezLocalEngineManager(path.join(this.root(), 'runtime'));
+    return this.engine;
   }
 
   async index(
@@ -180,7 +185,7 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
   ): Promise<string> {
     await this.stop();
     onProgress?.({ message: 'Preparando mecanismo visual local.' });
-    const executable = await this.engine.ensureInstalled(signal, (progress) => {
+    const executable = await this.engineManager().ensureInstalled(signal, (progress) => {
       onProgress?.({
         message: 'Preparando llama.cpp para visão local.',
         ...(progress.percent !== undefined ? { percent: progress.percent } : {}),
