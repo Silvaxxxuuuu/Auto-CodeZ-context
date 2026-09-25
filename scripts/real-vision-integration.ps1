@@ -23,10 +23,10 @@ if (-not (Test-Path (Join-Path $runtime 'llama-server.exe'))) { Expand-Archive -
 $serverExe = Join-Path $runtime 'llama-server.exe'
 if (-not (Test-Path $serverExe)) { throw 'llama-server.exe missing after verified extraction.' }
 
-$modelPath = Join-Path $downloads 'SmolVLM-500M-Instruct-Q8_0.gguf'
-$projectorPath = Join-Path $downloads 'mmproj-SmolVLM-500M-Instruct-Q8_0.gguf'
-Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/SmolVLM-500M-Instruct-Q8_0.gguf?download=true' -Destination $modelPath -Sha256 '9d4612de6a42214499e301494a3ecc2be0abdd9de44e663bda63f1152fad1bf4' -Bytes 0
-Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf?download=true' -Destination $projectorPath -Sha256 'd1eb8b6b23979205fdf63703ed10f788131a3f812c7b1f72e0119d5d81295150' -Bytes 108783360
+$modelPath = Join-Path $downloads 'SmolVLM2-2.2B-Instruct-Q4_K_M.gguf'
+$projectorPath = Join-Path $downloads 'mmproj-SmolVLM2-2.2B-Instruct-Q4_K_M.gguf'
+Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/main/SmolVLM2-2.2B-Instruct-Q4_K_M.gguf?download=true' -Destination $modelPath -Sha256 '0cf76814555b8665149075b74ab6b5c1d428ea1d3d01c1918c12012e8d7c9f58' -Bytes 1112602656
+Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/main/mmproj-SmolVLM2-2.2B-Instruct-Q4_K_M.gguf?download=true' -Destination $projectorPath -Sha256 'ae07ea1facd07dd3230c4483b63e8cda96c6944ad2481f33d531f79e892dd024' -Bytes 592523200
 
 Add-Type -AssemblyName System.Drawing
 
@@ -70,7 +70,7 @@ New-TestImage $fixture3 'DEVICE REGISTRY' @('DEVICE          PC Principal','SYST
 $port = 18088
 $stdout = Join-Path $root 'llama.stdout.log'
 $stderr = Join-Path $root 'llama.stderr.log'
-$args = @('--model',$modelPath,'--mmproj',$projectorPath,'--alias','smolvlm-500m-instruct-q8','--host','127.0.0.1','--port',"$port",'--ctx-size','4096','--jinja')
+$args = @('--model',$modelPath,'--mmproj',$projectorPath,'--alias','smolvlm2-2.2b-instruct-q4','--host','127.0.0.1','--port',"$port",'--ctx-size','4096','--jinja')
 $process = Start-Process -FilePath $serverExe -ArgumentList $args -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 
 try {
@@ -93,7 +93,7 @@ try {
     param([string]$ImagePath,[string]$Name,[string[]]$Expected)
     $base64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($ImagePath))
     $body = @{
-      model = 'smolvlm-500m-instruct-q8'
+      model = 'smolvlm2-2.2b-instruct-q4'
       temperature = 0
       max_tokens = 1200
       messages = @(@{
