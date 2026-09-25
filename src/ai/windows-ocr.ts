@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
 
 const WINDOWS_OCR_SCRIPT = String.raw`
-param([Parameter(Mandatory = $true)][string]$ImagePath)
 $ErrorActionPreference = 'Stop'
+$ImagePath = $env:AUTO_CODEZ_OCR_IMAGE
+if ([string]::IsNullOrWhiteSpace($ImagePath)) { throw 'OCR image path is missing.' }
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
@@ -51,8 +52,12 @@ export async function recognizeImageTextWindows(
       '-NonInteractive',
       '-ExecutionPolicy', 'Bypass',
       '-EncodedCommand', encoded,
-      '-ImagePath', imagePath,
-    ], { windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
+    ], {
+      windowsHide: true,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, AUTO_CODEZ_OCR_IMAGE: imagePath },
+    });
 
     let stdout = '';
     let stderr = '';
