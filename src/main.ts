@@ -81,8 +81,14 @@ declare const __AUTO_CODEZ_DESCOPE_PROJECT_ID__: string;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const storage = new LocalStorage();
 const attachmentStore = new AttachmentStore(() => path.join(app.getPath('userData'), 'attachments'));
+const attachmentVisionRoot = (): string => {
+  const testRoot = process.env.AUTO_CODEZ_VISUAL_TEST === '1'
+    ? process.env.AUTO_CODEZ_TEST_ATTACHMENT_VISION_ROOT?.trim()
+    : undefined;
+  return testRoot ? path.resolve(testRoot) : path.join(app.getPath('userData'), 'attachment-vision');
+};
 const attachmentIndexer = new ManagedVisionAttachmentIndexer(
-  () => path.join(app.getPath('userData'), 'attachment-vision'),
+  attachmentVisionRoot,
   attachmentStore,
 );
 const accountCredentials = new LocalProtectedCredentialStore(storage);
