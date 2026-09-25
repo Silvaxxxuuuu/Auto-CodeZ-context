@@ -20,6 +20,27 @@ test('freshness coordinator does not browse for timeless requests', async () => 
   assert.equal(searches, 0);
 });
 
+test('freshness coordinator classifies only explicit user text before derived attachment context', async () => {
+  let searches = 0;
+  const runtime = new WebRetrievalRuntime({ searchAdapter: { id: 'fixture', displayName: 'Fixture', async search() { searches += 1; return []; } } });
+  const coordinator = new WebGroundingCoordinator({ runtime, now: () => Date.UTC(2026, 8, 8) });
+  const content = [
+    'Sobre o que é essa imagem? Qual o conteúdo dela?',
+    '',
+    '--- Contexto de anexos indexado pelo Auto CodeZ ---',
+    '[Anexo: screenshot.png · image/png · 100 bytes]',
+    'Texto reconhecido na imagem:',
+    'Electron software framework JavaScript Chromium Node.js latest release current version',
+  ].join('\n');
+
+  assert.deepEqual(coordinator.classify([user(content)]), {
+    required: false,
+    userMessage: 'Sobre o que é essa imagem? Qual o conteúdo dela?',
+  });
+  assert.equal(await coordinator.ground([user(content)]), undefined);
+  assert.equal(searches, 0);
+});
+
 test('freshness coordinator does not treat generic current workspace wording as public-web freshness', () => {
   const runtime = new WebRetrievalRuntime({ searchAdapter: { id: 'fixture', displayName: 'Fixture', async search() { return []; } } });
   const coordinator = new WebGroundingCoordinator({ runtime, now: () => Date.UTC(2026, 8, 8) });
