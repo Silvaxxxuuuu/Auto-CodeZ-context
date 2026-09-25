@@ -88,8 +88,8 @@ jobs:
           Download-Verified 'https://github.com/ggml-org/llama.cpp/releases/download/b10837/llama-b10837-bin-win-cpu-x64.zip' $engineZip 'b1b304054b13676d03876cce0e29d6c62b1de2a66456d1cd591afbdf15348088' 18417206
           Expand-Archive -Path $engineZip -DestinationPath $runtime -Force
 
-          $model = Join-Path $downloads 'Qwen2.5-0.5B-Instruct-Q4_K_M.gguf'
-          Download-Verified 'https://huggingface.co/second-state/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf?download=true' $model '750f8f144f0504208add7897f01c7d2350a7363d8855eab59e137a1041e90394'
+          $model = Join-Path $downloads 'qwen2.5-1.5b-instruct-q4_k_m.gguf'
+          Download-Verified 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true' $model '6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e'
 
           $server = Join-Path $runtime 'llama-server.exe'
           if (-not (Test-Path $server)) { throw 'llama-server.exe missing.' }
