@@ -122,6 +122,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
     });
   },
   pickChatAttachments: (kind: 'file' | 'image') => invoke('chat-attachments:pick', kind),
+  previewChatAttachment: (attachment: unknown) => invoke<string | null>('chat-attachments:preview', attachment),
   pasteChatImage: (input: { name?: string; mediaType: string; bytes: Uint8Array }) => {
     const value = requireObject(input, 'Imagem da área de transferência');
     if (!(value.bytes instanceof Uint8Array)) throw new Error('Bytes da imagem inválidos.');
