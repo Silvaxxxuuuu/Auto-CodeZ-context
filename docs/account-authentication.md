@@ -100,6 +100,34 @@ Descope configuration:
 
 Microsoft can return an email that Descope does not consider verified. Auto CodeZ therefore treats the immutable Descope user ID as the account key. Email is profile/contact data and must not be used as the authoritative account identifier or as an unsafe account-merging key.
 
+### Magic Link production configuration
+
+Magic Link uses the Descope API directly and returns to the native callback `autocodez://auth/magic-link`.
+
+Descope configuration:
+
+- Authentication Methods -> Magic Link -> Enable method in API and SDK: enabled.
+- Project Settings -> General -> Security -> Approved Domains -> Mobile App Schemes: add `auth`. Descope validates the host/identifier of custom-scheme redirects; the Auto CodeZ callback host is `auth`.
+- Keep the callback path fixed as `/magic-link`. The runtime only adds protected `flowId` and `state` query parameters; Descope appends the one-time token as `t`.
+- Recommended token expiration: 3-5 minutes. Auto CodeZ also keeps its local pending transaction time-limited.
+- Configure a retry/attempt limit per recipient to reduce spam and repeated-send abuse.
+- Self-service Magic Link sign-up requires delivery to a not-yet-verified email address. If the project blocks unverified recipients, new-user Magic Link sign-up cannot complete. If this setting is enabled, keep the retry limits strict because it increases spam exposure.
+
+Delivery:
+
+- Descope's built-in email delivery is acceptable for development and early testing.
+- Before production, use an Auto CodeZ-owned email connector if the product must not depend on Descope's built-in delivery quota or if branded sender/domain control is required.
+- Messaging-provider credentials belong only in Descope's connector configuration; they must never be embedded in Electron or committed to the repository.
+
+Security behavior in the desktop:
+
+- Email is normalized before the request and only a masked hint is exposed to the renderer state.
+- The full email is not persisted in the pending Magic Link transaction.
+- The callback must match both the protected `flowId` and cryptographically random `state`.
+- A forged state does not consume the legitimate pending transaction.
+- The one-time token is never persisted after completion and is not exposed in the public auth snapshot.
+- The returned Session JWT is verified before the account is established.
+
 
 ## Local development
 
