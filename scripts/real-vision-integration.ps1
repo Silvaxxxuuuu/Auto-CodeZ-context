@@ -153,7 +153,7 @@ try {
 
   Invoke-Vision $fixture1 'dashboard-result' @('358','42','17','READY','test:visual','RUN TESTS')
   Invoke-Vision $fixture2 'terminal-result' @('429','35','21','PASS','3','RECOVERING')
-  Invoke-Vision $fixture3 'devices-result' @('PC Principal','Windows','14:32','3','ACTIVE','CONNECTED')
+  Invoke-Vision $fixture3 'devices-result' @('PC Principal','Windows','14:32','3','ACTIVE','CONNECTED','DEVICE REGISTRY')
 }
 finally {
   if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
