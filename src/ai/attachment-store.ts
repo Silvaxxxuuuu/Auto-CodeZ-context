@@ -285,6 +285,36 @@ export class AttachmentStore {
     };
   }
 
+  async cleanupUnreferenced(
+    referencedHashes: ReadonlySet<string>,
+    minimumAgeMs = 7 * 24 * 60 * 60 * 1000,
+    now = Date.now(),
+  ): Promise<{ removed: number }> {
+    const root = this.root();
+    let removed = 0;
+    const directories = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+    for (const directory of directories) {
+      if (!directory.isDirectory() || !/^[a-f0-9]{2}$/.test(directory.name)) continue;
+      const directoryPath = path.join(root, directory.name);
+      const files = await fs.readdir(directoryPath, { withFileTypes: true }).catch(() => []);
+      for (const file of files) {
+        if (!file.isFile() || !/^[a-f0-9]{64}$/.test(file.name)) continue;
+        if (referencedHashes.has(file.name)) continue;
+        const filePath = path.join(directoryPath, file.name);
+        const stat = await fs.stat(filePath).catch(() => undefined);
+        if (!stat || now - stat.mtimeMs < minimumAgeMs) continue;
+        await Promise.allSettled([
+          fs.rm(filePath, { force: true }),
+          fs.rm(`${filePath}.contexts.json`, { force: true }),
+        ]);
+        removed += 1;
+      }
+      const remaining = await fs.readdir(directoryPath).catch(() => []);
+      if (!remaining.length) await fs.rmdir(directoryPath).catch(() => undefined);
+    }
+    return { removed };
+  }
+
   async previewDataUrl(attachment: AIAttachment): Promise<string | undefined> {
     if (attachment.kind !== 'image') return undefined;
     const bytes = await this.readBytes(attachment);
