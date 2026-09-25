@@ -735,6 +735,15 @@ window.addEventListener('auto-codez-retry-message', () => { void retryLastMessag
 
 app.addEventListener('click', async (event) => {
   const target = event.target as HTMLElement;
+  const removeAttachment = target.closest<HTMLElement>('[data-remove-attachment]');
+  if (removeAttachment?.dataset.removeAttachment) {
+    event.preventDefault();
+    event.stopPropagation();
+    const attachmentId = removeAttachment.dataset.removeAttachment;
+    pendingAttachments = pendingAttachments.filter((item) => item.attachment.id !== attachmentId);
+    renderComposer();
+    return;
+  }
   const panel = target.closest<HTMLElement>('[data-panel]');
   if (panel) {
     activePanel = panel.dataset.panel || 'chats';
