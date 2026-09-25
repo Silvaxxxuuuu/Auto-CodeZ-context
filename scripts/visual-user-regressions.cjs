@@ -17,6 +17,7 @@ let stateRoot;
 let appProcess;
 let browser;
 let page;
+let attachmentFixturePath;
 
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function killTree(pid) {
@@ -46,10 +47,45 @@ async function prepareState() {
     await fs.mkdir(path.join(stateRoot, 'AppData', 'Roaming'), { recursive: true });
     await fs.mkdir(path.join(stateRoot, 'AppData', 'Local'), { recursive: true });
   }
+
+  attachmentFixturePath = path.join(stateRoot, 'attachment-fixture.png');
+  if (process.platform === 'win32') {
+    const script = String.raw`
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+$bitmap = [System.Drawing.Bitmap]::new(960,540)
+$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+$graphics.Clear([System.Drawing.Color]::FromArgb(12,16,22))
+$font = [System.Drawing.Font]::new('Segoe UI',[single]28,[System.Drawing.FontStyle]::Bold)
+$mono = [System.Drawing.Font]::new('Consolas',[single]22,[System.Drawing.FontStyle]::Regular)
+$brush = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
+$graphics.DrawString('AUTO CODEZ ATTACHMENT TEST',$font,$brush,42,42)
+$graphics.DrawString('STATUS READY',$mono,$brush,42,125)
+$graphics.DrawString('FILES INDEXED 17',$mono,$brush,42,185)
+$graphics.DrawString('ERRORS 0',$mono,$brush,42,245)
+$graphics.DrawString('npm run test:visual',$mono,$brush,42,305)
+$graphics.DrawString('feature/ui-hierarchy-polish',$mono,$brush,42,365)
+$bitmap.Save($env:AUTO_CODEZ_VISUAL_ATTACHMENT_FIXTURE,[System.Drawing.Imaging.ImageFormat]::Png)
+$graphics.Dispose(); $bitmap.Dispose(); $font.Dispose(); $mono.Dispose(); $brush.Dispose()
+`;
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], {
+      windowsHide: true,
+      env: { ...process.env, AUTO_CODEZ_VISUAL_ATTACHMENT_FIXTURE: attachmentFixturePath },
+      encoding: 'utf8',
+    });
+    if (result.status !== 0) throw new Error(`Falha ao criar fixture visual de anexo: ${result.stderr || result.stdout}`);
+  }
 }
 
 function environment() {
-  const env = { ...process.env, HOME: stateRoot, AUTO_CODEZ_VISUAL_TEST: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' };
+  const env = {
+    ...process.env,
+    HOME: stateRoot,
+    AUTO_CODEZ_VISUAL_TEST: '1',
+    AUTO_CODEZ_VISUAL_ATTACHMENT_FIXTURE: attachmentFixturePath,
+    ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+  };
   if (process.platform === 'win32') {
     env.USERPROFILE = stateRoot;
     env.APPDATA = path.join(stateRoot, 'AppData', 'Roaming');
@@ -237,6 +273,30 @@ async function verifyLocalChatInstallFlow() {
   await page.screenshot({ path: path.join(outputDir, 'funcional-modelo-local-no-chat.png'), animations: 'disabled' });
 }
 
+async function verifyAttachmentComposer() {
+  const close = page.locator('.modal-close').first();
+  if (await close.count() && await close.isVisible().catch(() => false)) await close.click();
+  const attach = page.locator('.attach-button').first();
+  await attach.waitFor({ state: 'visible', timeout: 10_000 });
+  await attach.click();
+
+  const tray = page.locator('#attachment-tray');
+  await tray.waitFor({ state: 'visible', timeout: 15_000 });
+  const card = tray.locator('.composer-attachment').first();
+  await card.waitFor({ state: 'visible' });
+  const preview = card.locator('.composer-attachment-preview');
+  await preview.waitFor({ state: 'visible' });
+  const text = (await card.innerText()).replace(/\s+/g, ' ');
+  if (!text.includes('attachment-fixture.png')) throw new Error(`Anexo visual não exibiu o nome esperado: ${text}`);
+  await page.screenshot({ path: path.join(outputDir, 'funcional-anexo-imagem-composer.png'), animations: 'disabled' });
+
+  await card.locator('[data-remove-attachment]').click();
+  await page.waitForFunction(() => {
+    const tray = document.querySelector('#attachment-tray');
+    return tray instanceof HTMLElement && tray.hidden;
+  });
+}
+
 async function verifyNoHistoricalGraphInjection() {
   if (await page.locator('.execution-graph-history-host').count()) throw new Error('Execution Graph histórico ainda foi injetado no fluxo do chat.');
 }
@@ -255,6 +315,7 @@ async function main() {
   await verifyUtilityRailIconsOnFirstFrame();
   await verifyTerminalSessions();
   await verifyLocalChatInstallFlow();
+  await verifyAttachmentComposer();
   await verifyNoHistoricalGraphInjection();
   if (pageErrors.length || consoleErrors.length) throw new Error(`Erros no renderer: page=${pageErrors.length}, console=${consoleErrors.length}.`);
   await fs.writeFile(path.join(outputDir, 'user-regressions.json'), `${JSON.stringify({ pageErrors, consoleErrors, installedOllamaModel }, null, 2)}\n`, 'utf8');
