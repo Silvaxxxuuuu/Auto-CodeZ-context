@@ -163,6 +163,38 @@ export class AttachmentStore {
     return path.join(this.directoryFor(hash), hash);
   }
 
+  private contextFileFor(hash: string): string {
+    return `${this.fileFor(hash)}.contexts.json`;
+  }
+
+  private async cachedContexts(hash: string): Promise<AIAttachmentContext[]> {
+    try {
+      const raw = await fs.readFile(this.contextFileFor(hash), 'utf8');
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.flatMap((item) => {
+        try {
+          const normalized = normalizeAttachmentReference({
+            id: 'cache',
+            kind: 'text',
+            name: 'cache.txt',
+            mediaType: 'text/plain',
+            size: 1,
+            storageKey: hash,
+            sha256: hash,
+            createdAt: 1,
+            contexts: [item],
+          }).contexts;
+          return normalized ?? [];
+        } catch {
+          return [];
+        }
+      });
+    } catch {
+      return [];
+    }
+  }
+
   async importFile(filePath: string): Promise<AIAttachment> {
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) throw new Error('O anexo selecionado não é um arquivo.');
@@ -221,9 +253,33 @@ export class AttachmentStore {
     return bytes;
   }
 
+  async saveContext(attachment: AIAttachment, context: AIAttachmentContext): Promise<AIAttachment> {
+    await this.readBytes(attachment);
+    const cached = await this.cachedContexts(attachment.sha256);
+    const key = `${context.kind}:${context.model ?? ''}`;
+    const next = [
+      ...cached.filter((item) => `${item.kind}:${item.model ?? ''}` !== key),
+      { ...context },
+    ];
+    await fs.mkdir(this.directoryFor(attachment.sha256), { recursive: true });
+    await fs.writeFile(this.contextFileFor(attachment.sha256), JSON.stringify(next), 'utf8');
+    return { ...attachment, contexts: next.map((item) => ({ ...item })) };
+  }
+
   async hydrate(attachment: AIAttachment): Promise<AIAttachment> {
-    const bytes = await this.readBytes(attachment);
-    return { ...attachment, contexts: attachment.contexts?.map((item) => ({ ...item })), dataBase64: bytes.toString('base64') };
+    const [bytes, cached] = await Promise.all([
+      this.readBytes(attachment),
+      this.cachedContexts(attachment.sha256),
+    ]);
+    const merged = new Map<string, AIAttachmentContext>();
+    for (const context of [...(attachment.contexts ?? []), ...cached]) {
+      merged.set(`${context.kind}:${context.model ?? ''}`, { ...context });
+    }
+    return {
+      ...attachment,
+      ...(merged.size ? { contexts: [...merged.values()] } : {}),
+      dataBase64: bytes.toString('base64'),
+    };
   }
 
   async previewDataUrl(attachment: AIAttachment): Promise<string | undefined> {
