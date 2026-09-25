@@ -10,6 +10,7 @@ export interface AccountAuthConfigurationSnapshot {
   configured: boolean;
   methods: Array<'magic_link' | 'github' | 'google' | 'microsoft' | 'passkey'>;
   hosted?: boolean;
+  passkeyEnrollmentSupported?: boolean;
   configurationError?: string;
 }
 
@@ -43,6 +44,7 @@ export function createAccountAuthAdapter(
         configuration: {
           configured: true,
           methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'],
+          passkeyEnrollmentSupported: false,
         },
       };
     } catch (error) {
@@ -80,6 +82,7 @@ export function createAccountAuthAdapter(
       configuration: {
         configured: true,
         methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'],
+        passkeyEnrollmentSupported: true,
       },
     };
   } catch (error) {
@@ -115,6 +118,9 @@ export async function resolveAccountAuthConfiguration(
       configured: true,
       methods: [...discovered.methods],
       ...(result.configuration.hosted ? { hosted: true } : {}),
+      ...(result.configuration.passkeyEnrollmentSupported !== undefined
+        ? { passkeyEnrollmentSupported: result.configuration.passkeyEnrollmentSupported }
+        : {}),
     };
   } catch (error) {
     return {
