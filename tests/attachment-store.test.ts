@@ -63,3 +63,21 @@ test('AttachmentStore extracts text from a simple textual PDF stream without ext
   assert.match(attachment.contexts?.[0]?.text ?? '', /Auto CodeZ PDF text/);
   await fs.rm(root, { recursive: true, force: true });
 });
+
+
+test('AttachmentStore imports clipboard image bytes through the same content-addressed store', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'autocodez-attachments-'));
+  const store = new AttachmentStore(() => path.join(root, 'store'));
+  const pngHeader = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+
+  const attachment = await store.importBuffer(pngHeader, 'clipboard-image.png', 'image/png');
+  assert.equal(attachment.kind, 'image');
+  assert.equal(attachment.name, 'clipboard-image.png');
+  assert.equal(attachment.mediaType, 'image/png');
+  assert.equal(attachment.size, pngHeader.byteLength);
+  assert.match(attachment.sha256, /^[a-f0-9]{64}$/);
+
+  const hydrated = await store.hydrate(attachment);
+  assert.deepEqual(Buffer.from(hydrated.dataBase64 ?? '', 'base64'), pngHeader);
+  await fs.rm(root, { recursive: true, force: true });
+});
