@@ -315,6 +315,11 @@ export class AttachmentStore {
     return { removed };
   }
 
+  async verifiedFilePath(attachment: AIAttachment): Promise<string> {
+    await this.readBytes(attachment);
+    return this.fileFor(attachment.storageKey);
+  }
+
   async previewDataUrl(attachment: AIAttachment): Promise<string | undefined> {
     if (attachment.kind !== 'image') return undefined;
     const bytes = await this.readBytes(attachment);
