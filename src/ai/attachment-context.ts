@@ -7,12 +7,19 @@ export type AttachmentDelivery =
 
 function bestDerivedContext(contexts: AIAttachmentContext[] | undefined): string | undefined {
   if (!contexts?.length) return undefined;
-  const priority: AIAttachmentContext['kind'][] = ['text', 'ocr', 'caption', 'transcript', 'metadata'];
-  for (const kind of priority) {
-    const candidate = contexts.find((context) => context.kind === kind && context.text.trim());
-    if (candidate) return candidate.text.trim();
-  }
-  return undefined;
+  const direct = contexts.find((context) => context.kind === 'text' && context.text.trim());
+  if (direct) return direct.text.trim();
+
+  const sections: string[] = [];
+  const ocr = contexts.find((context) => context.kind === 'ocr' && context.text.trim());
+  const caption = contexts.find((context) => context.kind === 'caption' && context.text.trim());
+  const transcript = contexts.find((context) => context.kind === 'transcript' && context.text.trim());
+  const metadata = contexts.find((context) => context.kind === 'metadata' && context.text.trim());
+  if (ocr) sections.push(`Texto reconhecido na imagem:\n${ocr.text.trim()}`);
+  if (caption) sections.push(`Descrição visual:\n${caption.text.trim()}`);
+  if (transcript) sections.push(`Transcrição:\n${transcript.text.trim()}`);
+  if (metadata) sections.push(`Metadados:\n${metadata.text.trim()}`);
+  return sections.length ? sections.join('\n\n') : undefined;
 }
 
 function attachmentLabel(attachment: AIAttachment): string {
