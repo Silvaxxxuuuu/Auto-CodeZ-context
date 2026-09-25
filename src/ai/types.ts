@@ -8,7 +8,32 @@ export type PluginToolName = `plugin_${string}`;
 export type ToolName = BuiltInToolName | PluginToolName;
 export type AISourceOrigin = 'autocodez-web' | 'provider-native';
 export interface AISource { title: string; url: string; origin: AISourceOrigin; citation?: number; snippet?: string; retrievedAt?: number; providerId?: string; searchProvider?: string; }
-export interface AIMessage { role: MessageRole; content: string; createdAt?: number; toolCallId?: string; toolName?: ToolName; toolCalls?: AIToolCall[]; changes?: FileDiff[]; diffPlan?: DiffPlan; commandResult?: CommandResultSummary; gitResult?: GitOperationSummary; sources?: AISource[]; }
+export type AIAttachmentKind = 'image' | 'document' | 'text' | 'audio' | 'video' | 'binary';
+export type AIAttachmentContextKind = 'native' | 'text' | 'ocr' | 'caption' | 'transcript' | 'metadata';
+
+export interface AIAttachmentContext {
+  kind: AIAttachmentContextKind;
+  text: string;
+  model?: string;
+  createdAt: number;
+}
+
+export interface AIAttachment {
+  id: string;
+  kind: AIAttachmentKind;
+  name: string;
+  mediaType: string;
+  size: number;
+  storageKey: string;
+  sha256: string;
+  createdAt: number;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  contexts?: AIAttachmentContext[];
+}
+
+export interface AIMessage { role: MessageRole; content: string; createdAt?: number; toolCallId?: string; toolName?: ToolName; toolCalls?: AIToolCall[]; attachments?: AIAttachment[]; changes?: FileDiff[]; diffPlan?: DiffPlan; commandResult?: CommandResultSummary; gitResult?: GitOperationSummary; sources?: AISource[]; }
 export interface AIModel { id: string; name: string; providerId: ProviderId; capabilities: Capability[]; contextWindow?: number; reasoningLevels?: IntelligenceLevel[]; }
 export interface AIProviderConfig { id: ProviderId; displayName: string; apiKey: string; baseUrl?: string; selectedModel?: string; enabled: boolean; }
 export interface AIRequest { providerId: ProviderId; model: string; messages: AIMessage[]; intelligence: IntelligenceLevel; projectContext?: string; toolsEnabled: boolean; tools?: AIToolDefinition[]; }
