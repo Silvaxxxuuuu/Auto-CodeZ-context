@@ -49,10 +49,19 @@ const EXPLICIT_RESEARCH_INTENT = /\b(pesquise|pesquisar|pesquisa na web|procure 
 const TECHNICAL_SUBJECT = /\b(ferramenta|ferramentas|biblioteca|bibliotecas|framework|frameworks|api|apis|pacote|pacotes|plugin|plugins|sdk|sdks|servi[cç]o|servi[cç]os|tool|tools|library|libraries|frameworks?|apis?|packages?|plugins?|sdks?|services?)\b/i;
 const TECHNICAL_DISCOVERY_INTENT = /\b(qual|quais|melhor|melhores|alternativa|alternativas|existe|existem|dispon[ií]vel|dispon[ií]veis|recomenda|recomende|recomendaria|devo usar|poderia usar|serve|servem|which|what tools|best|alternatives?|available|recommend|should i use|could use|suitable)\b/i;
 
+const ATTACHMENT_CONTEXT_MARKER = '--- Contexto de anexos indexado pelo Auto CodeZ ---';
+
+function explicitUserText(content: string): string {
+  const markerIndex = content.indexOf(ATTACHMENT_CONTEXT_MARKER);
+  return (markerIndex >= 0 ? content.slice(0, markerIndex) : content).trim();
+}
+
 function latestUserMessage(messages: AIMessage[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message?.role === 'user' && message.content.trim()) return message.content.trim();
+    if (message?.role !== 'user') continue;
+    const explicit = explicitUserText(message.content);
+    if (explicit) return explicit;
   }
   return undefined;
 }
