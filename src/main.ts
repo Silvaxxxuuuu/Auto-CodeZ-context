@@ -55,6 +55,7 @@ import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-contro
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
 import type { AIAttachment, AIProviderConfig, AIStreamEvent, ChatRecord } from './ai/types';
 import { AttachmentStore } from './ai/attachment-store';
+import { ManagedVisionAttachmentIndexer } from './ai/attachment-indexer';
 import { operationalLedger, type OperationalLedgerQuery, type OperationalLedgerState } from './operational-ledger';
 import { OperationalLedgerPersistence, OperationalLedgerStore } from './operational-ledger-store';
 import { OperationalLedgerRetrieval, type OperationalLedgerScope } from './operational-ledger-retrieval';
@@ -80,6 +81,10 @@ declare const __AUTO_CODEZ_DESCOPE_PROJECT_ID__: string;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const storage = new LocalStorage();
 const attachmentStore = new AttachmentStore(() => path.join(app.getPath('userData'), 'attachments'));
+const attachmentIndexer = new ManagedVisionAttachmentIndexer(
+  () => path.join(app.getPath('userData'), 'attachment-vision'),
+  attachmentStore,
+);
 const accountCredentials = new LocalProtectedCredentialStore(storage);
 const accountDeviceIdentity = new DeviceIdentityStore(
   storage,
@@ -223,7 +228,17 @@ const toolRuntime = new ShadowAwareToolRuntime(shadowAwareWorkspaceRuntime, perm
 toolRuntime.configureShadowWorkspace(executionShadowWorkspaceRuntime);
 toolRuntime.configureGitRuntime(gitRuntime);
 const providerRequestJournal = new ProviderRequestJournal(storage);
-const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefined, activityRuntime, undefined, toolRuntime.listDefinitions(), providerRequestJournal);
+const chatRuntime = new ChatRuntime(
+  providerManager.registry,
+  undefined,
+  undefined,
+  activityRuntime,
+  undefined,
+  toolRuntime.listDefinitions(),
+  providerRequestJournal,
+  undefined,
+  attachmentIndexer,
+);
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const executionManager = new ExecutionManager();
 const executionStateStore = new ExecutionStateStore(storage);
@@ -1659,6 +1674,7 @@ app.on('before-quit', (event) => {
     clearAccountRefreshTimer();
     await mcpTunnelRuntime.stop().catch((): undefined => undefined);
     await mcpGatewayServer.stop().catch((): undefined => undefined);
+    await attachmentIndexer.stop().catch((): undefined => undefined);
     app.quit();
   })();
 });
