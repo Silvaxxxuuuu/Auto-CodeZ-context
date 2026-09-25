@@ -123,18 +123,19 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
     onProgress?: (progress: AttachmentIndexProgress) => void,
   ): Promise<AIAttachment> {
     if (attachment.kind !== 'image') return attachment;
-    const existing = attachment.contexts?.find((context) =>
+    const hydrated = await this.store.hydrate(attachment);
+    const existing = hydrated.contexts?.find((context) =>
       (context.kind === 'caption' || context.kind === 'ocr')
       && context.text.trim(),
     );
-    if (existing) return attachment;
+    if (existing) return hydrated;
 
-    const running = this.indexInFlight.get(attachment.sha256);
+    const running = this.indexInFlight.get(hydrated.sha256);
     if (running) return await running;
-    const operation = this.indexOnce(attachment, signal, onProgress).finally(() => {
-      if (this.indexInFlight.get(attachment.sha256) === operation) this.indexInFlight.delete(attachment.sha256);
+    const operation = this.indexOnce(hydrated, signal, onProgress).finally(() => {
+      if (this.indexInFlight.get(hydrated.sha256) === operation) this.indexInFlight.delete(hydrated.sha256);
     });
-    this.indexInFlight.set(attachment.sha256, operation);
+    this.indexInFlight.set(hydrated.sha256, operation);
     return await operation;
   }
 
