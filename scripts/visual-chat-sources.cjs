@@ -151,50 +151,53 @@ async function main() {
 
     const chatsPath = await findFile(stateRoot, 'chats.json');
     if (!chatsPath) throw new Error('chats.json não foi localizado no estado isolado do Electron.');
-    const chats = JSON.parse(await fs.readFile(chatsPath, 'utf8'));
-    const chat = chats.find((item) => item.id === chatId);
-    if (!chat) throw new Error('Chat criado não foi persistido em chats.json.');
     const now = Date.now();
-    chat.title = 'Pesquisa atual com IA local';
-    chat.providerId = 'ollama';
-    chat.model = 'qwen3:8b';
-    chat.messages = [
-      {
-        role: 'user',
-        content: 'Pesquise a documentação atual antes de recomendar as ferramentas para este projeto.',
-        createdAt: now - 1000,
-      },
-      {
-        role: 'assistant',
-        content: 'Consultei fontes públicas atuais antes de montar a recomendação. As referências usadas ficam registradas abaixo da resposta.',
-        createdAt: now,
-        sources: [
-          {
-            title: 'Electron Forge — Vite Plugin',
-            url: 'https://www.electronforge.io/config/plugins/vite',
-            origin: 'autocodez-web',
-            citation: 1,
-            searchProvider: 'DuckDuckGo',
-            retrievedAt: now,
-          },
-          {
-            title: 'TypeScript — Documentation',
-            url: 'https://www.typescriptlang.org/docs/',
-            origin: 'autocodez-web',
-            citation: 2,
-            searchProvider: 'DuckDuckGo',
-            retrievedAt: now,
-          },
-          {
-            title: 'Destino privado que não pode aparecer',
-            url: 'http://127.0.0.1:11434/api/tags',
-            origin: 'provider-native',
-          },
-        ],
-      },
-    ];
-    chat.updatedAt = now;
-    await fs.writeFile(chatsPath, `${JSON.stringify(chats, null, 2)}\n`, 'utf8');
+    const fixtureChat = {
+      id: chatId,
+      title: 'Pesquisa atual com IA local',
+      providerId: 'ollama',
+      model: 'qwen3:8b',
+      intelligence: 'normal',
+      permissionLevel: 'read-only',
+      messages: [
+        {
+          role: 'user',
+          content: 'Pesquise a documentação atual antes de recomendar as ferramentas para este projeto.',
+          createdAt: now - 1000,
+        },
+        {
+          role: 'assistant',
+          content: 'Consultei fontes públicas atuais antes de montar a recomendação. As referências usadas ficam registradas abaixo da resposta.',
+          createdAt: now,
+          sources: [
+            {
+              title: 'Electron Forge — Vite Plugin',
+              url: 'https://www.electronforge.io/config/plugins/vite',
+              origin: 'autocodez-web',
+              citation: 1,
+              searchProvider: 'DuckDuckGo',
+              retrievedAt: now,
+            },
+            {
+              title: 'TypeScript — Documentation',
+              url: 'https://www.typescriptlang.org/docs/',
+              origin: 'autocodez-web',
+              citation: 2,
+              searchProvider: 'DuckDuckGo',
+              retrievedAt: now,
+            },
+            {
+              title: 'Destino privado que não pode aparecer',
+              url: 'http://127.0.0.1:11434/api/tags',
+              origin: 'provider-native',
+            },
+          ],
+        },
+      ],
+      createdAt: now - 2000,
+      updatedAt: now,
+    };
+    await fs.writeFile(chatsPath, `${JSON.stringify([fixtureChat], null, 2)}\n`, 'utf8');
 
     second = await launch(stateRoot);
     const pageErrors = [];
