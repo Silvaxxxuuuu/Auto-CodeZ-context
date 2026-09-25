@@ -31,6 +31,7 @@ export interface AIAttachment {
   height?: number;
   durationMs?: number;
   contexts?: AIAttachmentContext[];
+  dataBase64?: string;
 }
 
 export interface AIMessage { role: MessageRole; content: string; createdAt?: number; toolCallId?: string; toolName?: ToolName; toolCalls?: AIToolCall[]; attachments?: AIAttachment[]; changes?: FileDiff[]; diffPlan?: DiffPlan; commandResult?: CommandResultSummary; gitResult?: GitOperationSummary; sources?: AISource[]; }
