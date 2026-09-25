@@ -24,9 +24,9 @@ $serverExe = Join-Path $runtime 'llama-server.exe'
 if (-not (Test-Path $serverExe)) { throw 'llama-server.exe missing after verified extraction.' }
 
 $modelPath = Join-Path $downloads 'SmolVLM2-2.2B-Instruct-Q4_K_M.gguf'
-$projectorPath = Join-Path $downloads 'mmproj-SmolVLM2-2.2B-Instruct-Q4_K_M.gguf'
+$projectorPath = Join-Path $downloads 'mmproj-SmolVLM2-2.2B-Instruct-Q8_0.gguf'
 Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/main/SmolVLM2-2.2B-Instruct-Q4_K_M.gguf?download=true' -Destination $modelPath -Sha256 '0cf76814555b8665149075b74ab6b5c1d428ea1d3d01c1918c12012e8d7c9f58' -Bytes 1112602656
-Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/main/mmproj-SmolVLM2-2.2B-Instruct-Q4_K_M.gguf?download=true' -Destination $projectorPath -Sha256 'ae07ea1facd07dd3230c4483b63e8cda96c6944ad2481f33d531f79e892dd024' -Bytes 592523200
+Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/main/mmproj-SmolVLM2-2.2B-Instruct-Q8_0.gguf?download=true' -Destination $projectorPath -Sha256 'ae07ea1facd07dd3230c4483b63e8cda96c6944ad2481f33d531f79e892dd024' -Bytes 592523200
 
 Add-Type -AssemblyName System.Drawing
 
