@@ -114,6 +114,19 @@ test('account auth factory exposes native Descope identity methods when project 
   });
 });
 
+test('native Descope can use an independent HTTPS Account Data Service for the Device Registry', () => {
+  const result = createAccountAuthAdapter({
+    descopeProjectId: 'P2abcDEF_123',
+    accountDataBaseUrl: 'https://account-data.autocodez.example',
+  });
+
+  assert.ok(result.adapter instanceof DescopeAuthAdapter);
+  assert.ok(result.deviceRegistry instanceof HttpDeviceRegistryAdapter);
+  assert.equal(result.publicOrigin, 'https://account-data.autocodez.example');
+  assert.equal(result.configuration.configured, true);
+  assert.equal(result.configuration.passkeyEnrollmentSupported, false);
+});
+
 test('native Descope Passkey is exposed only after the dedicated OIDC Flow is explicitly enabled', async () => {
   const result = createAccountAuthAdapter({
     descopeProjectId: 'P2abcDEF_123',
