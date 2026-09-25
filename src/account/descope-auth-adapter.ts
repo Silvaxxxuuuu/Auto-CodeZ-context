@@ -25,6 +25,7 @@ interface DescopeAuthAdapterOptions {
   fetch?: FetchLike;
   timeoutMs?: number;
   now?: () => number;
+  passkeyOidcFlowEnabled?: boolean;
 }
 
 type OidcTokenResponse = {
@@ -261,6 +262,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
   private readonly now: () => number;
+  private readonly passkeyOidcFlowEnabled: boolean;
   private readonly hostedRedirectUri = 'autocodez://auth/hosted';
   private oidcJwksCache?: CachedJwks;
   private sessionJwksCache?: CachedJwks;
@@ -271,13 +273,22 @@ export class DescopeAuthAdapter implements AuthAdapter {
     this.fetchImpl = options.fetch ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.now = options.now ?? Date.now;
+    this.passkeyOidcFlowEnabled = options.passkeyOidcFlowEnabled === true;
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs < 1_000 || this.timeoutMs > 60_000) {
       throw new Error('Timeout do Descope inválido.');
     }
   }
 
   async configuration(): Promise<{ methods: AuthMethod[] }> {
-    return { methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'] };
+    return {
+      methods: [
+        'magic_link',
+        'github',
+        'google',
+        'microsoft',
+        ...(this.passkeyOidcFlowEnabled ? ['passkey' as const] : []),
+      ],
+    };
   }
 
   async beginHosted(input: BeginHostedInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
@@ -370,12 +381,17 @@ export class DescopeAuthAdapter implements AuthAdapter {
   }
 
   async beginPasskey(input: BeginPasskeyInput): Promise<{ authorizationUrl: string; flowId: string; expiresAt: number }> {
+    if (!this.passkeyOidcFlowEnabled) {
+      throw new AuthAdapterError(
+        'not_configured',
+        'Passkey ainda não está ligado a um Flow OIDC dedicado no Descope.',
+      );
+    }
     return this.beginHostedFlow(
       input.state,
       input.nonce,
       input.codeChallenge,
       'autocodez://auth/passkey',
-      'passkey',
     );
   }
 
@@ -441,7 +457,6 @@ export class DescopeAuthAdapter implements AuthAdapter {
     nonce: string,
     codeChallenge: string,
     redirectUri: string,
-    requestedMethod?: 'passkey',
   ): {
     authorizationUrl: string;
     flowId: string;
@@ -457,7 +472,6 @@ export class DescopeAuthAdapter implements AuthAdapter {
     url.searchParams.set('code_challenge_method', 'S256');
     url.searchParams.set('state', state);
     url.searchParams.set('nonce', nonce);
-    if (requestedMethod) url.searchParams.set('autocodez_method', requestedMethod);
 
     return {
       authorizationUrl: url.toString(),
