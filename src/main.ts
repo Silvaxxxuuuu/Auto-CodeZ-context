@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, Menu, shell, BrowserWindow } from 'electron';
+import { app, clipboard, dialog, ipcMain, Menu, shell, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalStorage } from './core/storage';
@@ -950,6 +950,29 @@ ipcMain.handle('chat:stop', async (_event, chatId: string) => {
   reconcileExecutionSlot(id);
   return { stopped: false };
 });
+ipcMain.handle('chat-attachments:paste-image', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.');
+  const image = clipboard.readImage();
+  if (image.isEmpty()) return null;
+  const bytes = image.toPNG();
+  if (!bytes.byteLength) return null;
+  const size = image.getSize();
+  const attachment = await attachmentStore.importBuffer(
+    bytes,
+    `clipboard-${Date.now()}.png`,
+    'image/png',
+  );
+  const enriched = {
+    ...attachment,
+    ...(size.width > 0 ? { width: size.width } : {}),
+    ...(size.height > 0 ? { height: size.height } : {}),
+  };
+  return {
+    attachment: enriched,
+    previewDataUrl: await attachmentStore.previewDataUrl(enriched),
+  };
+});
+
 ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   const value = requireObject(input, 'Mensagem');
   const chatId = requireIdentifier(value.chatId, 'Chat');
