@@ -4,7 +4,10 @@ import { getAppPreferences } from './app-preferences';
 type ProviderSummary = { id: string; displayName: string; configured: boolean; selectedModel?: string; model?: string; apiKeyConfigured: boolean };
 type Model = { id: string; name: string; providerId: string; capabilities: string[]; reasoningLevels?: string[] };
 type Change = { path: string; type: string; before: string; after: string; addedLines: number; removedLines: number };
-type Message = { role: 'user' | 'assistant' | 'system' | 'tool'; content: string; createdAt?: number; toolCallId?: string; toolName?: string; changes?: Change[] };
+type AttachmentContext = { kind: 'native' | 'text' | 'ocr' | 'caption' | 'transcript' | 'metadata'; text: string; model?: string; createdAt: number };
+type Attachment = { id: string; kind: 'image' | 'document' | 'text' | 'audio' | 'video' | 'binary'; name: string; mediaType: string; size: number; storageKey: string; sha256: string; createdAt: number; width?: number; height?: number; durationMs?: number; contexts?: AttachmentContext[] };
+type PickedAttachment = { attachment: Attachment; previewDataUrl?: string };
+type Message = { role: 'user' | 'assistant' | 'system' | 'tool'; content: string; createdAt?: number; toolCallId?: string; toolName?: string; attachments?: Attachment[]; changes?: Change[] };
 type Chat = { id: string; title: string; projectId?: string; providerId: string; model: string; intelligence: 'low' | 'normal' | 'high' | 'maximum'; permissionLevel: 'read-only' | 'safe' | 'ask' | 'unrestricted'; messages: Message[]; createdAt: number; updatedAt: number };
 type Project = { id: string; name: string; rootPath: string; createdAt: number; updatedAt: number };
 type IntelligenceLevel = Chat['intelligence'];
@@ -23,7 +26,8 @@ declare global {
       createChat: (input: { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }) => Promise<Chat>;
       deleteChat: (chatId: string) => Promise<Chat[]>;
       updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
-      streamChat: (input: { chatId: string; content: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
+      pickChatAttachments: (kind: 'file' | 'image') => Promise<PickedAttachment[]>;
+      streamChat: (input: { chatId: string; content: string; attachments?: Attachment[] }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
       stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
       mcpRuntimeStatus: () => Promise<{ platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string }>;
@@ -111,6 +115,7 @@ let pendingApprovals: Approval[] = [];
 let lastError = '';
 let retryContent = '';
 let lastSubmittedContent = '';
+let pendingAttachments: PickedAttachment[] = [];
 let streamRenderTimer: number | null = null;
 let streamingMessageElement: HTMLElement | null = null;
 let activityElement: HTMLElement | null = null;
@@ -139,6 +144,7 @@ app.innerHTML = `
       <section class="chat-header" id="chat-header"></section>
       <section class="messages" id="messages"></section>
       <section class="composer-wrap">
+        <div class="attachment-tray" id="attachment-tray" hidden></div>
         <div class="composer">
           <button class="attach-button" data-action="attachments" title="Anexar conteúdo" aria-label="Anexar conteúdo"></button>
           <textarea id="prompt" rows="1" placeholder="Digite uma mensagem..." aria-label="Mensagem"></textarea>
@@ -168,6 +174,7 @@ const chatHeader = document.querySelector<HTMLElement>('#chat-header')!;
 const messages = document.querySelector<HTMLElement>('#messages')!;
 const prompt = document.querySelector<HTMLTextAreaElement>('#prompt')!;
 const sendButton = document.querySelector<HTMLButtonElement>('#send-button')!;
+const attachmentTray = document.querySelector<HTMLDivElement>('#attachment-tray')!;
 const intelligenceButton = document.querySelector<HTMLButtonElement>('#intelligence-button')!;
 const intelligenceMenu = document.querySelector<HTMLDivElement>('#intelligence-menu')!;
 const modalRoot = document.querySelector<HTMLDivElement>('#modal-root')!;
