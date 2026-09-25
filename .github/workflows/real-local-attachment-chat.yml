@@ -93,8 +93,29 @@ jobs:
 
           $server = Join-Path $runtime 'llama-server.exe'
           if (-not (Test-Path $server)) { throw 'llama-server.exe missing.' }
+
+          $visionRoot = Join-Path $root 'attachment-vision'
+          $visionEngine = Join-Path $visionRoot 'engine\b10837'
+          $visionAssets = Join-Path $visionRoot 'vision'
+          New-Item -ItemType Directory -Force -Path $visionEngine,$visionAssets | Out-Null
+          Copy-Item -Path (Join-Path $runtime '*') -Destination $visionEngine -Recurse -Force
+          $visionServer = Join-Path $visionEngine 'llama-server.exe'
+          $visionServerSha = (Get-FileHash -Path $visionServer -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{
+            release = 'b10837'
+            asset = 'llama-b10837-bin-win-cpu-x64.zip'
+            sha256 = 'b1b304054b13676d03876cce0e29d6c62b1de2a66456d1cd591afbdf15348088'
+            executableSha256 = $visionServerSha
+          } | ConvertTo-Json | Out-File -FilePath (Join-Path $visionEngine 'engine.json') -Encoding utf8
+
+          $visionModel = Join-Path $visionAssets 'SmolVLM-256M-Instruct-Q8_0.gguf'
+          $visionProjector = Join-Path $visionAssets 'mmproj-SmolVLM-256M-Instruct-Q8_0.gguf'
+          Download-Verified 'https://huggingface.co/ggml-org/SmolVLM-256M-Instruct-GGUF/resolve/main/SmolVLM-256M-Instruct-Q8_0.gguf?download=true' $visionModel '2a31195d3769c0b0fd0a4906201666108834848db768af11de1d2cef7cd35e65' 175054528
+          Download-Verified 'https://huggingface.co/ggml-org/SmolVLM-256M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-256M-Instruct-Q8_0.gguf?download=true' $visionProjector '7e943f7c53f0382a6fc41b6ee0c2def63ba4fded9ab8ed039cc9e2ab905e0edd' 103769856
+
           "AUTO_CODEZ_LOCAL_TEXT_SERVER_EXE=$server" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "AUTO_CODEZ_LOCAL_TEXT_MODEL=$model" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AUTO_CODEZ_TEST_ATTACHMENT_VISION_ROOT=$visionRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Run real Ctrl+V and local image understanding
         env:
