@@ -904,7 +904,7 @@ ipcMain.handle('chat-attachments:pick', async (_event, kindInput?: unknown) => {
     filters: kind === 'image'
       ? [{ name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif'] }]
       : [
-          { name: 'Arquivos suportados', extensions: ['txt','md','json','js','jsx','ts','tsx','css','html','xml','yaml','yml','toml','ini','csv','log','sql','sh','ps1','py','java','c','cpp','h','hpp','cs','go','rs','pdf','png','jpg','jpeg','webp','gif','bmp','avif'] },
+          { name: 'Arquivos suportados', extensions: ['txt','md','json','js','jsx','ts','tsx','css','html','xml','yaml','yml','toml','ini','csv','log','sql','sh','ps1','py','java','c','cpp','h','hpp','cs','go','rs','pdf','docx','pptx','xlsx','odt','ods','odp','png','jpg','jpeg','webp','gif','bmp','avif'] },
           { name: 'Todos os arquivos', extensions: ['*'] },
         ],
   });
