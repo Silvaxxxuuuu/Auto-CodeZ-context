@@ -183,6 +183,75 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
 }
 
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 ** 2).toFixed(value < 10 * 1024 ** 2 ? 1 : 0)} MB`;
+}
+
+function attachmentIcon(kind: Attachment['kind']): string {
+  if (kind === 'image') return 'Imagem';
+  if (kind === 'document') return 'Documento';
+  if (kind === 'text') return 'Arquivo';
+  if (kind === 'audio') return 'Áudio';
+  if (kind === 'video') return 'Vídeo';
+  return 'Arquivo';
+}
+
+function attachmentListMarkup(attachments: Attachment[] | undefined): string {
+  if (!attachments?.length) return '';
+  return `<div class="message-attachments">${attachments.map((attachment) => `
+    <div class="message-attachment">
+      <span class="message-attachment-kind">${escapeHtml(attachmentIcon(attachment.kind))}</span>
+      <span class="message-attachment-copy">
+        <strong>${escapeHtml(attachment.name)}</strong>
+        <small>${escapeHtml(formatBytes(attachment.size))} · ${escapeHtml(attachment.mediaType)}</small>
+      </span>
+    </div>
+  `).join('')}</div>`;
+}
+
+function renderAttachmentTray(): void {
+  if (!pendingAttachments.length) {
+    attachmentTray.hidden = true;
+    attachmentTray.innerHTML = '';
+    return;
+  }
+  attachmentTray.hidden = false;
+  attachmentTray.innerHTML = pendingAttachments.map(({ attachment, previewDataUrl }) => `
+    <div class="composer-attachment" data-pending-attachment="${escapeHtml(attachment.id)}">
+      ${previewDataUrl
+        ? `<img src="${escapeHtml(previewDataUrl)}" alt="" class="composer-attachment-preview">`
+        : `<span class="composer-attachment-file">${escapeHtml(attachmentIcon(attachment.kind).slice(0, 1))}</span>`}
+      <span class="composer-attachment-copy">
+        <strong>${escapeHtml(attachment.name)}</strong>
+        <small>${escapeHtml(formatBytes(attachment.size))}</small>
+      </span>
+      <button type="button" class="composer-attachment-remove" data-remove-attachment="${escapeHtml(attachment.id)}" title="Remover anexo" aria-label="Remover ${escapeHtml(attachment.name)}"></button>
+    </div>
+  `).join('');
+}
+
+async function pickAttachments(kind: 'file' | 'image' = 'file'): Promise<void> {
+  if (!activeChat || executionState === 'running' || executionState === 'waiting_approval') return;
+  try {
+    const selected = await window.autoCodez.pickChatAttachments(kind);
+    if (!selected.length) return;
+    const existing = new Set(pendingAttachments.map((item) => item.attachment.sha256));
+    for (const item of selected) {
+      if (existing.has(item.attachment.sha256)) continue;
+      if (pendingAttachments.length >= 12) break;
+      pendingAttachments.push(item);
+      existing.add(item.attachment.sha256);
+    }
+    renderComposer();
+  } catch (error) {
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível anexar o arquivo.');
+  }
+}
+
 function providerName(id: string): string {
   if (id === 'unconfigured') return 'IA não configurada';
   return providers.find((provider) => provider.id === id)?.displayName || id;
