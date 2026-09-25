@@ -92,6 +92,7 @@ const accountDeviceIdentity = new DeviceIdentityStore(
 const accountAuth = createAccountAuthAdapter({
   descopeProjectId: process.env.AUTO_CODEZ_DESCOPE_PROJECT_ID?.trim() || __AUTO_CODEZ_DESCOPE_PROJECT_ID__,
   descopeBaseUrl: process.env.AUTO_CODEZ_DESCOPE_BASE_URL,
+  descopePasskeyOidcFlowEnabled: process.env.AUTO_CODEZ_DESCOPE_PASSKEY_OIDC_FLOW_ENABLED === '1',
 });
 const accountAuthAdapter = accountAuth.adapter;
 const accountSessionRuntime = new AccountSessionRuntime(
