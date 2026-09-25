@@ -11,6 +11,7 @@ import { SYSTEM_PROJECT_ID } from '../agent/command-runtime';
 import { runWithAbortSignal } from './request-cancellation';
 import { WebGroundingCoordinator } from '../web/web-grounding-coordinator';
 import { prepareMessagesForAttachments } from './attachment-context';
+import type { AttachmentIndexer } from './attachment-indexer';
 
 const PROVIDER_RECENT_TOOL_ROUNDS = 2;
 const PROVIDER_RECENT_TOOL_RESULT_CHARS = 12_000;
@@ -217,6 +218,7 @@ export class ChatRuntime {
     private readonly toolDefinitions: AIToolDefinition[] = [],
     private readonly requestJournal = new ProviderRequestJournal(),
     private readonly webGrounding = new WebGroundingCoordinator(),
+    private readonly attachmentIndexer?: AttachmentIndexer,
   ) {}
 
   async init(): Promise<void> {
@@ -227,6 +229,65 @@ export class ChatRuntime {
     return this.requestJournal.listInterrupted();
   }
 
+  private async indexAttachmentsForModel(
+    messages: AIMessage[],
+    capabilities: readonly import('./types').Capability[],
+    signal?: AbortSignal,
+  ): Promise<AIMessage[]> {
+    if (capabilities.includes('vision') || !this.attachmentIndexer) return messages.map((message) => ({ ...message }));
+
+    const prepared: AIMessage[] = [];
+    for (const message of messages) {
+      if (!message.attachments?.length) {
+        prepared.push({ ...message });
+        continue;
+      }
+
+      const attachments = [];
+      for (const attachment of message.attachments) {
+        if (
+          attachment.kind !== 'image'
+          || attachment.contexts?.some((context) =>
+            (context.kind === 'caption' || context.kind === 'ocr') && context.text.trim(),
+          )
+        ) {
+          attachments.push({ ...attachment });
+          continue;
+        }
+
+        let lastStatus = '';
+        this.activity.emit({
+          type: 'action',
+          message: `Preparando visão local para ${attachment.name}.`,
+          status: 'running',
+        });
+        try {
+          const indexed = await this.attachmentIndexer.index(attachment, signal, (progress) => {
+            if (!progress.message || progress.message === lastStatus) return;
+            lastStatus = progress.message;
+            this.activity.emit({
+              type: 'action',
+              message: progress.message,
+              status: progress.percent === 100 ? 'success' : 'running',
+            });
+          });
+          attachments.push(indexed);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.activity.emit({
+            type: 'error',
+            message: `Falha ao indexar ${attachment.name} localmente.`,
+            status: 'failed',
+            error: reason,
+          });
+          throw new Error(`O modelo selecionado não possui visão e o indexador visual local falhou: ${reason}`);
+        }
+      }
+      prepared.push({ ...message, attachments });
+    }
+    return prepared;
+  }
+
   private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal) {
     const adapter = this.registry.get(config.id);
     signal?.throwIfAborted();
@@ -234,7 +295,8 @@ export class ChatRuntime {
     signal?.throwIfAborted();
     if (!this.capabilities.supports(model, 'text')) throw new Error('O modelo selecionado não suporta texto.');
     const resolution = this.intelligence.resolve(model, chat.intelligence);
-    const attachmentMessages = prepareMessagesForAttachments(chat.messages, model.capabilities);
+    const indexedMessages = await this.indexAttachmentsForModel(chat.messages, model.capabilities, signal);
+    const attachmentMessages = prepareMessagesForAttachments(indexedMessages, model.capabilities);
     const lightweightTurn = isLightweightConversationTurn({ ...chat, messages: attachmentMessages });
 
     let webContext: string | undefined;
