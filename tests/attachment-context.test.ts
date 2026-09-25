@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attachmentFallbackContext, resolveAttachmentDelivery } from '../src/ai/attachment-context';
+import { attachmentFallbackContext, prepareMessagesForAttachments, resolveAttachmentDelivery } from '../src/ai/attachment-context';
 import type { AIAttachment } from '../src/ai/types';
 
 function image(contexts: AIAttachment['contexts'] = []): AIAttachment {
@@ -53,4 +53,19 @@ test('native vision attachments are excluded from textual fallback context', () 
   ], ['text', 'vision']);
 
   assert.equal(context, '');
+});
+
+
+test('derived attachment context respects the model budget and prioritizes recent messages', () => {
+  const oldAttachment = image([{ kind: 'ocr', text: 'OLD '.repeat(2_000), createdAt: 100 }]);
+  const recentAttachment = { ...image([{ kind: 'ocr', text: 'RECENT '.repeat(2_000), createdAt: 101 }]), id: 'att-2', sha256: 'b'.repeat(64), storageKey: 'b'.repeat(64) };
+  const messages = prepareMessagesForAttachments([
+    { role: 'user', content: 'antiga', attachments: [oldAttachment] },
+    { role: 'assistant', content: 'ok' },
+    { role: 'user', content: 'recente', attachments: [recentAttachment] },
+  ], ['text'], 4_000);
+
+  assert.match(messages[2]?.content ?? '', /RECENT/);
+  assert.equal((messages[0]?.content ?? '').includes('OLD'), false);
+  assert.ok((messages[2]?.content.length ?? 0) < 4_300);
 });
