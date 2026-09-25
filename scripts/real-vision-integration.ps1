@@ -11,7 +11,7 @@ function Download-Verified {
   param([string]$Url,[string]$Destination,[string]$Sha256,[Int64]$Bytes)
   if (-not (Test-Path $Destination)) { Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing }
   $item = Get-Item $Destination
-  if ($item.Length -ne $Bytes) { throw "Unexpected size for ${Destination}: $($item.Length), expected $Bytes" }
+  if ($Bytes -gt 0 -and $item.Length -ne $Bytes) { throw "Unexpected size for ${Destination}: $($item.Length), expected $Bytes" }
   $actual = (Get-FileHash -Path $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $Sha256.ToLowerInvariant()) { throw "SHA-256 mismatch for ${Destination}: $actual" }
 }
@@ -23,10 +23,10 @@ if (-not (Test-Path (Join-Path $runtime 'llama-server.exe'))) { Expand-Archive -
 $serverExe = Join-Path $runtime 'llama-server.exe'
 if (-not (Test-Path $serverExe)) { throw 'llama-server.exe missing after verified extraction.' }
 
-$modelPath = Join-Path $downloads 'SmolVLM-256M-Instruct-Q8_0.gguf'
-$projectorPath = Join-Path $downloads 'mmproj-SmolVLM-256M-Instruct-Q8_0.gguf'
-Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM-256M-Instruct-GGUF/resolve/main/SmolVLM-256M-Instruct-Q8_0.gguf?download=true' -Destination $modelPath -Sha256 '2a31195d3769c0b0fd0a4906201666108834848db768af11de1d2cef7cd35e65' -Bytes 175054528
-Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM-256M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-256M-Instruct-Q8_0.gguf?download=true' -Destination $projectorPath -Sha256 '7e943f7c53f0382a6fc41b6ee0c2def63ba4fded9ab8ed039cc9e2ab905e0edd' -Bytes 103769856
+$modelPath = Join-Path $downloads 'SmolVLM-500M-Instruct-Q8_0.gguf'
+$projectorPath = Join-Path $downloads 'mmproj-SmolVLM-500M-Instruct-Q8_0.gguf'
+Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/SmolVLM-256M-Instruct-Q8_0.gguf?download=true' -Destination $modelPath -Sha256 '9d4612de6a42214499e301494a3ecc2be0abdd9de44e663bda63f1152fad1bf4' -Bytes 0
+Download-Verified -Url 'https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-256M-Instruct-Q8_0.gguf?download=true' -Destination $projectorPath -Sha256 'd1eb8b6b23979205fdf63703ed10f788131a3f812c7b1f72e0119d5d81295150' -Bytes 108783360
 
 Add-Type -AssemblyName System.Drawing
 
@@ -70,7 +70,7 @@ New-TestImage $fixture3 'DEVICE REGISTRY' @('DEVICE          PC Principal','SYST
 $port = 18088
 $stdout = Join-Path $root 'llama.stdout.log'
 $stderr = Join-Path $root 'llama.stderr.log'
-$args = @('--model',$modelPath,'--mmproj',$projectorPath,'--alias','smolvlm-256m-instruct-q8','--host','127.0.0.1','--port',"$port",'--ctx-size','4096','--jinja')
+$args = @('--model',$modelPath,'--mmproj',$projectorPath,'--alias','smolvlm-500m-instruct-q8','--host','127.0.0.1','--port',"$port",'--ctx-size','4096','--jinja')
 $process = Start-Process -FilePath $serverExe -ArgumentList $args -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 
 try {
@@ -93,7 +93,7 @@ try {
     param([string]$ImagePath,[string]$Name,[string[]]$Expected)
     $base64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($ImagePath))
     $body = @{
-      model = 'smolvlm-256m-instruct-q8'
+      model = 'smolvlm-500m-instruct-q8'
       temperature = 0
       max_tokens = 1200
       messages = @(@{
