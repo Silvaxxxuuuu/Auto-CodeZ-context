@@ -606,3 +606,136 @@ test('AccountSessionRuntime refreshSession preserves cached account while tempor
   assert.equal(runtime.getAccessToken(), null);
   assert.equal(credentials.values.get('account.session.refresh-token'), 'refresh-old');
 });
+
+
+test('AccountSessionRuntime deduplicates concurrent refreshes so a rotating token is consumed once', async () => {
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => 100,
+    },
+  );
+  const device = await devices.getOrCreate();
+  let refreshCalls = 0;
+  let releaseRefresh: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+
+  const adapter: SessionAuthAdapter = {
+    async refresh(input): Promise<AuthGrant> {
+      refreshCalls += 1;
+      assert.equal(input.refreshToken, 'refresh-old');
+      await gate;
+      return {
+        account: profile(),
+        session: { ...session(device.id), id: 'session-2', accessExpiresAt: 90_000 },
+        accessToken: 'access-new',
+        refreshToken: 'refresh-new',
+      };
+    },
+    async revoke(): Promise<void> {
+      return;
+    },
+  };
+
+  const runtime = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+  await runtime.establish({
+    account: profile(),
+    session: session(device.id),
+    accessToken: 'access-old',
+    refreshToken: 'refresh-old',
+  });
+
+  const first = runtime.refreshSession();
+  const second = runtime.refreshSession();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(refreshCalls, 1);
+
+  releaseRefresh?.();
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+
+  assert.equal(firstResult.state, 'authenticated');
+  assert.equal(secondResult.state, 'authenticated');
+  assert.equal(firstResult.session?.id, 'session-2');
+  assert.equal(secondResult.session?.id, 'session-2');
+  assert.equal(credentials.values.get('account.session.refresh-token'), 'refresh-new');
+});
+
+test('AccountSessionRuntime logout waits for an in-flight refresh and revokes the rotated session', async () => {
+  const storage = new MemoryStorage();
+  const credentials = new MemoryCredentials();
+  const devices = new DeviceIdentityStore(
+    storage as unknown as LocalStorage,
+    credentials,
+    {
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      defaultName: 'Este dispositivo',
+      now: () => 100,
+    },
+  );
+  const device = await devices.getOrCreate();
+  let releaseRefresh: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  const revoked: Array<{ sessionId: string; refreshToken?: string }> = [];
+
+  const adapter: SessionAuthAdapter = {
+    async refresh(): Promise<AuthGrant> {
+      await gate;
+      return {
+        account: profile(),
+        session: { ...session(device.id), id: 'session-2', accessExpiresAt: 90_000 },
+        accessToken: 'access-new',
+        refreshToken: 'refresh-new',
+      };
+    },
+    async revoke(input): Promise<void> {
+      revoked.push({ sessionId: input.sessionId, refreshToken: input.refreshToken });
+    },
+  };
+
+  const runtime = new AccountSessionRuntime(
+    storage as unknown as LocalStorage,
+    credentials,
+    devices,
+    adapter,
+  );
+  await runtime.establish({
+    account: profile(),
+    session: session(device.id),
+    accessToken: 'access-old',
+    refreshToken: 'refresh-old',
+  });
+
+  const refresh = runtime.refreshSession();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const logout = runtime.logout();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(revoked.length, 0);
+
+  releaseRefresh?.();
+  await refresh;
+  const signedOut = await logout;
+
+  assert.equal(signedOut.state, 'signed_out');
+  assert.equal(runtime.getAccessToken(), null);
+  assert.deepEqual(revoked, [{ sessionId: 'session-2', refreshToken: 'refresh-new' }]);
+  assert.equal(credentials.values.has('account.session.refresh-token'), false);
+  assert.equal(storage.values.has('account-session.json'), false);
+});
