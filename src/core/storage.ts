@@ -25,6 +25,7 @@ const SENSITIVE_JSON_FILES = new Set([
   'plugins.json',
   'plugin-settings.json',
   'account-session.json',
+  'chats.json',
 ]);
 
 function isMissingFile(error: unknown): boolean {
