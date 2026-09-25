@@ -956,6 +956,12 @@ ipcMain.handle('chat:stop', async (_event, chatId: string) => {
   reconcileExecutionSlot(id);
   return { stopped: false };
 });
+ipcMain.handle('chat-attachments:preview', async (_event, input: unknown) => {
+  const attachment = await attachmentStore.validateReference(input);
+  if (attachment.kind !== 'image') return null;
+  return await attachmentStore.previewDataUrl(attachment) ?? null;
+});
+
 ipcMain.handle('chat-attachments:paste-image', async (_event, input: unknown) => {
   const value = requireObject(input, 'Imagem da área de transferência');
   const mediaType = requireNonEmptyString(value.mediaType, 'MIME da imagem');
