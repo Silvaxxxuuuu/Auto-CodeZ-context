@@ -27,6 +27,7 @@ test('account auth factory enables all passwordless methods for a valid HTTPS ba
     'microsoft',
     'passkey',
   ]);
+  assert.equal(result.configuration.passkeyEnrollmentSupported, true);
   assert.ok(result.adapter instanceof HttpAuthAdapter);
   assert.ok(result.deviceRegistry instanceof HttpDeviceRegistryAdapter);
 });
@@ -70,6 +71,7 @@ test('visual auth discovery uses deterministic configured capabilities without n
   assert.equal(discoveryCalls, 0);
   assert.equal(configuration.configured, true);
   assert.deepEqual(configuration.methods, ['magic_link', 'github', 'google', 'microsoft', 'passkey']);
+  assert.equal(configuration.passkeyEnrollmentSupported, true);
   assert.equal(configuration.configurationError, undefined);
 });
 
@@ -95,6 +97,7 @@ test('account auth factory exposes native Descope identity methods when project 
 
   assert.equal(result.configuration.configured, true);
   assert.equal(result.configuration.hosted, undefined);
+  assert.equal(result.configuration.passkeyEnrollmentSupported, false);
   assert.deepEqual(result.configuration.methods, [
     'magic_link',
     'github',
@@ -108,5 +111,6 @@ test('account auth factory exposes native Descope identity methods when project 
   assert.deepEqual(await resolveAccountAuthConfiguration(result), {
     configured: true,
     methods: ['magic_link', 'github', 'google', 'microsoft', 'passkey'],
+    passkeyEnrollmentSupported: false,
   });
 });
