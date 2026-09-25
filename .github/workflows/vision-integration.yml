@@ -26,7 +26,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Run verified local vision integration
-        shell: pwsh
+        shell: powershell
         run: ./scripts/real-vision-integration.ps1
 
       - name: Upload vision fixtures and model outputs
