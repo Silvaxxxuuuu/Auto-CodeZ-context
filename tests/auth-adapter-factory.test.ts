@@ -25,7 +25,6 @@ test('account auth factory enables all passwordless methods for a valid HTTPS ba
     'github',
     'google',
     'microsoft',
-    'passkey',
   ]);
   assert.equal(result.configuration.passkeyEnrollmentSupported, true);
   assert.ok(result.adapter instanceof HttpAuthAdapter);
@@ -107,6 +106,28 @@ test('account auth factory exposes native Descope identity methods when project 
   ]);
   assert.ok(result.adapter instanceof DescopeAuthAdapter);
   assert.ok(result.deviceRegistry instanceof UnavailableDeviceRegistryAdapter);
+
+  assert.deepEqual(await resolveAccountAuthConfiguration(result), {
+    configured: true,
+    methods: ['magic_link', 'github', 'google', 'microsoft'],
+    passkeyEnrollmentSupported: false,
+  });
+});
+
+test('native Descope Passkey is exposed only after the dedicated OIDC Flow is explicitly enabled', async () => {
+  const result = createAccountAuthAdapter({
+    descopeProjectId: 'P2abcDEF_123',
+    descopePasskeyOidcFlowEnabled: true,
+  });
+
+  assert.deepEqual(result.configuration.methods, [
+    'magic_link',
+    'github',
+    'google',
+    'microsoft',
+    'passkey',
+  ]);
+  assert.equal(result.configuration.passkeyEnrollmentSupported, false);
 
   assert.deepEqual(await resolveAccountAuthConfiguration(result), {
     configured: true,
