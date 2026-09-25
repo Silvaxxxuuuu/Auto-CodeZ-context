@@ -279,11 +279,18 @@ export class ChatRuntime {
     if (!this.capabilities.supports(model, 'text')) throw new Error('O modelo selecionado não suporta texto.');
     const resolution = this.intelligence.resolve(model, chat.intelligence);
     const latestUserMessage = [...chat.messages].reverse().find((message) => message.role === 'user');
-    const latestImageCount = latestUserMessage?.attachments?.filter((attachment) => attachment.kind === 'image').length ?? 0;
-    if (latestImageCount > 0) {
+    const latestAttachments = latestUserMessage?.attachments ?? [];
+    if (latestAttachments.length > 0) {
+      const imageCount = latestAttachments.filter((attachment) => attachment.kind === 'image').length;
+      const fileCount = latestAttachments.length - imageCount;
+      const message = imageCount > 0 && fileCount > 0
+        ? 'Analisando anexos…'
+        : imageCount > 0
+          ? imageCount === 1 ? 'Analisando imagem anexada…' : 'Analisando imagens anexadas…'
+          : fileCount === 1 ? 'Analisando arquivo anexado…' : 'Analisando arquivos anexados…';
       this.activity.emit({
         type: 'action',
-        message: latestImageCount === 1 ? 'Analisando imagem anexada…' : 'Analisando imagens anexadas…',
+        message,
         status: 'running',
       });
     }
