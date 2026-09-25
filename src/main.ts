@@ -53,7 +53,8 @@ import { ExecutionShadowLifecycle } from './execution-shadow-lifecycle';
 import { reconcileExecutionBootstrapState } from './execution-bootstrap-state';
 import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
-import type { AIProviderConfig, AIStreamEvent } from './ai/types';
+import type { AIAttachment, AIProviderConfig, AIStreamEvent, ChatRecord } from './ai/types';
+import { AttachmentStore } from './ai/attachment-store';
 import { operationalLedger, type OperationalLedgerQuery, type OperationalLedgerState } from './operational-ledger';
 import { OperationalLedgerPersistence, OperationalLedgerStore } from './operational-ledger-store';
 import { OperationalLedgerRetrieval, type OperationalLedgerScope } from './operational-ledger-retrieval';
@@ -78,6 +79,7 @@ declare const __AUTO_CODEZ_DESCOPE_PROJECT_ID__: string;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const storage = new LocalStorage();
+const attachmentStore = new AttachmentStore(() => path.join(app.getPath('userData'), 'attachments'));
 const accountCredentials = new LocalProtectedCredentialStore(storage);
 const accountDeviceIdentity = new DeviceIdentityStore(
   storage,
@@ -115,6 +117,35 @@ const deviceRegistryRuntime = new DeviceRegistryRuntime(
   accountAuth.deviceRegistry,
 );
 let pendingAccountAuthCallback = findAccountAuthCallback(process.argv);
+
+
+async function hydrateChatAttachments(chat: ChatRecord): Promise<ChatRecord> {
+  const messages = [];
+  for (const message of chat.messages) {
+    if (!message.attachments?.length) {
+      messages.push({ ...message });
+      continue;
+    }
+    const attachments = [];
+    for (const attachment of message.attachments) attachments.push(await attachmentStore.hydrate(attachment));
+    messages.push({ ...message, attachments });
+  }
+  return { ...chat, messages };
+}
+
+async function requireStoredAttachments(value: unknown): Promise<AIAttachment[]> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 12) throw new Error('Lista de anexos inválida.');
+  const attachments: AIAttachment[] = [];
+  let totalBytes = 0;
+  for (const item of value) {
+    const attachment = await attachmentStore.validateReference(item);
+    totalBytes += attachment.size;
+    if (totalBytes > 96 * 1024 * 1024) throw new Error('Os anexos deste envio excedem o limite de 96 MB.');
+    attachments.push(attachment);
+  }
+  return attachments;
+}
 
 function requireOAuthProvider(value: unknown): OAuthProvider {
   if (value === 'github' || value === 'google' || value === 'microsoft') return value;
