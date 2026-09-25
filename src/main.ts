@@ -1,4 +1,4 @@
-import { app, clipboard, dialog, ipcMain, Menu, shell, BrowserWindow } from 'electron';
+import { app, dialog, ipcMain, Menu, shell, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalStorage } from './core/storage';
@@ -950,26 +950,19 @@ ipcMain.handle('chat:stop', async (_event, chatId: string) => {
   reconcileExecutionSlot(id);
   return { stopped: false };
 });
-ipcMain.handle('chat-attachments:paste-image', async () => {
-  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.');
-  const image = clipboard.readImage();
-  if (image.isEmpty()) return null;
-  const bytes = image.toPNG();
-  if (!bytes.byteLength) return null;
-  const size = image.getSize();
-  const attachment = await attachmentStore.importBuffer(
-    bytes,
-    `clipboard-${Date.now()}.png`,
-    'image/png',
-  );
-  const enriched = {
-    ...attachment,
-    ...(size.width > 0 ? { width: size.width } : {}),
-    ...(size.height > 0 ? { height: size.height } : {}),
-  };
+ipcMain.handle('chat-attachments:paste-image', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Imagem da área de transferência');
+  const mediaType = requireNonEmptyString(value.mediaType, 'MIME da imagem');
+  if (!mediaType.toLowerCase().startsWith('image/')) throw new Error('O conteúdo colado não é uma imagem.');
+  if (!(value.bytes instanceof Uint8Array)) throw new Error('Bytes da imagem inválidos.');
+  const bytes = Buffer.from(value.bytes);
+  const fileName = typeof value.name === 'string' && value.name.trim()
+    ? path.basename(value.name.trim())
+    : `clipboard-${Date.now()}.png`;
+  const attachment = await attachmentStore.importBuffer(bytes, fileName, mediaType);
   return {
-    attachment: enriched,
-    previewDataUrl: await attachmentStore.previewDataUrl(enriched),
+    attachment,
+    previewDataUrl: await attachmentStore.previewDataUrl(attachment),
   };
 });
 
