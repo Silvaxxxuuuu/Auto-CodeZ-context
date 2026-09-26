@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ChatRuntime } from '../src/ai/chat-runtime';
 import { ProviderRegistry } from '../src/ai/provider-registry';
-import type { AIProviderAdapter, AIProviderConfig, AIResponse, AIStreamEvent, ChatRecord } from '../src/ai/types';
+import type { AIProviderAdapter, AIProviderConfig, AIResponse, AIStreamEvent, ChatRecord, ToolName } from '../src/ai/types';
+import { WebGroundingCoordinator } from '../src/web/web-grounding-coordinator';
+import { WebRetrievalRuntime } from '../src/web/web-retrieval-runtime';
 
 const config: AIProviderConfig = {
   id: 'test-provider',
@@ -11,7 +13,7 @@ const config: AIProviderConfig = {
   enabled: true,
 };
 
-function chat(model = 'test-model', projectId = 'project-test'): ChatRecord {
+function chat(model = 'test-model', projectId = 'project-test', content = 'Inspect the current implementation.'): ChatRecord {
   return {
     id: 'chat-test',
     title: 'Chat Test',
@@ -20,7 +22,7 @@ function chat(model = 'test-model', projectId = 'project-test'): ChatRecord {
     model,
     intelligence: 'normal',
     permissionLevel: 'ask',
-    messages: [{ role: 'user', content: 'Hello' }],
+    messages: [{ role: 'user', content }],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -44,17 +46,15 @@ function registerAdapter(registry: ProviderRegistry, capabilities: ('text' | 'to
   return { requests, responses };
 }
 
+function tool(name: ToolName, requiresWriteAccess: boolean, requiresApproval: boolean) {
+  return { name, description: name, parameters: { type: 'object' }, requiresWriteAccess, requiresApproval };
+}
+
 test('send includes workspace context and tool definitions only when tools are supported', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
-    {
-      name: 'read_file',
-      description: 'Read a file',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: false,
-    },
+    tool('read_file', false, false),
   ]);
 
   await runtime.send(config, chat(), 'src/index.ts contains the current implementation.');
@@ -64,39 +64,106 @@ test('send includes workspace context and tool definitions only when tools are s
   assert.equal(request.projectContext, 'src/index.ts contains the current implementation.');
   assert.equal(request.messages[0].role, 'system');
   assert.match(request.messages[0].content, /Contexto do workspace atual/);
-  assert.equal(request.messages[1].content, 'Hello');
+  assert.equal(request.messages[1].role, 'system');
+  assert.match(request.messages[1].content, /src\/index\.ts contains the current implementation/);
+  assert.equal(request.messages[2].content, 'Inspect the current implementation.');
 });
 
-test('send does not expose workspace tools to a normal chat', async () => {
+test('trivial greeting isolates the current turn from old task history, workspace context and tools', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
-    {
-      name: 'read_file',
-      description: 'Read a file',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: false,
-    },
+    tool('read_file', false, false),
+    tool('run_command', false, true),
+  ]);
+  const greeting = chat('test-model', 'project-test', 'Oi?');
+  greeting.messages = [
+    { role: 'user', content: 'Crie o site GameHub completo e use ferramentas para escrever os arquivos.' },
+    { role: 'assistant', content: '<toolcall>functions.create_file {"path":"GameHub/index.html"}</toolcall>' },
+    { role: 'tool', content: '<!DOCTYPE html><html><body>GameHub</body></html>' },
+    { role: 'user', content: 'Oi?' },
+  ];
+
+  await runtime.send(config, greeting, 'large workspace context that should not be attached');
+  const request = requests[0] as { messages: Array<{ role: string; content: string }>; tools?: unknown[]; toolsEnabled: boolean; projectContext?: string };
+  assert.equal(request.toolsEnabled, false);
+  assert.equal(request.tools, undefined);
+  assert.equal(request.projectContext, undefined);
+  assert.equal(request.messages.some((message) => message.content.includes('large workspace context')), false);
+  assert.equal(request.messages.some((message) => message.content.includes('GameHub')), false);
+  assert.equal(request.messages.some((message) => message.content.includes('<toolcall>')), false);
+  assert.deepEqual(
+    request.messages.filter((message) => message.role === 'user').map((message) => message.content),
+    ['Oi?'],
+  );
+  assert.equal(
+    request.messages.some((message) => /não retome, continue, execute nem complete automaticamente tarefas de turnos anteriores/i.test(message.content)),
+    true,
+  );
+  assert.equal(request.messages.at(-1)?.content, 'Oi?');
+});
+
+test('send exposes protected file tools, run_command and plugin gateway to a normal chat but excludes Git', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry);
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    tool('read_file', false, false),
+    tool('read_symbol', false, false),
+    tool('write_file', true, true),
+    tool('create_file', true, true),
+    tool('replace_range', true, true),
+    tool('replace_text', true, true),
+    tool('replace_symbol', true, true),
+    tool('insert_before', true, true),
+    tool('insert_after', true, true),
+    tool('delete_file', true, true),
+    tool('rename_file', true, true),
+    tool('search_files', false, false),
+    tool('run_command', false, true),
+    tool('plugin_list_tools', false, false),
+    tool('plugin_call', false, false),
+    tool('git_status', false, false),
   ]);
 
   await runtime.send(config, chat('test-model', ''));
-  const request = requests[0] as { toolsEnabled: boolean; tools?: unknown[] };
-  assert.equal(request.toolsEnabled, false);
-  assert.equal(request.tools, undefined);
+  const request = requests[0] as { toolsEnabled: boolean; tools?: Array<{ name: string }>; messages: Array<{ content: string }> };
+  assert.equal(request.toolsEnabled, true);
+  assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'read_symbol', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command', 'plugin_list_tools', 'plugin_call']);
+  assert.equal(request.tools?.some((item) => item.name === 'git_status'), false);
+  assert.match(request.messages[0].content, /Runtime OS:/);
+  assert.match(request.messages[0].content, /protected system workspace rooted at the user's Home directory/i);
+  assert.match(request.messages[0].content, /Desktop\/Novo site\/index\.html/i);
+  assert.match(request.messages[0].content, /only need one complete named TypeScript or JavaScript declaration, prefer read_symbol/i);
+  assert.match(request.messages[0].content, /replacing a complete named TypeScript or JavaScript declaration, prefer replace_symbol/i);
+  assert.match(request.messages[0].content, /smaller localized edits, prefer replace_text/i);
+  assert.match(request.messages[0].content, /Use write_file when most or all of a file genuinely needs replacement/i);
+  assert.match(request.messages[0].content, /plugin_list_tools/);
+  assert.match(request.messages[0].content, /plugin_call only with an exact generated tool name/i);
+});
+
+test('send keeps available protected file tools in a normal chat even when run_command is unavailable', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry);
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    tool('read_file', false, false),
+    tool('read_symbol', false, false),
+    tool('create_file', true, true),
+    tool('replace_range', true, true),
+    tool('replace_text', true, true),
+    tool('replace_symbol', true, true),
+  ]);
+
+  await runtime.send(config, chat('test-model', ''));
+  const request = requests[0] as { toolsEnabled: boolean; tools?: Array<{ name: string }> };
+  assert.equal(request.toolsEnabled, true);
+  assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'read_symbol', 'create_file', 'replace_range', 'replace_text', 'replace_symbol']);
 });
 
 test('send disables tools for models without tool capability', async () => {
   const registry = new ProviderRegistry();
   const { requests } = registerAdapter(registry, ['text']);
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
-    {
-      name: 'read_file',
-      description: 'Read a file',
-      parameters: { type: 'object' },
-      requiresWriteAccess: false,
-      requiresApproval: false,
-    },
+    tool('read_file', false, false),
   ]);
 
   await runtime.send(config, chat());
@@ -134,4 +201,199 @@ test('stream preserves provider stream events and final response', async () => {
   for await (const event of runtime.stream(config, chat())) events.push(event);
 
   assert.deepEqual(events, providerEvents);
+});
+
+
+test('streaming greeting also receives only the current lightweight user turn', async () => {
+  const registry = new ProviderRegistry();
+  const requests: Array<{ messages: Array<{ role: string; content: string }>; toolsEnabled: boolean; tools?: unknown[] }> = [];
+  registry.register({
+    id: config.id,
+    displayName: config.displayName,
+    async listModels() {
+      return [{ id: 'test-model', name: 'Test Model', providerId: config.id, capabilities: ['text', 'tools', 'streaming'] }];
+    },
+    async send() {
+      return { content: 'Oi!', model: 'test-model', providerId: config.id };
+    },
+    async *stream(_config, request) {
+      requests.push(request);
+      yield { type: 'start' };
+      yield { type: 'delta', text: 'Oi!' };
+      yield { type: 'complete', response: { content: 'Oi!', model: 'test-model', providerId: config.id } };
+    },
+  });
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    tool('create_file', true, true),
+  ]);
+  const greeting = chat('test-model', 'project-test', 'Opa');
+  greeting.messages = [
+    { role: 'user', content: 'Continue criando todos os arquivos do GameHub.' },
+    { role: 'assistant', content: '<toolcall>functions.create_file</toolcall>' },
+    { role: 'user', content: 'Opa' },
+  ];
+
+  const events: AIStreamEvent[] = [];
+  for await (const event of runtime.stream(config, greeting, 'GameHub workspace context')) events.push(event);
+
+  assert.deepEqual(events.map((event) => event.type), ['start', 'delta', 'complete']);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].toolsEnabled, false);
+  assert.equal(requests[0].tools, undefined);
+  assert.equal(requests[0].messages.some((message) => message.content.includes('GameHub')), false);
+  assert.deepEqual(
+    requests[0].messages.filter((message) => message.role === 'user').map((message) => message.content),
+    ['Opa'],
+  );
+});
+
+
+test('provider request compacts large historical tool payloads without mutating local chat history', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry);
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    tool('read_file', false, false),
+  ]);
+  const value = chat();
+  const oldArgument = 'A'.repeat(8_000);
+  const oldResult = 'B'.repeat(30_000);
+  const recentResult = 'C'.repeat(30_000);
+  value.messages = [
+    { role: 'user', content: 'Faça uma tarefa longa.' },
+    { role: 'assistant', content: 'round 1', toolCalls: [{ id: 'call-1', name: 'read_file', input: { path: 'a.txt', payload: oldArgument } }] },
+    { role: 'tool', content: oldResult, toolCallId: 'call-1', toolName: 'read_file' },
+    { role: 'assistant', content: 'round 2', toolCalls: [{ id: 'call-2', name: 'read_file', input: { path: 'b.txt' } }] },
+    { role: 'tool', content: recentResult, toolCallId: 'call-2', toolName: 'read_file' },
+    { role: 'assistant', content: 'round 3', toolCalls: [{ id: 'call-3', name: 'read_file', input: { path: 'c.txt' } }] },
+    { role: 'tool', content: recentResult, toolCallId: 'call-3', toolName: 'read_file' },
+  ];
+
+  await runtime.send(config, value);
+  const request = requests[0] as { messages: Array<{ role: string; content: string; toolCalls?: Array<{ input: Record<string, unknown> }> }> };
+  const providerOldTool = request.messages.find((message) => message.role === 'tool' && message.content.startsWith('B'));
+  const providerRecentTools = request.messages.filter((message) => message.role === 'tool' && message.content.startsWith('C'));
+  const providerOldAssistant = request.messages.find((message) => message.role === 'assistant' && message.content === 'round 1');
+
+  assert.ok(providerOldTool);
+  assert.ok(providerOldTool!.content.length < oldResult.length);
+  assert.match(providerOldTool!.content, /caracteres omitidos pelo Auto CodeZ/i);
+  assert.equal(providerRecentTools.length, 2);
+  assert.ok(providerRecentTools.every((message) => message.content.length < recentResult.length));
+  assert.ok(String(providerOldAssistant?.toolCalls?.[0]?.input.payload).length < oldArgument.length);
+  assert.equal(request.messages.some((message) => /histórico local permanece completo/i.test(message.content)), true);
+
+  assert.equal(value.messages[2].content, oldResult);
+  assert.equal(value.messages[4].content, recentResult);
+  assert.equal(value.messages[1].toolCalls?.[0]?.input.payload, oldArgument);
+});
+
+
+test('successful automatic grounding suppresses duplicate web tools but keeps non-web tools', async () => {
+  const registry = new ProviderRegistry();
+  const requests: Array<{ tools?: Array<{ name: string }>; messages: Array<{ role: string; content: string }> }> = [];
+  registry.register({
+    id: config.id,
+    displayName: config.displayName,
+    async listModels() {
+      return [{ id: 'test-model', name: 'Test Model', providerId: config.id, capabilities: ['text', 'tools'] }];
+    },
+    async send(_config, request) {
+      requests.push(request);
+      return { content: 'Resposta grounded', model: 'test-model', providerId: config.id };
+    },
+  });
+  const groundingRuntime = new WebRetrievalRuntime({
+    searchAdapter: {
+      id: 'fixture',
+      displayName: 'Fixture',
+      async search() {
+        return [{ title: 'Ranking atual', url: 'https://example.com/ranking', snippet: 'Top 1, Top 2, Top 3.' }];
+      },
+    },
+  });
+  const grounding = new WebGroundingCoordinator({ runtime: groundingRuntime, fetchLimit: 0 });
+  const runtime = new ChatRuntime(
+    registry,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    [
+      tool('web_search', false, false),
+      tool('web_fetch', false, false),
+      tool('read_file', false, false),
+    ],
+    undefined,
+    grounding,
+  );
+  const value = chat('test-model', undefined, 'Pesquise na web o ranking atual e salve um resumo.');
+
+  await runtime.send(config, value);
+
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0].tools?.map((item) => item.name), ['read_file']);
+  assert.equal(requests[0].messages.some((message) => /grounding Web deste turno já foi concluído/i.test(message.content)), true);
+});
+
+
+test('pure informational grounded turn disables all agent tools for a one-call answer', async () => {
+  const registry = new ProviderRegistry();
+  const requests: Array<{ tools?: Array<{ name: string }>; toolsEnabled: boolean; messages: Array<{ role: string; content: string }> }> = [];
+  registry.register({
+    id: config.id,
+    displayName: config.displayName,
+    async listModels() {
+      return [{ id: 'test-model', name: 'Test Model', providerId: config.id, capabilities: ['text', 'tools'] }];
+    },
+    async send(_config, request) {
+      requests.push(request);
+      return { content: 'Ranking grounded', model: 'test-model', providerId: config.id };
+    },
+  });
+  const groundingRuntime = new WebRetrievalRuntime({
+    searchAdapter: {
+      id: 'fixture',
+      displayName: 'Fixture',
+      async search() {
+        return [{ title: 'Ranking atual', url: 'https://example.com/ranking', snippet: 'Top 1, Top 2, Top 3.' }];
+      },
+    },
+  });
+  const grounding = new WebGroundingCoordinator({ runtime: groundingRuntime, fetchLimit: 0 });
+  const runtime = new ChatRuntime(
+    registry,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    [
+      tool('web_search', false, false),
+      tool('web_fetch', false, false),
+      tool('read_file', false, false),
+      tool('run_command', false, true),
+    ],
+    undefined,
+    grounding,
+  );
+
+  const value = chat('test-model', undefined, 'Pode pesquisar na internet quais são os tops globais de Fortnite?');
+  value.messages = [
+    { role: 'user', content: 'Crie um site sobre jogos.' },
+    { role: 'assistant', content: '<|toolcallssectionbegin|><|toolcallbegin|>functions.createfile:5<|toolcallargumentbegin|>{"path":"Desktop/GameHub/index.html"}<|toolcallend|><|toolcallssectionend|>' },
+    { role: 'tool', content: 'Arquivo preparado', toolCallId: 'old-call', toolName: 'create_file' },
+    { role: 'user', content: 'Pode pesquisar na internet quais são os tops globais de Fortnite?' },
+  ];
+
+  await runtime.send(config, value);
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].toolsEnabled, false);
+  assert.equal(requests[0].tools, undefined);
+  assert.equal(requests[0].messages.some((message) => /consulta informativa já grounded/i.test(message.content)), true);
+  assert.deepEqual(
+    requests[0].messages.filter((message) => message.role === 'user').map((message) => message.content),
+    ['Pode pesquisar na internet quais são os tops globais de Fortnite?'],
+  );
+  assert.equal(requests[0].messages.some((message) => message.role === 'tool'), false);
+  assert.equal(requests[0].messages.some((message) => message.content.includes('<|toolcall')), false);
 });

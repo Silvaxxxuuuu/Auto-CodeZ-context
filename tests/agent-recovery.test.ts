@@ -57,12 +57,12 @@ async function createFixture(responses: AIResponse[], failAfter = Number.POSITIV
   return { agent: new AgentRuntime(chatRuntime, tools), root };
 }
 
-async function createPersistentFixture(storage: MemoryStorage, responses: AIResponse[], root: string): Promise<AgentRuntime> {
+async function createPersistentFixture(storage: MemoryStorage, responses: AIResponse[], root: string, failAfter = Number.POSITIVE_INFINITY): Promise<AgentRuntime> {
   const project: ProjectRecord = { id: 'recovery-project', name: 'Recovery Project', rootPath: root, createdAt: Date.now(), updatedAt: Date.now() };
   const workspace = new WorkspaceRuntime(async () => [project]);
   const tools = new ToolRuntime(workspace, undefined, undefined, undefined, undefined, undefined, storage);
   const registry = new ProviderRegistry();
-  registry.register(makeAdapter(responses));
+  registry.register(makeAdapter(responses, failAfter));
   const chatRuntime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, tools.listDefinitions());
   await tools.init();
   const agent = new AgentRuntime(chatRuntime, tools, undefined, storage);
@@ -114,6 +114,33 @@ test('provider failure after an approved tool does not re-execute the tool', asy
     assert.equal(await fs.readFile(path.join(fixture.root, 'src', 'index.ts'), 'utf8'), 'export const value = 2;');
     await assert.rejects(fixture.agent.resume(pending.pendingApprovalIds[0]), /Aprovação não encontrada/);
   } finally { await fs.rm(fixture.root, { recursive: true, force: true }); }
+});
+
+test('recovers a provider-failed run explicitly without re-executing the approved tool', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-recovery-provider-failure-'));
+  const storage = new MemoryStorage();
+  const firstResponse: AIResponse = { content: '', model: 'test-model', providerId: config.id, toolCalls: [writeCall] };
+  const finalResponse: AIResponse = { content: 'Recovered after provider failure.', model: 'test-model', providerId: config.id };
+  try {
+    await fs.mkdir(path.join(root, 'src'), { recursive: true });
+    await fs.writeFile(path.join(root, 'src', 'index.ts'), 'export const value = 1;');
+
+    const first = await createPersistentFixture(storage, [firstResponse], root, 1);
+    const pending = await first.run(config, makeChat(), undefined, 'ask');
+    await assert.rejects(first.resume(pending.pendingApprovalIds[0]), /Provider indisponível/);
+    const persisted = await storage.read<{ runs: Array<{ runId: string; lastError?: string }> }>('agent-runs.json', { runs: [] });
+    assert.equal(persisted.runs.length, 1);
+    assert.equal(persisted.runs[0].lastError, 'Recovery Provider: Provider indisponível durante a retomada.');
+    assert.equal(await fs.readFile(path.join(root, 'src', 'index.ts'), 'utf8'), 'export const value = 2;');
+
+    const recovered = await createPersistentFixture(storage, [finalResponse], root);
+    const result = await recovered.resumeRecovered(persisted.runs[0].runId);
+
+    assert.equal(result.pendingApprovalIds.length, 0);
+    assert.equal(result.response.content, 'Recovered after provider failure.');
+    assert.equal(await fs.readFile(path.join(root, 'src', 'index.ts'), 'utf8'), 'export const value = 2;');
+    assert.equal((await recovered.listRecoverableRuns()).length, 0);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test('recovers pending approvals after runtime reconstruction', async () => {

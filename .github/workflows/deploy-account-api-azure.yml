@@ -1,0 +1,111 @@
+name: Deploy Account API Azure
+
+on:
+  push:
+    branches:
+      - feature/ui-hierarchy-polish
+    paths:
+      - '.github/account-api-deploy-trigger'
+  workflow_dispatch:
+    inputs:
+      location:
+        description: Azure region
+        required: true
+        default: brazilsouth
+        type: string
+      resource_group:
+        description: Resource group
+        required: true
+        default: rg-autocodez-account-test
+        type: string
+      name_prefix:
+        description: Stable resource prefix
+        required: true
+        default: autocodezacct
+        type: string
+      min_replicas:
+        description: Minimum Container App replicas
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '0'
+          - '1'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-account-api-azure
+  cancel-in-progress: false
+
+env:
+  DEPLOY_LOCATION: ${{ inputs.location || 'brazilsouth' }}
+  DEPLOY_RESOURCE_GROUP: ${{ inputs.resource_group || 'rg-autocodez-account-test' }}
+  DEPLOY_NAME_PREFIX: ${{ inputs.name_prefix || 'autocodezacct' }}
+  DEPLOY_MIN_REPLICAS: ${{ inputs.min_replicas || '1' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+
+      - name: Azure login with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Container Apps CLI extension
+        run: az extension add --name containerapp --upgrade --only-show-errors
+
+      - name: Bootstrap Account API
+        shell: pwsh
+        run: |
+          $parameters = @{
+            SubscriptionId = "${{ vars.AZURE_SUBSCRIPTION_ID }}"
+            Location = $env:DEPLOY_LOCATION
+            ResourceGroup = $env:DEPLOY_RESOURCE_GROUP
+            NamePrefix = $env:DEPLOY_NAME_PREFIX
+            MinReplicas = [int]$env:DEPLOY_MIN_REPLICAS
+            ImageBuildMode = 'LocalDocker'
+            SkipProviderRegistration = $true
+          }
+          ./infra/azure/account-api/bootstrap.ps1 @parameters
+
+      - name: Show deployed Account API
+        shell: pwsh
+        run: |
+          $subscription = az account show --query id -o tsv
+          $value = "$subscription|$env:DEPLOY_NAME_PREFIX"
+          $sha = [System.Security.Cryptography.SHA256]::Create()
+          try {
+            $hash = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($value))
+            $suffix = ([Convert]::ToHexString($hash).Substring(0, 8)).ToLowerInvariant()
+          } finally {
+            $sha.Dispose()
+          }
+          $prefix = ("$env:DEPLOY_NAME_PREFIX".ToLowerInvariant() -replace '[^a-z0-9]', '')
+          $app = ("$prefix-$suffix-api").ToLowerInvariant()
+          if ($app.Length -gt 31) { $app = $app.Substring(0, 31).TrimEnd('-') }
+          $fqdn = az containerapp show --name $app --resource-group "$env:DEPLOY_RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv
+          if (-not $fqdn) { throw 'Container App sem FQDN depois do deploy.' }
+          "### Account API" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "- URL: https://$fqdn" >> $env:GITHUB_STEP_SUMMARY
+          "- Health: https://$fqdn/healthz" >> $env:GITHUB_STEP_SUMMARY
+          "- GitHub callback: https://$fqdn/api/auth/callback/github" >> $env:GITHUB_STEP_SUMMARY
+          "- Google callback: https://$fqdn/api/auth/callback/google" >> $env:GITHUB_STEP_SUMMARY
+          "- Microsoft callback: https://$fqdn/api/auth/callback/microsoft" >> $env:GITHUB_STEP_SUMMARY
+          "ACCOUNT_API_URL=https://$fqdn" >> $env:GITHUB_ENV
+
+      - name: Smoke test deployed Account API
+        shell: pwsh
+        run: |
+          ./infra/azure/account-api/smoke.ps1 -BaseUrl "$env:ACCOUNT_API_URL"

@@ -1,0 +1,133 @@
+name: Real Local Attachment Chat
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - 'feature/**'
+      - 'fix/**'
+    paths:
+      - '.github/workflows/real-local-attachment-chat.yml'
+      - 'scripts/real-local-attachment-chat.cjs'
+      - 'src/ai/attachment-context.ts'
+      - 'src/ai/attachment-indexer.ts'
+      - 'src/ai/attachment-store.ts'
+      - 'src/ai/windows-ocr.ts'
+      - 'src/ai/chat-runtime.ts'
+      - 'src/main.ts'
+      - 'src/preload.ts'
+      - 'src/renderer.ts'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-local-attachment-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  attachment:
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout feature head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Install pinned Playwright runtime
+        run: npm install --prefix .visual-tools --no-save --package-lock=false playwright@1.61.0
+
+      - name: Rebuild node-pty for Electron 44
+        run: npx electron-rebuild -f -w node-pty -v 44.0.0 -a x64 --build-from-source
+
+      - name: Build Electron application
+        run: npm run package
+
+      - name: Resolve packaged executable
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path (Join-Path $PWD 'out') -Filter 'Auto CodeZ.exe' -Recurse -File | Select-Object -First 1
+          if (-not $exe) { throw 'Auto CodeZ.exe was not found.' }
+          "AUTO_CODEZ_ELECTRON_EXECUTABLE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Prepare verified local text inference
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $root = Join-Path $PWD 'artifacts\local-attachment-runtime'
+          $downloads = Join-Path $root 'downloads'
+          $runtime = Join-Path $root 'runtime'
+          New-Item -ItemType Directory -Force -Path $downloads,$runtime | Out-Null
+
+          function Download-Verified {
+            param([string]$Url,[string]$Destination,[string]$Sha256,[Int64]$Bytes = 0)
+            if (-not (Test-Path $Destination)) {
+              & curl.exe -L --fail --silent --show-error --retry 3 --output $Destination $Url
+              if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
+            }
+            $item = Get-Item $Destination
+            if ($Bytes -gt 0 -and $item.Length -ne $Bytes) { throw "Unexpected size for ${Destination}: $($item.Length)" }
+            $actual = (Get-FileHash -Path $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $Sha256.ToLowerInvariant()) { throw "SHA-256 mismatch for ${Destination}: $actual" }
+          }
+
+          $engineZip = Join-Path $downloads 'llama-b10837-bin-win-cpu-x64.zip'
+          Download-Verified 'https://github.com/ggml-org/llama.cpp/releases/download/b10837/llama-b10837-bin-win-cpu-x64.zip' $engineZip 'b1b304054b13676d03876cce0e29d6c62b1de2a66456d1cd591afbdf15348088' 18417206
+          Expand-Archive -Path $engineZip -DestinationPath $runtime -Force
+
+          $model = Join-Path $downloads 'qwen2.5-1.5b-instruct-q4_k_m.gguf'
+          Download-Verified 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true' $model '6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e'
+
+          $server = Join-Path $runtime 'llama-server.exe'
+          if (-not (Test-Path $server)) { throw 'llama-server.exe missing.' }
+
+          $visionRoot = Join-Path $root 'attachment-vision'
+          $visionEngine = Join-Path $visionRoot 'engine\b10837'
+          $visionAssets = Join-Path $visionRoot 'vision'
+          New-Item -ItemType Directory -Force -Path $visionEngine,$visionAssets | Out-Null
+          Copy-Item -Path (Join-Path $runtime '*') -Destination $visionEngine -Recurse -Force
+          $visionServer = Join-Path $visionEngine 'llama-server.exe'
+          $visionServerSha = (Get-FileHash -Path $visionServer -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{
+            release = 'b10837'
+            asset = 'llama-b10837-bin-win-cpu-x64.zip'
+            sha256 = 'b1b304054b13676d03876cce0e29d6c62b1de2a66456d1cd591afbdf15348088'
+            executableSha256 = $visionServerSha
+          } | ConvertTo-Json | Out-File -FilePath (Join-Path $visionEngine 'engine.json') -Encoding utf8
+
+          $visionModel = Join-Path $visionAssets 'SmolVLM-256M-Instruct-Q8_0.gguf'
+          $visionProjector = Join-Path $visionAssets 'mmproj-SmolVLM-256M-Instruct-Q8_0.gguf'
+          Download-Verified 'https://huggingface.co/ggml-org/SmolVLM-256M-Instruct-GGUF/resolve/main/SmolVLM-256M-Instruct-Q8_0.gguf?download=true' $visionModel '2a31195d3769c0b0fd0a4906201666108834848db768af11de1d2cef7cd35e65' 175054528
+          Download-Verified 'https://huggingface.co/ggml-org/SmolVLM-256M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-256M-Instruct-Q8_0.gguf?download=true' $visionProjector '7e943f7c53f0382a6fc41b6ee0c2def63ba4fded9ab8ed039cc9e2ab905e0edd' 103769856
+
+          "AUTO_CODEZ_LOCAL_TEXT_SERVER_EXE=$server" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AUTO_CODEZ_LOCAL_TEXT_MODEL=$model" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AUTO_CODEZ_TEST_ATTACHMENT_VISION_ROOT=$visionRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run real Ctrl+V and local image understanding
+        env:
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
+          AUTO_CODEZ_LOCAL_ATTACHMENT_DIR: artifacts/local-attachment-chat
+        run: node scripts/real-local-attachment-chat.cjs
+
+      - name: Upload local attachment proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-codez-real-local-attachment-${{ github.run_id }}
+          path: artifacts/local-attachment-chat
+          if-no-files-found: warn
+          retention-days: 14

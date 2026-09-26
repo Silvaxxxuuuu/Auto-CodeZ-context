@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ProviderRequestError, classifyProviderError, formatProviderError, normalizeProviderError } from '../src/ai/provider-errors';
+import { ProviderRequestError, classifyProviderError, formatProviderError, normalizeProviderError, createProviderRequestError, retryAfterFromMessage } from '../src/ai/provider-errors';
 
 test('classifies quota errors independently of provider', () => {
   assert.equal(classifyProviderError(429, 'You exceeded your current quota'), 'quota');
@@ -21,6 +21,15 @@ test('classifies authentication and rate limit failures', () => {
   assert.equal(classifyProviderError(429, 'Too many requests'), 'rate_limit');
 });
 
+test('preserves provider HTTP status when normalizing adapter errors', () => {
+  const adapterError = createProviderRequestError('OpenAI', 'send', 402, 'payment required');
+  const normalized = normalizeProviderError('OpenAI', 'send', adapterError);
+  assert.equal(normalized.status, 402);
+  assert.equal(normalized.kind, 'billing');
+  assert.equal(normalized.provider, 'OpenAI');
+  assert.equal(normalized.operation, 'send');
+});
+
 test('normalizes unknown adapter failures without losing the original detail', () => {
   const normalized = normalizeProviderError('Google AI', 'stream', new Error('quota exceeded'));
   assert.ok(normalized instanceof ProviderRequestError);
@@ -35,4 +44,36 @@ test('formats provider failures for the application UI', () => {
   const billing = new ProviderRequestError('no credits remaining', 402, 'OpenAI');
   assert.match(formatProviderError(quota), /Google AI:.*cota.*API key continua salva/i);
   assert.match(formatProviderError(billing), /OpenAI:.*créditos.*API key continua salva/i);
+});
+
+
+test('formats rate-limit retry windows when the provider supplies them', () => {
+  const limited = new ProviderRequestError(
+    'Too many requests',
+    429,
+    'Azure Foundry',
+    'rate_limit',
+    'stream',
+    12_000,
+  );
+  assert.match(formatProviderError(limited), /Azure Foundry:.*12s/i);
+});
+
+
+test('recovers retry timing from provider rate-limit text when headers are absent', () => {
+  const limited = new ProviderRequestError(
+    'Too many requests. Please retry after 35 seconds.',
+    429,
+    'Azure Foundry',
+    'rate_limit',
+    'stream',
+  );
+  assert.match(formatProviderError(limited), /Azure Foundry:.*35s/i);
+});
+
+
+test('parses provider retry windows for automatic retry', () => {
+  assert.equal(retryAfterFromMessage('Please retry after 35 seconds.'), 35_000);
+  assert.equal(retryAfterFromMessage('Please retry after 1.5 minutes.'), 90_000);
+  assert.equal(retryAfterFromMessage('Too many requests'), undefined);
 });

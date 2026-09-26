@@ -1,116 +1,1621 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
+import { app, dialog, ipcMain, Menu, shell, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalStorage } from './core/storage';
 import { ProviderManager } from './ai/provider-manager';
 import { ChatManager } from './ai/chat-manager';
 import { ProjectManager } from './project/project-manager';
-import { ToolRuntime } from './agent/tool-runtime';
+import { ShadowAwareToolRuntime } from './agent/shadow-aware-tool-runtime';
+import { ShadowAwareWorkspaceRuntime } from './agent/shadow-aware-workspace-runtime';
+import { ShadowAwareCommandRuntime } from './agent/shadow-aware-command-runtime';
+import { ShadowAwareGitRuntime } from './agent/shadow-aware-git-runtime';
 import { AgentRuntime } from './agent/agent-runtime';
 import { ChatRuntime } from './ai/chat-runtime';
+import { ProviderRequestJournal } from './ai/provider-request-journal';
+import { retryAfterFromMessage } from './ai/provider-errors';
+import { runWithAbortSignal } from './ai/request-cancellation';
 import { TerminalService, type TerminalEvent } from './agent/terminal-service';
-import { GitRuntime } from './agent/git-runtime';
 import { GitService } from './agent/git-service';
 import { WorkspaceRuntime } from './agent/workspace-runtime';
 import { PermissionRuntime } from './agent/permission-runtime';
 import { ActivityRuntime } from './agent/activity-runtime';
 import { ApprovalRuntime } from './agent/approval-runtime';
-import { CommandRuntime } from './agent/command-runtime';
 import { DiffRuntime } from './agent/diff-runtime';
+import { ComputerContextRuntime } from './agent/computer-context';
+import { ExecutionManager, type ExecutionChange } from './execution-manager';
+import { ExecutionStatePersistence, ExecutionStateStore } from './execution-state-store';
+import { ExecutionTimeline } from './execution-timeline';
+import { ExecutionTimelinePersistence, ExecutionTimelineStore } from './execution-timeline-store';
+import { ExecutionCoordinator } from './execution-coordinator';
+import { ExecutionPlanner, type ExecutionPlanChange } from './execution-planner';
+import { ExecutionPlanPersistence, ExecutionPlanStore } from './execution-plan-store';
+import { ExecutionPlanHistory } from './execution-plan-history';
+import { ExecutionPlanHistoryPersistence, ExecutionPlanHistoryStore } from './execution-plan-history-store';
+import { ExecutionReportBuilder } from './execution-report';
+import { ExecutionQualityGateRuntime, type ExecutionQualityGateRequirement } from './execution-quality-gate';
+import { ExecutionQualityGatePersistence, ExecutionQualityGateStore } from './execution-quality-gate-store';
+import { ExecutionTaskCapsuleRuntime } from './execution-task-capsule';
+import { ExecutionTaskCapsulePersistence, ExecutionTaskCapsuleStore } from './execution-task-capsule-store';
+import { ExecutionCheckpointRuntime } from './execution-checkpoint';
+import { ExecutionCheckpointPersistence, ExecutionCheckpointStore } from './execution-checkpoint-store';
+import { ExecutionCheckpointController } from './execution-checkpoint-controller';
+import { ExecutionChangeBudgetRuntime } from './execution-change-budget';
+import { ExecutionChangeBudgetPersistence, ExecutionChangeBudgetStore } from './execution-change-budget-store';
+import { ExecutionPathScopeRuntime } from './execution-path-scope';
+import { ExecutionPathScopePersistence, ExecutionPathScopeStore } from './execution-path-scope-store';
+import { ExecutionPathScopeController } from './execution-path-scope-controller';
+import { normalizeOptionalExecutionAllowedPaths } from './execution-path-scope-request';
+import { ExecutionShadowWorkspaceRuntime } from './execution-shadow-workspace';
+import { ExecutionShadowWorkspacePersistence, ExecutionShadowWorkspaceStore } from './execution-shadow-workspace-store';
+import { ExecutionShadowWorkspaceController } from './execution-shadow-workspace-controller';
+import { reconcileShadowWorkspaceBootstrap } from './execution-shadow-workspace-bootstrap';
+import { ExecutionShadowLifecycle } from './execution-shadow-lifecycle';
+import { reconcileExecutionBootstrapState } from './execution-bootstrap-state';
+import { listRecoverableRuns, resumeRecoveredRun } from './agent/recovery-controller';
 import { requireIdentifier, requireNonEmptyString, requireObject } from './core/input-validation';
-import type { AIProviderConfig, AIStreamEvent } from './ai/types';
+import type { AIAttachment, AIProviderConfig, AIStreamEvent, ChatRecord } from './ai/types';
+import { AttachmentStore } from './ai/attachment-store';
+import { ManagedVisionAttachmentIndexer } from './ai/attachment-indexer';
+import { VisualGroundingCoordinator } from './ai/visual-grounding/visual-grounding-coordinator';
+import { GoogleVisionWebProvider } from './ai/visual-grounding/providers/google-vision-web';
+import { operationalLedger, type OperationalLedgerQuery, type OperationalLedgerState } from './operational-ledger';
+import { OperationalLedgerPersistence, OperationalLedgerStore } from './operational-ledger-store';
+import { OperationalLedgerRetrieval, type OperationalLedgerScope } from './operational-ledger-retrieval';
+import { McpGatewayProtocol } from './mcp-gateway/protocol';
+import { McpGatewayHttpServer } from './mcp-gateway/http-server';
+import { McpGatewayExecutionRuntime } from './mcp-gateway/execution-runtime';
+import { McpTunnelRuntime } from './mcp-gateway/tunnel-runtime';
+import { McpRuntimeInstaller } from './mcp-gateway/runtime-installer';
+import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
+import { LocalProtectedCredentialStore } from './account/protected-credential-store';
+import { DeviceIdentityStore } from './account/device-identity';
+import { AccountSessionRuntime } from './account/account-session-runtime';
+import { createAccountAuthAdapter, resolveAccountAuthConfiguration } from './account/auth-adapter-factory';
+import { DeviceRegistryRuntime } from './account/device-registry-runtime';
+import { AccountAuthFlowRuntime } from './account/account-auth-flow-runtime';
+import { findAccountAuthCallback, parseAccountAuthCallback } from './account/account-auth-callback';
+import type { OAuthProvider } from './account/auth-adapter';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
+declare const __AUTO_CODEZ_DESCOPE_PROJECT_ID__: string;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const storage = new LocalStorage();
+const attachmentStore = new AttachmentStore(() => path.join(app.getPath('userData'), 'attachments'));
+const CHAT_IMAGE_PICKER_EXTENSIONS = [
+  'png','jpg','jpeg','jpe','jfif','gif','svg','webp','avif','apng','heic','heif','tif','tiff','bmp','ico','tga','exr','dds',
+  'raw','dng','cr2','cr3','nef','arw','orf','rw2','raf','psd','ai','eps','pdf','indd','cdr','jp2','j2k','jxl','hdr','xcf',
+] as const;
+const attachmentVisionRoot = (): string => {
+  const testRoot = process.env.AUTO_CODEZ_VISUAL_TEST === '1'
+    ? process.env.AUTO_CODEZ_TEST_ATTACHMENT_VISION_ROOT?.trim()
+    : undefined;
+  return testRoot ? path.resolve(testRoot) : path.join(app.getPath('userData'), 'attachment-vision');
+};
+const attachmentIndexer = new ManagedVisionAttachmentIndexer(
+  attachmentVisionRoot,
+  attachmentStore,
+);
+const visualGrounding = new VisualGroundingCoordinator({
+  reverseProvider: new GoogleVisionWebProvider(attachmentStore, {
+    apiKey: process.env.AUTO_CODEZ_GOOGLE_VISION_API_KEY?.trim(),
+  }),
+});
+const accountCredentials = new LocalProtectedCredentialStore(storage);
+const accountDeviceIdentity = new DeviceIdentityStore(
+  storage,
+  accountCredentials,
+  {
+    platform: process.platform,
+    arch: process.arch,
+    appVersion: app.getVersion(),
+    defaultName: 'Este dispositivo',
+  },
+);
+const accountAuth = createAccountAuthAdapter({
+  descopeProjectId: process.env.AUTO_CODEZ_DESCOPE_PROJECT_ID?.trim() || __AUTO_CODEZ_DESCOPE_PROJECT_ID__,
+  descopeBaseUrl: process.env.AUTO_CODEZ_DESCOPE_BASE_URL,
+  descopePasskeyOidcFlowEnabled: process.env.AUTO_CODEZ_DESCOPE_PASSKEY_OIDC_FLOW_ENABLED === '1',
+  accountDataBaseUrl: process.env.AUTO_CODEZ_ACCOUNT_DATA_BASE_URL,
+  deviceProofSigner: async (challenge) => {
+    const device = await accountDeviceIdentity.getOrCreate();
+    if (device.credentialPersistence !== 'protected') {
+      throw new Error('Armazenamento seguro do sistema indisponível para autenticar este dispositivo.');
+    }
+    return {
+      deviceId: device.id,
+      signature: await accountDeviceIdentity.signChallenge(challenge),
+    };
+  },
+});
+const accountAuthAdapter = accountAuth.adapter;
+const accountSessionRuntime = new AccountSessionRuntime(
+  storage,
+  accountCredentials,
+  accountDeviceIdentity,
+  accountAuthAdapter,
+);
+const accountAuthFlowRuntime = new AccountAuthFlowRuntime(
+  accountAuthAdapter,
+  accountSessionRuntime,
+  accountDeviceIdentity,
+  Date.now,
+  accountCredentials,
+);
+const deviceRegistryRuntime = new DeviceRegistryRuntime(
+  accountSessionRuntime,
+  accountDeviceIdentity,
+  accountAuth.deviceRegistry,
+);
+let pendingAccountAuthCallback = findAccountAuthCallback(process.argv);
+
+
+async function hydrateChatAttachments(chat: ChatRecord): Promise<ChatRecord> {
+  const messages = [];
+  for (const message of chat.messages) {
+    if (!message.attachments?.length) {
+      messages.push({ ...message });
+      continue;
+    }
+    const attachments = [];
+    for (const attachment of message.attachments) attachments.push(await attachmentStore.hydrate(attachment));
+    messages.push({ ...message, attachments });
+  }
+  return { ...chat, messages };
+}
+
+async function requireStoredAttachments(value: unknown): Promise<AIAttachment[]> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 12) throw new Error('Lista de anexos inválida.');
+  const attachments: AIAttachment[] = [];
+  let totalBytes = 0;
+  for (const item of value) {
+    const attachment = await attachmentStore.validateReference(item);
+    totalBytes += attachment.size;
+    if (totalBytes > 96 * 1024 * 1024) throw new Error('Os anexos deste envio excedem o limite de 96 MB.');
+    attachments.push(attachment);
+  }
+  return attachments;
+}
+
+function requireOAuthProvider(value: unknown): OAuthProvider {
+  if (value === 'github' || value === 'google' || value === 'microsoft') return value;
+  throw new Error('Provider OAuth inválido.');
+}
+
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+async function completeAccountAuthCallback(rawUrl: string): Promise<void> {
+  const callback = parseAccountAuthCallback(rawUrl);
+  if (callback.type === 'oauth') {
+    await accountAuthFlowRuntime.completeOAuth(callback);
+  } else if (callback.type === 'oauth_error') {
+    await accountAuthFlowRuntime.failOAuthCallback(callback);
+  } else if (callback.type === 'passkey') {
+    await accountAuthFlowRuntime.completePasskey(callback);
+  } else if (callback.type === 'passkey_error') {
+    await accountAuthFlowRuntime.failPasskeyCallback(callback);
+  } else if (callback.type === 'hosted') {
+    await accountAuthFlowRuntime.completeHosted(callback);
+  } else if (callback.type === 'hosted_error') {
+    await accountAuthFlowRuntime.failHostedCallback(callback);
+  } else {
+    await accountAuthFlowRuntime.completeMagicLink(callback);
+  }
+  focusMainWindow();
+}
+
+function queueAccountAuthCallback(rawUrl: string): void {
+  if (!app.isReady()) {
+    pendingAccountAuthCallback = rawUrl;
+    return;
+  }
+  void completeAccountAuthCallback(rawUrl).catch((error) => {
+    console.error('[Auto CodeZ account callback]', error);
+    focusMainWindow();
+  });
+}
+
+if (process.env.AUTO_CODEZ_VISUAL_TEST !== '1') {
+  const lock = app.requestSingleInstanceLock();
+  if (!lock) app.quit();
+  app.on('second-instance', (_event, argv) => {
+    const callback = findAccountAuthCallback(argv);
+    if (callback) queueAccountAuthCallback(callback);
+    else focusMainWindow();
+  });
+}
+
+app.on('open-url', (event, rawUrl) => {
+  event.preventDefault();
+  if (rawUrl.startsWith('autocodez://auth/')) queueAccountAuthCallback(rawUrl);
+});
 const providerManager = new ProviderManager(storage);
 const chatManager = new ChatManager(storage);
 const projectManager = new ProjectManager(storage);
 const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
+const executionShadowWorkspaceRuntime = new ExecutionShadowWorkspaceRuntime(workspaceRuntime);
+const shadowAwareWorkspaceRuntime = new ShadowAwareWorkspaceRuntime(workspaceRuntime, executionShadowWorkspaceRuntime);
 const permissionRuntime = new PermissionRuntime();
 const activityRuntime = new ActivityRuntime();
 const approvalRuntime = new ApprovalRuntime();
-const commandRuntime = new CommandRuntime(() => projectManager.list());
+const commandRuntime = new ShadowAwareCommandRuntime(() => projectManager.list(), executionShadowWorkspaceRuntime);
 const diffRuntime = new DiffRuntime();
-const gitRuntime = new GitRuntime(() => projectManager.list());
+const gitRuntime = new ShadowAwareGitRuntime(() => projectManager.list(), executionShadowWorkspaceRuntime);
 const gitService = new GitService(gitRuntime);
 const terminalService = new TerminalService(storage, () => projectManager.list());
-const toolRuntime = new ToolRuntime(workspaceRuntime, permissionRuntime, activityRuntime, approvalRuntime, commandRuntime, diffRuntime, storage);
+const computerContextRuntime = new ComputerContextRuntime();
+const toolRuntime = new ShadowAwareToolRuntime(shadowAwareWorkspaceRuntime, permissionRuntime, activityRuntime, approvalRuntime, commandRuntime, diffRuntime, storage);
+toolRuntime.configureShadowWorkspace(executionShadowWorkspaceRuntime);
 toolRuntime.configureGitRuntime(gitRuntime);
-const chatRuntime = new ChatRuntime(providerManager.registry, undefined, undefined, activityRuntime, undefined, toolRuntime.listDefinitions());
+const providerRequestJournal = new ProviderRequestJournal(storage);
+const chatRuntime = new ChatRuntime(
+  providerManager.registry,
+  undefined,
+  undefined,
+  activityRuntime,
+  undefined,
+  toolRuntime.listDefinitions(),
+  providerRequestJournal,
+  undefined,
+  attachmentIndexer,
+  visualGrounding,
+);
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
+const executionManager = new ExecutionManager();
+const executionStateStore = new ExecutionStateStore(storage);
+const executionStatePersistence = new ExecutionStatePersistence(executionStateStore);
+const executionTimeline = new ExecutionTimeline();
+const executionTimelineStore = new ExecutionTimelineStore(storage);
+const executionTimelinePersistence = new ExecutionTimelinePersistence(executionTimelineStore);
+const operationalLedgerStore = new OperationalLedgerStore(storage);
+const operationalLedgerPersistence = new OperationalLedgerPersistence(operationalLedgerStore);
+const operationalLedgerRetrieval = new OperationalLedgerRetrieval(operationalLedger);
+const mcpGatewayExecutionRuntime = new McpGatewayExecutionRuntime(agentRuntime, pluginToolCatalog, operationalLedger);
+const mcpGatewayProtocol = new McpGatewayProtocol(operationalLedgerRetrieval, mcpGatewayExecutionRuntime);
+const mcpGatewayServer = new McpGatewayHttpServer(mcpGatewayProtocol);
+const mcpTunnelRuntime = new McpTunnelRuntime();
+const mcpRuntimeInstaller = new McpRuntimeInstaller(() => app.getPath('userData'));
+const executionPlanner = new ExecutionPlanner();
+const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
+const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
+const executionChangeBudgetStore = new ExecutionChangeBudgetStore(storage);
+const executionChangeBudgetPersistence = new ExecutionChangeBudgetPersistence(executionChangeBudgetStore);
+toolRuntime.configureExecutionPlanner(executionPlanner);
+toolRuntime.configureExecutionChangeBudget(executionChangeBudgetRuntime);
+const executionPlanStore = new ExecutionPlanStore(storage);
+const executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore);
+const executionPlanHistory = new ExecutionPlanHistory();
+const executionPlanHistoryStore = new ExecutionPlanHistoryStore(storage);
+const executionPlanHistoryPersistence = new ExecutionPlanHistoryPersistence(executionPlanHistoryStore);
+const executionReportBuilder = new ExecutionReportBuilder(executionManager, executionTimeline, executionPlanHistory);
+const executionQualityGateRuntime = new ExecutionQualityGateRuntime();
+const executionQualityGateStore = new ExecutionQualityGateStore(storage);
+const executionQualityGatePersistence = new ExecutionQualityGatePersistence(executionQualityGateStore);
+const executionTaskCapsuleRuntime = new ExecutionTaskCapsuleRuntime();
+const executionTaskCapsuleStore = new ExecutionTaskCapsuleStore(storage);
+const executionTaskCapsulePersistence = new ExecutionTaskCapsulePersistence(executionTaskCapsuleStore);
+const executionPathScopeRuntime = new ExecutionPathScopeRuntime();
+const executionPathScopeStore = new ExecutionPathScopeStore(storage);
+const executionPathScopePersistence = new ExecutionPathScopePersistence(executionPathScopeStore);
+toolRuntime.configureExecutionPathScope(executionPathScopeRuntime);
+const executionPathScopeController = new ExecutionPathScopeController(executionTaskCapsuleRuntime, executionPathScopeRuntime, toolRuntime);
+const executionCheckpointRuntime = new ExecutionCheckpointRuntime();
+const executionCheckpointStore = new ExecutionCheckpointStore(storage);
+const executionCheckpointPersistence = new ExecutionCheckpointPersistence(executionCheckpointStore);
+const executionShadowWorkspaceStore = new ExecutionShadowWorkspaceStore(storage);
+const executionShadowWorkspacePersistence = new ExecutionShadowWorkspacePersistence(executionShadowWorkspaceStore);
+let executionPersistenceEnabled = false;
+let executionTimelinePersistenceEnabled = false;
+let operationalLedgerPersistenceEnabled = false;
+let executionPlanPersistenceEnabled = false;
+let executionPlanHistoryPersistenceEnabled = false;
+let executionQualityGatePersistenceEnabled = false;
+let executionTaskCapsulePersistenceEnabled = false;
+let executionPathScopePersistenceEnabled = false;
+let executionCheckpointPersistenceEnabled = false;
+let executionChangeBudgetPersistenceEnabled = false;
+let executionShadowWorkspacePersistenceEnabled = false;
+const executionCheckpointController = new ExecutionCheckpointController(
+  executionCheckpointRuntime,
+  workspaceRuntime,
+  executionManager,
+  (checkpoints) => {
+    if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(checkpoints);
+  },
+);
+const executionShadowWorkspaceController = new ExecutionShadowWorkspaceController(
+  executionShadowWorkspaceRuntime,
+  (record) => {
+    executionCheckpointRuntime.record(record);
+    if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
+  },
+);
+const executionShadowLifecycle = new ExecutionShadowLifecycle(
+  executionCoordinator,
+  executionShadowWorkspaceController,
+  isRecoverableExecution,
+);
+executionChangeBudgetRuntime.subscribe((snapshots) => {
+  if (executionChangeBudgetPersistenceEnabled) executionChangeBudgetPersistence.schedule(snapshots);
+});
+executionPathScopeRuntime.subscribe((snapshots) => {
+  if (executionPathScopePersistenceEnabled) executionPathScopePersistence.schedule(snapshots);
+});
+executionShadowWorkspaceRuntime.subscribe((snapshots) => {
+  if (executionShadowWorkspacePersistenceEnabled) executionShadowWorkspacePersistence.schedule(snapshots);
+});
+const activeStreamControllers = new Map<string, { runId: string; controller: AbortController }>();
+const approvalRunLocks = new Set<string>();
 let mainWindow: BrowserWindow | null = null;
+let accountRefreshTimer: NodeJS.Timeout | undefined;
+const ACCOUNT_REFRESH_SKEW_MS = 120_000;
+const ACCOUNT_OFFLINE_RETRY_MS = 60_000;
+const ACCOUNT_MIN_REFRESH_DELAY_MS = 5_000;
 
-function sendTerminalEvent(event: unknown): void { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('terminal:event', event); }
-function sendActivity(event: unknown): void { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('agent:activity', event); }
+function isRecoverableExecution(chatId: string, runId: string): boolean {
+  return agentRuntime.listPendingRuns().some((run) => run.chatId === chatId && run.runId === runId)
+    || listRecoverableRuns(agentRuntime).some((run) => run.chatId === chatId && run.runId === runId);
+}
+
+function sendTerminalEvent(event: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('terminal:event', event);
+}
+
+function sendActivity(event: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('agent:activity', event);
+}
+function sendStreamEvent(event: AIStreamEvent): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', event);
+}
+
+function sendExecutionChange(change: ExecutionChange): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution:event', change);
+}
+
+function sendExecutionPlanChange(change: ExecutionPlanChange): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('execution-plan:event', change);
+}
+
+function sendOperationalLedgerEvent(event: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('operational-ledger:event', event);
+}
+
+function sendMcpTunnelStatus(status: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('mcp-tunnel:event', status);
+}
+
+function sendAccountState(snapshot: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('account:event', snapshot);
+}
+
+function sendAccountAuthFlowState(snapshot: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('account-auth-flow:event', snapshot);
+}
+
+function sendDeviceRegistryState(snapshot: unknown): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('account-device-registry:event', snapshot);
+}
+
+function clearAccountRefreshTimer(): void {
+  if (!accountRefreshTimer) return;
+  clearTimeout(accountRefreshTimer);
+  accountRefreshTimer = undefined;
+}
+
+function scheduleAccountRefresh(snapshot: ReturnType<AccountSessionRuntime['snapshot']>): void {
+  clearAccountRefreshTimer();
+
+  let delayMs: number | undefined;
+  if (snapshot.state === 'authenticated' && snapshot.session) {
+    delayMs = Math.max(
+      ACCOUNT_MIN_REFRESH_DELAY_MS,
+      snapshot.session.accessExpiresAt - Date.now() - ACCOUNT_REFRESH_SKEW_MS,
+    );
+  } else if (
+    (snapshot.state === 'offline' || snapshot.state === 'error')
+    && snapshot.account
+    && snapshot.session
+  ) {
+    delayMs = ACCOUNT_OFFLINE_RETRY_MS;
+  }
+
+  if (delayMs === undefined) return;
+  accountRefreshTimer = setTimeout(() => {
+    accountRefreshTimer = undefined;
+    void accountSessionRuntime.refreshSession().then((next) => {
+      if (next.state === 'authenticated') void deviceRegistryRuntime.ensureRegistered();
+    }).catch((error) => {
+      console.error('[Auto CodeZ account refresh]', error);
+    });
+  }, Math.min(delayMs, 2_147_000_000));
+  accountRefreshTimer.unref?.();
+}
+
+accountSessionRuntime.subscribe((snapshot) => {
+  sendAccountState(snapshot);
+  scheduleAccountRefresh(snapshot);
+
+  if (snapshot.state === 'authenticated') {
+    void deviceRegistryRuntime.ensureRegistered();
+    return;
+  }
+
+  if (snapshot.state === 'offline') {
+    deviceRegistryRuntime.markOffline();
+    return;
+  }
+
+  if (snapshot.state === 'signed_out' || snapshot.state === 'revoked') {
+    deviceRegistryRuntime.reset();
+    accountAuthFlowRuntime.reset();
+  }
+});
+
+accountAuthFlowRuntime.subscribe((snapshot) => {
+  sendAccountAuthFlowState(snapshot);
+});
+
+deviceRegistryRuntime.subscribe((snapshot) => {
+  sendDeviceRegistryState(snapshot);
+});
+
+executionPlanner.subscribe((change) => {
+  sendExecutionPlanChange(change);
+  const historyChanged = executionPlanHistory.record(change);
+  if (executionPlanPersistenceEnabled) executionPlanPersistence.schedule(executionPlanner.list());
+  if (executionPlanHistoryPersistenceEnabled && historyChanged) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
+});
+
+executionManager.subscribe((change) => {
+  sendExecutionChange(change);
+  const timelineEvents = executionTimeline.record(change);
+  if (change.type === 'upsert') {
+    const state: OperationalLedgerState = change.snapshot.state === 'waiting_approval'
+      ? 'waiting'
+      : change.snapshot.state === 'completed'
+        ? 'success'
+        : change.snapshot.state === 'failed'
+          ? 'failed'
+          : change.snapshot.state === 'interrupted'
+            ? 'cancelled'
+            : 'running';
+    operationalLedger.record({
+      actor: 'runtime',
+      category: 'execution',
+      state,
+      summary: `Execução ${change.snapshot.state}.`,
+      chatId: change.snapshot.chatId,
+      runId: change.snapshot.runId,
+      toolName: change.snapshot.currentTool,
+      error: change.snapshot.error,
+      timestamp: change.snapshot.updatedAt,
+    });
+  } else {
+    operationalLedger.record({
+      actor: 'runtime',
+      category: 'execution',
+      state: 'success',
+      summary: 'Execução removida do estado ativo.',
+      chatId: change.chatId,
+      runId: change.runId,
+    });
+  }
+  if (executionPersistenceEnabled) executionStatePersistence.schedule(executionManager.list());
+  if (executionTimelinePersistenceEnabled && timelineEvents.length) executionTimelinePersistence.schedule(executionTimeline.list());
+});
+
+function recordConsumedApprovalDecision(
+  approval: { id: string; chatId?: string; runId?: string; toolCall: { id: string; name: string } },
+  decision: 'approved' | 'denied',
+  at: number,
+): void {
+  if (!approval.chatId || !approval.runId) return;
+  const events = executionTimeline.recordApprovalDecision({
+    chatId: approval.chatId,
+    runId: approval.runId,
+    approvalId: approval.id,
+    toolCallId: approval.toolCall.id,
+    toolName: approval.toolCall.name,
+    decision,
+    at,
+  });
+  if (executionTimelinePersistenceEnabled && events.length) executionTimelinePersistence.schedule(executionTimeline.list());
+  operationalLedger.record({
+    actor: 'user',
+    category: 'approval',
+    state: decision === 'approved' ? 'success' : 'failed',
+    summary: decision === 'approved' ? `Aprovação concedida para ${approval.toolCall.name}.` : `Aprovação recusada para ${approval.toolCall.name}.`,
+    chatId: approval.chatId,
+    runId: approval.runId,
+    toolCallId: approval.toolCall.id,
+    toolName: approval.toolCall.name,
+    causationId: approval.id,
+    details: { decision },
+    timestamp: at,
+  });
+}
+
+function recordExternalApprovalDecision(
+  approval: { id: string; chatId?: string; runId?: string; toolCall: { id: string; name: string } },
+  operation: { operationId: string; projectId: string; pluginId: string; externalToolName: string },
+  decision: 'approved' | 'denied',
+  at: number,
+): void {
+  operationalLedger.record({
+    actor: 'user',
+    category: 'approval',
+    state: decision === 'approved' ? 'success' : 'failed',
+    summary: decision === 'approved'
+      ? `Aprovação MCP concedida para ${operation.externalToolName}.`
+      : `Aprovação MCP recusada para ${operation.externalToolName}.`,
+    chatId: approval.chatId,
+    runId: approval.runId,
+    projectId: operation.projectId,
+    pluginId: operation.pluginId,
+    toolCallId: approval.toolCall.id,
+    toolName: operation.externalToolName,
+    causationId: operation.operationId,
+    details: { decision, approvalId: approval.id },
+    timestamp: at,
+  });
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function isRateLimitFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /limite de requisi[cç][oõ]es|too many requests|rate[_ -]?limit|HTTP\s*429/i.test(message);
+}
+
+function isMalformedToolArgumentsFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /argumentos inv[aá]lidos para uma ferramenta|invalid tool (?:input|arguments)|malformed tool/i.test(message);
+}
+
+function isAutomaticProviderRecoveryFailure(error: unknown): boolean {
+  return isRateLimitFailure(error) || isMalformedToolArgumentsFailure(error);
+}
+
+function automaticProviderRecoveryDelayMs(error: unknown): number {
+  if (isMalformedToolArgumentsFailure(error)) return 750;
+  return rateLimitRecoveryDelayMs(error);
+}
+
+function automaticProviderRecoveryMessage(error: unknown, delayMs: number): string {
+  if (isMalformedToolArgumentsFailure(error)) {
+    return 'O provider retornou uma tool call incompleta. O Auto CodeZ preservou o trabalho preparado e está pedindo novamente argumentos válidos.';
+  }
+  return `Azure atingiu o limite temporário. A execução foi preservada e continua automaticamente em cerca de ${Math.max(1, Math.ceil(delayMs / 1000))}s.`;
+}
+
+function rateLimitRecoveryDelayMs(error: unknown): number {
+  const message = error instanceof Error ? error.message : String(error);
+  return Math.min(120_000, Math.max(1_000, retryAfterFromMessage(message) ?? 60_000));
+}
+
+async function waitForExecutionRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, delayMs);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal.reason instanceof Error ? signal.reason : new DOMException('Aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  signal.throwIfAborted();
+}
 
 function createWindow(): void {
-  mainWindow = new BrowserWindow({ width: 1440, height: 920, minWidth: 960, minHeight: 680, webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false } });
+  mainWindow = new BrowserWindow({
+    width: 1440,
+    height: 920,
+    minWidth: 960,
+    minHeight: 680,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   else void mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnType<ChatManager['list']>>[number]; config: AIProviderConfig; projectContext?: string }> {
+function reconcileExecutionSlot(chatId: string): void {
+  const current = executionManager.get(chatId);
+  if (!current || (current.state !== 'running' && current.state !== 'waiting_approval')) return;
+  const hasController = activeStreamControllers.has(chatId);
+  const hasPending = agentRuntime.hasPendingForChat(chatId);
+  if (!hasController && !hasPending) {
+    executionShadowLifecycle.interrupt(chatId, current.runId);
+    executionManager.remove(chatId);
+  }
+}
+
+function ensureApprovalExecution(chatId: string, runId: string): void {
+  const current = executionManager.get(chatId);
+  if (current?.runId === runId && (current.state === 'running' || current.state === 'waiting_approval')) {
+    executionCoordinator.resumePlan(chatId, runId);
+    return;
+  }
+  if (current) executionManager.remove(chatId);
+  executionManager.start(chatId, Date.now(), runId);
+  executionCoordinator.resumePlan(chatId, runId);
+}
+
+async function clearChatExecution(chatId: string): Promise<void> {
+  const execution = executionManager.get(chatId);
+  const active = activeStreamControllers.get(chatId);
+  active?.controller.abort();
+  activeStreamControllers.delete(chatId);
+  approvalRuntime.remove({ chatId });
+  await agentRuntime.cancelChat(chatId);
+  executionShadowLifecycle.clearChat(chatId);
+  if (execution) executionCoordinator.interrupt(chatId, execution.runId);
+  else executionPlanner.remove(chatId);
+  executionManager.remove(chatId);
+}
+
+async function withApprovalRunLock<T>(chatId: string, runId: string, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  if (approvalRunLocks.has(runId)) throw new Error('Esta execução já está processando outra decisão de aprovação.');
+  if (activeStreamControllers.has(chatId)) throw new Error('Esta execução já possui uma operação ativa.');
+  approvalRunLocks.add(runId);
+  const controller = new AbortController();
+  activeStreamControllers.set(chatId, { runId, controller });
+  try {
+    return await runWithAbortSignal(controller.signal, () => operation(controller.signal));
+  } finally {
+    const current = activeStreamControllers.get(chatId);
+    if (current?.controller === controller) activeStreamControllers.delete(chatId);
+    approvalRunLocks.delete(runId);
+  }
+}
+
+async function cancelledRunResult(chatId: string) {
   const chat = (await chatManager.list()).find((item) => item.id === chatId);
-  if (!chat) throw new Error('Chat não encontrado.');
-  const config = providerManager.getConfig(chat.providerId);
-  const projectContext = chat.projectId ? await projectManager.buildContext(chat.projectId) : undefined;
-  return { chat, config, projectContext };
+  if (!chat) throw new Error('Chat não encontrado após o cancelamento.');
+  return {
+    chatId,
+    response: { content: '', model: chat.model, providerId: chat.providerId },
+    toolRounds: 0,
+    pendingApprovalIds: [] as string[],
+    messages: [...chat.messages],
+  };
+}
+
+async function restoreExecutionBootstrapState(): Promise<void> {
+  const recoveredAt = Date.now();
+  const snapshots = reconcileExecutionBootstrapState({
+    persisted: await executionStateStore.load(),
+    pendingRuns: agentRuntime.listPendingRuns(),
+    recoverableRuns: listRecoverableRuns(agentRuntime),
+    now: recoveredAt,
+  });
+  executionManager.hydrate(snapshots);
+  for (const snapshot of snapshots) executionTimeline.recordRecovery(snapshot, recoveredAt);
+}
+
+async function restoreShadowWorkspaceBootstrapState(): Promise<void> {
+  const snapshots = reconcileShadowWorkspaceBootstrap(
+    await executionShadowWorkspaceStore.load(),
+    agentRuntime.listPendingRuns(),
+    listRecoverableRuns(agentRuntime),
+  );
+  executionShadowWorkspaceRuntime.restore(snapshots);
+}
+
+async function getChatContext(chatId: string): Promise<{ chat: Awaited<ReturnType<ChatManager['list']>>[number]; config: AIProviderConfig }> {
+  const storedChat = (await chatManager.list()).find((item) => item.id === chatId);
+  if (!storedChat) throw new Error('Chat não encontrado.');
+
+  let chat = storedChat;
+  let config: AIProviderConfig;
+
+  if (chat.apiKeyId) {
+    const keys = await providerManager.listKeys();
+    const exactKey = keys.find((item) => item.id === chat.apiKeyId);
+    if (exactKey) {
+      config = providerManager.getConfigForKey(exactKey.id);
+    } else {
+      const legacyProviderReference = chat.apiKeyId === chat.providerId || keys.some((item) => item.providerId === chat.apiKeyId);
+      if (!legacyProviderReference) throw new Error('A IA salva selecionada neste chat não está mais disponível. Abra “IAs salvas” e escolha outra credencial.');
+      const replacement = keys.find((item) => item.providerId === chat.providerId && item.active) || keys.find((item) => item.providerId === chat.providerId);
+      if (!replacement) throw new Error('A IA salva usada por este chat não existe mais. Abra “IAs salvas” e escolha outra credencial.');
+      chat = await chatManager.updateSettings({ chatId: chat.id, providerId: chat.providerId, model: chat.model, apiKeyId: replacement.id, intelligence: chat.intelligence, permissionLevel: chat.permissionLevel });
+      config = providerManager.getConfigForKey(replacement.id);
+    }
+  } else {
+    config = providerManager.getConfig(chat.providerId);
+  }
+
+  if (config.id !== chat.providerId) throw new Error('A API key selecionada não pertence ao provider salvo neste chat.');
+  return { chat, config };
+}
+
+function captureExecutionTaskCapsule(
+  chat: Awaited<ReturnType<ChatManager['list']>>[number],
+  runId: string,
+  objective: string,
+): void {
+  executionTaskCapsuleRuntime.create({
+    chatId: chat.id,
+    runId,
+    objective,
+    projectId: chat.projectId,
+    providerId: chat.providerId,
+    model: chat.model,
+    permissionLevel: chat.permissionLevel,
+  });
+  if (executionTaskCapsulePersistenceEnabled) executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
+}
+
+async function configureInitialExecutionPathScope(chatId: string, runId: string, allowedPaths?: string[]): Promise<void> {
+  if (allowedPaths === undefined) return;
+  await executionPathScopeController.configure({ chatId, runId, allowedPaths });
+}
+
+async function buildExecutionContext(
+  chat: Awaited<ReturnType<ChatManager['list']>>[number],
+  runId: string,
+  taskQuery: string,
+): Promise<string> {
+  const computerContext = computerContextRuntime.build();
+  if (!chat.projectId) return computerContext;
+  const projectId = chat.projectId;
+  const scope = executionPathScopeRuntime.get(chat.id, runId);
+  if (scope && scope.projectId !== projectId) throw new Error('O escopo de caminhos da execução pertence a outro projeto.');
+  const projectContext = await projectManager.buildContext(
+    projectId,
+    scope
+      ? async (relativePath) => {
+          const canonicalPath = await workspaceRuntime.canonicalRelativePath(projectId, relativePath);
+          return executionPathScopeRuntime.allowsPath(chat.id, runId, projectId, canonicalPath);
+        }
+      : undefined,
+    taskQuery,
+  );
+  return `${computerContext}\n\n${projectContext}`;
+}
+
+function accountStateForRenderer(): ReturnType<AccountSessionRuntime['snapshot']> {
+  const current = accountSessionRuntime.snapshot();
+  if (
+    process.env.AUTO_CODEZ_VISUAL_TEST !== '1'
+    || process.env.AUTO_CODEZ_VISUAL_ACCOUNT_PROFILE !== '1'
+  ) return current;
+
+  const now = Date.now();
+  return {
+    state: 'authenticated',
+    account: {
+      id: 'visual-account-user',
+      primaryEmail: 'visual.account@example.com',
+      displayName: 'Conta de teste visual',
+      status: 'active',
+      identities: [{
+        id: 'microsoft:visual-account-user',
+        provider: 'microsoft',
+        providerAccountId: 'visual-account-user',
+        email: 'visual.account@example.com',
+        displayName: 'Conta de teste visual',
+        linkedAt: now - 86_400_000,
+        lastUsedAt: now,
+      }],
+      createdAt: now - 86_400_000,
+      updatedAt: now,
+    },
+    session: {
+      id: 'visual-session',
+      accountId: 'visual-account-user',
+      deviceId: current.device.id,
+      identityProvider: 'microsoft',
+      createdAt: now - 60_000,
+      lastActivityAt: now,
+      accessExpiresAt: now + 3_600_000,
+    },
+    device: {
+      ...current.device,
+      name: 'Silva PC',
+    },
+  };
 }
 
 ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.list(), chats: await chatManager.list(), projects: await projectManager.list() }));
-ipcMain.handle('providers:list-models', async (_event, providerId: string) => providerManager.listModels(requireIdentifier(providerId, 'Provider')));
-ipcMain.handle('providers:list-keys', async () => providerManager.listKeys());
-ipcMain.handle('providers:save-key', async (_event, input: unknown) => {
-  const value = requireObject(input, 'Dados da API key');
-  return providerManager.saveKey({ providerId: requireIdentifier(value.providerId, 'Provider'), name: requireNonEmptyString(value.name, 'Nome da API key'), apiKey: requireNonEmptyString(value.apiKey, 'API key'), model: value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo'), baseUrl: value.baseUrl === undefined ? undefined : requireNonEmptyString(value.baseUrl, 'URL base') });
+ipcMain.handle('account:get-state', async () => accountStateForRenderer());
+ipcMain.handle('account:logout', async () => accountSessionRuntime.logout());
+ipcMain.handle('account:rename-device', async (_event, name: string) => accountSessionRuntime.renameDevice(requireNonEmptyString(name, 'Nome do dispositivo')));
+ipcMain.handle('account-auth-flow:get-state', async () => accountAuthFlowRuntime.snapshot());
+ipcMain.handle('account-auth-flow:reset', async () => accountAuthFlowRuntime.reset());
+ipcMain.handle('account-auth-flow:cancel', async () => accountAuthFlowRuntime.cancel());
+ipcMain.handle('account-auth:get-configuration', async () => resolveAccountAuthConfiguration(
+  accountAuth,
+  process.env.AUTO_CODEZ_VISUAL_TEST === '1',
+));
+ipcMain.handle('account-auth:begin-magic-link', async (_event, email: string) => accountAuthFlowRuntime.beginMagicLink(requireNonEmptyString(email, 'E-mail')));
+ipcMain.handle('account-auth:begin-oauth', async (_event, provider: unknown) => {
+  const result = await accountAuthFlowRuntime.beginOAuth(requireOAuthProvider(provider));
+  if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
+  return result.snapshot;
 });
+ipcMain.handle('account-auth:begin-passkey', async () => {
+  const result = await accountAuthFlowRuntime.beginPasskey();
+  if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
+  return result.snapshot;
+});
+ipcMain.handle('account-auth:begin-hosted', async () => {
+  const result = await accountAuthFlowRuntime.beginHosted();
+  if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
+  return result.snapshot;
+});
+ipcMain.handle('account-auth:open-passkey-enrollment', async () => {
+  if (accountAuth.configuration.hosted) {
+    const result = await accountAuthFlowRuntime.beginPasskey();
+    if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
+    return { opened: true };
+  }
+  if (!accountAuth.publicOrigin) throw new Error('Serviço de autenticação não configurado.');
+  const enrollmentUrl = new URL('/desktop/passkey/enroll', accountAuth.publicOrigin).toString();
+  await shell.openExternal(enrollmentUrl);
+  return { opened: true };
+});
+ipcMain.handle('account-device-registry:get-state', async () => deviceRegistryRuntime.snapshot());
+ipcMain.handle('account-device-registry:refresh', async () => deviceRegistryRuntime.refresh());
+ipcMain.handle('account-device-registry:rename-current', async (_event, name: string) => deviceRegistryRuntime.renameCurrent(requireNonEmptyString(name, 'Nome do dispositivo')));
+ipcMain.handle('account-device-registry:revoke', async (_event, deviceId: string) => deviceRegistryRuntime.revoke(requireNonEmptyString(deviceId, 'Dispositivo')));
+ipcMain.handle('providers:list-models', async (_event, identifier: string) => {
+  const value = requireIdentifier(identifier, 'Provider');
+  const key = (await providerManager.listKeys()).find((item) => item.id === value);
+  return key ? providerManager.listModelsForKey(value) : providerManager.listModels(value);
+});
+ipcMain.handle('providers:list-models-for-key', async (_event, keyId: string) => providerManager.listModelsForKey(requireIdentifier(keyId, 'API key')));
+ipcMain.handle('providers:list-keys', async () => providerManager.listKeys());
+ipcMain.handle('providers:save-key', async (_event, input: unknown) => { const value = requireObject(input, 'Dados da API key'); return providerManager.saveKey({ providerId: requireIdentifier(value.providerId, 'Provider'), name: requireNonEmptyString(value.name, 'Nome da API key'), apiKey: requireNonEmptyString(value.apiKey, 'API key'), model: value.model === undefined ? undefined : requireIdentifier(value.model, 'Modelo'), baseUrl: value.baseUrl === undefined ? undefined : requireNonEmptyString(value.baseUrl, 'URL base') }); });
 ipcMain.handle('providers:rename-key', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome da API key'); return providerManager.renameKey(requireIdentifier(value.keyId, 'API key'), requireNonEmptyString(value.name, 'Nome da API key')); });
 ipcMain.handle('providers:set-active-key', async (_event, keyId: string) => providerManager.setActiveKey(requireIdentifier(keyId, 'API key')));
 ipcMain.handle('providers:remove-key', async (_event, keyId: string) => providerManager.removeKey(requireIdentifier(keyId, 'API key')));
 ipcMain.handle('providers:save', async (_event, input: unknown) => providerManager.save(requireObject(input, 'Dados do provider') as { providerId: string; apiKey: string; model?: string; baseUrl?: string }));
 ipcMain.handle('providers:remove', async (_event, providerId: string) => providerManager.remove(requireIdentifier(providerId, 'Provider')));
-ipcMain.handle('chat:create', async (_event, input: unknown) => chatManager.create(requireObject(input, 'Dados do chat') as { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }));
-ipcMain.handle('chat:delete', async (_event, chatId: string) => chatManager.remove(requireIdentifier(chatId, 'Chat')));
+ipcMain.handle('chat:create', async (_event, input: unknown) => chatManager.create(requireObject(input, 'Dados do chat') as { providerId?: string; model?: string; apiKeyId?: string; intelligence: string; permissionLevel: string; projectId?: string }));
+ipcMain.handle('chat:delete', async (_event, chatId: string) => {
+  const id = requireIdentifier(chatId, 'Chat');
+  await clearChatExecution(id);
+  if (executionPlanHistory.purgeChat(id) && executionPlanHistoryPersistenceEnabled) executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
+  if (executionQualityGateRuntime.removeChat(id) && executionQualityGatePersistenceEnabled) executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
+  executionPathScopeController.removeChat(id);
+  if (executionTaskCapsuleRuntime.removeChat(id) && executionTaskCapsulePersistenceEnabled) executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
+  if (executionCheckpointRuntime.removeChat(id) && executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
+  executionChangeBudgetRuntime.removeChat(id);
+  return chatManager.remove(id);
+});
 ipcMain.handle('chat:rename', async (_event, input: unknown) => { const value = requireObject(input, 'Dados do nome do chat'); return chatManager.rename(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.title, 'Nome do chat')); });
-ipcMain.handle('chat:update-settings', async (_event, input: unknown) => chatManager.updateSettings(requireObject(input, 'Configurações do chat') as { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }));
+ipcMain.handle('chat:update-settings', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Configurações do chat');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const requestedProviderId = requireIdentifier(value.providerId, 'Provider');
+  const explicitApiKeyId = value.apiKeyId === undefined ? undefined : requireIdentifier(value.apiKeyId, 'API key');
+  const selectedKey = explicitApiKeyId ? (await providerManager.listKeys()).find((item) => item.id === explicitApiKeyId) : (await providerManager.listKeys()).find((item) => item.id === requestedProviderId);
+  const apiKeyId = explicitApiKeyId || selectedKey?.id;
+  const providerId = selectedKey?.providerId || requestedProviderId;
+  if (apiKeyId) {
+    const config = providerManager.getConfigForKey(apiKeyId);
+    if (config.id !== providerId) throw new Error('A API key selecionada não pertence ao provider informado.');
+  }
+  return chatManager.updateSettings({ chatId, providerId, model: requireIdentifier(value.model, 'Modelo'), apiKeyId, intelligence: requireIdentifier(value.intelligence, 'Inteligência'), permissionLevel: requireIdentifier(value.permissionLevel, 'Permissão') });
+});
 
-async function executeChat(chatId: string, content: string): Promise<{ pendingApprovalIds: string[]; chat: Awaited<ReturnType<ChatManager['list']>>[number] | undefined }> {
-  const { chat, config, projectContext } = await getChatContext(chatId);
-  await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
-  const current = (await chatManager.list()).find((item) => item.id === chat.id);
-  if (!current) throw new Error('Chat desapareceu durante a execução.');
-  const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel);
-  await chatManager.update({ ...current, messages: result.messages });
-  return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+function recordExecutionContext(
+  chat: Awaited<ReturnType<ChatManager['list']>>[number],
+  config: AIProviderConfig,
+  runId: string,
+): void {
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'execution',
+    state: 'running',
+    summary: 'Contexto autoritativo da execução iniciado.',
+    chatId: chat.id,
+    runId,
+    projectId: chat.projectId,
+    providerId: config.id,
+    clientId: 'autocodez-chat',
+    details: {
+      model: chat.model,
+      permission: chat.permissionLevel,
+      intelligence: chat.intelligence,
+    },
+  });
 }
 
-ipcMain.handle('chat:send', async (_event, input: { chatId: string; content: string }) => { const value = requireObject(input, 'Mensagem'); return executeChat(requireIdentifier(value.chatId, 'Chat'), requireNonEmptyString(value.content, 'Mensagem')); });
-ipcMain.handle('chat:stream', async (_event, input: { chatId: string; content: string }) => {
+async function executeChat(chatId: string, content: string, allowedPaths?: string[]): Promise<{ pendingApprovalIds: string[]; chat: Awaited<ReturnType<ChatManager['list']>>[number] | undefined }> {
+  const { chat, config } = await getChatContext(chatId);
+  reconcileExecutionSlot(chatId);
+  const execution = executionManager.start(chatId);
+  const runId = execution.runId;
+  recordExecutionContext(chat, config, runId);
+  try {
+    captureExecutionTaskCapsule(chat, runId, content);
+    await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
+    const projectContext = await buildExecutionContext(chat, runId, content);
+    await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
+    const current = (await chatManager.list()).find((item) => item.id === chat.id);
+    if (!current) throw new Error('Chat desapareceu durante a execução.');
+    const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel, runId);
+    await chatManager.update({ ...current, messages: result.messages });
+    if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
+    else {
+      const { completion } = await executionShadowLifecycle.complete(chatId, runId);
+      if (completion.error) throw new Error(completion.error);
+    }
+    return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    executionShadowLifecycle.fail(chatId, runId, message);
+    throw error;
+  }
+}
+
+ipcMain.handle('chat-attachments:pick', async (_event, kindInput?: unknown) => {
+  const kind = kindInput === undefined ? 'file' : requireIdentifier(kindInput, 'Tipo de anexo');
+  if (kind !== 'file' && kind !== 'image') throw new Error('Tipo de anexo inválido.');
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.');
+  const visualFixture = process.env.AUTO_CODEZ_VISUAL_TEST === '1'
+    ? process.env.AUTO_CODEZ_VISUAL_ATTACHMENT_FIXTURE?.trim()
+    : undefined;
+  let filePaths: string[];
+  if (visualFixture) {
+    filePaths = [visualFixture];
+  } else {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: kind === 'image'
+        ? [{ name: 'Imagens e arquivos gráficos', extensions: [...CHAT_IMAGE_PICKER_EXTENSIONS] }]
+        : [{ name: 'Todos os arquivos', extensions: ['*'] }],
+    });
+    if (result.canceled || result.filePaths.length === 0) return [];
+    filePaths = result.filePaths;
+  }
+  const attachments = await attachmentStore.importFiles(filePaths.slice(0, 12));
+  return await Promise.all(attachments.map(async (attachment) => ({
+    attachment,
+    ...(attachment.kind === 'image'
+      ? { previewDataUrl: await attachmentStore.previewDataUrl(attachment) }
+      : {}),
+  })));
+});
+
+ipcMain.handle('chat:send', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Mensagem');
+  return executeChat(
+    requireIdentifier(value.chatId, 'Chat'),
+    requireNonEmptyString(value.content, 'Mensagem'),
+    normalizeOptionalExecutionAllowedPaths(value.allowedPaths),
+  );
+});
+ipcMain.handle('chat:stop', async (_event, chatId: string) => {
+  const id = requireIdentifier(chatId, 'Chat');
+  const active = activeStreamControllers.get(id);
+  if (active) {
+    active.controller.abort();
+    return { stopped: true };
+  }
+  if (agentRuntime.hasPendingForChat(id) || agentRuntime.hasRecoverableForChat(id)) {
+    await clearChatExecution(id);
+    sendStreamEvent({ type: 'cancelled', chatId: id });
+    return { stopped: true };
+  }
+  reconcileExecutionSlot(id);
+  return { stopped: false };
+});
+ipcMain.handle('chat-attachments:preview', async (_event, input: unknown) => {
+  const attachment = await attachmentStore.validateReference(input);
+  if (attachment.kind !== 'image') return null;
+  return await attachmentStore.previewDataUrl(attachment) ?? null;
+});
+
+ipcMain.handle('chat-attachments:paste-image', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Imagem da área de transferência');
+  const mediaType = requireNonEmptyString(value.mediaType, 'MIME da imagem');
+  if (!mediaType.toLowerCase().startsWith('image/')) throw new Error('O conteúdo colado não é uma imagem.');
+  if (!(value.bytes instanceof Uint8Array)) throw new Error('Bytes da imagem inválidos.');
+  const bytes = Buffer.from(value.bytes);
+  const fileName = typeof value.name === 'string' && value.name.trim()
+    ? path.basename(value.name.trim())
+    : `clipboard-${Date.now()}.png`;
+  const attachment = await attachmentStore.importBuffer(bytes, fileName, mediaType);
+  return {
+    attachment,
+    previewDataUrl: await attachmentStore.previewDataUrl(attachment),
+  };
+});
+
+ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   const value = requireObject(input, 'Mensagem');
   const chatId = requireIdentifier(value.chatId, 'Chat');
   const content = requireNonEmptyString(value.content, 'Mensagem');
-  const { chat, config, projectContext } = await getChatContext(chatId);
-  await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
+  const attachments = await requireStoredAttachments(value.attachments);
+  const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
+  const { chat, config } = await getChatContext(chatId);
+  const lastMessage = chat.messages.at(-1);
+  const isRetryOfPersistedUserMessage = lastMessage?.role === 'user' && lastMessage.content === content;
   const current = (await chatManager.list()).find((item) => item.id === chat.id);
   if (!current) throw new Error('Chat desapareceu durante a execução.');
-  const emit = (event: AIStreamEvent): void => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('chat:stream-event', event); };
-  emit({ type: 'start' });
-  const result = await agentRuntime.runStreaming(config, current, projectContext, current.permissionLevel, emit);
-  await chatManager.update({ ...current, messages: result.messages });
-  return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id) };
+
+  reconcileExecutionSlot(chatId);
+  let execution;
+  try {
+    execution = executionManager.start(chatId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    sendStreamEvent({ type: 'error', chatId, error: message });
+    return { pendingApprovalIds: [], chat: current, error: message };
+  }
+
+  const controller = new AbortController();
+  activeStreamControllers.set(chatId, { runId: execution.runId, controller });
+  const runId = execution.runId;
+  let partialAssistantText = '';
+  recordExecutionContext(chat, config, runId);
+
+  const emit = (event: AIStreamEvent): void => {
+    if (event.type === 'delta' && event.text) partialAssistantText += event.text;
+    try {
+      if (event.type === 'approval_required') executionManager.update(chatId, { state: 'waiting_approval', runId });
+      else if (event.type === 'error') executionManager.update(chatId, { state: 'failed', error: event.error, runId });
+      else if (event.type === 'tool_call') executionManager.update(chatId, { state: 'running', currentTool: event.toolCall?.name, runId });
+    } catch {
+      // Execution bookkeeping must never interrupt the provider stream.
+    }
+    sendStreamEvent({ ...event, chatId, runId });
+  };
+
+  emit({ type: 'start', chatId, runId });
+  try {
+    captureExecutionTaskCapsule(chat, runId, content);
+    await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
+    const projectContext = await buildExecutionContext(chat, runId, content);
+    if (!isRetryOfPersistedUserMessage) {
+      await chatManager.addMessage(chat.id, {
+        role: 'user',
+        content,
+        createdAt: Date.now(),
+        ...(attachments.length ? { attachments } : {}),
+      });
+    }
+    const persistedWorkingChat = (await chatManager.list()).find((item) => item.id === chat.id);
+    if (!persistedWorkingChat) throw new Error('Chat desapareceu durante a execução.');
+    const workingChat = await hydrateChatAttachments(persistedWorkingChat);
+    let result;
+    try {
+      result = await runWithAbortSignal(controller.signal, () => agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId));
+    } catch (initialError) {
+      let recoveryError: unknown = initialError;
+      let recoveryAttempts = 0;
+      let recoveryWaitMs = 0;
+      while (
+        isAutomaticProviderRecoveryFailure(recoveryError)
+        && agentRuntime.hasRecoverableForChat(chatId)
+        && recoveryAttempts < 3
+        && recoveryWaitMs < 180_000
+      ) {
+        const desiredDelayMs = automaticProviderRecoveryDelayMs(recoveryError);
+        const delayMs = Math.min(desiredDelayMs, 180_000 - recoveryWaitMs);
+        recoveryAttempts += 1;
+        recoveryWaitMs += delayMs;
+        emit({
+          type: 'activity',
+          chatId,
+          runId,
+          activity: {
+            runId,
+            chatId,
+            type: 'action',
+            message: automaticProviderRecoveryMessage(recoveryError, delayMs),
+            status: 'pending',
+          },
+        });
+        await waitForExecutionRetry(delayMs, controller.signal);
+        try {
+          result = await runWithAbortSignal(controller.signal, () => agentRuntime.resumeRecovered(runId, controller.signal));
+          recoveryError = undefined;
+          break;
+        } catch (error) {
+          recoveryError = error;
+        }
+      }
+      if (recoveryError) throw recoveryError;
+    }
+    await chatManager.update({ ...workingChat, messages: result.messages });
+    if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
+    else if (executionManager.get(chatId)?.state === 'running') {
+      const { completion } = await executionShadowLifecycle.complete(chatId, runId);
+      if (completion.error) sendStreamEvent({ type: 'error', chatId, runId, error: completion.error });
+    }
+    return { pendingApprovalIds: result.pendingApprovalIds, chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
+  } catch (error) {
+    if (controller.signal.aborted || isAbortError(error)) {
+      const partial = partialAssistantText.trim();
+      if (partial) {
+        await chatManager.addMessage(chat.id, {
+          role: 'assistant',
+          content: partial,
+          createdAt: Date.now(),
+        });
+      }
+      await clearChatExecution(chatId);
+      emit({ type: 'cancelled', chatId, runId });
+      return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    executionShadowLifecycle.fail(chatId, runId, message);
+    emit({ type: 'error', chatId, runId, error: message });
+    return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: message };
+  } finally {
+    const active = activeStreamControllers.get(chatId);
+    if (active?.runId === runId && active.controller === controller) activeStreamControllers.delete(chatId);
+  }
 });
 
 ipcMain.handle('agent:list-tools', async () => toolRuntime.listDefinitions());
-ipcMain.handle('agent:list-approvals', async () => toolRuntime.listApprovals());
+ipcMain.handle('agent:list-approvals', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return toolRuntime.listApprovals();
+  const value = requireObject(filters, 'Filtro de aprovações');
+  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  return toolRuntime.listApprovals({ chatId, runId });
+});
+ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatId === undefined ? executionManager.list() : executionManager.get(requireIdentifier(chatId, 'Chat')) ?? null);
+ipcMain.handle('agent:list-operational-ledger', async (_event, query: OperationalLedgerQuery | undefined) => operationalLedger.query(query ?? {}));
+
+ipcMain.handle('mcp-gateway:status', async () => mcpGatewayServer.status());
+ipcMain.handle('mcp-gateway:preflight', async () => {
+  const result = await mcpGatewayServer.preflight();
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'MCP Gateway local passou no preflight.',
+    clientId: 'autocodez-mcp-gateway',
+    details: {
+      protocolVersion: result.protocolVersion,
+      toolCount: result.toolCount,
+      writeToolCount: result.writeToolCount,
+    },
+  });
+  return result;
+});
+
+ipcMain.handle('mcp-runtime:status', async () => mcpRuntimeInstaller.inspect());
+ipcMain.handle('mcp-runtime:prepare', async () => {
+  const status = await mcpRuntimeInstaller.prepare();
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'Runtime MCP local preparado.',
+    clientId: 'autocodez-mcp-runtime',
+    details: { platform: status.platform, arch: status.arch, version: status.version, managed: status.managed },
+  });
+  return status;
+});
+ipcMain.handle('mcp-tunnel:status', async () => ({
+  ...mcpTunnelRuntime.status(),
+  credentialAvailable: Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()),
+}));
+ipcMain.handle('mcp-tunnel:doctor', async (_event, tunnelIdInput: unknown, controlPlaneApiKeyInput: unknown) => {
+  const tunnelId = requireIdentifier(tunnelIdInput, 'Tunnel ID');
+  const controlPlaneApiKey = controlPlaneApiKeyInput === undefined
+    ? undefined
+    : requireNonEmptyString(controlPlaneApiKeyInput, 'Chave do control plane');
+  const runtime = await mcpRuntimeInstaller.prepare();
+  if (!runtime.executable) throw new Error('Runtime MCP indisponível.');
+  const gateway = await mcpGatewayServer.preflight();
+  const binding = mcpGatewayServer.trustedTunnelBinding();
+  const result = await mcpTunnelRuntime.diagnose({
+    tunnelId,
+    localEndpoint: binding.endpoint,
+    localBearerToken: binding.bearerToken,
+    executable: runtime.executable,
+    ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
+  });
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'Secure MCP Tunnel Doctor validou Gateway local e transporte.',
+    clientId: 'autocodez-secure-mcp-tunnel',
+    details: {
+      tunnelId,
+      version: result.version,
+      protocolVersion: gateway.protocolVersion,
+      toolCount: gateway.toolCount,
+      writeToolCount: gateway.writeToolCount,
+    },
+  });
+  return { ...result, gateway };
+});
+ipcMain.handle('mcp-tunnel:start', async (_event, tunnelIdInput: unknown, controlPlaneApiKeyInput: unknown) => {
+  const tunnelId = requireIdentifier(tunnelIdInput, 'Tunnel ID');
+  const controlPlaneApiKey = controlPlaneApiKeyInput === undefined
+    ? undefined
+    : requireNonEmptyString(controlPlaneApiKeyInput, 'Chave do control plane');
+  const runtime = await mcpRuntimeInstaller.prepare();
+  if (!runtime.executable) throw new Error('Runtime MCP indisponível.');
+  await mcpGatewayServer.preflight();
+  const binding = mcpGatewayServer.trustedTunnelBinding();
+  const status = await mcpTunnelRuntime.start({
+    tunnelId,
+    localEndpoint: binding.endpoint,
+    localBearerToken: binding.bearerToken,
+    executable: runtime.executable,
+    ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
+  });
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'Secure MCP Tunnel conectado.',
+    clientId: 'autocodez-secure-mcp-tunnel',
+    details: {
+      tunnelId: status.tunnelId ?? tunnelId,
+      version: status.version ?? '',
+      ready: status.ready,
+    },
+  });
+  return status;
+});
+ipcMain.handle('mcp-tunnel:stop', async () => {
+  const previous = mcpTunnelRuntime.status();
+  const stopped = await mcpTunnelRuntime.stop();
+  if (stopped) {
+    operationalLedger.record({
+      actor: 'runtime',
+      category: 'system',
+      state: 'cancelled',
+      summary: 'Secure MCP Tunnel encerrado.',
+      clientId: 'autocodez-secure-mcp-tunnel',
+      ...(previous.tunnelId ? { details: { tunnelId: previous.tunnelId } } : {}),
+    });
+  }
+  return { stopped };
+});
+ipcMain.handle('mcp-gateway:start', async (_event, input: unknown) => {
+  const value = input === undefined ? {} : requireObject(input, 'Configuração do MCP Gateway');
+  const port = value.port === undefined ? undefined : Number(value.port);
+  if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) throw new Error('Porta do MCP Gateway inválida.');
+  const info = await mcpGatewayServer.start(port === undefined ? {} : { port });
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'MCP Gateway local iniciado.',
+    clientId: 'autocodez-mcp-gateway',
+    details: { host: info.host, port: info.port, protocol: '2026-07-28' },
+  });
+  return info;
+});
+ipcMain.handle('mcp-gateway:stop', async () => {
+  await mcpTunnelRuntime.stop();
+  const stopped = await mcpGatewayServer.stop();
+  if (stopped) {
+    operationalLedger.record({
+      actor: 'runtime',
+      category: 'system',
+      state: 'cancelled',
+      summary: 'MCP Gateway local encerrado.',
+      clientId: 'autocodez-mcp-gateway',
+    });
+  }
+  return { stopped };
+});
+
+
+function requireOperationalLedgerScope(input: unknown): OperationalLedgerScope {
+  if (input === undefined) return {};
+  const value = requireObject(input, 'Escopo do ledger operacional');
+  return {
+    ...(value.chatId === undefined ? {} : { chatId: requireIdentifier(value.chatId, 'Chat') }),
+    ...(value.runId === undefined ? {} : { runId: requireIdentifier(value.runId, 'Execução') }),
+    ...(value.projectId === undefined ? {} : { projectId: requireIdentifier(value.projectId, 'Projeto') }),
+    ...(value.sessionId === undefined ? {} : { sessionId: requireIdentifier(value.sessionId, 'Sessão') }),
+    ...(value.pluginId === undefined ? {} : { pluginId: requireIdentifier(value.pluginId, 'Plugin') }),
+  };
+}
+
+function optionalLedgerNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) throw new Error(`${label} inválido.`);
+  return value;
+}
+
+function requireLedgerRetrievalInput(input: unknown): { scope: OperationalLedgerScope; limit?: number; beforeSequence?: number } {
+  if (input === undefined) return { scope: {} };
+  const value = requireObject(input, 'Consulta do ledger operacional');
+  const scope = requireOperationalLedgerScope(value.scope);
+  return {
+    scope,
+    ...(value.limit === undefined ? {} : { limit: optionalLedgerNumber(value.limit, 'Limite') }),
+    ...(value.beforeSequence === undefined ? {} : { beforeSequence: optionalLedgerNumber(value.beforeSequence, 'Cursor') }),
+  };
+}
+
+ipcMain.handle('agent:operational-session-summary', async (_event, input: unknown) => operationalLedgerRetrieval.sessionSummary(requireOperationalLedgerScope(input)));
+ipcMain.handle('agent:operational-session-recent-events', async (_event, input: unknown) => {
+  const value = requireLedgerRetrievalInput(input);
+  return operationalLedgerRetrieval.recentEvents(value.scope, value.limit, value.beforeSequence);
+});
+ipcMain.handle('agent:operational-session-changes', async (_event, input: unknown) => {
+  const value = requireLedgerRetrievalInput(input);
+  return operationalLedgerRetrieval.changes(value.scope, value.limit, value.beforeSequence);
+});
+ipcMain.handle('agent:operational-session-errors', async (_event, input: unknown) => {
+  const value = requireLedgerRetrievalInput(input);
+  return operationalLedgerRetrieval.errors(value.scope, value.limit, value.beforeSequence);
+});
+ipcMain.handle('agent:operational-session-artifacts', async (_event, input: unknown) => {
+  const value = requireLedgerRetrievalInput(input);
+  return operationalLedgerRetrieval.artifacts(value.scope, value.limit, value.beforeSequence);
+});
+ipcMain.handle('agent:operational-session-sources', async (_event, input: unknown) => {
+  const value = requireLedgerRetrievalInput(input);
+  return operationalLedgerRetrieval.sources(value.scope, value.limit, value.beforeSequence);
+});
+
+ipcMain.handle('agent:list-execution-timeline', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return executionTimeline.list();
+  const value = requireObject(filters, 'Filtro da timeline de execução');
+  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  return executionTimeline.list(chatId, runId);
+});
+ipcMain.handle('agent:list-execution-plans', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return executionPlanner.list();
+  const value = requireObject(filters, 'Filtro dos planos de execução');
+  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  if (chatId !== undefined) {
+    const plan = executionPlanner.get(chatId, runId);
+    return plan ? [plan] : [];
+  }
+  return executionPlanner.list().filter((plan) => runId === undefined || plan.runId === runId);
+});
+ipcMain.handle('agent:list-execution-plan-history', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return executionPlanHistory.list();
+  const value = requireObject(filters, 'Filtro do histórico de planos');
+  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  return executionPlanHistory.list({ chatId, runId });
+});
+ipcMain.handle('agent:get-execution-report', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação do relatório de execução');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const runId = requireIdentifier(value.runId, 'Execução');
+  return executionReportBuilder.build(chatId, runId) ?? null;
+});
+ipcMain.handle('agent:list-execution-reports', async (_event, chatId?: string) => executionReportBuilder.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));
+ipcMain.handle('agent:configure-execution-quality-gate', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Configuração do quality gate');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const runId = requireIdentifier(value.runId, 'Execução');
+  if (value.requireVerifiedCompletion !== undefined && typeof value.requireVerifiedCompletion !== 'boolean') throw new Error('requireVerifiedCompletion inválido.');
+  if (value.requirements !== undefined && !Array.isArray(value.requirements)) throw new Error('Requisitos do quality gate inválidos.');
+  const requirements = (value.requirements ?? []) as ExecutionQualityGateRequirement[];
+  const gate = executionQualityGateRuntime.configure({ chatId, runId, requireVerifiedCompletion: value.requireVerifiedCompletion as boolean | undefined, requirements });
+  if (executionQualityGatePersistenceEnabled) executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
+  return gate;
+});
+ipcMain.handle('agent:get-execution-quality-gate', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação do quality gate');
+  return executionQualityGateRuntime.get(requireIdentifier(value.chatId, 'Chat'), requireIdentifier(value.runId, 'Execução')) ?? null;
+});
+ipcMain.handle('agent:evaluate-execution-quality-gate', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação do quality gate');
+  const chatId = requireIdentifier(value.chatId, 'Chat');
+  const runId = requireIdentifier(value.runId, 'Execução');
+  return executionQualityGateRuntime.evaluate(executionReportBuilder.build(chatId, runId)) ?? null;
+});
+ipcMain.handle('agent:list-execution-quality-gates', async (_event, chatId?: string) => executionQualityGateRuntime.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));
+ipcMain.handle('agent:get-execution-task-capsule', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação da Task Capsule');
+  return executionTaskCapsuleRuntime.get(requireIdentifier(value.chatId, 'Chat'), requireIdentifier(value.runId, 'Execução')) ?? null;
+});
+ipcMain.handle('agent:list-execution-task-capsules', async (_event, chatId?: string) => executionTaskCapsuleRuntime.list(chatId === undefined ? undefined : requireIdentifier(chatId, 'Chat')));
+ipcMain.handle('agent:configure-execution-path-scope', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Configuração do escopo de caminhos');
+  if ('projectId' in value) throw new Error('O projeto do escopo é definido pela Task Capsule e não pode ser informado pelo renderer.');
+  const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
+  if (allowedPaths === undefined) throw new Error('Caminhos permitidos inválidos.');
+  return executionPathScopeController.configure({
+    chatId: requireIdentifier(value.chatId, 'Chat'),
+    runId: requireIdentifier(value.runId, 'Execução'),
+    allowedPaths,
+  });
+});
+ipcMain.handle('agent:get-execution-path-scope', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação do escopo de caminhos');
+  return executionPathScopeController.get(requireIdentifier(value.chatId, 'Chat'), requireIdentifier(value.runId, 'Execução')) ?? null;
+});
+ipcMain.handle('agent:list-execution-path-scopes', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return executionPathScopeController.list();
+  const value = requireObject(filters, 'Filtro dos escopos de caminhos');
+  return executionPathScopeController.list({
+    chatId: value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat'),
+    runId: value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução'),
+  });
+});
+ipcMain.handle('agent:list-execution-checkpoints', async (_event, filters?: { chatId?: string; runId?: string }) => {
+  if (filters === undefined) return executionCheckpointController.list();
+  const value = requireObject(filters, 'Filtro dos checkpoints de execução');
+  const chatId = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runId = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  return executionCheckpointController.list(chatId, runId);
+});
+ipcMain.handle('agent:restore-execution-checkpoint', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Identificação do checkpoint');
+  return executionCheckpointController.restore({
+    checkpointId: requireIdentifier(value.checkpointId, 'Checkpoint'),
+    chatId: requireIdentifier(value.chatId, 'Chat'),
+    runId: requireIdentifier(value.runId, 'Execução'),
+  });
+});
+ipcMain.handle('agent:list-recoverable-runs', async () => listRecoverableRuns(agentRuntime));
+ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
+  const id = requireIdentifier(runId, 'Execução recuperável');
+  const recoverable = listRecoverableRuns(agentRuntime).find((run) => run.runId === id);
+  if (!recoverable) throw new Error('Execução recuperável não encontrada.');
+  return withApprovalRunLock(recoverable.chatId, id, async (signal) => {
+    sendStreamEvent({ type: 'start', chatId: recoverable.chatId, runId: id });
+    try {
+      executionCoordinator.resumePlan(recoverable.chatId, id);
+      const { result } = await resumeRecoveredRun(agentRuntime, executionManager, recoverable, Date.now(), signal, true);
+      const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+      if (chat) await chatManager.update({ ...chat, messages: result.messages });
+      if (!result.pendingApprovalIds.length) {
+        const { completion } = await executionShadowLifecycle.complete(recoverable.chatId, id);
+        if (completion.error) sendStreamEvent({ type: 'error', chatId: recoverable.chatId, runId: id, error: completion.error });
+      }
+      return result;
+    } catch (error) {
+      if (signal.aborted || isAbortError(error)) {
+        await clearChatExecution(recoverable.chatId);
+        sendStreamEvent({ type: 'cancelled', chatId: recoverable.chatId, runId: id });
+        return cancelledRunResult(recoverable.chatId);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      executionShadowLifecycle.fail(recoverable.chatId, id, message);
+      throw error;
+    }
+  });
+});
 ipcMain.handle('agent:list-interrupted-provider-requests', async () => chatRuntime.listInterruptedProviderRequests());
-ipcMain.handle('agent:approve', async (_event, approvalId: string) => { const result = await agentRuntime.resume(requireIdentifier(approvalId, 'Aprovação')); const chat = (await chatManager.list()).find((item) => item.id === result.chatId); if (chat) await chatManager.update({ ...chat, messages: result.messages }); return result; });
-ipcMain.handle('agent:deny', async (_event, approvalId: string) => { const result = await agentRuntime.reject(requireIdentifier(approvalId, 'Aprovação')); const chat = (await chatManager.list()).find((item) => item.id === result.chatId); if (chat) await chatManager.update({ ...chat, messages: result.messages }); return result; });
+ipcMain.handle('agent:approve', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Dados da aprovação');
+  const id = requireIdentifier(value.approvalId, 'Aprovação');
+  const chatIdFilter = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runIdFilter = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  const approval = toolRuntime.listApprovals({ chatId: chatIdFilter, runId: runIdFilter }).find((item) => item.id === id);
+  if (!approval?.chatId || !approval.runId) throw new Error('Aprovação não pertence ao contexto informado.');
+  if (mcpGatewayExecutionRuntime.ownsApproval(id)) {
+    const decisionAt = Date.now();
+    const operation = await mcpGatewayExecutionRuntime.approve(id);
+    recordExternalApprovalDecision(approval, operation, 'approved', decisionAt);
+    return {
+      chatId: approval.chatId,
+      pendingApprovalIds: operation.state === 'waiting_approval' && operation.approvalId ? [operation.approvalId] : [],
+      messages: [],
+      operation,
+    };
+  }
+  const chatId = approval.chatId;
+  const runId = agentRuntime.getPendingRunId(id);
+  if (runId !== approval.runId) throw new Error('A aprovação não corresponde mais à execução que a criou.');
+
+  return withApprovalRunLock(chatId, runId, async (signal) => {
+    ensureApprovalExecution(chatId, runId);
+    executionManager.update(chatId, { state: 'running', runId });
+    const decisionAt = Date.now();
+    try {
+      const result = await agentRuntime.resume(id, signal);
+      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
+      if (!stillPending) recordConsumedApprovalDecision(approval, 'approved', decisionAt);
+      const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+      if (chat) await chatManager.update({ ...chat, messages: result.messages });
+      if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
+      else {
+        const { completion } = await executionShadowLifecycle.complete(chatId, runId);
+        if (completion.error) sendStreamEvent({ type: 'error', chatId, runId, error: completion.error });
+      }
+      return result;
+    } catch (error) {
+      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
+      if (!stillPending) recordConsumedApprovalDecision(approval, 'approved', decisionAt);
+      if (signal.aborted || isAbortError(error)) {
+        await clearChatExecution(chatId);
+        sendStreamEvent({ type: 'cancelled', chatId, runId });
+        return cancelledRunResult(chatId);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      if (stillPending) executionCoordinator.waitingApproval(chatId, runId);
+      else executionShadowLifecycle.fail(chatId, runId, message);
+      throw error;
+    }
+  });
+});
+ipcMain.handle('agent:deny', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Dados da aprovação');
+  const id = requireIdentifier(value.approvalId, 'Aprovação');
+  const chatIdFilter = value.chatId === undefined ? undefined : requireIdentifier(value.chatId, 'Chat');
+  const runIdFilter = value.runId === undefined ? undefined : requireIdentifier(value.runId, 'Execução');
+  const approval = toolRuntime.listApprovals({ chatId: chatIdFilter, runId: runIdFilter }).find((item) => item.id === id);
+  if (!approval?.chatId || !approval.runId) throw new Error('Aprovação não pertence ao contexto informado.');
+  if (mcpGatewayExecutionRuntime.ownsApproval(id)) {
+    const decisionAt = Date.now();
+    const operation = mcpGatewayExecutionRuntime.deny(id);
+    recordExternalApprovalDecision(approval, operation, 'denied', decisionAt);
+    return { chatId: approval.chatId, pendingApprovalIds: [], messages: [], operation };
+  }
+  const chatId = approval.chatId;
+  const runId = agentRuntime.getPendingRunId(id);
+  if (runId !== approval.runId) throw new Error('A aprovação não corresponde mais à execução que a criou.');
+
+  return withApprovalRunLock(chatId, runId, async (signal) => {
+    ensureApprovalExecution(chatId, runId);
+    executionManager.update(chatId, { state: 'running', runId });
+    const decisionAt = Date.now();
+    try {
+      const result = await agentRuntime.reject(id, signal);
+      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
+      if (!stillPending) recordConsumedApprovalDecision(approval, 'denied', decisionAt);
+      const chat = (await chatManager.list()).find((item) => item.id === result.chatId);
+      if (chat) await chatManager.update({ ...chat, messages: result.messages });
+      if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
+      else {
+        const { completion } = await executionShadowLifecycle.complete(chatId, runId);
+        if (completion.error) sendStreamEvent({ type: 'error', chatId, runId, error: completion.error });
+      }
+      return result;
+    } catch (error) {
+      const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
+      if (!stillPending) recordConsumedApprovalDecision(approval, 'denied', decisionAt);
+      if (signal.aborted || isAbortError(error)) {
+        await clearChatExecution(chatId);
+        sendStreamEvent({ type: 'cancelled', chatId, runId });
+        return cancelledRunResult(chatId);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      if (stillPending) executionCoordinator.waitingApproval(chatId, runId);
+      else executionShadowLifecycle.fail(chatId, runId, message);
+      throw error;
+    }
+  });
+});
 
 ipcMain.handle('terminal:start', async (_event, input: { projectId: string; command: string }) => { const value = requireObject(input, 'Dados do terminal'); return terminalService.start(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.command, 'Comando')); });
+ipcMain.handle('terminal:write-input', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Entrada do terminal');
+  const sessionId = requireIdentifier(value.sessionId, 'Sessão do terminal');
+  if (typeof value.data !== 'string') throw new Error('Entrada do terminal inválida.');
+  return terminalService.writeInput(sessionId, value.data);
+});
+ipcMain.handle('terminal:resize', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Tamanho do terminal');
+  const sessionId = requireIdentifier(value.sessionId, 'Sessão do terminal');
+  const cols = Number(value.cols);
+  const rows = Number(value.rows);
+  if (!Number.isInteger(cols) || !Number.isInteger(rows)) throw new Error('Tamanho do terminal inválido.');
+  return terminalService.resize(sessionId, cols, rows);
+});
 ipcMain.handle('terminal:kill', async (_event, sessionId: string) => terminalService.kill(requireIdentifier(sessionId, 'Sessão do terminal')));
 ipcMain.handle('terminal:list-sessions', async () => terminalService.listSessions());
 ipcMain.handle('terminal:get-output', async (_event, sessionId: string) => terminalService.getOutput(requireIdentifier(sessionId, 'Sessão do terminal')));
@@ -122,10 +1627,10 @@ ipcMain.handle('git:branches', async (_event, projectId: string) => gitService.b
 ipcMain.handle('git:diff', async (_event, projectId: string) => gitService.diff(requireIdentifier(projectId, 'Projeto')));
 ipcMain.handle('git:log', async (_event, input: { projectId: string; limit?: number }) => { const value = requireObject(input, 'Dados do histórico Git'); const projectId = requireIdentifier(value.projectId, 'Projeto'); const limit = value.limit === undefined ? undefined : Number(value.limit); if (limit !== undefined && !Number.isFinite(limit)) throw new Error('Limite do histórico Git inválido.'); return gitService.log(projectId, limit); });
 ipcMain.handle('git:create-branch', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados da branch'); return gitService.createBranch(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Nome da branch')); });
-ipcMain.handle('git:checkout', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados do checkout'); return gitService.checkout(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Branch')); });
+ipcMain.handle('git:checkout', async (_event, input: { projectId: string; name: string }) => { const value = requireObject(input, 'Dados do checkout'); return gitService.checkout(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.name, 'Nome da branch')); });
 ipcMain.handle('git:stage', async (_event, input: { projectId: string; paths: string[] }) => { const value = requireObject(input, 'Dados do staging'); if (!Array.isArray(value.paths) || value.paths.some((item) => typeof item !== 'string')) throw new Error('Arquivos do staging inválidos.'); return gitService.stage(requireIdentifier(value.projectId, 'Projeto'), value.paths.map((item) => requireNonEmptyString(item, 'Arquivo'))); });
 ipcMain.handle('git:stage-all', async (_event, projectId: string) => gitService.stageAll(requireIdentifier(projectId, 'Projeto')));
-ipcMain.handle('git:commit', async (_event, input: { projectId: string; message: string }) => { const value = requireObject(input, 'Dados do commit'); return gitService.commit(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.message, 'Mensagem do commit')); });
+ipcMain.handle('git:commit', async (_event, input: { projectId: string; message: string }) => { const value = requireObject(input, 'Dados do commit'); return gitService.commit(requireIdentifier(value.projectId, 'Projeto'), requireNonEmptyString(value.message, 'Mensagem')); });
 
 ipcMain.handle('projects:create', async (_event, input: { name: string; rootPath: string }) => { const value = requireObject(input, 'Dados do projeto'); return projectManager.create(requireNonEmptyString(value.name, 'Nome do projeto'), requireNonEmptyString(value.rootPath, 'Pasta do projeto')); });
 ipcMain.handle('projects:open-folder', async () => { if (!mainWindow || mainWindow.isDestroyed()) throw new Error('A janela principal não está disponível.'); const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] }); return result.canceled ? null : result.filePaths[0] || null; });
@@ -134,22 +1639,151 @@ ipcMain.handle('projects:delete', async (_event, projectId: string) => projectMa
 ipcMain.handle('projects:scan', async (_event, rootPath: string) => projectManager.scan(requireNonEmptyString(rootPath, 'Pasta do projeto')));
 ipcMain.handle('projects:read-file', async (_event, filePath: string) => projectManager.readFile(requireNonEmptyString(filePath, 'Arquivo')));
 ipcMain.handle('projects:write-file', async (_event, input: { filePath: string; content: string }) => { const value = requireObject(input, 'Dados do arquivo'); await projectManager.writeFile(requireNonEmptyString(value.filePath, 'Arquivo'), typeof value.content === 'string' ? value.content : (() => { throw new Error('Conteúdo de arquivo é inválido.'); })()); return { ok: true }; });
-ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(requireNonEmptyString(url, 'URL')));
+ipcMain.handle('app:open-external', async (_event, url: string) => shell.openExternal(requireNonEmptyString(url, 'URL externa')));
 
 app.whenReady().then(async () => {
+  if (process.env.AUTO_CODEZ_VISUAL_TEST !== '1') {
+    if (process.defaultApp && process.argv[1]) {
+      app.setAsDefaultProtocolClient('autocodez', process.execPath, [path.resolve(process.argv[1])]);
+    } else {
+      app.setAsDefaultProtocolClient('autocodez');
+    }
+  }
   await storage.init();
+  const initialAccountState = await accountSessionRuntime.hydrate();
+  scheduleAccountRefresh(initialAccountState);
+  if (initialAccountState.state === 'authenticated') await deviceRegistryRuntime.ensureRegistered();
+  operationalLedger.restore(await operationalLedgerStore.load());
   await providerManager.init();
   await chatManager.init();
+  const attachmentReferences = new Set(
+    (await chatManager.list())
+      .flatMap((chat) => chat.messages)
+      .flatMap((message) => message.attachments ?? [])
+      .map((attachment) => attachment.sha256),
+  );
+  void attachmentStore.cleanupUnreferenced(attachmentReferences).catch((error) => {
+    console.warn('[Auto CodeZ attachment cleanup]', error);
+  });
   await projectManager.init();
   await terminalService.init();
   await chatRuntime.init();
+  executionPathScopeRuntime.restore(await executionPathScopeStore.load());
   await toolRuntime.init();
   await agentRuntime.init();
-  activityRuntime.subscribe((event) => sendActivity(event));
+  await restoreShadowWorkspaceBootstrapState();
+  executionTimeline.restore(await executionTimelineStore.load());
+  executionPlanHistory.restore(await executionPlanHistoryStore.load());
+  executionQualityGateRuntime.restore(await executionQualityGateStore.load());
+  executionTaskCapsuleRuntime.restore(await executionTaskCapsuleStore.load());
+  executionCheckpointRuntime.hydrate(await executionCheckpointStore.load());
+  executionChangeBudgetRuntime.restore(await executionChangeBudgetStore.load());
+  executionPlanner.restore(await executionPlanStore.load());
+  await restoreExecutionBootstrapState();
+  for (const run of agentRuntime.listPendingRuns()) executionCoordinator.resumePlan(run.chatId, run.runId);
+  for (const run of listRecoverableRuns(agentRuntime)) executionCoordinator.resumePlan(run.chatId, run.runId);
+  executionPersistenceEnabled = true;
+  executionTimelinePersistenceEnabled = true;
+  operationalLedgerPersistenceEnabled = true;
+  executionPlanPersistenceEnabled = true;
+  executionPlanHistoryPersistenceEnabled = true;
+  executionQualityGatePersistenceEnabled = true;
+  executionTaskCapsulePersistenceEnabled = true;
+  executionPathScopePersistenceEnabled = true;
+  executionCheckpointPersistenceEnabled = true;
+  executionChangeBudgetPersistenceEnabled = true;
+  executionShadowWorkspacePersistenceEnabled = true;
+  executionStatePersistence.schedule(executionManager.list());
+  executionTimelinePersistence.schedule(executionTimeline.list());
+  operationalLedgerPersistence.schedule(operationalLedger.listAll());
+  executionPlanPersistence.schedule(executionPlanner.list());
+  executionPlanHistoryPersistence.schedule(executionPlanHistory.list());
+  executionQualityGatePersistence.schedule(executionQualityGateRuntime.list());
+  executionTaskCapsulePersistence.schedule(executionTaskCapsuleRuntime.list());
+  executionPathScopePersistence.schedule(executionPathScopeRuntime.list());
+  executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
+  executionChangeBudgetPersistence.schedule(executionChangeBudgetRuntime.list());
+  executionShadowWorkspacePersistence.schedule(executionShadowWorkspaceRuntime.list());
+  operationalLedger.subscribe((event) => {
+    sendOperationalLedgerEvent(event);
+    if (operationalLedgerPersistenceEnabled) operationalLedgerPersistence.schedule(operationalLedger.listAll());
+  });
+  mcpTunnelRuntime.subscribe((status) => {
+    sendMcpTunnelStatus({
+      ...status,
+      credentialAvailable: Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()),
+    });
+  });
+  activityRuntime.subscribe((event) => {
+    sendActivity(event);
+    const changes = event.changes ?? event.diffPlan?.changes ?? [];
+    const resources = [...new Set(changes.map((change) => change.path))];
+    const diff = changes.length
+      ? {
+          files: changes.length,
+          addedLines: changes.reduce((total, change) => total + change.addedLines, 0),
+          removedLines: changes.reduce((total, change) => total + change.removedLines, 0),
+        }
+      : undefined;
+    const sourceRefs = [...new Set((event.sources ?? []).map((source) => source.url))];
+    const details: Record<string, string | number | boolean | null> = {};
+    if (event.commandResult) {
+      details.exitCode = event.commandResult.exitCode;
+      details.timedOut = event.commandResult.timedOut;
+      details.durationMs = event.commandResult.durationMs;
+    }
+    if (event.gitResult) {
+      details.gitOperation = event.gitResult.operation;
+      details.branch = event.gitResult.branch;
+    }
+    if (sourceRefs.length) details.sourceCount = sourceRefs.length;
+
+    operationalLedger.record({
+      actor: 'agent',
+      category: event.toolName === 'web_search' || event.toolName === 'web_fetch'
+        ? 'web'
+        : event.type === 'test' || event.type === 'build'
+          ? 'test'
+          : (event.type === 'complete' || event.type === 'error') && !event.toolName
+            ? 'execution'
+            : 'tool',
+      state: event.status === 'pending' ? 'pending' : event.status === 'running' ? 'running' : event.status === 'failed' ? 'failed' : 'success',
+      summary: event.message,
+      chatId: event.chatId,
+      runId: event.runId,
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      resources,
+      sourceRefs,
+      diff,
+      ...(Object.keys(details).length ? { details } : {}),
+      error: event.error,
+      timestamp: event.createdAt,
+    });
+  });
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
   createWindow();
+  if (pendingAccountAuthCallback) {
+    const callback = pendingAccountAuthCallback;
+    pendingAccountAuthCallback = undefined;
+    queueAccountAuthCallback(callback);
+  }
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
+let shutdownCleanupStarted = false;
+
+app.on('before-quit', (event) => {
+  if (shutdownCleanupStarted) return;
+  shutdownCleanupStarted = true;
+  event.preventDefault();
+  void (async () => {
+    clearAccountRefreshTimer();
+    await mcpTunnelRuntime.stop().catch((): undefined => undefined);
+    await mcpGatewayServer.stop().catch((): undefined => undefined);
+    await attachmentIndexer.stop().catch((): undefined => undefined);
+    app.quit();
+  })();
+});
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

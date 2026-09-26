@@ -1,75 +1,40 @@
-type CommandResult = {
-  command: string;
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  startedAt: number;
-  finishedAt: number;
-  durationMs: number;
-};
-
-type GitOperationSummary = {
-  operation: 'create_branch' | 'checkout' | 'stage' | 'stage_all' | 'commit';
-  branch: string;
-  output: string;
-};
-
-type FileChange = {
-  path: string;
-  kind: 'created' | 'modified' | 'deleted' | 'renamed';
-  oldContent?: string;
-  newContent?: string;
-};
-
-type DiffPlan = {
-  id: string;
-  changes: FileChange[];
-  reason?: string;
-};
-
-type ActivityEvent = {
-  id: string;
-  type: 'thought' | 'action' | 'tool' | 'test' | 'build' | 'complete' | 'error';
-  message: string;
-  status: 'pending' | 'running' | 'success' | 'failed';
-  createdAt: number;
-  toolCallId?: string;
-  toolName?: string;
-  commandResult?: CommandResult;
-  gitResult?: GitOperationSummary;
-  changes?: FileChange[];
-  diffPlan?: DiffPlan;
-  error?: string;
-};
+import type { ActivityEvent, FileDiff, DiffPlan, GitOperationSummary } from './ai/types';
 
 const style = document.createElement('style');
 style.textContent = `
-.activity-results { display:flex; flex-direction:column; gap:8px; padding:0 20px 10px; max-height:360px; overflow:auto; }
-.activity-result-card { border:1px solid rgba(255,255,255,.08); border-radius:10px; background:#101318; overflow:hidden; }
-.activity-result-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 11px; }
+.execution-run-details { border-top:1px solid rgba(255,255,255,.055); padding:0 12px 9px; }
+.execution-run-details:empty { display:none; }
+.execution-run-details .activity-result-card { margin-top:7px; }
+.activity-result-card { border:1px solid rgba(255,255,255,.065); border-radius:9px; background:rgba(12,15,20,.72); overflow:hidden; }
+.activity-result-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px; }
 .activity-result-title { display:flex; align-items:center; gap:8px; min-width:0; }
-.activity-result-title strong { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.activity-result-status { font-size:11px; opacity:.72; }
-.activity-result-meta { display:flex; gap:10px; font-size:11px; opacity:.62; white-space:nowrap; }
-.activity-result-output { margin:0; padding:10px 11px; border-top:1px solid rgba(255,255,255,.06); font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; white-space:pre-wrap; overflow:auto; max-height:120px; color:#cbd1da; }
+.activity-result-title strong { font-size:11px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.activity-result-status { font-size:10px; opacity:.62; }
+.activity-result-meta { display:flex; gap:10px; font-size:10px; opacity:.56; white-space:nowrap; }
+.activity-result-output { margin:0; padding:9px 10px; border-top:1px solid rgba(255,255,255,.05); font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; white-space:pre-wrap; overflow:auto; max-height:120px; color:#cbd1da; }
 .activity-result-error { color:#f1a7a7; }
-.activity-result-dot { width:7px; height:7px; border-radius:50%; background:#7d8794; flex:0 0 auto; }
+.activity-result-dot { width:6px; height:6px; border-radius:50%; background:#7d8794; flex:0 0 auto; }
 .activity-result-dot.success { background:#72c28b; }
 .activity-result-dot.failed { background:#dc7777; }
 .activity-result-dot.running { background:#d2b36f; }
 .activity-result-dot.pending { background:#9b8ad1; }
-.activity-result-git { border-top:1px solid rgba(255,255,255,.06); padding:9px 11px; font-size:11px; }
+.activity-result-git { border-top:1px solid rgba(255,255,255,.05); padding:8px 10px; font-size:10px; }
 .activity-result-git-row { display:flex; justify-content:space-between; gap:10px; }
-.activity-result-git-label { opacity:.58; }
-.activity-result-changes { border-top:1px solid rgba(255,255,255,.06); padding:8px 11px; }
-.activity-result-change { display:flex; align-items:center; gap:8px; padding:3px 0; font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.activity-result-git-label { opacity:.52; }
+.activity-result-changes { border-top:1px solid rgba(255,255,255,.05); padding:7px 10px; }
+.activity-result-change { display:flex; align-items:center; gap:8px; padding:3px 0; font:10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 .activity-result-change-kind { width:14px; text-align:center; font-weight:700; }
-.activity-result-change-path { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.activity-result-change-details { margin-top:7px; }
-.activity-result-change-details summary { cursor:pointer; font-size:11px; opacity:.7; }
+.activity-result-change-path { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.activity-result-change-lines { flex:none; color:#7f8996; }
+.activity-result-change-rename { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#7f8996; }
+@media (max-width:720px) {
+  .execution-run-details { padding:0 10px 8px; }
+  .activity-result-change-rename { display:none; }
+}
 `;
 document.head.appendChild(style);
+
+const pendingDetails = new Map<string, ActivityEvent[]>();
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
@@ -95,38 +60,43 @@ function gitOperationLabel(operation: GitOperationSummary['operation']): string 
   return labels[operation];
 }
 
-function changeKindLabel(kind: FileChange['kind']): string {
+function changeKindLabel(kind: FileDiff['type']): string {
   return { created: '+', modified: 'M', deleted: '-', renamed: 'R' }[kind];
 }
 
-function ensureContainer(): HTMLElement | null {
-  const chatArea = document.querySelector<HTMLElement>('.chat-area');
-  const composer = document.querySelector<HTMLElement>('.composer-wrap');
-  if (!chatArea || !composer) return null;
-  let container = document.querySelector<HTMLElement>('#activity-results');
-  if (!container) {
-    container = document.createElement('section');
-    container.id = 'activity-results';
-    container.className = 'activity-results';
-    chatArea.insertBefore(container, composer);
-  }
-  return container;
+function runIdFor(event: ActivityEvent): string {
+  return typeof event.runId === 'string' && event.runId.trim() ? event.runId : 'global';
 }
 
-function renderChanges(changes: FileChange[] | undefined): string {
+function ensureRunDetails(runId: string): HTMLElement | null {
+  const escapedId = CSS.escape(runId);
+  const run = document.querySelector<HTMLElement>(`.execution-run[data-run-id="${escapedId}"]`);
+  if (!run) return null;
+  let details = run.querySelector<HTMLElement>('.execution-run-details');
+  if (!details) {
+    details = document.createElement('div');
+    details.className = 'execution-run-details';
+    run.appendChild(details);
+  }
+  return details;
+}
+
+function renderChangeRows(changes: FileDiff[]): string {
+  return changes.map((change) => {
+    const rename = change.renamedFrom ? `<span class="activity-result-change-rename" title="${escapeHtml(change.renamedFrom)}">${escapeHtml(change.renamedFrom)} →</span>` : '';
+    const lines = change.addedLines || change.removedLines ? `<span class="activity-result-change-lines">+${change.addedLines} -${change.removedLines}</span>` : '';
+    return `<div class="activity-result-change"><span class="activity-result-change-kind">${escapeHtml(changeKindLabel(change.type))}</span>${rename}<span class="activity-result-change-path" title="${escapeHtml(change.path)}">${escapeHtml(change.path)}</span>${lines}</div>`;
+  }).join('');
+}
+
+function renderChanges(changes: FileDiff[] | undefined): string {
   if (!changes?.length) return '';
-  const rows = changes.map((change) => `<div class="activity-result-change"><span class="activity-result-change-kind">${escapeHtml(changeKindLabel(change.kind))}</span><span class="activity-result-change-path">${escapeHtml(change.path)}</span></div>`).join('');
-  return `<div class="activity-result-changes">${rows}</div>`;
+  return `<div class="activity-result-changes">${renderChangeRows(changes)}</div>`;
 }
 
 function renderDiffPlan(plan: DiffPlan | undefined): string {
   if (!plan?.changes?.length) return '';
-  const sections = plan.changes.map((change) => {
-    const before = change.oldContent ?? '';
-    const after = change.newContent ?? '';
-    return `<details class="activity-result-change-details"><summary>${escapeHtml(change.path)}</summary><pre class="activity-result-output">${escapeHtml(`--- before ---\n${before}\n\n+++ after +++\n${after}`)}</pre></details>`;
-  }).join('');
-  return `<div class="activity-result-changes">${sections}</div>`;
+  return `<div class="activity-result-changes">${renderChangeRows(plan.changes)}</div>`;
 }
 
 function renderCommandActivity(event: ActivityEvent, container: HTMLElement): void {
@@ -136,7 +106,8 @@ function renderCommandActivity(event: ActivityEvent, container: HTMLElement): vo
   const card = document.createElement('article');
   card.className = 'activity-result-card';
   card.dataset.activityId = event.id;
-  card.innerHTML = `<div class="activity-result-head"><div class="activity-result-title"><span class="activity-result-dot ${escapeHtml(event.status)}"></span><strong>${escapeHtml(result.command)}</strong><span class="activity-result-status">${statusLabel(event.status)}</span></div><div class="activity-result-meta"><span>exit ${result.exitCode}</span><span>${formatDuration(result.durationMs)}</span></div></div>${output ? `<pre class="activity-result-output ${result.stderr ? 'activity-result-error' : ''}">${escapeHtml(output)}</pre>` : ''}${renderChanges(event.changes)}${renderDiffPlan(event.diffPlan)}${event.error ? `<div class="activity-result-output activity-result-error">${escapeHtml(event.error)}</div>` : ''}`;
+  const changeSummary = event.changes?.length ? renderChanges(event.changes) : renderDiffPlan(event.diffPlan);
+  card.innerHTML = `<div class="activity-result-head"><div class="activity-result-title"><span class="activity-result-dot ${escapeHtml(event.status)}"></span><strong>${escapeHtml(result.command)}</strong><span class="activity-result-status">${statusLabel(event.status)}</span></div><div class="activity-result-meta"><span>exit ${result.exitCode}</span><span>${formatDuration(result.durationMs)}</span></div></div>${output ? `<pre class="activity-result-output ${result.stderr ? 'activity-result-error' : ''}">${escapeHtml(output)}</pre>` : ''}${changeSummary}${event.error ? `<div class="activity-result-output activity-result-error">${escapeHtml(event.error)}</div>` : ''}`;
   container.prepend(card);
 }
 
@@ -146,22 +117,40 @@ function renderGitActivity(event: ActivityEvent, container: HTMLElement): void {
   const card = document.createElement('article');
   card.className = 'activity-result-card';
   card.dataset.activityId = event.id;
-  card.innerHTML = `<div class="activity-result-head"><div class="activity-result-title"><span class="activity-result-dot ${escapeHtml(event.status)}"></span><strong>${escapeHtml(gitOperationLabel(result.operation))}</strong><span class="activity-result-status">${statusLabel(event.status)}</span></div><div class="activity-result-meta"><span>${escapeHtml(result.branch)}</span></div></div><div class="activity-result-git"><div class="activity-result-git-row"><span class="activity-result-git-label">Operação</span><span>${escapeHtml(result.operation)}</span></div>${result.output ? `<pre class="activity-result-output">${escapeHtml(result.output)}</pre>` : ''}${event.error ? `<div class="activity-result-error">${escapeHtml(event.error)}</div>` : ''}</div>${renderChanges(event.changes)}${renderDiffPlan(event.diffPlan)}`;
+  const changeSummary = event.changes?.length ? renderChanges(event.changes) : renderDiffPlan(event.diffPlan);
+  card.innerHTML = `<div class="activity-result-head"><div class="activity-result-title"><span class="activity-result-dot ${escapeHtml(event.status)}"></span><strong>${escapeHtml(gitOperationLabel(result.operation))}</strong><span class="activity-result-status">${statusLabel(event.status)}</span></div><div class="activity-result-meta"><span>${escapeHtml(result.branch)}</span></div></div><div class="activity-result-git"><div class="activity-result-git-row"><span class="activity-result-git-label">Operação</span><span>${escapeHtml(result.operation)}</span></div>${result.output ? `<pre class="activity-result-output">${escapeHtml(result.output)}</pre>` : ''}${event.error ? `<div class="activity-result-error">${escapeHtml(event.error)}</div>` : ''}</div>${changeSummary}`;
   container.prepend(card);
 }
 
 function renderActivity(event: ActivityEvent): void {
   if (!event.commandResult && !event.gitResult && !event.changes?.length && !event.diffPlan) return;
-  const container = ensureContainer();
-  if (!container) return;
+  const runId = runIdFor(event);
+  const container = ensureRunDetails(runId);
+  if (!container) {
+    const pending = pendingDetails.get(runId) || [];
+    pending.push(event);
+    pendingDetails.set(runId, pending.slice(-6));
+    return;
+  }
   container.querySelector(`[data-activity-id="${CSS.escape(event.id)}"]`)?.remove();
   if (event.gitResult) renderGitActivity(event, container);
   else if (event.commandResult) renderCommandActivity(event, container);
-  while (container.children.length > 8) container.lastElementChild?.remove();
+  while (container.children.length > 6) container.lastElementChild?.remove();
+}
+
+function flushPending(runId: string): void {
+  if (!pendingDetails.has(runId)) return;
+  const events = pendingDetails.get(runId) || [];
+  pendingDetails.delete(runId);
+  events.forEach(renderActivity);
 }
 
 function initialize(): void {
-  const unsubscribe = window.autoCodez.onActivity((event) => renderActivity(event as unknown as ActivityEvent));
+  const unsubscribe = window.autoCodez.onActivity(renderActivity);
+  window.addEventListener('auto-codez-execution-run-rendered', (event) => {
+    const runId = (event as CustomEvent<{ runId?: string }>).detail?.runId;
+    if (runId) flushPending(runId);
+  });
   window.addEventListener('beforeunload', unsubscribe, { once: true });
 }
 

@@ -5,14 +5,23 @@ export class ProviderRequestError extends Error {
   readonly provider: string;
   readonly kind: ProviderErrorKind;
   readonly operation: string;
+  readonly retryAfterMs?: number;
 
-  constructor(message: string, status: number, provider = 'AI provider', kind?: ProviderErrorKind, operation = 'request') {
+  constructor(
+    message: string,
+    status: number,
+    provider = 'AI provider',
+    kind?: ProviderErrorKind,
+    operation = 'request',
+    retryAfterMs?: number,
+  ) {
     super(message);
     this.name = 'ProviderRequestError';
     this.status = status;
     this.provider = provider;
     this.kind = kind || classifyProviderError(status, message);
     this.operation = operation;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -22,7 +31,7 @@ export function classifyProviderError(status: number, message: string): Provider
   if (status === 401 || status === 403 || /invalid\s+(?:api\s*)?key|api\s*key.*(?:invalid|incorrect|not\s+valid)|invalid\s+authentication|unauthorized|authentication.*failed|permission\s+denied|forbidden/.test(normalized)) return 'authentication';
   if (status === 429 || /quota|rate limit|rate_limit|too many requests|resource exhausted|free tier/.test(normalized)) return /quota|free tier|resource exhausted/.test(normalized) ? 'quota' : 'rate_limit';
   if (/network|fetch failed|timed out|timeout|socket|econn|enotfound|dns/.test(normalized)) return 'network';
-  if (status >= 500) return 'server';
+  if (status >= 500 || /service unavailable|temporarily unavailable|server unavailable|service is unavailable/.test(normalized)) return 'server';
   if (status === 400 || status === 404 || /invalid request|invalid argument|unsupported|malformed/.test(normalized)) return 'invalid_request';
   return 'unknown';
 }
@@ -30,7 +39,11 @@ export function classifyProviderError(status: number, message: string): Provider
 export function normalizeProviderError(provider: string, operation: string, error: unknown): ProviderRequestError {
   if (error instanceof ProviderRequestError) return error;
   const message = error instanceof Error ? error.message : String(error);
-  return new ProviderRequestError(message || 'Falha desconhecida do provider.', 0, provider, undefined, operation);
+  const status = error && typeof error === 'object' && 'status' in error && typeof (error as { status?: unknown }).status === 'number' ? (error as { status: number }).status : 0;
+  const retryAfterMs = error && typeof error === 'object' && 'retryAfterMs' in error && typeof (error as { retryAfterMs?: unknown }).retryAfterMs === 'number'
+    ? (error as { retryAfterMs: number }).retryAfterMs
+    : undefined;
+  return new ProviderRequestError(message || 'Falha desconhecida do provider.', status, provider, undefined, operation, retryAfterMs);
 }
 
 export function isAuthenticationError(error: unknown): boolean {
@@ -45,21 +58,59 @@ export function providerErrorKind(error: unknown): ProviderErrorKind | undefined
   return error instanceof ProviderRequestError ? error.kind : undefined;
 }
 
+function conciseDetail(error: ProviderRequestError): string {
+  const detail = error.message.trim().replace(/\s+/g, ' ');
+  if (!detail) return '';
+  const bounded = detail.length > 220 ? `${detail.slice(0, 217)}...` : detail;
+  return bounded;
+}
+
+function httpSuffix(error: ProviderRequestError): string {
+  return error.status > 0 ? ` (HTTP ${error.status})` : '';
+}
+
+export function retryAfterFromMessage(message: string): number | undefined {
+  const seconds = message.match(/(?:retry after|tente novamente em(?: cerca de)?)\s+(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s|segundos?)/i);
+  if (seconds) {
+    const value = Number(seconds[1]);
+    if (Number.isFinite(value) && value >= 0) return value * 1000;
+  }
+  const minutes = message.match(/(?:retry after|tente novamente em(?: cerca de)?)\s+(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m|minutos?)/i);
+  if (minutes) {
+    const value = Number(minutes[1]);
+    if (Number.isFinite(value) && value >= 0) return value * 60_000;
+  }
+  return undefined;
+}
+
 export function formatProviderError(error: unknown): string {
   if (!(error instanceof ProviderRequestError)) return error instanceof Error ? error.message : String(error);
   const prefix = `${error.provider}:`;
+  const detail = conciseDetail(error);
   switch (error.kind) {
-    case 'authentication': return `${prefix} a API key foi recusada. Verifique a chave nas configurações de IA.`;
-    case 'billing': return `${prefix} a conta não possui créditos ou faturamento disponível para esta solicitação. A API key continua salva.`;
-    case 'quota': return `${prefix} a cota disponível para este modelo foi atingida. A API key continua salva.`;
-    case 'rate_limit': return `${prefix} o limite de requisições foi atingido. Aguarde e tente novamente.`;
-    case 'server': return `${prefix} o serviço do provider apresentou um erro temporário. Tente novamente.`;
-    case 'network': return `${prefix} não foi possível alcançar o serviço. Verifique a conexão e tente novamente.`;
-    case 'invalid_request': return `${prefix} a solicitação foi recusada. ${error.message}`;
-    default: return `${prefix} ${error.message}`;
+    case 'authentication': return `${prefix} a API key foi recusada. Abra Configurações de IA para verificar ou trocar a chave.`;
+    case 'billing': return `${prefix} não há créditos ou faturamento disponível para esta solicitação. Sua API key continua salva. Abra Configurações de IA para usar outra chave.`;
+    case 'quota': return `${prefix} a cota disponível para este modelo foi atingida. Sua API key continua salva. Tente outro modelo ou outra chave em Configurações de IA.`;
+    case 'rate_limit': {
+      const retryMs = error.retryAfterMs ?? retryAfterFromMessage(error.message);
+      const wait = retryMs && retryMs > 0
+        ? ` Tente novamente em cerca de ${Math.max(1, Math.ceil(retryMs / 1000))}s.`
+        : ' Aguarde e tente novamente.';
+      return `${prefix} o limite de requisições foi atingido${httpSuffix(error)}.${wait}`;
+    }
+    case 'server': return `${prefix} o serviço respondeu com uma falha temporária${httpSuffix(error)}.${detail ? ` ${detail}` : ''}`;
+    case 'network': return `${prefix} não foi possível concluir a conexão com o serviço.${detail ? ` ${detail}` : ' Verifique a conexão e tente novamente.'}`;
+    case 'invalid_request': return `${prefix} a solicitação foi recusada${httpSuffix(error)}. ${detail || 'O provider não aceitou o formato enviado.'}`;
+    default: return `${prefix} ${detail || 'Falha desconhecida do provider.'}`;
   }
 }
 
-export function createProviderRequestError(provider: string, operation: string, status: number, message: string): ProviderRequestError {
-  return new ProviderRequestError(message, status, provider, undefined, operation);
+export function createProviderRequestError(
+  provider: string,
+  operation: string,
+  status: number,
+  message: string,
+  retryAfterMs?: number,
+): ProviderRequestError {
+  return new ProviderRequestError(message, status, provider, undefined, operation, retryAfterMs);
 }

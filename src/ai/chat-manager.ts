@@ -2,12 +2,39 @@ import crypto from 'node:crypto';
 import type { AIMessage, ChatRecord, IntelligenceLevel, PermissionLevel } from './types';
 
 const STATE_FILE = 'chats.json';
+export const UNCONFIGURED_PROVIDER_ID = 'unconfigured';
+export const UNCONFIGURED_MODEL_ID = 'unconfigured';
 
 interface ChatStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
+
+function cloneMessage(message: AIMessage): AIMessage {
+  return {
+    ...message,
+    ...(message.toolCalls ? { toolCalls: message.toolCalls.map((call) => ({ ...call, input: structuredClone(call.input) })) } : {}),
+    ...(message.attachments ? {
+      attachments: message.attachments.map(({ dataBase64: _ephemeral, ...attachment }) => ({
+        ...attachment,
+        ...(attachment.contexts ? { contexts: attachment.contexts.map((context) => ({ ...context })) } : {}),
+      })),
+    } : {}),
+    ...(message.sources ? { sources: message.sources.map((source) => ({ ...source })) } : {}),
+  };
+}
+
+function cloneChat(chat: ChatRecord): ChatRecord {
+  return { ...chat, messages: chat.messages.map(cloneMessage) };
+}
 
 function titleFromMessage(content: string): string {
   const value = content.trim().replace(/\s+/g, ' ');
   return value ? value.slice(0, 64) : 'Novo chat';
+}
+
+function normalizeStoredChat(chat: ChatRecord): ChatRecord {
+  if (chat.providerId === UNCONFIGURED_PROVIDER_ID && !chat.model.trim()) {
+    return { ...chat, model: UNCONFIGURED_MODEL_ID, messages: chat.messages.map(cloneMessage) };
+  }
+  return cloneChat(chat);
 }
 
 export class ChatManager {
@@ -17,20 +44,26 @@ export class ChatManager {
 
   async init(): Promise<void> {
     const stored = await this.storage.read<ChatRecord[]>(STATE_FILE, []);
-    this.chats = Array.isArray(stored) ? stored : [];
+    if (!Array.isArray(stored)) {
+      this.chats = [];
+      return;
+    }
+    this.chats = stored.map(normalizeStoredChat);
+    if (this.chats.some((chat, index) => chat.model !== stored[index]?.model)) await this.persist();
   }
 
-  async list(): Promise<ChatRecord[]> { return this.chats.map((chat) => ({ ...chat, messages: [...chat.messages] })); }
+  async list(): Promise<ChatRecord[]> { return this.chats.map(cloneChat); }
 
-  async create(input: { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }): Promise<ChatRecord> {
+  async create(input: { providerId?: string; model?: string; apiKeyId?: string; intelligence: string; permissionLevel: string; projectId?: string }): Promise<ChatRecord> {
     const now = Date.now();
     const chat: ChatRecord = {
       id: crypto.randomUUID(),
       title: 'Novo chat',
-      providerId: input.providerId || 'unconfigured',
-      model: input.model || '',
+      providerId: input.providerId || UNCONFIGURED_PROVIDER_ID,
+      model: input.model || UNCONFIGURED_MODEL_ID,
       intelligence: input.intelligence as IntelligenceLevel,
       permissionLevel: input.permissionLevel as PermissionLevel,
+      ...(input.apiKeyId ? { apiKeyId: input.apiKeyId } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       messages: [],
       createdAt: now,
@@ -38,36 +71,39 @@ export class ChatManager {
     };
     this.chats.unshift(chat);
     await this.persist();
-    return { ...chat, messages: [] };
+    return cloneChat(chat);
   }
 
   async addMessage(chatId: string, message: AIMessage): Promise<ChatRecord> {
     const chat = this.require(chatId);
-    chat.messages.push(message);
+    chat.messages.push(cloneMessage(message));
     if (message.role === 'user' && chat.title === 'Novo chat') chat.title = titleFromMessage(message.content);
     chat.updatedAt = Date.now();
     await this.persist();
-    return { ...chat, messages: [...chat.messages] };
+    return cloneChat(chat);
   }
 
   async update(chat: ChatRecord): Promise<ChatRecord> {
     const index = this.chats.findIndex((item) => item.id === chat.id);
     if (index < 0) throw new Error('Chat não encontrado.');
-    const next = { ...chat, messages: [...chat.messages], updatedAt: Date.now() };
+    const next = { ...chat, messages: chat.messages.map(cloneMessage), updatedAt: Date.now() };
     this.chats[index] = next;
     await this.persist();
-    return { ...next, messages: [...next.messages] };
+    return cloneChat(next);
   }
 
-  async updateSettings(input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }): Promise<ChatRecord> {
+  async updateSettings(input: { chatId: string; providerId: string; model: string; apiKeyId?: string; intelligence: string; permissionLevel: string }): Promise<ChatRecord> {
     const chat = this.require(input.chatId);
+    const previousProviderId = chat.providerId;
     chat.providerId = input.providerId;
     chat.model = input.model;
+    if (input.apiKeyId) chat.apiKeyId = input.apiKeyId;
+    else if (chat.apiKeyId && previousProviderId !== input.providerId) delete chat.apiKeyId;
     chat.intelligence = input.intelligence as IntelligenceLevel;
     chat.permissionLevel = input.permissionLevel as PermissionLevel;
     chat.updatedAt = Date.now();
     await this.persist();
-    return { ...chat, messages: [...chat.messages] };
+    return cloneChat(chat);
   }
 
   async rename(chatId: string, title: string): Promise<ChatRecord> {
@@ -78,7 +114,7 @@ export class ChatManager {
     chat.title = normalized;
     chat.updatedAt = Date.now();
     await this.persist();
-    return { ...chat, messages: [...chat.messages] };
+    return cloneChat(chat);
   }
 
   async remove(chatId: string): Promise<ChatRecord[]> {

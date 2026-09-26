@@ -16,25 +16,27 @@ style.textContent = `
 .git-action:disabled { opacity:.5; cursor:default; }
 .git-action-wide { grid-column:1 / -1; }
 .git-action-status { font-size:11px; opacity:.7; min-height:16px; }
+.git-rail-icon { display:block; width:17px; height:17px; color:currentColor; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
 `;
 document.head.appendChild(style);
 
-function getProjectId(): string {
-  return document.querySelector<HTMLSelectElement>('#git-project')?.value || '';
-}
+function getProjectId(): string { return document.querySelector<HTMLSelectElement>('#git-project')?.value || ''; }
+function setStatus(value: string, error = false): void { const element = document.querySelector<HTMLDivElement>('#git-action-status'); if (!element) return; element.textContent = value; element.style.color = error ? '#e59a9a' : ''; }
+async function refreshGitPanel(): Promise<void> { document.querySelector<HTMLButtonElement>('#git-refresh')?.click(); }
 
-function setStatus(value: string, error = false): void {
-  const element = document.querySelector<HTMLDivElement>('#git-action-status');
-  if (!element) return;
-  element.textContent = value;
-  element.style.color = error ? '#e59a9a' : '';
-}
-
-async function refreshGitPanel(): Promise<void> {
-  document.querySelector<HTMLButtonElement>('#git-refresh')?.click();
+function installGitIcon(): void {
+  const button = [...document.querySelectorAll<HTMLButtonElement>('.rail-button')].find((item) => item.title === 'Git');
+  if (!button || button.querySelector('.git-rail-icon')) return;
+  button.classList.add('git-rail-button');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.classList.add('git-rail-icon');
+  svg.innerHTML = '<circle cx="6" cy="5" r="2.5"></circle><circle cx="18" cy="19" r="2.5"></circle><circle cx="18" cy="5" r="2.5"></circle><path d="M6 7.5v5.5a6 6 0 0 0 6 6h3.5"></path><path d="M18 7.5v5"></path><path d="M8.5 5h7"></path>';
+  button.replaceChildren(svg);
 }
 
 function install(): void {
+  installGitIcon();
   const body = document.querySelector<HTMLElement>('.git-body');
   if (!body || document.querySelector('#git-actions')) return;
   const actions = document.createElement('section');
@@ -51,56 +53,21 @@ function install(): void {
     </div>
   `;
   body.appendChild(actions);
-
   document.querySelector<HTMLButtonElement>('#git-new-branch')?.addEventListener('click', async () => {
-    const projectId = getProjectId();
-    if (!projectId) return;
-    const name = window.prompt('Nome da nova branch:');
-    if (!name?.trim()) return;
-    if (!window.confirm(`Criar a branch "${name.trim()}" a partir da branch atual?`)) return;
-    setStatus('Criando branch...');
-    try {
-      const result = await api.git.createBranch({ projectId, name: name.trim() });
-      setStatus(`Branch ${result.branch} criada.`);
-      await refreshGitPanel();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Não foi possível criar a branch.', true);
-    }
+    const projectId = getProjectId(); if (!projectId) return; const name = window.prompt('Nome da nova branch:'); if (!name?.trim()) return; if (!window.confirm(`Criar a branch "${name.trim()}" a partir da branch atual?`)) return; setStatus('Criando branch...');
+    try { const result = await api.git.createBranch({ projectId, name: name.trim() }); setStatus(`Branch ${result.branch} criada.`); await refreshGitPanel(); } catch (error) { setStatus(error instanceof Error ? error.message : 'Não foi possível criar a branch.', true); }
   });
-
   document.querySelector<HTMLButtonElement>('#git-checkout')?.addEventListener('click', async () => {
-    const projectId = getProjectId();
-    if (!projectId) return;
-    const name = window.prompt('Nome da branch existente para trocar:');
-    if (!name?.trim()) return;
-    if (!window.confirm(`Trocar para a branch "${name.trim()}"? Alterações locais incompatíveis podem impedir a operação.`)) return;
-    setStatus('Trocando branch...');
-    try {
-      const result = await api.git.checkout({ projectId, name: name.trim() });
-      setStatus(`Branch atual: ${result.branch}.`);
-      await refreshGitPanel();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Não foi possível trocar de branch.', true);
-    }
+    const projectId = getProjectId(); if (!projectId) return; const name = window.prompt('Nome da branch existente para trocar:'); if (!name?.trim()) return; if (!window.confirm(`Trocar para a branch "${name.trim()}"? Alterações locais incompatíveis podem impedir a operação.`)) return; setStatus('Trocando branch...');
+    try { const result = await api.git.checkout({ projectId, name: name.trim() }); setStatus(`Branch atual: ${result.branch}.`); await refreshGitPanel(); } catch (error) { setStatus(error instanceof Error ? error.message : 'Não foi possível trocar de branch.', true); }
   });
-
   document.querySelector<HTMLButtonElement>('#git-commit')?.addEventListener('click', async () => {
-    const projectId = getProjectId();
-    if (!projectId) return;
-    const message = window.prompt('Mensagem do commit:');
-    if (!message?.trim()) return;
-    if (!window.confirm(`Criar um commit com a mensagem:\n\n${message.trim()}`)) return;
-    setStatus('Criando commit...');
-    try {
-      const result = await api.git.commit({ projectId, message: message.trim() });
-      setStatus(`Commit criado em ${result.branch}.`);
-      await refreshGitPanel();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Não foi possível criar o commit.', true);
-    }
+    const projectId = getProjectId(); if (!projectId) return; const message = window.prompt('Mensagem do commit:'); if (!message?.trim()) return; if (!window.confirm(`Criar um commit com a mensagem:\n\n${message.trim()}`)) return; setStatus('Criando commit...');
+    try { const result = await api.git.commit({ projectId, message: message.trim() }); setStatus(`Commit criado em ${result.branch}.`); await refreshGitPanel(); } catch (error) { setStatus(error instanceof Error ? error.message : 'Não foi possível criar o commit.', true); }
   });
 }
 
 install();
 window.setTimeout(install, 0);
 window.setTimeout(install, 100);
+window.setTimeout(installGitIcon, 250);

@@ -9,6 +9,8 @@ on:
   pull_request:
     branches:
       - main
+      - 'feature/**'
+      - 'fix/**'
 
 permissions:
   contents: read
@@ -39,21 +41,65 @@ jobs:
       - name: ESLint validation
         run: npm run lint
 
+      - name: Azure deployment script syntax
+        shell: pwsh
+        run: |
+          $scripts = @(
+            'infra/azure/account-api/bootstrap.ps1',
+            'infra/azure/account-api/configure-providers.ps1',
+            'infra/azure/account-api/smoke.ps1',
+            'infra/azure/account-api/destroy.ps1'
+          )
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "${script}: $($_.Message)" }
+              throw "PowerShell parse failed for $script"
+            }
+          }
+
       - name: Electron Forge package build
-        run: npm run package
+        shell: pwsh
+        run: |
+          $maxAttempts = 3
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "Electron Forge package attempt $attempt/$maxAttempts"
+            & npm.cmd run package
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+            if ($attempt -lt $maxAttempts) {
+              Write-Warning "Electron Forge package failed with exit code $LASTEXITCODE. Retrying after 20 seconds."
+              Start-Sleep -Seconds 20
+            }
+          }
+          throw "Electron Forge package failed after $maxAttempts attempts."
 
       - name: Electron startup smoke test
         shell: pwsh
         env:
           AUTO_CODEZ_SMOKE: '1'
         run: |
-          $process = Start-Process -FilePath 'npm.cmd' -ArgumentList 'start' -PassThru -WorkingDirectory $PWD
-          if (-not $process.WaitForExit(30000)) {
-            Stop-Process -Id $process.Id -Force
-            throw 'Electron smoke test exceeded the 30 second timeout.'
+          $stdout = Join-Path $env:RUNNER_TEMP 'auto-codez-smoke.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'auto-codez-smoke.stderr.log'
+          $process = Start-Process -FilePath 'npm.cmd' -ArgumentList 'start' -PassThru -WorkingDirectory $PWD -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          Start-Sleep -Seconds 10
+          if ($process.HasExited) {
+            Write-Host '--- Electron smoke stdout ---'
+            if (Test-Path $stdout) { Get-Content $stdout }
+            Write-Host '--- Electron smoke stderr ---'
+            if (Test-Path $stderr) { Get-Content $stderr }
+            if ($process.ExitCode -ne 0) {
+              throw "Electron smoke test exited with code $($process.ExitCode)."
+            }
+            throw 'Electron smoke test exited before the startup window could be verified.'
           }
-          if ($process.ExitCode -ne 0) {
-            throw "Electron smoke test exited with code $($process.ExitCode)."
-          }
+          Stop-Process -Id $process.Id -Force
 
 # Validation intentionally runs the full quality gate in order.

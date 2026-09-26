@@ -1,15 +1,19 @@
 import './index.css';
+import { getAppPreferences } from './app-preferences';
 
 type ProviderSummary = { id: string; displayName: string; configured: boolean; selectedModel?: string; model?: string; apiKeyConfigured: boolean };
 type Model = { id: string; name: string; providerId: string; capabilities: string[]; reasoningLevels?: string[] };
 type Change = { path: string; type: string; before: string; after: string; addedLines: number; removedLines: number };
-type Message = { role: 'user' | 'assistant' | 'system' | 'tool'; content: string; createdAt?: number; toolCallId?: string; toolName?: string; changes?: Change[] };
+type AttachmentContext = { kind: 'native' | 'text' | 'ocr' | 'caption' | 'transcript' | 'metadata'; text: string; model?: string; createdAt: number };
+type Attachment = { id: string; kind: 'image' | 'document' | 'text' | 'audio' | 'video' | 'binary'; name: string; mediaType: string; size: number; storageKey: string; sha256: string; createdAt: number; width?: number; height?: number; durationMs?: number; contexts?: AttachmentContext[] };
+type PickedAttachment = { attachment: Attachment; previewDataUrl?: string };
+type Message = { role: 'user' | 'assistant' | 'system' | 'tool'; content: string; createdAt?: number; toolCallId?: string; toolName?: string; attachments?: Attachment[]; changes?: Change[] };
 type Chat = { id: string; title: string; projectId?: string; providerId: string; model: string; intelligence: 'low' | 'normal' | 'high' | 'maximum'; permissionLevel: 'read-only' | 'safe' | 'ask' | 'unrestricted'; messages: Message[]; createdAt: number; updatedAt: number };
 type Project = { id: string; name: string; rootPath: string; createdAt: number; updatedAt: number };
 type IntelligenceLevel = Chat['intelligence'];
 type PermissionLevel = Chat['permissionLevel'];
-type StreamEvent = { type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'error'; text?: string; activity?: { message: string; status: string }; toolCall?: { id: string; name: string; input: Record<string, unknown> }; pendingApprovalIds?: string[]; error?: string };
-type Approval = { id: string; projectId: string; permissionLevel: string; toolCall: { id: string; name: string; input: Record<string, unknown> }; createdAt: number };
+type StreamEvent = { type: 'start' | 'delta' | 'activity' | 'tool_call' | 'usage' | 'complete' | 'approval_required' | 'cancelled' | 'error'; chatId?: string; runId?: string; text?: string; activity?: { message: string; status: string }; toolCall?: { id: string; name: string; input: Record<string, unknown> }; pendingApprovalIds?: string[]; error?: string };
+type Approval = { id: string; projectId: string; chatId?: string; runId?: string; permissionLevel: string; toolCall: { id: string; name: string; input: Record<string, unknown> }; createdAt: number };
 type ExecutionState = 'idle' | 'running' | 'waiting_approval' | 'failed';
 
 declare global {
@@ -22,12 +26,50 @@ declare global {
       createChat: (input: { providerId?: string; model?: string; intelligence: string; permissionLevel: string; projectId?: string }) => Promise<Chat>;
       deleteChat: (chatId: string) => Promise<Chat[]>;
       updateChatSettings: (input: { chatId: string; providerId: string; model: string; intelligence: string; permissionLevel: string }) => Promise<Chat>;
-      streamChat: (input: { chatId: string; content: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
+      pickChatAttachments: (kind: 'file' | 'image') => Promise<PickedAttachment[]>;
+      previewChatAttachment: (attachment: Attachment) => Promise<string | null>;
+      pasteChatImage: (input: { name?: string; mediaType: string; bytes: Uint8Array }) => Promise<PickedAttachment | null>;
+      streamChat: (input: { chatId: string; content: string; attachments?: Attachment[] }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
+      stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
-      listApprovals: () => Promise<Approval[]>;
-      approveTool: (approvalId: string) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
-      denyTool: (approvalId: string) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
-      onActivity: (listener: (event: { message?: string; status?: string }) => void) => () => void;
+      mcpRuntimeStatus: () => Promise<{ platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string }>;
+      prepareMcpRuntime: () => Promise<{ platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string }>;
+      mcpTunnelStatus: () => Promise<{ running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean }>;
+      onMcpTunnelStatus: (listener: (event: { running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean }) => void) => () => void;
+
+      doctorMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => Promise<{ executable: string; version: string; supported: true; diagnostics: string; gateway: { ok: true; protocolVersion: string; toolCount: number; writeToolCount: number } }>;
+      startMcpTunnel: (input: { tunnelId: string; controlPlaneApiKey?: string }) => Promise<{ running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string }>;
+      stopMcpTunnel: () => Promise<{ stopped: boolean }>;
+      mcpGatewayStatus: () => Promise<{ running: boolean; host: string; port: number; endpoint: string }>;
+      preflightMcpGateway: () => Promise<{ ok: true; protocolVersion: string; toolCount: number; writeToolCount: number }>;
+      startMcpGateway: (input?: { port?: number }) => Promise<{ host: string; port: number; endpoint: string; bearerToken: string }>;
+      stopMcpGateway: () => Promise<{ stopped: boolean }>;
+      listOperationalLedger: (query?: {
+        afterSequence?: number;
+        beforeSequence?: number;
+        chatId?: string;
+        runId?: string;
+        projectId?: string;
+        sessionId?: string;
+        pluginId?: string;
+        toolCallId?: string;
+        jobId?: string;
+        artifactId?: string;
+        category?: string;
+        state?: string;
+        limit?: number;
+        direction?: 'forward' | 'backward';
+      }) => Promise<{
+        events: Array<Record<string, unknown>>;
+        firstSequence?: number;
+        lastSequence?: number;
+        hasMore: boolean;
+      }>;
+      onOperationalLedgerEvent: (listener: (event: unknown) => void) => () => void;
+      listApprovals: (filters?: { chatId?: string; runId?: string }) => Promise<Approval[]>;
+      approveTool: (approvalId: string, filters?: { chatId?: string; runId?: string }) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
+      denyTool: (approvalId: string, filters?: { chatId?: string; runId?: string }) => Promise<{ chatId?: string; messages?: Message[]; pendingApprovalIds?: string[] }>;
+      onActivity: (listener: (event: { message?: string; status?: string; chatId?: string; runId?: string }) => void) => () => void;
       terminal: {
         start: (input: { projectId: string; command: string }) => Promise<unknown>;
         kill: (sessionId: string) => Promise<unknown>;
@@ -35,7 +77,7 @@ declare global {
         getOutput: (sessionId: string) => Promise<unknown>;
         listHistory: (projectId?: string) => Promise<unknown[]>;
         clearHistory: (projectId?: string) => Promise<void>;
-        onEvent: (listener: (event: unknown) => void) => () => void;
+        onEvent: (listener: (event: unknown) => void) => void;
       };
       git: {
         status: (projectId: string) => Promise<{ branch: string; ahead: number; behind: number; clean: boolean; files: Array<{ path: string; index: string; worktree: string }> }>;
@@ -67,26 +109,38 @@ let activePanel = 'chats';
 let activeProjectId: string | undefined;
 let composerIntelligence: IntelligenceLevel = 'normal';
 let intelligenceMenuOpen = false;
+let attachmentMenuOpen = false;
 let executionState: ExecutionState = 'idle';
+let activeRunId: string | undefined;
 let streamingText = '';
 let streamingActivity: string[] = [];
 let pendingApprovals: Approval[] = [];
 let lastError = '';
+let retryContent = '';
+let lastSubmittedContent = '';
+let pendingAttachments: PickedAttachment[] = [];
+let streamRenderTimer: number | null = null;
+let streamingMessageElement: HTMLElement | null = null;
+let activityElement: HTMLElement | null = null;
+let stateRefreshToken = 0;
+let approvalRefreshToken = 0;
+const attachmentPreviewCache = new Map<string, string | null>();
+const attachmentPreviewRequests = new Map<string, Promise<void>>();
 
 app.innerHTML = `
 <div class="app-shell">
   <header class="topbar">
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Auto CodeZ</span></div>
-    <div class="topbar-actions">
-      <button class="top-action" data-action="new-chat">Novo chat</button>
-      <button class="top-action icon-only" data-action="ai-settings" title="Configurações de IA" aria-label="Configurações de IA"></button>
-    </div>
+    <div class="topbar-actions"></div>
   </header>
   <div class="body">
     <aside class="rail">
       <button class="rail-button active" data-panel="chats" title="Chats" aria-label="Chats"></button>
       <button class="rail-button" data-panel="projects" title="Projetos" aria-label="Projetos"></button>
       <button class="rail-button" data-panel="plugins" title="Plugins" aria-label="Plugins"></button>
+      <button class="rail-button api-key-rail-button" type="button" title="API Keys" aria-label="API Keys"><svg class="ac-rail-icon ac-lucide-icon" data-api-key-icon="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg></button>
+      <button class="rail-button terminal-rail-button" type="button" title="Terminal" aria-label="Terminal" aria-expanded="false"><svg class="ac-rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg></button>
+      <button class="rail-button" type="button" data-mcp-mode title="MCP Mode" aria-label="MCP Mode"><svg class="ac-rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 18h6"/><path d="M6 18h.01"/><path d="M8 6h1"/><rect x="2" y="14" width="20" height="8" rx="2"/><rect x="4" y="2" width="16" height="12" rx="2"/></svg></button>
       <div class="rail-spacer"></div>
       <button class="rail-button" data-action="profile" title="Perfil" aria-label="Perfil"></button>
     </aside>
@@ -95,8 +149,15 @@ app.innerHTML = `
       <section class="chat-header" id="chat-header"></section>
       <section class="messages" id="messages"></section>
       <section class="composer-wrap">
+        <div class="attachment-tray" id="attachment-tray" hidden></div>
         <div class="composer">
-          <button class="attach-button" data-action="attachments" title="Anexar conteúdo" aria-label="Anexar conteúdo"></button>
+          <div class="attachment-control">
+            <button class="attach-button" data-action="attachments" title="Anexar conteúdo" aria-label="Anexar conteúdo" aria-haspopup="menu" aria-expanded="false"></button>
+            <div class="attachment-menu" id="attachment-menu" role="menu" hidden>
+              <button type="button" class="attachment-option" data-attachment-option="image" role="menuitem"><span class="attachment-option-icon image" aria-hidden="true"></span><span><strong>Imagens</strong><small>Escolher imagens e arquivos gráficos</small></span></button>
+              <button type="button" class="attachment-option" data-attachment-option="file" role="menuitem"><span class="attachment-option-icon file" aria-hidden="true"></span><span><strong>Arquivos</strong><small>Escolher qualquer arquivo</small></span></button>
+            </div>
+          </div>
           <textarea id="prompt" rows="1" placeholder="Digite uma mensagem..." aria-label="Mensagem"></textarea>
           <div class="composer-divider" aria-hidden="true"></div>
           <div class="intelligence-control">
@@ -124,12 +185,141 @@ const chatHeader = document.querySelector<HTMLElement>('#chat-header')!;
 const messages = document.querySelector<HTMLElement>('#messages')!;
 const prompt = document.querySelector<HTMLTextAreaElement>('#prompt')!;
 const sendButton = document.querySelector<HTMLButtonElement>('#send-button')!;
+const attachmentTray = document.querySelector<HTMLDivElement>('#attachment-tray')!;
+const attachmentButton = document.querySelector<HTMLButtonElement>('[data-action="attachments"]')!;
+const attachmentMenu = document.querySelector<HTMLDivElement>('#attachment-menu')!;
 const intelligenceButton = document.querySelector<HTMLButtonElement>('#intelligence-button')!;
 const intelligenceMenu = document.querySelector<HTMLDivElement>('#intelligence-menu')!;
 const modalRoot = document.querySelector<HTMLDivElement>('#modal-root')!;
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]!));
+}
+
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  if (value < 1024) return `${Math.round(value)} B`;
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 ** 2).toFixed(value < 10 * 1024 ** 2 ? 1 : 0)} MB`;
+}
+
+function attachmentIcon(kind: Attachment['kind']): string {
+  if (kind === 'image') return 'Imagem';
+  if (kind === 'document') return 'Documento';
+  if (kind === 'text') return 'Arquivo';
+  if (kind === 'audio') return 'Áudio';
+  if (kind === 'video') return 'Vídeo';
+  return 'Arquivo';
+}
+
+function attachmentListMarkup(attachments: Attachment[] | undefined): string {
+  if (!attachments?.length) return '';
+  return `<div class="message-attachments">${attachments.map((attachment) => {
+    const preview = attachment.kind === 'image' ? attachmentPreviewCache.get(attachment.sha256) : null;
+    const previewMarkup = attachment.kind === 'image' && preview
+      ? `<img src="${escapeHtml(preview)}" alt="${escapeHtml(attachment.name)}" class="message-attachment-preview">`
+      : `<span class="message-attachment-kind">${escapeHtml(attachmentIcon(attachment.kind))}</span>`;
+    return `
+      <div class="message-attachment ${attachment.kind === 'image' ? 'is-image' : ''}">
+        ${previewMarkup}
+        <span class="message-attachment-copy">
+          <strong>${escapeHtml(attachment.name)}</strong>
+          <small>${escapeHtml(formatBytes(attachment.size))} · ${escapeHtml(attachment.mediaType)}</small>
+        </span>
+      </div>
+    `;
+  }).join('')}</div>`;
+}
+
+function ensureAttachmentPreview(attachment: Attachment, chatId: string): void {
+  if (attachment.kind !== 'image' || attachmentPreviewCache.has(attachment.sha256) || attachmentPreviewRequests.has(attachment.sha256)) return;
+  const request = window.autoCodez.previewChatAttachment(attachment)
+    .then((preview) => {
+      attachmentPreviewCache.set(attachment.sha256, preview);
+      if (activeChat?.id === chatId) renderMessages();
+    })
+    .catch(() => {
+      attachmentPreviewCache.set(attachment.sha256, null);
+    })
+    .finally(() => {
+      attachmentPreviewRequests.delete(attachment.sha256);
+    });
+  attachmentPreviewRequests.set(attachment.sha256, request);
+}
+
+function ensureVisibleAttachmentPreviews(chat: Chat): void {
+  for (const message of chat.messages) {
+    for (const attachment of message.attachments ?? []) ensureAttachmentPreview(attachment, chat.id);
+  }
+}
+
+function renderAttachmentTray(): void {
+  if (!pendingAttachments.length) {
+    attachmentTray.hidden = true;
+    attachmentTray.innerHTML = '';
+    return;
+  }
+  attachmentTray.hidden = false;
+  attachmentTray.innerHTML = pendingAttachments.map(({ attachment, previewDataUrl }) => `
+    <div class="composer-attachment" data-pending-attachment="${escapeHtml(attachment.id)}">
+      ${previewDataUrl
+        ? `<img src="${escapeHtml(previewDataUrl)}" alt="" class="composer-attachment-preview">`
+        : `<span class="composer-attachment-file">${escapeHtml(attachmentIcon(attachment.kind).slice(0, 1))}</span>`}
+      <span class="composer-attachment-copy">
+        <strong>${escapeHtml(attachment.name)}</strong>
+        <small>${escapeHtml(formatBytes(attachment.size))}</small>
+      </span>
+      <button type="button" class="composer-attachment-remove" data-remove-attachment="${escapeHtml(attachment.id)}" title="Remover anexo" aria-label="Remover ${escapeHtml(attachment.name)}"></button>
+    </div>
+  `).join('');
+}
+
+function appendPendingAttachments(selected: readonly PickedAttachment[]): void {
+  if (!selected.length) return;
+  const existing = new Set(pendingAttachments.map((item) => item.attachment.sha256));
+  for (const item of selected) {
+    if (existing.has(item.attachment.sha256)) continue;
+    if (pendingAttachments.length >= 12) break;
+    pendingAttachments.push(item);
+    existing.add(item.attachment.sha256);
+  }
+  renderComposer();
+}
+
+async function pickAttachments(kind: 'file' | 'image' = 'file'): Promise<void> {
+  if (!activeChat || executionState === 'running' || executionState === 'waiting_approval') return;
+  try {
+    appendPendingAttachments(await window.autoCodez.pickChatAttachments(kind));
+  } catch (error) {
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível anexar o arquivo.');
+  }
+}
+
+function clipboardImageName(mediaType: string): string {
+  const extension = mediaType === 'image/jpeg' ? 'jpg'
+    : mediaType === 'image/webp' ? 'webp'
+      : mediaType === 'image/gif' ? 'gif'
+        : mediaType === 'image/avif' ? 'avif'
+          : 'png';
+  return `clipboard-${Date.now()}.${extension}`;
+}
+
+async function pasteClipboardImage(file: File): Promise<void> {
+  if (!activeChat || executionState === 'running' || executionState === 'waiting_approval') return;
+  try {
+    if (file.size <= 0) throw new Error('A imagem da área de transferência está vazia.');
+    if (file.size > 64 * 1024 * 1024) throw new Error('A imagem da área de transferência excede o limite de 64 MB.');
+    const mediaType = file.type.startsWith('image/') ? file.type : 'image/png';
+    const selected = await window.autoCodez.pasteChatImage({
+      name: clipboardImageName(mediaType),
+      mediaType,
+      bytes: new Uint8Array(await file.arrayBuffer()),
+    });
+    if (selected) appendPendingAttachments([selected]);
+  } catch (error) {
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível colar a imagem.');
+  }
 }
 
 function providerName(id: string): string {
@@ -150,6 +340,62 @@ function setExecutionState(state: ExecutionState, error = ''): void {
   lastError = error;
   renderMessages();
   renderComposer();
+}
+
+function scheduleStreamRender(): void {
+  if (streamRenderTimer !== null) return;
+  streamRenderTimer = window.setTimeout(() => {
+    streamRenderTimer = null;
+    renderStreamingDom();
+  }, 33);
+}
+
+function ensureStreamingMessage(): HTMLElement | null {
+  if (!activeChat || executionState !== 'running' || !streamingText) return null;
+  if (streamingMessageElement?.isConnected && streamingMessageElement.closest('#messages') === messages) return streamingMessageElement;
+  const article = document.createElement('article');
+  article.className = 'message assistant streaming';
+  article.innerHTML = `<div class="message-label">${escapeHtml(providerName(activeChat.providerId))}</div><div class="message-content"></div>`;
+  messages.appendChild(article);
+  streamingMessageElement = article;
+  return article;
+}
+
+function renderStreamingActivityDom(): void {
+  const activityLines = [...streamingActivity];
+  if (executionState === 'waiting_approval') activityLines.push('Aguardando sua aprovação.');
+  if (lastError) activityLines.push(lastError);
+  if (!activityLines.length) {
+    activityElement?.remove();
+    activityElement = null;
+    return;
+  }
+  if (!activityElement?.isConnected || activityElement.closest('#messages') !== messages) {
+    activityElement = document.createElement('div');
+    activityElement.className = 'activity-card';
+    messages.appendChild(activityElement);
+  }
+  activityElement.innerHTML = `<div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line ${executionState === 'failed' ? 'error' : 'running'}">${escapeHtml(line)}</div>`).join('')}`;
+}
+
+function renderStreamingDom(): void {
+  if (!activeChat) return;
+  const wasNearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100;
+  const live = ensureStreamingMessage();
+  if (live) live.querySelector<HTMLElement>('.message-content')!.innerHTML = escapeHtml(streamingText).replace(/\n/g, '<br>');
+  else if (streamingMessageElement) {
+    streamingMessageElement.remove();
+    streamingMessageElement = null;
+  }
+  renderStreamingActivityDom();
+  if (wasNearBottom || executionState === 'running') messages.scrollTop = messages.scrollHeight;
+}
+
+function setAttachmentMenu(open: boolean): void {
+  attachmentMenuOpen = open;
+  attachmentMenu.hidden = !open;
+  attachmentButton.setAttribute('aria-expanded', String(open));
+  attachmentButton.classList.toggle('open', open);
 }
 
 function setIntelligenceMenu(open: boolean): void {
@@ -185,49 +431,59 @@ function renderNav(): void {
 }
 
 function chatItem(chat: Chat): string {
-  return `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-rename="${chat.id}" title="Renomear chat" aria-label="Renomear chat"></button><button class="chat-delete" data-chat-delete="${chat.id}" title="Excluir chat" aria-label="Excluir chat">×</button></div>`;
+  const running = activeChat?.id !== chat.id && false;
+  return `<div class="chat-item ${activeChat?.id === chat.id ? 'selected' : ''} ${running ? 'is-running' : ''}" data-chat="${chat.id}" role="button" tabindex="0"><span class="chat-item-copy"><span>${escapeHtml(chat.title)}</span><small>${escapeHtml(providerName(chat.providerId))}</small></span><button class="chat-settings" data-chat-rename="${chat.id}" title="Renomear chat" aria-label="Renomear chat"></button><button class="chat-delete" data-chat-delete="${chat.id}" title="Excluir chat" aria-label="Excluir chat"></button></div>`;
 }
 
 function renderHeader(): void {
   if (!activeChat) {
-    chatHeader.innerHTML = `<div><div class="eyebrow">NOVO CHAT</div><h1>Comece uma conversa</h1></div><div class="header-actions"><button class="header-button" data-action="ai-settings">Configurar IA</button></div>`;
+    chatHeader.innerHTML = `<div><div class="eyebrow">NOVO CHAT</div><h1>Comece uma conversa</h1></div><div class="header-actions"></div>`;
     return;
   }
   const unconfigured = activeChat.providerId === 'unconfigured';
-  chatHeader.innerHTML = `<div><div class="chat-title-row"><h1>${escapeHtml(activeChat.title)}</h1><button class="gear" data-chat-settings="${activeChat.id}" title="Configurações do chat" aria-label="Configurações do chat"></button></div><div class="chat-subtitle">${escapeHtml(providerName(activeChat.providerId))}${unconfigured ? '' : ` · ${escapeHtml(activeChat.model)} · Inteligência ${intelligenceLabel(activeChat.intelligence)}`}</div></div><div class="header-actions"><button class="provider-chip" data-chat-settings="${activeChat.id}">${escapeHtml(providerName(activeChat.providerId))}<span class="provider-chevron" aria-hidden="true"></span></button></div>`;
-}
-
-function renderApprovals(): string {
-  if (!pendingApprovals.length) return '';
-  return pendingApprovals.map((approval) => `<div class="approval-card" data-approval="${approval.id}"><div class="approval-heading">Aprovação necessária</div><div class="approval-tool">${escapeHtml(approval.toolCall.name)}</div><div class="approval-input">${escapeHtml(JSON.stringify(approval.toolCall.input, null, 2))}</div><div class="approval-actions"><button data-approve="${approval.id}" class="primary-button">Aprovar</button><button data-deny="${approval.id}" class="danger-button">Recusar</button></div></div>`).join('');
+  chatHeader.innerHTML = `<div><div class="chat-title-row"><h1>${escapeHtml(activeChat.title)}</h1></div><div class="chat-subtitle">${escapeHtml(providerName(activeChat.providerId))}${unconfigured ? '' : ` · ${escapeHtml(activeChat.model)} · Inteligência ${intelligenceLabel(activeChat.intelligence)}`}</div></div><div class="header-actions"><button class="provider-chip" data-chat-settings="${activeChat.id}">${escapeHtml(providerName(activeChat.providerId))}<span class="provider-chevron" aria-hidden="true"></span></button></div>`;
 }
 
 function renderMessages(): void {
+  streamingMessageElement = null;
+  activityElement = null;
   if (!activeChat) {
     messages.innerHTML = `<div class="welcome"><div class="welcome-mark"><span class="welcome-mark-eye"></span></div><h2>Como você quer trabalhar?</h2><p>Converse com uma IA, crie conteúdo ou abra um projeto para trabalhar em arquivos.</p><div class="welcome-grid"><button data-suggestion="Explique como o Auto CodeZ funciona.">Pergunte qualquer coisa</button><button data-suggestion="Analise meu projeto e explique a estrutura.">Analise um projeto</button><button data-suggestion="Crie uma ideia de interface moderna.">Crie conteúdo</button></div></div>`;
     return;
   }
-  const rendered = activeChat.messages.map((message) => `<article class="message ${message.role}"><div class="message-label">${message.role === 'user' ? 'Você' : message.role === 'tool' ? 'Ferramenta' : providerName(activeChat!.providerId)}</div><div class="message-content">${escapeHtml(message.content).replace(/\n/g, '<br>')}</div></article>`).join('');
+  const rendered = activeChat.messages.map((message) => `<article class="message ${message.role}"><div class="message-label">${message.role === 'user' ? 'Você' : message.role === 'tool' ? 'Ferramenta' : providerName(activeChat!.providerId)}</div>${attachmentListMarkup(message.attachments)}<div class="message-content">${escapeHtml(message.content).replace(/\n/g, '<br>')}</div></article>`).join('');
   const live = executionState === 'running' && streamingText ? `<article class="message assistant streaming"><div class="message-label">${escapeHtml(providerName(activeChat.providerId))}</div><div class="message-content">${escapeHtml(streamingText).replace(/\n/g, '<br>')}</div></article>` : '';
   const activityLines = [...streamingActivity];
   if (executionState === 'waiting_approval') activityLines.push('Aguardando sua aprovação.');
   if (lastError) activityLines.push(lastError);
-  const activity = activityLines.length || pendingApprovals.length ? `<div class="activity-card"><div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line ${executionState === 'failed' ? 'error' : 'running'}">${escapeHtml(line)}</div>`).join('')}${renderApprovals()}</div>` : '';
+  const activity = activityLines.length ? `<div class="activity-card"><div class="activity-heading"><span class="activity-pulse"></span>Atividade</div>${activityLines.slice(-8).map((line) => `<div class="activity-line ${executionState === 'failed' ? 'error' : 'running'}">${escapeHtml(line)}</div>`).join('')}</div>` : '';
+  const wasNearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100;
   messages.innerHTML = rendered + live + activity;
-  messages.scrollTop = messages.scrollHeight;
+  if (wasNearBottom || executionState === 'running') messages.scrollTop = messages.scrollHeight;
+  streamingMessageElement = messages.querySelector<HTMLElement>('.message.streaming');
+  activityElement = messages.querySelector<HTMLElement>('.activity-card');
+  ensureVisibleAttachmentPreviews(activeChat);
 }
 
 function renderComposer(): void {
   const busy = executionState === 'running' || executionState === 'waiting_approval';
   intelligenceButton.querySelector<HTMLElement>('.intelligence-current')!.textContent = intelligenceLabel(composerIntelligence);
-  sendButton.disabled = !activeChat || !prompt.value.trim() || busy || pendingApprovals.length > 0;
+  prompt.dataset.executionLocked = String(busy);
+  sendButton.dataset.executionLocked = String(busy);
+  sendButton.disabled = !activeChat || (!prompt.value.trim() && pendingAttachments.length === 0) || busy || pendingApprovals.length > 0;
   prompt.disabled = busy;
+  attachmentButton.toggleAttribute('disabled', busy || !activeChat);
+  if (busy || !activeChat) setAttachmentMenu(false);
+  renderAttachmentTray();
+  resizePrompt();
   renderIntelligenceMenu();
 }
 
 async function refresh(): Promise<void> {
+  const token = ++stateRefreshToken;
   try {
     const state = await window.autoCodez.getState();
+    if (token !== stateRefreshToken) return;
     providers = state.providers;
     chats = state.chats;
     projects = state.projects;
@@ -242,13 +498,12 @@ async function refresh(): Promise<void> {
     renderMessages();
     renderComposer();
   } catch (error) {
+    if (token !== stateRefreshToken) return;
     setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível carregar o estado do aplicativo.');
   }
 }
 
-function closeModal(): void {
-  modalRoot.innerHTML = '';
-}
+function closeModal(): void { modalRoot.innerHTML = ''; }
 
 function openModal(content: string): void {
   setIntelligenceMenu(false);
@@ -269,17 +524,22 @@ async function openChatSettings(chat: Chat): Promise<void> {
   if (provider?.configured) {
     try { models = await window.autoCodez.listModels(chat.providerId); } catch { models = []; }
   }
-  openModal(`<div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Configurações do chat</h2><p>Essas configurações pertencem a esta conversa.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><label>Inteligência artificial<select id="chat-provider">${providers.map((item) => `<option value="${item.id}" ${item.id === chat.providerId ? 'selected' : ''} ${item.configured ? '' : 'disabled'}>${escapeHtml(item.displayName)}${item.configured ? '' : ' · não configurada'}</option>`).join('')}</select></label><label>Modelo<select id="chat-model">${models.map((model) => `<option value="${model.id}" ${model.id === chat.model ? 'selected' : ''}>${escapeHtml(model.name)}</option>`).join('') || (chat.model === 'unconfigured' ? '<option value="">Configure uma IA primeiro</option>' : `<option value="${escapeHtml(chat.model)}">${escapeHtml(chat.model)}</option>`)}</select></label><label>Perfil de raciocínio<select id="chat-intelligence">${intelligence.map((item) => `<option value="${item[0]}" ${item[0] === chat.intelligence ? 'selected' : ''}>${item[1]} · ${item[2]}</option>`).join('')}</select></label><label>Nível de acesso<select id="chat-permission"><option value="read-only" ${chat.permissionLevel === 'read-only' ? 'selected' : ''}>Somente leitura</option><option value="safe" ${chat.permissionLevel === 'safe' ? 'selected' : ''}>Acesso seguro</option><option value="ask" ${chat.permissionLevel === 'ask' ? 'selected' : ''}>Acesso solicitado</option><option value="unrestricted" ${chat.permissionLevel === 'unrestricted' ? 'selected' : ''}>Acesso irrestrito</option></select></label><button class="primary-button" id="save-chat-settings">Salvar configurações</button></div>`);
+  if (activeChat?.id !== chat.id) return;
+  openModal(`<div class="modal-head"><div><div class="eyebrow">CHAT</div><h2>Configurações do chat</h2><p>Essas configurações pertencem a esta conversa.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><label>Inteligência artificial<select id="chat-provider">${providers.map((item) => `<option value="${item.id}" ${item.id === chat.providerId ? 'selected' : ''} ${item.configured ? '' : 'disabled'}>${escapeHtml(item.displayName)}${item.configured ? '' : ' · não configurada'}</option>`).join('')}</select></label><label>Modelo<select id="chat-model">${models.map((model) => `<option value="${model.id}" ${model.id === chat.model ? 'selected' : ''}>${escapeHtml(model.name)}</option>`).join('') || (chat.model === 'unconfigured' ? '<option value="">Configure uma IA primeiro</option>' : `<option value="${escapeHtml(chat.model)}">${escapeHtml(chat.model)}</option>`)}</select></label><label>Nível de acesso<select id="chat-permission"><option value="read-only" ${chat.permissionLevel === 'read-only' ? 'selected' : ''}>Somente leitura</option><option value="safe" ${chat.permissionLevel === 'safe' ? 'selected' : ''}>Acesso seguro</option><option value="ask" ${chat.permissionLevel === 'ask' ? 'selected' : ''}>Acesso solicitado</option><option value="unrestricted" ${chat.permissionLevel === 'unrestricted' ? 'selected' : ''}>Acesso irrestrito</option></select></label><button class="primary-button" id="save-chat-settings">Salvar configurações</button></div>`);
 }
 
 async function newChat(projectId?: string): Promise<void> {
-  if (executionState !== 'idle' && executionState !== 'failed') return;
   try {
-    activeChat = await window.autoCodez.createChat({ intelligence: 'normal', permissionLevel: 'safe', projectId });
-    composerIntelligence = 'normal';
+    const defaults = getAppPreferences().chatDefaults;
+    activeChat = await window.autoCodez.createChat({ intelligence: defaults.intelligence, permissionLevel: defaults.permissionLevel, projectId });
+    composerIntelligence = defaults.intelligence;
+    pendingAttachments = [];
     pendingApprovals = [];
     streamingActivity = [];
     lastError = '';
+    retryContent = '';
+    lastSubmittedContent = '';
+    activeRunId = undefined;
     executionState = 'idle';
     activePanel = projectId ? 'projects' : 'chats';
     activeProjectId = projectId;
@@ -304,37 +564,69 @@ async function newProject(): Promise<void> {
 }
 
 async function refreshApprovals(): Promise<void> {
+  const chatId = activeChat?.id;
+  const token = ++approvalRefreshToken;
+  if (!chatId) {
+    pendingApprovals = [];
+    return;
+  }
   try {
-    pendingApprovals = await window.autoCodez.listApprovals();
+    const approvals = (await window.autoCodez.listApprovals({ chatId })).filter((approval) => approval.chatId === chatId);
+    if (token !== approvalRefreshToken || activeChat?.id !== chatId) return;
+    pendingApprovals = approvals;
+    if (approvals[0]?.runId) activeRunId = approvals[0].runId;
     if (pendingApprovals.length) executionState = 'waiting_approval';
     renderMessages();
     renderComposer();
   } catch (error) {
+    if (token !== approvalRefreshToken || activeChat?.id !== chatId) return;
     pendingApprovals = [];
-    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível carregar as aprovações.');
+    window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível carregar as aprovações.' }));
   }
 }
 
-async function sendMessage(): Promise<void> {
-  const content = prompt.value.trim();
+async function sendMessage(contentOverride?: string, isRetry = false): Promise<void> {
+  const attachments = isRetry ? [] : pendingAttachments.map((item) => item.attachment);
+  const typedContent = (contentOverride ?? prompt.value).trim();
+  const content = typedContent || (attachments.length ? 'Analise o conteúdo anexado.' : '');
   if (!content || !activeChat || (executionState !== 'idle' && executionState !== 'failed') || pendingApprovals.length) return;
-  if (executionState === 'failed') {
-    executionState = 'idle';
-    lastError = '';
-  }
+  if (isRetry && !retryContent) return;
+  if (executionState === 'failed') { executionState = 'idle'; lastError = ''; }
   const chatId = activeChat.id;
   prompt.value = '';
   prompt.style.height = '';
   streamingText = '';
   streamingActivity = [`Enviando para ${providerName(activeChat.providerId)}`];
   lastError = '';
-  activeChat.messages = [...activeChat.messages, { role: 'user', content, createdAt: Date.now() }];
+  lastSubmittedContent = content;
+  activeRunId = undefined;
+  if (!isRetry) {
+    retryContent = '';
+    activeChat.messages = [...activeChat.messages, {
+      role: 'user',
+      content,
+      createdAt: Date.now(),
+      ...(attachments.length ? { attachments } : {}),
+    }];
+    pendingAttachments = [];
+  }
   setExecutionState('running');
   try {
-    const result = await window.autoCodez.streamChat({ chatId, content });
+    const result = await window.autoCodez.streamChat({
+      chatId,
+      content,
+      ...(attachments.length ? { attachments } : {}),
+    });
     if (!activeChat || activeChat.id !== chatId) return;
     activeChat = result.chat;
-    pendingApprovals = result.pendingApprovalIds.length ? await window.autoCodez.listApprovals() : [];
+    if (result.pendingApprovalIds.length) {
+      const approvals = (await window.autoCodez.listApprovals({ chatId })).filter((approval) => approval.chatId === chatId);
+      if (!activeChat || activeChat.id !== chatId) return;
+      pendingApprovals = approvals;
+      if (approvals[0]?.runId) activeRunId = approvals[0].runId;
+    } else {
+      pendingApprovals = [];
+    }
     if (pendingApprovals.length) {
       executionState = 'waiting_approval';
       streamingText = '';
@@ -342,19 +634,32 @@ async function sendMessage(): Promise<void> {
       renderComposer();
     } else {
       executionState = 'idle';
+      activeRunId = undefined;
       streamingText = '';
       streamingActivity = [];
+      retryContent = '';
+      lastSubmittedContent = '';
       await refresh();
     }
   } catch (error) {
+    if (!activeChat || activeChat.id !== chatId) return;
+    retryContent = content;
     setExecutionState('failed', error instanceof Error ? error.message : 'Falha ao enviar mensagem.');
   }
 }
 
+async function retryLastMessage(): Promise<void> {
+  if (!activeChat || executionState !== 'failed' || pendingApprovals.length || !retryContent) return;
+  const content = retryContent;
+  await sendMessage(content, true);
+}
+
 async function resumeApproval(id: string, approve: boolean): Promise<void> {
-  if (executionState !== 'waiting_approval') return;
+  if (executionState !== 'waiting_approval' || !activeChat) return;
   const approval = pendingApprovals.find((item) => item.id === id);
-  if (!approval) return;
+  if (!approval || approval.chatId !== activeChat.id) return;
+  const chatId = activeChat.id;
+  const runId = approval.runId;
   executionState = 'running';
   pendingApprovals = pendingApprovals.filter((item) => item.id !== id);
   streamingText = '';
@@ -363,64 +668,95 @@ async function resumeApproval(id: string, approve: boolean): Promise<void> {
   renderMessages();
   renderComposer();
   try {
-    const result = approve ? await window.autoCodez.approveTool(id) : await window.autoCodez.denyTool(id);
+    const scope = { chatId, ...(runId ? { runId } : {}) };
+    const result = approve ? await window.autoCodez.approveTool(id, scope) : await window.autoCodez.denyTool(id, scope);
     if (result.chatId) {
       const chat = chats.find((item) => item.id === result.chatId);
       if (chat && result.messages) chat.messages = result.messages;
-      if (activeChat?.id === result.chatId && result.messages) activeChat.messages = result.messages;
     }
-    pendingApprovals = await window.autoCodez.listApprovals();
+    if (activeChat?.id !== chatId) return;
+    if (result.chatId === chatId && result.messages) activeChat.messages = result.messages;
+    const approvals = (await window.autoCodez.listApprovals({ chatId })).filter((item) => item.chatId === chatId && (!runId || !item.runId || item.runId === runId));
+    if (activeChat?.id !== chatId) return;
+    pendingApprovals = approvals;
     if (pendingApprovals.length) {
       executionState = 'waiting_approval';
+      activeRunId = pendingApprovals[0]?.runId || runId;
       streamingActivity = ['Outras operações ainda aguardam aprovação.'];
       renderMessages();
       renderComposer();
     } else {
       executionState = 'idle';
+      activeRunId = undefined;
       streamingText = '';
       streamingActivity = [];
+      retryContent = '';
+      lastSubmittedContent = '';
       await refresh();
     }
   } catch (error) {
-    pendingApprovals = await window.autoCodez.listApprovals().catch((): Approval[] => []);
-    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível processar a aprovação.');
+    const message = error instanceof Error ? error.message : 'Não foi possível processar a aprovação.';
+    const approvals = await window.autoCodez.listApprovals({ chatId }).catch((): Approval[] => []);
+    if (activeChat?.id !== chatId) return;
+    pendingApprovals = approvals.filter((item) => item.chatId === chatId && (!runId || !item.runId || item.runId === runId));
+    if (pendingApprovals.length) {
+      executionState = 'waiting_approval';
+      activeRunId = pendingApprovals[0]?.runId || runId;
+      streamingActivity = [message];
+      lastError = '';
+      renderMessages();
+      renderComposer();
+    } else {
+      setExecutionState('failed', message);
+    }
+  } finally {
+    window.dispatchEvent(new CustomEvent('auto-codez-approval-settled', { detail: { approvalId: id, chatId, runId } }));
   }
 }
 
 async function setComposerIntelligence(level: IntelligenceLevel): Promise<void> {
   if (!activeChat || (executionState !== 'idle' && executionState !== 'failed')) return;
+  const chatId = activeChat.id;
   const previous = composerIntelligence;
-  const previousState = executionState;
   composerIntelligence = level;
   setIntelligenceMenu(false);
   if (activeChat.intelligence === level) { renderComposer(); return; }
   try {
-    activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId: activeChat.providerId, model: activeChat.model, intelligence: level, permissionLevel: activeChat.permissionLevel });
+    const updated = await window.autoCodez.updateChatSettings({ chatId, providerId: activeChat.providerId, model: activeChat.model, intelligence: level, permissionLevel: activeChat.permissionLevel });
+    if (activeChat?.id !== chatId) return;
+    activeChat = updated;
     executionState = 'idle';
     lastError = '';
+    retryContent = '';
+    lastSubmittedContent = '';
     await refresh();
   } catch (error) {
+    if (activeChat?.id !== chatId) return;
     composerIntelligence = previous;
-    setExecutionState(previousState === 'failed' ? 'failed' : 'failed', error instanceof Error ? error.message : 'Não foi possível atualizar o perfil de raciocínio.');
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível atualizar o perfil de raciocínio.');
   }
 }
 
 async function deleteChat(chatId: string): Promise<void> {
-  if (executionState === 'running' || executionState === 'waiting_approval') return;
   if (!window.confirm('Excluir esta conversa permanentemente?')) return;
   try {
     await window.autoCodez.deleteChat(chatId);
     if (activeChat?.id === chatId) {
       activeChat = null;
+      pendingAttachments = [];
+      activeRunId = undefined;
       pendingApprovals = [];
       streamingText = '';
       streamingActivity = [];
       lastError = '';
+      retryContent = '';
+      lastSubmittedContent = '';
       executionState = 'idle';
     }
     await refresh();
   } catch (error) {
-    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível excluir o chat.');
+    if (activeChat?.id === chatId) setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível excluir o chat.');
+    else window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível excluir o chat.' }));
   }
 }
 
@@ -438,11 +774,39 @@ intelligenceMenu.addEventListener('click', async (event) => {
   if (option) await setComposerIntelligence(option.dataset.intelligenceOption as IntelligenceLevel);
 });
 
+function resizePrompt(): void {
+  const style = getComputedStyle(prompt);
+  const lineHeight = Number.parseFloat(style.lineHeight) || 20;
+  const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+  const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+  const minHeight = Math.ceil(lineHeight + paddingTop + paddingBottom);
+  const maxHeight = Math.ceil((lineHeight * 10) + paddingTop + paddingBottom);
+
+  prompt.style.setProperty('height', 'auto', 'important');
+  prompt.style.setProperty('overflow-y', 'hidden', 'important');
+  const measuredHeight = Math.max(minHeight, prompt.scrollHeight);
+  const nextHeight = Math.min(measuredHeight, maxHeight);
+  prompt.style.setProperty('height', `${nextHeight}px`, 'important');
+  prompt.style.setProperty('overflow-y', measuredHeight > maxHeight ? 'auto' : 'hidden', 'important');
+}
+
 prompt.addEventListener('input', () => {
-  prompt.style.height = 'auto';
-  prompt.style.height = `${Math.min(prompt.scrollHeight, 160)}px`;
+  resizePrompt();
   renderComposer();
 });
+document.addEventListener('paste', (event) => {
+  const clipboard = event.clipboardData;
+  if (!clipboard || !activeChat) return;
+  const itemFile = Array.from(clipboard.items)
+    .find((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    ?.getAsFile();
+  const imageFile = itemFile || Array.from(clipboard.files).find((file) => file.type.startsWith('image/'));
+  if (!imageFile) return;
+  if (executionState === 'running' || executionState === 'waiting_approval') return;
+  event.preventDefault();
+  void pasteClipboardImage(imageFile);
+});
+
 prompt.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -453,14 +817,32 @@ sendButton.addEventListener('click', () => void sendMessage());
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
   if (!target.closest('.intelligence-control')) setIntelligenceMenu(false);
+  if (!target.closest('.attachment-control')) setAttachmentMenu(false);
   const approve = target.closest<HTMLElement>('[data-approve]');
   if (approve?.dataset.approve) void resumeApproval(approve.dataset.approve, true);
   const deny = target.closest<HTMLElement>('[data-deny]');
   if (deny?.dataset.deny) void resumeApproval(deny.dataset.deny, false);
 });
 
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  setAttachmentMenu(false);
+  setIntelligenceMenu(false);
+});
+
+window.addEventListener('auto-codez-retry-message', () => { void retryLastMessage(); });
+
 app.addEventListener('click', async (event) => {
   const target = event.target as HTMLElement;
+  const removeAttachment = target.closest<HTMLElement>('[data-remove-attachment]');
+  if (removeAttachment?.dataset.removeAttachment) {
+    event.preventDefault();
+    event.stopPropagation();
+    const attachmentId = removeAttachment.dataset.removeAttachment;
+    pendingAttachments = pendingAttachments.filter((item) => item.attachment.id !== attachmentId);
+    renderComposer();
+    return;
+  }
   const panel = target.closest<HTMLElement>('[data-panel]');
   if (panel) {
     activePanel = panel.dataset.panel || 'chats';
@@ -476,24 +858,32 @@ app.addEventListener('click', async (event) => {
   }
   const settings = target.closest<HTMLElement>('[data-chat-settings]');
   if (settings) {
-    if (executionState === 'running' || executionState === 'waiting_approval') return;
     const chat = chats.find((item) => item.id === settings.dataset.chatSettings) || (activeChat?.id === settings.dataset.chatSettings ? activeChat : undefined);
     if (chat) await openChatSettings(chat);
     return;
   }
   const chatButton = target.closest<HTMLElement>('[data-chat]');
   if (chatButton) {
-    if (executionState === 'running' || executionState === 'waiting_approval') return;
-    activeChat = chats.find((chat) => chat.id === chatButton.dataset.chat) || null;
+    const nextChat = chats.find((chat) => chat.id === chatButton.dataset.chat) || null;
+    if (!nextChat) return;
+    approvalRefreshToken += 1;
+    stateRefreshToken += 1;
+    activeChat = nextChat;
+    activeRunId = undefined;
     pendingApprovals = [];
     streamingText = '';
     streamingActivity = [];
     lastError = '';
-    composerIntelligence = activeChat?.intelligence || 'normal';
+    retryContent = '';
+    lastSubmittedContent = '';
+    executionState = 'idle';
+    composerIntelligence = activeChat.intelligence;
     renderNav();
     renderHeader();
     renderMessages();
     renderComposer();
+    void refreshApprovals();
+    void refresh();
     return;
   }
   const projectButton = target.closest<HTMLElement>('[data-project]');
@@ -506,6 +896,13 @@ app.addEventListener('click', async (event) => {
     renderComposer();
     return;
   }
+  const attachmentOption = target.closest<HTMLElement>('[data-attachment-option]')?.dataset.attachmentOption;
+  if (attachmentOption === 'image' || attachmentOption === 'file') {
+    setAttachmentMenu(false);
+    await pickAttachments(attachmentOption);
+    return;
+  }
+
   const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
   if (action === 'new-chat') { closeModal(); await newChat(); return; }
   if (action === 'new-project-chat') { if (activeProjectId) await newChat(activeProjectId); return; }
@@ -514,7 +911,7 @@ app.addEventListener('click', async (event) => {
   if (action === 'ai-settings') { await openProviderSettings(); return; }
   if (action === 'close-modal') { closeModal(); return; }
   if (action === 'profile') { openModal(`<div class="modal-head"><div><div class="eyebrow">PERFIL</div><h2>Seu perfil</h2><p>O sistema de conta e sincronização será conectado em uma etapa própria.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="profile-preview"><div class="avatar">CZ</div><div><strong>Usuário local</strong><span>Configuração local do Auto CodeZ</span></div></div>`); return; }
-  if (action === 'attachments') { openModal(`<div class="modal-head"><div><div class="eyebrow">ANEXOS</div><h2>Anexar conteúdo</h2><p>Arquivos e multimídia serão conectados ao sistema de capacidades.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="attachment-options"><button>Arquivo</button><button>Imagem</button><button>Áudio</button><button>Vídeo</button></div>`); return; }
+  if (action === 'attachments') { setAttachmentMenu(!attachmentMenuOpen); return; }
 });
 
 modalRoot.addEventListener('click', async (event) => {
@@ -545,39 +942,54 @@ modalRoot.addEventListener('click', async (event) => {
   }
   if (target.id === 'save-chat-settings') {
     if (!activeChat) return;
+    const chatId = activeChat.id;
     const providerId = document.querySelector<HTMLSelectElement>('#chat-provider')?.value || activeChat.providerId;
     const model = document.querySelector<HTMLSelectElement>('#chat-model')?.value || activeChat.model;
-    const intelligenceLevel = document.querySelector<HTMLSelectElement>('#chat-intelligence')?.value || activeChat.intelligence;
     const permissionLevel = document.querySelector<HTMLSelectElement>('#chat-permission')?.value || activeChat.permissionLevel;
-    if (providerId === 'unconfigured' || !model) {
+    if (providerId === 'unconfigured' || !model) { closeModal(); await openProviderSettings(); return; }
+    try {
+      const updated = await window.autoCodez.updateChatSettings({ chatId, providerId, model, intelligence: activeChat.intelligence, permissionLevel });
+      if (activeChat?.id !== chatId) return;
+      activeChat = updated;
+      composerIntelligence = activeChat.intelligence;
       closeModal();
-      await openProviderSettings();
-      return;
+      executionState = 'idle';
+      lastError = '';
+      retryContent = '';
+      lastSubmittedContent = '';
+      await refresh();
+    } catch (error) {
+      if (activeChat?.id === chatId) setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.');
     }
-    try { activeChat = await window.autoCodez.updateChatSettings({ chatId: activeChat.id, providerId, model, intelligence: intelligenceLevel, permissionLevel }); composerIntelligence = activeChat.intelligence; closeModal(); executionState = 'idle'; lastError = ''; await refresh(); } catch (error) { setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível salvar as configurações do chat.'); }
   }
 });
 
 window.autoCodez.onStreamEvent((event) => {
+  const eventChatId = event.chatId;
+  if (eventChatId && eventChatId !== activeChat?.id) return;
+  if (!eventChatId && !activeChat) return;
   if (event.type === 'start') {
+    activeRunId = event.runId;
     executionState = 'running';
     lastError = '';
     renderComposer();
     return;
   }
+  if (event.runId && activeRunId && event.runId !== activeRunId) return;
+  if (event.runId && !activeRunId) activeRunId = event.runId;
   if (event.type === 'delta' && event.text) {
     streamingText += event.text;
-    renderMessages();
+    scheduleStreamRender();
     return;
   }
   if (event.type === 'tool_call' && event.toolCall) {
     streamingActivity.push(`Solicitou ferramenta: ${event.toolCall.name}`);
-    renderMessages();
+    scheduleStreamRender();
     return;
   }
   if (event.type === 'activity' && event.activity?.message) {
     streamingActivity.push(event.activity.message);
-    renderMessages();
+    scheduleStreamRender();
     return;
   }
   if (event.type === 'approval_required') {
@@ -586,27 +998,75 @@ window.autoCodez.onStreamEvent((event) => {
     return;
   }
   if (event.type === 'complete') {
+    executionState = 'idle';
+    activeRunId = undefined;
     streamingText = '';
+    streamingActivity = [];
+    pendingApprovals = [];
+    retryContent = '';
+    lastSubmittedContent = '';
     renderMessages();
+    renderComposer();
+    return;
+  }
+  if (event.type === 'cancelled') {
+    executionState = 'idle';
+    activeRunId = undefined;
+    streamingText = '';
+    streamingActivity = [];
+    pendingApprovals = [];
+    lastError = '';
+    retryContent = '';
+    lastSubmittedContent = '';
+    renderMessages();
+    renderComposer();
     return;
   }
   if (event.type === 'error' && event.error) {
+    retryContent = lastSubmittedContent;
     setExecutionState('failed', event.error);
   }
 });
 
 window.autoCodez.onActivity((event) => {
-  if (event.message) {
+  if (event.chatId && event.chatId !== activeChat?.id) return;
+  if (event.runId && activeRunId && event.runId !== activeRunId) return;
+  if (event.message && executionState === 'running') {
     streamingActivity.push(event.message);
-    if (executionState === 'running') renderMessages();
+    scheduleStreamRender();
   }
 });
 
-window.addEventListener('error', (event) => {
-  if (executionState === 'running' || executionState === 'waiting_approval') setExecutionState('failed', event.error instanceof Error ? event.error.message : event.message || 'Erro inesperado no renderer.');
-});
-window.addEventListener('unhandledrejection', (event) => {
-  setExecutionState('failed', event.reason instanceof Error ? event.reason.message : String(event.reason || 'Operação rejeitada.'));
+window.addEventListener('auto-codez-chat-settings-updated', (event) => {
+  const updated = (event as CustomEvent<Chat>).detail;
+  if (!updated?.id) return;
+  closeModal();
+  const index = chats.findIndex((chat) => chat.id === updated.id);
+  if (index >= 0) chats[index] = updated;
+  else chats.unshift(updated);
+  if (activeChat?.id === updated.id) {
+    activeChat = updated;
+    composerIntelligence = updated.intelligence;
+  }
+  renderNav();
+  renderHeader();
+  renderMessages();
+  renderComposer();
+  void refresh();
 });
 
-void refresh();
+window.addEventListener('error', (event) => {
+  const message = event.error instanceof Error ? event.error.message : event.message || 'Erro inesperado no renderer.';
+  console.error('[Auto CodeZ renderer]', event.error || event.message);
+  window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: message }));
+});
+window.addEventListener('unhandledrejection', (event) => {
+  const message = event.reason instanceof Error ? event.reason.message : String(event.reason || 'Operação rejeitada.');
+  console.error('[Auto CodeZ renderer promise]', event.reason);
+  window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: message }));
+});
+
+void refresh().finally(() => {
+  document.documentElement.dataset.autoCodezCoreReady = 'true';
+  window.dispatchEvent(new CustomEvent('auto-codez-core-ready'));
+});
