@@ -15,7 +15,10 @@
     "test:integration": "node -e \"require('node:fs').rmSync('.integration-dist',{recursive:true,force:true})\" && tsc -p tsconfig.integration.json && node --test .integration-dist/tests/integration/*.test.js",
     "migrate:build": "npm run build:server && node dist/migrate.js",
     "migrate": "node dist/migrate.js",
-    "start": "node dist/server.js"
+    "migrate:data:build": "npm run build:server && node dist/migrate-account-data.js",
+    "migrate:data": "node dist/migrate-account-data.js",
+    "start": "node dist/server.js",
+    "start:data": "node dist/account-data-server.js"
   },
   "dependencies": {
     "@azure/communication-email": "1.0.0",
