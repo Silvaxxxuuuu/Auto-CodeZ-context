@@ -700,15 +700,12 @@ function hide(): void {
   if (rootAfterHide) rootAfterHide.hidden = true;
 }
 
-function installStyles(): void {}
-
 function install(): void {
   const rail = document.querySelector<HTMLElement>('.rail');
   const body = document.querySelector<HTMLElement>('.body');
   const spacer = rail?.querySelector<HTMLElement>('.rail-spacer');
   if (!rail || !body || !spacer || document.getElementById(rootId)) return;
 
-  installStyles();
 
   let button = rail.querySelector<HTMLButtonElement>('[data-mcp-mode]');
   if (!button) {
