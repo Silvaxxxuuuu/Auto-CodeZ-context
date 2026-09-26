@@ -8,6 +8,7 @@ import { Database } from '../../src/db.js';
 import { DesktopSessionService } from '../../src/desktop-session.js';
 import { DesktopAuthFlowService } from '../../src/desktop-auth-flow.js';
 import { DeviceRegistryService } from '../../src/device-registry.js';
+import type { DeviceAccessVerifier } from '../../src/descope-session-verifier.js';
 
 function environment(): AccountApiEnvironment {
   const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -404,6 +405,69 @@ test('desktop account keeps multiple linked authentication identities for the sa
       [user.id],
     );
     assert.deepEqual(rows.map((row) => row.provider), ['github', 'google']);
+  } finally {
+    await database.close();
+  }
+});
+
+
+test('Device Registry accepts a Descope subject without legacy desktop account or session rows', async () => {
+  const env = environment();
+  const database = new Database(env);
+  try {
+    await migrateDesktopSchema(database);
+    await reset(database);
+
+    const verifier: DeviceAccessVerifier = {
+      async validate(token) {
+        assert.equal(token, 'descope-session-token');
+        return { userId: 'descope-user-standalone' };
+      },
+    };
+    const registry = new DeviceRegistryService(database, undefined, () => 1_800_000_000_000, verifier);
+    const context = await registry.authenticate('descope-session-token');
+    assert.deepEqual(context, { userId: 'descope-user-standalone' });
+
+    const keyPair = crypto.generateKeyPairSync('ed25519');
+    const publicKey = keyPair.publicKey.export({
+      type: 'spki',
+      format: 'pem',
+    }).toString();
+
+    const pending = await registry.beginRegistration(context, {
+      id: 'descope-device-1',
+      name: 'PC Descope',
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      publicKey,
+    });
+    const signature = crypto.sign(
+      null,
+      Buffer.from(pending.challenge, 'utf8'),
+      keyPair.privateKey,
+    ).toString('base64');
+
+    const registered = await registry.completeRegistration(context, {
+      registrationId: pending.registrationId,
+      deviceId: 'descope-device-1',
+      signature,
+    });
+    assert.equal(registered.id, 'descope-device-1');
+    assert.equal(registered.name, 'PC Descope');
+
+    const accountRows = await database.query<{ user_id: string }>(
+      'SELECT user_id FROM desktop_account WHERE user_id = $1',
+      ['descope-user-standalone'],
+    );
+    assert.deepEqual(accountRows, []);
+
+    const listed = await registry.list(context);
+    assert.deepEqual(listed.map((device) => device.id), ['descope-device-1']);
+
+    await registry.revoke(context, 'descope-device-1');
+    const revoked = await registry.list(context);
+    assert.equal(revoked[0]?.revokedAt !== undefined, true);
   } finally {
     await database.close();
   }
