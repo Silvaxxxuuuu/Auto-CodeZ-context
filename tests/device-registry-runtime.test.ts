@@ -347,6 +347,29 @@ test('DeviceRegistryRuntime preserves the local device name when remote rename f
   );
 
   assert.equal((await devices.getOrCreate()).name, before);
+  const snapshot = registry.snapshot();
+  assert.equal(snapshot.state, 'offline');
+  assert.match(snapshot.lastError ?? '', /Sem conexão/);
+});
+
+test('DeviceRegistryRuntime signs out when rename discovers the current device was revoked', async () => {
+  const { registry, adapter, devices, sessions } = await setup();
+  await registry.ensureRegistered();
+  const before = (await devices.getOrCreate()).name;
+  adapter.rename = async () => {
+    throw new DeviceRegistryAdapterError('revoked', 'Este dispositivo foi revogado no Device Registry.');
+  };
+
+  await assert.rejects(
+    registry.renameCurrent('Nome que não deve persistir'),
+    /revogado/,
+  );
+
+  assert.equal((await devices.getOrCreate()).name, before);
+  const snapshot = registry.snapshot();
+  assert.equal(snapshot.state, 'unavailable');
+  assert.match(snapshot.lastError ?? '', /revogado/);
+  assert.equal(sessions.snapshot().state, 'signed_out');
 });
 
 

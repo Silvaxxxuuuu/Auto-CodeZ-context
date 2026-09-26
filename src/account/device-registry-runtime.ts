@@ -223,9 +223,23 @@ export class DeviceRegistryRuntime {
         throw new Error(registered.lastError || 'Dispositivo ainda não foi registrado remotamente.');
       }
     }
-    await this.adapter.rename(accessToken, local.id, normalizedName);
-    await this.devices.rename(normalizedName);
-    return await this.refresh();
+    try {
+      await this.adapter.rename(accessToken, local.id, normalizedName);
+      await this.devices.rename(normalizedName);
+      return await this.refresh();
+    } catch (error) {
+      if (error instanceof DeviceRegistryAdapterError) {
+        if (error.code === 'unauthorized') void this.sessions.refreshSession();
+        else if (error.code === 'revoked') await this.sessions.logout();
+      }
+      this.setState({
+        state: registryFailureState(error),
+        devices: this.state.devices,
+        currentDeviceId: local.id,
+        lastError: error instanceof Error ? error.message : 'Falha ao renomear o dispositivo.',
+      });
+      throw error;
+    }
   }
 
   async revoke(deviceId: string): Promise<DeviceRegistrySnapshot> {
