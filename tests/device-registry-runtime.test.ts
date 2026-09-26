@@ -348,3 +348,33 @@ test('DeviceRegistryRuntime preserves the local device name when remote rename f
 
   assert.equal((await devices.getOrCreate()).name, before);
 });
+
+
+test('DeviceRegistryRuntime reports revoke connectivity failure without losing the known device list', async () => {
+  const { registry, adapter, sessions } = await setup();
+  const ready = await registry.ensureRegistered();
+  adapter.revoke = async () => {
+    throw new DeviceRegistryAdapterError('offline', 'Sem conexão para revogar o dispositivo.');
+  };
+
+  const snapshot = await registry.revoke('remote-device');
+
+  assert.equal(snapshot.state, 'offline');
+  assert.deepEqual(snapshot.devices, ready.devices);
+  assert.match(snapshot.lastError ?? '', /Sem conexão/);
+  assert.equal(sessions.snapshot().state, 'authenticated');
+});
+
+test('DeviceRegistryRuntime signs out when revoke discovers the current device was already revoked', async () => {
+  const { registry, adapter, sessions } = await setup();
+  await registry.ensureRegistered();
+  adapter.revoke = async () => {
+    throw new DeviceRegistryAdapterError('revoked', 'Este dispositivo foi revogado no Device Registry.');
+  };
+
+  const snapshot = await registry.revoke('remote-device');
+
+  assert.equal(snapshot.state, 'unavailable');
+  assert.match(snapshot.lastError ?? '', /revogado/);
+  assert.equal(sessions.snapshot().state, 'signed_out');
+});

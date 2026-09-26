@@ -234,8 +234,22 @@ export class DeviceRegistryRuntime {
     const id = deviceId.trim();
     if (!id) throw new Error('Dispositivo inválido.');
 
-    await this.adapter.revoke(accessToken, id);
-    return await this.refresh();
+    try {
+      await this.adapter.revoke(accessToken, id);
+      return await this.refresh();
+    } catch (error) {
+      if (error instanceof DeviceRegistryAdapterError) {
+        if (error.code === 'unauthorized') void this.sessions.refreshSession();
+        else if (error.code === 'revoked') await this.sessions.logout();
+      }
+      const currentDeviceId = this.state.currentDeviceId;
+      return this.setState({
+        state: registryFailureState(error),
+        devices: this.state.devices,
+        ...(currentDeviceId ? { currentDeviceId } : {}),
+        lastError: error instanceof Error ? error.message : 'Falha ao revogar o dispositivo.',
+      });
+    }
   }
 
   private setState(snapshot: DeviceRegistrySnapshot): DeviceRegistrySnapshot {
