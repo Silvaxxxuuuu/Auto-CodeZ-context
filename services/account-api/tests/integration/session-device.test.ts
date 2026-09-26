@@ -468,6 +468,18 @@ test('Device Registry accepts a Descope subject without legacy desktop account o
     await registry.revoke(context, 'descope-device-1');
     const revoked = await registry.list(context);
     assert.equal(revoked[0]?.revokedAt !== undefined, true);
+
+    await assert.rejects(
+      registry.beginRegistration(context, {
+        id: 'descope-device-1',
+        name: 'PC Descope',
+        platform: 'win32',
+        arch: 'x64',
+        appVersion: '2.0.0-test',
+        publicKey,
+      }),
+      /forbidden/,
+    );
   } finally {
     await database.close();
   }
