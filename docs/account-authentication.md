@@ -83,6 +83,24 @@ Authentication and product/account data are separate concerns.
 
 This separation allows the Account Data Service to be hosted on any suitable provider later without coupling Auto CodeZ authentication to that infrastructure.
 
+The repository contains a standalone Account Data entrypoint at `services/account-api/src/account-data-server.ts`. It exposes only `/healthz` and `/v1/devices/*`; it does not initialize Better Auth, social-provider callbacks, Magic Link, Passkey enrollment or the legacy desktop authentication routes.
+
+Standalone Account Data configuration:
+
+- `DATABASE_URL`: PostgreSQL connection string.
+- `DESCOPE_PROJECT_ID`: public Descope project identifier used as the expected token audience.
+- `DESCOPE_BASE_URL`: optional HTTPS Descope/custom-domain base URL.
+- `PORT`: optional listening port; defaults to `8080`.
+- No Descope management key or social-provider secret is required for Device Registry session validation.
+
+Operational commands from `services/account-api`:
+
+- `npm run migrate:data:build` builds the service and applies the Account Data migrations without running Better Auth migrations.
+- `npm run start:data` runs the standalone Account Data server.
+- `Dockerfile.account-data` builds a production container whose default command is the standalone Account Data server.
+
+Device requests carry the current Descope session token as a Bearer token. The service validates RS256 signature, expiration, issuer and the Descope Project ID audience against Descope public JWKS before trusting the immutable `sub` claim as the account key. Device registration additionally requires proof of possession of the device-local Ed25519 private key. A remotely revoked device cannot silently reactivate itself by repeating registration.
+
 ## Descope project requirements
 
 The desktop only needs the public Descope Project ID at runtime/build time. It never embeds a Descope management key, access key, social client secret or email-provider credential.
