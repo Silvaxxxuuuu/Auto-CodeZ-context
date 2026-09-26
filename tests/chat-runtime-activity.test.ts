@@ -155,3 +155,77 @@ test('ChatRuntime exposes one human image-analysis activity and hides local visi
   );
   assert.equal(messages.some((message) => /Preparando visão local|OCR do Windows|llama\.cpp|indexando/i.test(message)), false);
 });
+
+
+test('ChatRuntime uses concise attachment activity labels for files and mixed attachments', async () => {
+  async function activityFor(attachments: AIAttachment[]): Promise<string[]> {
+    const registry = new ProviderRegistry();
+    registry.register({
+      id: config.id,
+      displayName: config.displayName,
+      async listModels() {
+        return [{ id: 'activity-model', name: 'Activity Model', providerId: config.id, capabilities: ['text'] }];
+      },
+      async send() {
+        return {
+          content: 'Conteúdo analisado.',
+          model: 'activity-model',
+          providerId: config.id,
+        };
+      },
+    });
+
+    const activity = new ActivityRuntime();
+    const messages: string[] = [];
+    activity.subscribe((event) => messages.push(event.message));
+    const runtime = new ChatRuntime(registry, undefined, undefined, activity);
+    const attachmentChat: ChatRecord = {
+      ...chat(),
+      messages: [{
+        role: 'user',
+        content: 'Analise estes anexos.',
+        attachments,
+      }],
+    };
+
+    await runtime.send(config, attachmentChat);
+    return messages;
+  }
+
+  const file: AIAttachment = {
+    id: 'file-1',
+    kind: 'document',
+    name: 'documento.pdf',
+    mediaType: 'application/pdf',
+    size: 2048,
+    storageKey: 'b'.repeat(64),
+    sha256: 'b'.repeat(64),
+    createdAt: 1,
+    contexts: [{ kind: 'text', text: 'Conteúdo textual extraído do documento.', createdAt: 2 }],
+  };
+  const image: AIAttachment = {
+    id: 'image-2',
+    kind: 'image',
+    name: 'captura.png',
+    mediaType: 'image/png',
+    size: 1024,
+    storageKey: 'c'.repeat(64),
+    sha256: 'c'.repeat(64),
+    createdAt: 1,
+    contexts: [{ kind: 'caption', text: 'Uma captura de interface.', createdAt: 2 }],
+  };
+
+  assert.deepEqual(
+    (await activityFor([file])).filter((message) => /Analisando/.test(message)),
+    ['Analisando arquivo anexado…'],
+  );
+  assert.deepEqual(
+    (await activityFor([file, { ...file, id: 'file-2', sha256: 'd'.repeat(64), storageKey: 'd'.repeat(64) }]))
+      .filter((message) => /Analisando/.test(message)),
+    ['Analisando arquivos anexados…'],
+  );
+  assert.deepEqual(
+    (await activityFor([image, file])).filter((message) => /Analisando/.test(message)),
+    ['Analisando anexos…'],
+  );
+});
