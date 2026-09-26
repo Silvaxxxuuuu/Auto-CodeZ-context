@@ -9,6 +9,7 @@ import { createBetterAuth } from './auth.js';
 import { DesktopAuthFlowService } from './desktop-auth-flow.js';
 import { DesktopSessionService } from './desktop-session.js';
 import { DeviceRegistryService } from './device-registry.js';
+import { DescopeSessionVerifier } from './descope-session-verifier.js';
 import {
   bearerToken,
   requestHeaders,
@@ -25,7 +26,12 @@ const email = new MagicLinkEmailSender(environment);
 const auth = createBetterAuth(environment, database, email);
 const flows = new DesktopAuthFlowService(database);
 const sessions = new DesktopSessionService(database, environment);
-const devices = new DeviceRegistryService(database, environment);
+const deviceAccessVerifier = environment.descopeProjectId
+  ? new DescopeSessionVerifier(environment.descopeProjectId, {
+      baseUrl: environment.descopeBaseUrl,
+    })
+  : undefined;
+const devices = new DeviceRegistryService(database, environment, Date.now, deviceAccessVerifier);
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
