@@ -30,7 +30,7 @@ export interface CompleteDeviceRegistrationInput {
   signature: string;
 }
 
-export type DeviceRegistryAdapterErrorCode = 'offline' | 'unauthorized' | 'server' | 'not_configured';
+export type DeviceRegistryAdapterErrorCode = 'offline' | 'unauthorized' | 'revoked' | 'server' | 'not_configured';
 
 export class DeviceRegistryAdapterError extends Error {
   constructor(
