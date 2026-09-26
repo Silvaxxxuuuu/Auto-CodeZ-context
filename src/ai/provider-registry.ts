@@ -25,6 +25,7 @@ function withSourceCollection(adapter: AIProviderAdapter): AIProviderAdapter {
     displayName: adapter.displayName,
     requiresApiKey: adapter.requiresApiKey,
     fallbackCapabilities: adapter.fallbackCapabilities,
+    fallbackCapabilitiesForModel: adapter.fallbackCapabilitiesForModel,
     listModels: (config) => adapter.listModels(config),
     send: async (config, request, signal) => withCollectedSources(await adapter.send(config, request, signal), request, adapter.id),
   };

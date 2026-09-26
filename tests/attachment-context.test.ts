@@ -40,10 +40,11 @@ test('text-only models receive derived image context instead of pretending to se
   assert.match(delivery.text, /Tela de erro do aplicativo/);
 });
 
-test('unindexed attachments are explicit instead of silently disappearing', () => {
+test('unindexed image attachments stay explicit without leaking filename hints', () => {
   const context = attachmentFallbackContext([image()], ['text']);
 
-  assert.match(context, /screenshot\.png/);
+  assert.match(context, /Imagem anexada/);
+  assert.doesNotMatch(context, /screenshot\.png/);
   assert.match(context, /ainda não foi indexado/);
 });
 

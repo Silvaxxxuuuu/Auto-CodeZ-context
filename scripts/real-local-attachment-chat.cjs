@@ -309,6 +309,22 @@ function hitsFor(answer) {
 }
 
 async function testPasteAndAnswer(chatId, sourcePath) {
+  const attachButton = page.locator('[data-action="attachments"]');
+  await attachButton.click();
+  const attachMenu = page.locator('#attachment-menu');
+  await attachMenu.waitFor({ state: 'visible', timeout: 5_000 });
+  await attachMenu.getByRole('menuitem', { name: /Imagens/i }).waitFor();
+  await attachMenu.getByRole('menuitem', { name: /Arquivos/i }).waitFor();
+  if (await attachMenu.getByRole('menuitem').count() !== 2) {
+    throw new Error('Menu de anexos deve conter somente Imagens e Arquivos nesta versão.');
+  }
+  await page.screenshot({
+    path: path.join(outputDir, 'funcional-menu-anexos.png'),
+    animations: 'disabled',
+  });
+  await page.keyboard.press('Escape');
+  await attachMenu.waitFor({ state: 'hidden', timeout: 5_000 });
+
   putImageOnClipboard(sourcePath);
   const prompt = page.locator('#prompt');
   await prompt.click();
