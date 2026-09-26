@@ -286,3 +286,18 @@ test('DeviceRegistryRuntime reports adapter connectivity failures as offline', a
   assert.equal(snapshot.state, 'offline');
   assert.match(snapshot.lastError ?? '', /Sem conexão/);
 });
+
+
+test('DeviceRegistryRuntime signs out instead of refreshing forever when current device was revoked', async () => {
+  const { registry, adapter, sessions } = await setup();
+  adapter.beginRegistration = async () => {
+    throw new DeviceRegistryAdapterError('revoked', 'Este dispositivo foi revogado no Device Registry.');
+  };
+
+  const snapshot = await registry.ensureRegistered();
+
+  assert.equal(snapshot.state, 'unavailable');
+  assert.match(snapshot.lastError ?? '', /revogado/);
+  assert.equal(sessions.snapshot().state, 'signed_out');
+  assert.equal(adapter.beginCalls, 0);
+});
