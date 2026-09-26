@@ -41,7 +41,7 @@ function normalizeDeviceName(value: string): string {
 function registryFailureState(error: unknown): 'offline' | 'error' | 'unavailable' {
   if (!(error instanceof DeviceRegistryAdapterError)) return 'error';
   if (error.code === 'offline') return 'offline';
-  if (error.code === 'not_configured') return 'unavailable';
+  if (error.code === 'not_configured' || error.code === 'revoked') return 'unavailable';
   return 'error';
 }
 
@@ -161,8 +161,9 @@ export class DeviceRegistryRuntime {
 
       return await this.refresh();
     } catch (error) {
-      if (error instanceof DeviceRegistryAdapterError && error.code === 'unauthorized') {
-        void this.sessions.refreshSession();
+      if (error instanceof DeviceRegistryAdapterError) {
+        if (error.code === 'unauthorized') void this.sessions.refreshSession();
+        else if (error.code === 'revoked') void this.sessions.logout();
       }
       return this.setState({
         state: registryFailureState(error),
@@ -195,8 +196,9 @@ export class DeviceRegistryRuntime {
         currentDeviceId: localDevice.id,
       });
     } catch (error) {
-      if (error instanceof DeviceRegistryAdapterError && error.code === 'unauthorized') {
-        void this.sessions.refreshSession();
+      if (error instanceof DeviceRegistryAdapterError) {
+        if (error.code === 'unauthorized') void this.sessions.refreshSession();
+        else if (error.code === 'revoked') void this.sessions.logout();
       }
       return this.setState({
         state: registryFailureState(error),
