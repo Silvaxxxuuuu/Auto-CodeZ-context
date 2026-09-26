@@ -119,7 +119,12 @@ export class ModelResolver {
     const cached = this.cache.get(this.cacheKey(config))?.models.find((model) => model.id === modelId);
     if (cached) return cloneModel(cached);
     const adapter = this.registry.get(config.id);
-    const capabilities = adapter.fallbackCapabilities?.length ? [...adapter.fallbackCapabilities] : [...DEFAULT_FALLBACK_CAPABILITIES];
+    const inferred = adapter.fallbackCapabilitiesForModel?.(modelId);
+    const capabilities = inferred?.length
+      ? [...inferred]
+      : adapter.fallbackCapabilities?.length
+        ? [...adapter.fallbackCapabilities]
+        : [...DEFAULT_FALLBACK_CAPABILITIES];
     return {
       id: modelId,
       name: modelId,

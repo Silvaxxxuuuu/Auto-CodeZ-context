@@ -203,7 +203,7 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
       '--alias', AUTO_CODEZ_VISION_MODEL.id,
       '--host', '127.0.0.1',
       '--port', String(port),
-      '--ctx-size', '4096',
+      '--ctx-size', '2048',
       '--jinja',
     ], {
       windowsHide: true,
@@ -249,6 +249,10 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
     }
 
     let indexed = attachment;
+    const captionAvailable = Boolean(indexed.contexts?.some((context) => context.kind === 'caption' && context.text.trim()));
+    if (captionAvailable) return indexed;
+
+    const serverReady = this.ensureServer(signal, onProgress);
     let ocrAvailable = Boolean(indexed.contexts?.some((context) => context.kind === 'ocr' && context.text.trim()));
     if (process.platform === 'win32' && !ocrAvailable) {
       onProgress?.({ message: `Lendo texto de ${attachment.name} com OCR do Windows.` });
@@ -270,12 +274,9 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
       }
     }
 
-    const captionAvailable = Boolean(indexed.contexts?.some((context) => context.kind === 'caption' && context.text.trim()));
-    if (captionAvailable) return indexed;
-
     let endpoint: string;
     try {
-      endpoint = await this.ensureServer(signal, onProgress);
+      endpoint = await serverReady;
     } catch (error) {
       if (ocrAvailable) return indexed;
       throw error;
@@ -287,13 +288,13 @@ export class ManagedVisionAttachmentIndexer implements AttachmentIndexer {
       body: JSON.stringify({
         model: AUTO_CODEZ_VISION_MODEL.id,
         temperature: 0,
-        max_tokens: 1400,
+        max_tokens: 384,
         messages: [{
           role: 'user',
           content: [
             {
               type: 'text',
-              text: 'Create a dense factual representation of this image for another AI. Include every legible text verbatim, UI controls, code, errors, numbers, status indicators, visible objects, layout and spatial relationships. Do not guess hidden information. Plain text only.',
+              text: 'Describe this image accurately for another AI. Prioritize distinctive visible subjects, objects, clothing, symbols, scene, layout and spatial relationships. Include important legible text verbatim. If a specific person, character or work is not visually certain, describe discriminative features instead of guessing an identity. Do not infer from filenames or hidden metadata. Plain text only.',
             },
             { type: 'image_url', image_url: { url: imageDataUrl(indexed) } },
           ],

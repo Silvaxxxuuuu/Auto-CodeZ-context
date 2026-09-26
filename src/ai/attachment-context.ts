@@ -23,6 +23,7 @@ function bestDerivedContext(contexts: AIAttachmentContext[] | undefined): string
 }
 
 function attachmentLabel(attachment: AIAttachment): string {
+  if (attachment.kind === 'image') return `[Imagem anexada · ${attachment.mediaType} · ${attachment.size} bytes]`;
   return `[Anexo: ${attachment.name} · ${attachment.mediaType} · ${attachment.size} bytes]`;
 }
 

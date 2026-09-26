@@ -545,6 +545,13 @@ async function fetchFoundryWithRateLimitRetry(
 export class AzureOpenAIAdapter implements AIProviderAdapter {
   readonly id = 'azure-openai';
   readonly displayName = 'Azure Foundry';
+  readonly fallbackCapabilitiesForModel = (modelId: string): AIModel['capabilities'] => [
+    'text',
+    'streaming',
+    'tools',
+    ...(supportsReasoning(modelId) ? ['reasoning' as const] : []),
+    ...(supportsVision(modelId) ? ['vision' as const] : []),
+  ];
 
   async listModels(config: AIProviderConfig): Promise<AIModel[]> {
     const response = await fetchWithTimeout(

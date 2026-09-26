@@ -208,3 +208,14 @@
   .intelligence-current { display: none !important; }
   .ac-empty-chat { margin-top: 13vh; }
 }
+
+.attachment-control{position:relative;display:flex;align-items:center;align-self:center}
+.attachment-menu{position:absolute;left:2px;bottom:46px;z-index:80;width:238px;padding:6px;border:1px solid #29313c;border-radius:12px;background:#0f141b;box-shadow:0 18px 48px #0009}
+.attachment-menu[hidden]{display:none}
+.attachment-option{width:100%;display:flex;align-items:center;gap:10px;padding:9px;border:0;border-radius:8px;background:transparent;color:#dce2e9;text-align:left;cursor:pointer}
+.attachment-option:hover,.attachment-option:focus-visible{background:#181f28;outline:none}
+.attachment-option>span:last-child{display:flex;min-width:0;flex-direction:column;gap:2px}
+.attachment-option strong{font-size:10.5px;font-weight:650;color:#e7ecf2}.attachment-option small{font-size:8.75px;line-height:1.35;color:#687585}
+.attachment-option-icon{width:28px;height:28px;flex:none;border:1px solid #2a3440;border-radius:8px;background:#141b23;position:relative}
+.attachment-option-icon:before{content:"+";position:absolute;inset:0;display:grid;place-items:center;color:#aeb9c6;font:500 17px/1 Inter,system-ui,sans-serif}
+.attach-button.open{background:#1a212a!important;color:#edf2f7!important}

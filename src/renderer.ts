@@ -109,6 +109,7 @@ let activePanel = 'chats';
 let activeProjectId: string | undefined;
 let composerIntelligence: IntelligenceLevel = 'normal';
 let intelligenceMenuOpen = false;
+let attachmentMenuOpen = false;
 let executionState: ExecutionState = 'idle';
 let activeRunId: string | undefined;
 let streamingText = '';
@@ -150,7 +151,13 @@ app.innerHTML = `
       <section class="composer-wrap">
         <div class="attachment-tray" id="attachment-tray" hidden></div>
         <div class="composer">
-          <button class="attach-button" data-action="attachments" title="Anexar conteúdo" aria-label="Anexar conteúdo"></button>
+          <div class="attachment-control">
+            <button class="attach-button" data-action="attachments" title="Anexar conteúdo" aria-label="Anexar conteúdo" aria-haspopup="menu" aria-expanded="false"></button>
+            <div class="attachment-menu" id="attachment-menu" role="menu" hidden>
+              <button type="button" class="attachment-option" data-attachment-option="image" role="menuitem"><span class="attachment-option-icon image" aria-hidden="true"></span><span><strong>Imagens</strong><small>Escolher imagens e arquivos gráficos</small></span></button>
+              <button type="button" class="attachment-option" data-attachment-option="file" role="menuitem"><span class="attachment-option-icon file" aria-hidden="true"></span><span><strong>Arquivos</strong><small>Escolher qualquer arquivo</small></span></button>
+            </div>
+          </div>
           <textarea id="prompt" rows="1" placeholder="Digite uma mensagem..." aria-label="Mensagem"></textarea>
           <div class="composer-divider" aria-hidden="true"></div>
           <div class="intelligence-control">
@@ -179,6 +186,8 @@ const messages = document.querySelector<HTMLElement>('#messages')!;
 const prompt = document.querySelector<HTMLTextAreaElement>('#prompt')!;
 const sendButton = document.querySelector<HTMLButtonElement>('#send-button')!;
 const attachmentTray = document.querySelector<HTMLDivElement>('#attachment-tray')!;
+const attachmentButton = document.querySelector<HTMLButtonElement>('[data-action="attachments"]')!;
+const attachmentMenu = document.querySelector<HTMLDivElement>('#attachment-menu')!;
 const intelligenceButton = document.querySelector<HTMLButtonElement>('#intelligence-button')!;
 const intelligenceMenu = document.querySelector<HTMLDivElement>('#intelligence-menu')!;
 const modalRoot = document.querySelector<HTMLDivElement>('#modal-root')!;
@@ -382,6 +391,13 @@ function renderStreamingDom(): void {
   if (wasNearBottom || executionState === 'running') messages.scrollTop = messages.scrollHeight;
 }
 
+function setAttachmentMenu(open: boolean): void {
+  attachmentMenuOpen = open;
+  attachmentMenu.hidden = !open;
+  attachmentButton.setAttribute('aria-expanded', String(open));
+  attachmentButton.classList.toggle('open', open);
+}
+
 function setIntelligenceMenu(open: boolean): void {
   intelligenceMenuOpen = open;
   intelligenceMenu.hidden = !open;
@@ -456,7 +472,8 @@ function renderComposer(): void {
   sendButton.dataset.executionLocked = String(busy);
   sendButton.disabled = !activeChat || (!prompt.value.trim() && pendingAttachments.length === 0) || busy || pendingApprovals.length > 0;
   prompt.disabled = busy;
-  document.querySelector<HTMLButtonElement>('[data-action="attachments"]')?.toggleAttribute('disabled', busy || !activeChat);
+  attachmentButton.toggleAttribute('disabled', busy || !activeChat);
+  if (busy || !activeChat) setAttachmentMenu(false);
   renderAttachmentTray();
   resizePrompt();
   renderIntelligenceMenu();
@@ -800,10 +817,17 @@ sendButton.addEventListener('click', () => void sendMessage());
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
   if (!target.closest('.intelligence-control')) setIntelligenceMenu(false);
+  if (!target.closest('.attachment-control')) setAttachmentMenu(false);
   const approve = target.closest<HTMLElement>('[data-approve]');
   if (approve?.dataset.approve) void resumeApproval(approve.dataset.approve, true);
   const deny = target.closest<HTMLElement>('[data-deny]');
   if (deny?.dataset.deny) void resumeApproval(deny.dataset.deny, false);
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  setAttachmentMenu(false);
+  setIntelligenceMenu(false);
 });
 
 window.addEventListener('auto-codez-retry-message', () => { void retryLastMessage(); });
@@ -872,6 +896,13 @@ app.addEventListener('click', async (event) => {
     renderComposer();
     return;
   }
+  const attachmentOption = target.closest<HTMLElement>('[data-attachment-option]')?.dataset.attachmentOption;
+  if (attachmentOption === 'image' || attachmentOption === 'file') {
+    setAttachmentMenu(false);
+    await pickAttachments(attachmentOption);
+    return;
+  }
+
   const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
   if (action === 'new-chat') { closeModal(); await newChat(); return; }
   if (action === 'new-project-chat') { if (activeProjectId) await newChat(activeProjectId); return; }
@@ -880,7 +911,7 @@ app.addEventListener('click', async (event) => {
   if (action === 'ai-settings') { await openProviderSettings(); return; }
   if (action === 'close-modal') { closeModal(); return; }
   if (action === 'profile') { openModal(`<div class="modal-head"><div><div class="eyebrow">PERFIL</div><h2>Seu perfil</h2><p>O sistema de conta e sincronização será conectado em uma etapa própria.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="profile-preview"><div class="avatar">CZ</div><div><strong>Usuário local</strong><span>Configuração local do Auto CodeZ</span></div></div>`); return; }
-  if (action === 'attachments') { await pickAttachments('file'); return; }
+  if (action === 'attachments') { setAttachmentMenu(!attachmentMenuOpen); return; }
 });
 
 modalRoot.addEventListener('click', async (event) => {

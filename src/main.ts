@@ -81,6 +81,10 @@ declare const __AUTO_CODEZ_DESCOPE_PROJECT_ID__: string;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const storage = new LocalStorage();
 const attachmentStore = new AttachmentStore(() => path.join(app.getPath('userData'), 'attachments'));
+const CHAT_IMAGE_PICKER_EXTENSIONS = [
+  'png','jpg','jpeg','jpe','jfif','gif','svg','webp','avif','apng','heic','heif','tif','tiff','bmp','ico','tga','exr','dds',
+  'raw','dng','cr2','cr3','nef','arw','orf','rw2','raf','psd','ai','eps','pdf','indd','cdr','jp2','j2k','jxl','hdr','xcf',
+] as const;
 const attachmentVisionRoot = (): string => {
   const testRoot = process.env.AUTO_CODEZ_VISUAL_TEST === '1'
     ? process.env.AUTO_CODEZ_TEST_ATTACHMENT_VISION_ROOT?.trim()
@@ -968,11 +972,8 @@ ipcMain.handle('chat-attachments:pick', async (_event, kindInput?: unknown) => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile', 'multiSelections'],
       filters: kind === 'image'
-        ? [{ name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif'] }]
-        : [
-            { name: 'Arquivos suportados', extensions: ['txt','md','json','js','jsx','ts','tsx','css','html','xml','yaml','yml','toml','ini','csv','log','sql','sh','ps1','py','java','c','cpp','h','hpp','cs','go','rs','pdf','docx','pptx','xlsx','odt','ods','odp','png','jpg','jpeg','webp','gif','bmp','avif'] },
-            { name: 'Todos os arquivos', extensions: ['*'] },
-          ],
+        ? [{ name: 'Imagens e arquivos gráficos', extensions: [...CHAT_IMAGE_PICKER_EXTENSIONS] }]
+        : [{ name: 'Todos os arquivos', extensions: ['*'] }],
     });
     if (result.canceled || result.filePaths.length === 0) return [];
     filePaths = result.filePaths;

@@ -16,7 +16,7 @@ const TEXT_EXTENSIONS = new Set([
   '.vue','.svelte','.astro','.graphql','.gql','.proto','.gradle','.properties',
   '.gitignore','.gitattributes','.editorconfig',
 ]);
-const IMAGE_EXTENSIONS = new Set(['.png','.jpg','.jpeg','.webp','.gif','.bmp','.avif']);
+const IMAGE_EXTENSIONS = new Set(['.png','.jpg','.jpeg','.jpe','.jfif','.webp','.gif','.bmp','.avif','.apng','.heic','.heif','.tif','.tiff','.ico']);
 const OFFICE_EXTENSIONS = new Set(['.docx','.pptx','.xlsx','.odt','.ods','.odp']);
 const AUDIO_EXTENSIONS = new Set(['.mp3','.wav','.ogg','.m4a','.aac','.flac','.opus']);
 const VIDEO_EXTENSIONS = new Set(['.mp4','.webm','.mov','.mkv','.avi','.m4v']);
@@ -24,8 +24,13 @@ const VIDEO_EXTENSIONS = new Set(['.mp4','.webm','.mov','.mkv','.avi','.m4v']);
 function mimeFromExtension(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   const map: Record<string, string> = {
-    '.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp',
-    '.gif':'image/gif','.bmp':'image/bmp','.avif':'image/avif',
+    '.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.jpe':'image/jpeg','.jfif':'image/jpeg','.webp':'image/webp',
+    '.gif':'image/gif','.bmp':'image/bmp','.avif':'image/avif','.apng':'image/apng','.heic':'image/heic','.heif':'image/heif',
+    '.tif':'image/tiff','.tiff':'image/tiff','.ico':'image/x-icon','.tga':'image/x-tga','.exr':'image/x-exr','.dds':'image/vnd-ms.dds',
+    '.psd':'image/vnd.adobe.photoshop','.ai':'application/postscript','.eps':'application/postscript','.indd':'application/x-indesign',
+    '.cdr':'application/vnd.corel-draw','.dng':'image/x-adobe-dng','.cr2':'image/x-canon-cr2','.cr3':'image/x-canon-cr3',
+    '.nef':'image/x-nikon-nef','.arw':'image/x-sony-arw','.orf':'image/x-olympus-orf','.rw2':'image/x-panasonic-rw2',
+    '.raf':'image/x-fuji-raf','.jp2':'image/jp2','.j2k':'image/jp2','.jxl':'image/jxl','.hdr':'image/vnd.radiance','.xcf':'image/x-xcf',
     '.pdf':'application/pdf','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','.odt':'application/vnd.oasis.opendocument.text','.ods':'application/vnd.oasis.opendocument.spreadsheet','.odp':'application/vnd.oasis.opendocument.presentation','.json':'application/json','.csv':'text/csv',
     '.html':'text/html','.htm':'text/html','.xml':'application/xml','.svg':'image/svg+xml',
     '.md':'text/markdown','.txt':'text/plain','.yaml':'application/yaml','.yml':'application/yaml',
@@ -38,7 +43,7 @@ function mimeFromExtension(filePath: string): string {
 
 function kindFrom(filePath: string, mediaType: string): AIAttachmentKind {
   const ext = path.extname(filePath).toLowerCase();
-  if (mediaType.startsWith('image/') && ext !== '.svg') return 'image';
+  if (IMAGE_EXTENSIONS.has(ext)) return 'image';
   if (mediaType.startsWith('audio/') || AUDIO_EXTENSIONS.has(ext)) return 'audio';
   if (mediaType.startsWith('video/') || VIDEO_EXTENSIONS.has(ext)) return 'video';
   if (mediaType.startsWith('text/') || TEXT_EXTENSIONS.has(ext) || ext === '.svg') return 'text';
