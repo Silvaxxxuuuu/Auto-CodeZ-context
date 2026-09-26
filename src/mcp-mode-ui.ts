@@ -1,3 +1,5 @@
+import './mcp-mode-ui.css';
+
 type LedgerState = 'pending' | 'running' | 'waiting' | 'success' | 'failed' | 'cancelled';
 type LedgerCategory = 'execution' | 'tool' | 'approval' | 'plugin' | 'job' | 'artifact' | 'test' | 'web' | 'system';
 
@@ -86,14 +88,16 @@ const selectedClients = (() => {
   return new Set<McpClientId>(['chatgpt']);
 })();
 let showAdvanced = false;
+let selectedConnectionId: McpClientId | '' = '';
+let connectPanelOpen = false;
 
-const MCP_CLIENTS: Array<{ id: McpClientId; name: string; detail: string; badge: string }> = [
-  { id: 'chatgpt', name: 'ChatGPT', detail: 'Plugin com Secure MCP Tunnel', badge: 'Configuração guiada' },
-  { id: 'codex', name: 'ChatGPT Codex', detail: 'MCP local no app, CLI ou extensão', badge: 'Conexão local' },
-  { id: 'claude-desktop', name: 'Claude Desktop', detail: 'Integração local MCP no aplicativo', badge: 'Configuração guiada' },
-  { id: 'claude-code', name: 'Claude Code', detail: 'MCP local pelo ambiente de desenvolvimento', badge: 'Conexão local' },
-  { id: 'cursor', name: 'Cursor', detail: 'Servidor MCP no editor', badge: 'Conexão local' },
-  { id: 'other', name: 'Outro cliente MCP', detail: 'Use com clientes compatíveis com MCP', badge: 'Configuração manual' },
+const MCP_CLIENTS: Array<{ id: McpClientId; name: string; detail: string; badge: string; description: string; mark: string }> = [
+  { id: 'chatgpt', name: 'ChatGPT', detail: 'Secure MCP Tunnel', badge: 'Configuração guiada', description: 'Permite que o ChatGPT use as ferramentas autorizadas do Auto CodeZ com sua aprovação local.', mark: 'C' },
+  { id: 'codex', name: 'ChatGPT Codex', detail: 'App, CLI ou extensão', badge: 'Conexão local', description: 'Conecte o Codex ao workspace para ler contexto e executar ferramentas MCP autorizadas.', mark: 'X' },
+  { id: 'claude-desktop', name: 'Claude Desktop', detail: 'Aplicativo desktop', badge: 'Configuração guiada', description: 'Disponibilize as ferramentas do Auto CodeZ para conversas e agentes no Claude Desktop.', mark: 'A' },
+  { id: 'claude-code', name: 'Claude Code', detail: 'Ambiente de desenvolvimento', badge: 'Conexão local', description: 'Use o MCP do Auto CodeZ diretamente em tarefas executadas pelo Claude Code.', mark: 'CC' },
+  { id: 'cursor', name: 'Cursor', detail: 'Editor de código', badge: 'Conexão local', description: 'Conecte o Cursor para usar ferramentas e contexto do Auto CodeZ durante o desenvolvimento.', mark: '⌁' },
+  { id: 'other', name: 'Outro cliente MCP', detail: 'Cliente compatível', badge: 'Configuração manual', description: 'Conecte outro aplicativo compatível com MCP usando a configuração avançada do Auto CodeZ.', mark: 'M' },
 ];
 
 function escapeHtml(value: unknown): string {
@@ -374,6 +378,154 @@ function renderClientInstructions(client: McpClientId): string {
   return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">M</span><div><strong>Outro cliente MCP</strong><small>Configuração manual</small></div></div><p>Adicione um servidor MCP usando os dados de conexão local mostrados em <b>Configuração avançada</b>. Se o seu cliente exigir um formato específico, consulte a documentação dele.</p></article>`;
 }
 
+function clientDefinition(id: McpClientId) {
+  return MCP_CLIENTS.find((client) => client.id === id)!;
+}
+
+function eventMatchesClient(event: LedgerEvent, client: McpClientId): boolean {
+  const value = `${event.clientId ?? ''} ${event.providerId ?? ''}`.toLowerCase();
+  if (!value.trim()) return false;
+  if (client === 'chatgpt') return /chatgpt|openai/.test(value);
+  if (client === 'codex') return /codex/.test(value);
+  if (client === 'claude-desktop') return /claude desktop|claude-desktop/.test(value);
+  if (client === 'claude-code') return /claude code|claude-code/.test(value);
+  if (client === 'cursor') return /cursor/.test(value);
+  return MCP_CLIENTS.every((item) => item.id === 'other' || !eventMatchesClient(event, item.id));
+}
+
+function clientEvents(client: McpClientId): LedgerEvent[] {
+  return mcpActivityEvents().filter((event) => eventMatchesClient(event, client));
+}
+
+function clientPublicState(client: McpClientId): { label: string; tone: string; detail: string } {
+  const latest = clientEvents(client).at(-1);
+  if (latest?.state === 'failed') return { label: 'Precisa de atenção', tone: 'attention', detail: latest.error || latest.summary };
+  if (latest?.state === 'running' || latest?.state === 'waiting' || latest?.state === 'pending') {
+    return { label: latest.state === 'running' ? 'Em uso agora' : 'Aguardando aprovação', tone: latest.state === 'running' ? 'active' : 'waiting', detail: latest.summary };
+  }
+  if (latest) return { label: 'Conectado', tone: 'connected', detail: `Última atividade às ${formatTime(latest.timestamp)}` };
+  if (client === 'chatgpt' && tunnelStatus.ready) return { label: 'Conectado', tone: 'connected', detail: 'Secure MCP Tunnel pronto' };
+  if (gatewayStatus.running && gatewayPreflight) return { label: 'Pronto para conectar', tone: 'ready', detail: `${gatewayPreflight.toolCount} ferramentas disponíveis` };
+  return { label: 'Configurado', tone: 'configured', detail: 'Conclua a conexão no aplicativo escolhido' };
+}
+
+function renderConnectionCard(client: (typeof MCP_CLIENTS)[number], configured: boolean): string {
+  const state = configured ? clientPublicState(client.id) : { label: 'Disponível', tone: 'available', detail: client.detail };
+  return `<article class="mcp-connection-card ${configured ? 'configured' : 'available'}" data-mcp-connection-card="${client.id}">
+    <div class="mcp-connection-card-top">
+      <span class="mcp-client-logo" aria-hidden="true">${escapeHtml(client.mark)}</span>
+      <span class="mcp-status-pill ${escapeHtml(state.tone)}"><i></i>${escapeHtml(state.label)}</span>
+    </div>
+    <div class="mcp-connection-card-copy">
+      <h3>${escapeHtml(client.name)}</h3>
+      <p>${escapeHtml(client.description)}</p>
+    </div>
+    <div class="mcp-connection-card-meta"><span>${escapeHtml(state.detail)}</span><span>${escapeHtml(client.badge)}</span></div>
+    <div class="mcp-connection-card-actions">
+      ${configured
+        ? `<button class="mcp-text-action" type="button" data-mcp-open-connection="${client.id}">Ver ferramentas</button>`
+        : `<button class="mcp-primary-action compact" type="button" data-mcp-connect-client="${client.id}">Conectar ${escapeHtml(client.name)}</button>`}
+    </div>
+  </article>`;
+}
+
+function renderTechnicalPanels(): string {
+  return `<div class="mcp-advanced-stack">
+    <section class="mcp-gateway-card ${gatewayStatus.running ? 'running' : ''}">
+      <div class="mcp-gateway-copy">
+        <div class="mcp-section-label">Gateway local</div>
+        <strong>${gatewayStatus.running ? 'Ativo somente neste computador' : 'Desligado'}</strong>
+        <span>${gatewayStatus.running ? `${escapeHtml(gatewayStatus.endpoint)} · MCP 2026-07-28` : 'Nenhuma porta local é aberta até você iniciar explicitamente.'}</span>
+        ${gatewayStatus.running && gatewayToken ? `<code>Bearer ${escapeHtml(gatewayToken)}</code>` : gatewayStatus.running ? '<small>O token é temporário e não é persistido.</small>' : ''}
+        ${gatewayPreflight ? `<small class="mcp-gateway-preflight-ok">Preflight OK · MCP ${escapeHtml(gatewayPreflight.protocolVersion)} · ${gatewayPreflight.toolCount} tools · ${gatewayPreflight.writeToolCount} write</small>` : ''}
+        ${gatewayPreflightError ? `<div class="mcp-gateway-preflight-error">${escapeHtml(gatewayPreflightError)}</div>` : ''}
+      </div>
+      <div class="mcp-gateway-actions">
+        ${gatewayStatus.running ? '<button data-mcp-gateway-preflight>Verificar gateway</button>' : ''}
+        ${gatewayStatus.running && gatewayToken ? '<button data-mcp-copy-gateway>Copiar conexão local</button>' : ''}
+        <button class="${gatewayStatus.running ? 'danger' : 'primary'}" data-mcp-gateway-toggle>${gatewayStatus.running ? 'Desligar gateway' : 'Iniciar gateway local'}</button>
+      </div>
+    </section>
+    <section class="mcp-tunnel-card ${tunnelStatus.ready ? 'ready' : tunnelStatus.running ? 'running' : ''}">
+      <div class="mcp-tunnel-copy">
+        <div class="mcp-section-label">Secure MCP Tunnel</div>
+        <strong>${tunnelStatus.ready ? 'Conectado e pronto' : tunnelStatus.running ? 'Inicializando…' : 'Somente quando necessário'}</strong>
+        <span>${tunnelStatus.ready
+          ? `${escapeHtml(tunnelStatus.tunnelId || '')}${tunnelStatus.version ? ` · tunnel-client ${escapeHtml(tunnelStatus.version)}` : ''}`
+          : 'Use para clientes que precisam alcançar o MCP local por um túnel protegido.'}</span>
+        ${tunnelDoctorResult ? `<small>${escapeHtml(tunnelDoctorResult)}</small>` : ''}
+        ${tunnelStatus.error || tunnelError ? `<div class="mcp-tunnel-error">${escapeHtml(tunnelStatus.error || tunnelError)}</div>` : ''}
+      </div>
+      <div class="mcp-tunnel-controls">
+        ${tunnelStatus.running
+          ? '<button class="danger" type="button" data-mcp-tunnel-stop>Desconectar tunnel</button>'
+          : `<input type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="Tunnel ID" value="${escapeHtml(tunnelIdDraft)}" data-mcp-tunnel-id aria-label="Tunnel ID">
+             <input type="password" maxlength="8192" autocomplete="new-password" placeholder="${tunnelStatus.credentialAvailable ? 'Credencial detectada no ambiente' : 'Chave do control plane'}" data-mcp-tunnel-key aria-label="Chave do control plane">
+             <button type="button" data-mcp-tunnel-doctor ${gatewayStatus.running ? '' : 'disabled'}>Testar tunnel</button>
+             <button class="primary" type="button" data-mcp-tunnel-start ${gatewayStatus.running ? '' : 'disabled'}>Conectar tunnel</button>`}
+      </div>
+    </section>
+  </div>`;
+}
+
+function renderConnectionDetail(root: HTMLElement, clientId: McpClientId): void {
+  const client = clientDefinition(clientId);
+  const state = clientPublicState(clientId);
+  const related = clientEvents(clientId).slice(-8).reverse();
+  const pending = relevantApprovals();
+  const toolCount = gatewayPreflight?.toolCount ?? 0;
+  const writeCount = gatewayPreflight?.writeToolCount ?? 0;
+  root.innerHTML = `<section class="mcp-detail-page" data-mcp-connection-detail="${client.id}">
+    <header class="mcp-detail-header">
+      <button class="mcp-back-button" type="button" data-mcp-back-hub aria-label="Voltar para MCP Mode"><span>←</span>MCP Mode</button>
+      <div class="mcp-detail-header-actions"><button class="mcp-icon-action" type="button" data-mcp-refresh aria-label="Atualizar status" title="Atualizar status">↻</button></div>
+    </header>
+    <main class="mcp-detail-content">
+      <section class="mcp-detail-hero">
+        <span class="mcp-client-logo large" aria-hidden="true">${escapeHtml(client.mark)}</span>
+        <div class="mcp-detail-identity"><span class="mcp-detail-eyebrow">CONEXÃO MCP</span><h1>${escapeHtml(client.name)}</h1><p>${escapeHtml(client.description)}</p><span class="mcp-status-pill ${escapeHtml(state.tone)}"><i></i>${escapeHtml(state.label)}</span></div>
+      </section>
+      <div class="mcp-detail-grid">
+        <section class="mcp-detail-card">
+          <div class="mcp-detail-card-heading"><span>FERRAMENTAS</span><h2>Disponíveis para esta conexão</h2></div>
+          <div class="mcp-tool-summary"><strong>${toolCount || '—'}</strong><div><span>ferramentas MCP</span><small>${toolCount ? `${writeCount} podem alterar dados e continuam sob aprovação local.` : 'O catálogo aparece assim que o gateway local estiver pronto.'}</small></div></div>
+          <button class="mcp-text-action" type="button" data-mcp-advanced>${showAdvanced ? 'Ocultar configuração avançada' : 'Ver configuração avançada'}</button>
+        </section>
+        <section class="mcp-detail-card">
+          <div class="mcp-detail-card-heading"><span>SEGURANÇA</span><h2>Controle continua no Auto CodeZ</h2></div>
+          <div class="mcp-security-list">
+            <div><i>✓</i><span><strong>Alterações protegidas</strong><small>Ferramentas de escrita continuam seguindo permissões e aprovações.</small></span></div>
+            <div><i>✓</i><span><strong>Credenciais temporárias</strong><small>Tokens de sessão não entram no histórico operacional.</small></span></div>
+            <div><i>✓</i><span><strong>Atividade rastreável</strong><small>Operações MCP aparecem na atividade recente desta conexão.</small></span></div>
+          </div>
+        </section>
+      </div>
+      ${showAdvanced ? renderTechnicalPanels() : ''}
+      ${pending.length ? `<section class="mcp-approval-stack"><div class="mcp-section-heading"><div><span>AGUARDANDO VOCÊ</span><h2>Aprovações pendentes</h2></div></div>${pending.map((approval) => `<div class="mcp-approval-card"><div><strong>${escapeHtml(approval.toolCall.name)}</strong><span>A execução está pausada até sua decisão.</span></div><div><button data-mcp-deny="${escapeHtml(approval.id)}">Rejeitar</button><button class="primary" data-mcp-approve="${escapeHtml(approval.id)}">Permitir esta ação</button></div></div>`).join('')}</section>` : ''}
+      <section class="mcp-activity-section">
+        <div class="mcp-section-heading"><div><span>ATIVIDADE</span><h2>Atividade recente</h2></div><small>${related.length ? `${related.length} eventos desta conexão` : 'Nenhuma atividade registrada ainda'}</small></div>
+        <div class="mcp-timeline compact">${related.length ? related.map(renderEvent).join('') : '<div class="mcp-empty-state compact"><strong>Aguardando a primeira ação</strong><span>Quando esta conexão usar uma ferramenta, ela aparecerá aqui com o resultado e o horário.</span></div>'}</div>
+      </section>
+    </main>
+  </section>`;
+  const tunnelKeyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
+  if (tunnelKeyInput && tunnelKeyDraft) tunnelKeyInput.value = tunnelKeyDraft;
+}
+
+function renderConnectPanel(): string {
+  const available = MCP_CLIENTS.filter((client) => !selectedClients.has(client.id));
+  return `<div class="mcp-connect-backdrop" data-mcp-close-connect>
+    <section class="mcp-connect-panel" role="dialog" aria-modal="true" aria-label="Conectar ferramenta">
+      <header><div><span>CONEXÕES MCP</span><h2>Conectar uma ferramenta</h2><p>Escolha um aplicativo compatível. O Auto CodeZ mantém os detalhes técnicos fora do caminho.</p></div><button class="mcp-icon-action" type="button" data-mcp-close-connect aria-label="Fechar">×</button></header>
+      <div class="mcp-connect-discovery"><span class="mcp-discovery-icon">⌁</span><div><strong>Clientes conhecidos neste Auto CodeZ</strong><small>Mostramos somente opções que já possuem fluxo de configuração no produto.</small></div></div>
+      <div class="mcp-connect-list">
+        ${available.length ? available.map((client) => `<button type="button" class="mcp-connect-option" data-mcp-connect-client="${client.id}"><span class="mcp-client-logo">${escapeHtml(client.mark)}</span><span><strong>${escapeHtml(client.name)}</strong><small>${escapeHtml(client.description)}</small></span><em>Conectar</em></button>`).join('') : '<div class="mcp-empty-state compact"><strong>Todas as conexões conhecidas já foram adicionadas.</strong><span>Novos tipos de conexão entrarão aqui conforme o runtime MCP evoluir.</span></div>'}
+      </div>
+      <footer><span>Precisa de um servidor personalizado?</span><button class="mcp-text-action" type="button" data-mcp-advanced>Usar configuração avançada</button></footer>
+    </section>
+  </div>`;
+}
+
 function renderOnboarding(root: HTMLElement): void {
   if (onboardingStep === 'activation') {
     const platform = runtimeStatus.platform ? `${escapeHtml(runtimeStatus.platform)} · ${escapeHtml(runtimeStatus.arch)}` : 'Seu computador';
@@ -382,12 +534,12 @@ function renderOnboarding(root: HTMLElement): void {
       <div class="mcp-onboarding-card">
         <div class="mcp-onboarding-icon"><span></span><span></span><span></span></div>
         <div class="mcp-onboarding-kicker">AUTO CODEZ · MCP</div>
-        <h1>O modo MCP não está ativado.</h1>
-        <p>Conecte ChatGPT, Codex, Claude e outros clientes ao Auto CodeZ. A preparação local é automática e mantém operações sensíveis sob sua aprovação.</p>
+        <h1>Prepare o MCP Mode.</h1>
+        <p>Conecte ferramentas e aplicativos às suas IAs sem precisar configurar portas, processos ou arquivos manualmente.</p>
         <div class="mcp-onboarding-points"><span>✓ Detecta ${platform}</span><span>✓ Prepara dependências</span><span>✓ Mantém writes sob aprovação</span></div>
         ${activationMessage ? `<div class="mcp-onboarding-progress"><span></span>${escapeHtml(activationMessage)}</div>` : ''}
         ${activationError ? `<div class="mcp-onboarding-error">${escapeHtml(activationError)}</div>` : ''}
-        <button class="mcp-onboarding-primary" data-mcp-activate ${activationBusy ? 'disabled' : ''}>${activationBusy ? 'Preparando…' : 'Ativar MCP'}</button>
+        <button class="mcp-onboarding-primary" data-mcp-activate ${activationBusy ? 'disabled' : ''}>${activationBusy ? 'Preparando…' : 'Preparar MCP Mode'}</button>
         <small>Nenhuma porta pública é aberta. Configurações técnicas ficam ocultas por padrão.</small>
       </div>
     </section>`;
@@ -398,8 +550,8 @@ function renderOnboarding(root: HTMLElement): void {
       <div class="mcp-onboarding-card wide">
         <div class="mcp-ready-mark">✓</div>
         <div class="mcp-onboarding-kicker">MCP PRONTO</div>
-        <h1>Onde você quer usar o Auto CodeZ?</h1>
-        <p>Escolha um ou mais clientes. Mostraremos somente os passos necessários para cada um.</p>
+        <h1>Escolha suas primeiras conexões.</h1>
+        <p>Você poderá adicionar ou remover conexões depois. Mostraremos somente os passos necessários para cada aplicativo.</p>
         <div class="mcp-client-grid">${MCP_CLIENTS.map((client) => `<button class="mcp-client-option ${selectedClients.has(client.id) ? 'selected' : ''}" data-mcp-client="${client.id}"><span class="mcp-client-check">${selectedClients.has(client.id) ? '✓' : ''}</span><span><strong>${escapeHtml(client.name)}</strong><small>${escapeHtml(client.detail)}</small></span><em>${escapeHtml(client.badge)}</em></button>`).join('')}</div>
         ${activationMessage ? `<div class="mcp-onboarding-progress"><span></span>${escapeHtml(activationMessage)}</div>` : ''}
         ${activationError ? `<div class="mcp-onboarding-error">${escapeHtml(activationError)}</div>` : ''}
@@ -410,7 +562,7 @@ function renderOnboarding(root: HTMLElement): void {
   }
   root.innerHTML = `<section class="mcp-onboarding instructions">
     <div class="mcp-instructions-shell">
-      <header><div><div class="mcp-onboarding-kicker">ÚLTIMO PASSO</div><h1>Conecte seus clientes</h1><p>Siga os blocos abaixo. Você não precisa entender portas, tokens ou protocolo MCP.</p></div><button class="mcp-onboarding-secondary" data-mcp-advanced>Configuração avançada</button></header>
+      <header><div><div class="mcp-onboarding-kicker">ÚLTIMO PASSO</div><h1>Conclua suas conexões</h1><p>Siga somente os passos de cada aplicativo. Os detalhes de protocolo continuam escondidos por padrão.</p></div><button class="mcp-onboarding-secondary" data-mcp-advanced>Ver configuração avançada</button></header>
       <div class="mcp-guide-list">${[...selectedClients].map(renderClientInstructions).join('')}</div>
       ${showAdvanced ? `<section class="mcp-inline-advanced">
         <div><strong>Conexão local</strong><span>${gatewayStatus.running ? escapeHtml(gatewayStatus.endpoint) : 'Gateway não iniciado'}</span>${gatewayPreflight ? `<small>Validado · MCP ${escapeHtml(gatewayPreflight.protocolVersion)} · ${gatewayPreflight.toolCount} tools</small>` : ''}</div>
@@ -424,88 +576,54 @@ function renderOnboarding(root: HTMLElement): void {
 function render(): void {
   const root = document.getElementById(rootId);
   if (!root) return;
-  if (onboardingStep !== 'operational') { root.classList.remove('show-advanced'); renderOnboarding(root); return; }
+  if (onboardingStep !== 'operational') {
+    selectedConnectionId = '';
+    connectPanelOpen = false;
+    root.classList.remove('show-advanced');
+    renderOnboarding(root);
+    return;
+  }
+
   root.classList.toggle('show-advanced', showAdvanced);
-  const sessions = sessionEntries();
-  const header = currentHeader();
-  const timeline = visibleEvents().slice(-MAX_RENDERED_EVENTS).reverse();
-  const artifactIds = artifacts();
+  const configured = MCP_CLIENTS.filter((client) => selectedClients.has(client.id));
+  const available = MCP_CLIENTS.filter((client) => !selectedClients.has(client.id));
+  const recent = mcpActivityEvents().slice(-6).reverse();
   const pending = relevantApprovals();
 
-  root.innerHTML = `
-    <aside class="mcp-mode-sidebar">
-      <div class="mcp-mode-sidebar-head"><span class="mcp-mode-kicker">MCP MODE</span><strong>Sessões</strong></div>
-      ${sessions.length ? `<button class="mcp-session-item ${selectedScope === '' ? 'active' : ''}" data-mcp-scope="">
-        <span class="mcp-session-led"></span><span><strong>Todas as sessões</strong><small>${mcpActivityEvents().length} eventos MCP</small></span>
-      </button>
-      <div class="mcp-session-list">
-        ${sessions.map(({ key, latest, count }) => `<button class="mcp-session-item ${selectedScope === key ? 'active' : ''}" data-mcp-scope="${escapeHtml(key)}">
-          <span class="mcp-session-led state-${escapeHtml(latest.state)}"></span>
-          <span><strong>${escapeHtml(scopeLabel(latest))}</strong><small>${escapeHtml(latest.runId ? latest.runId.slice(0, 12) : latest.sessionId ? latest.sessionId.slice(0, 12) : 'sessão externa')} · ${count}</small></span>
-        </button>`).join('')}
-      </div>` : '<div class="mcp-sidebar-empty">Nenhuma IA conectada ainda.</div>'}
-    </aside>
-    <section class="mcp-mode-main">
-      <header class="mcp-mode-header">
-        <div>
-          <div class="mcp-mode-title-row"><span class="mcp-live-dot state-${escapeHtml(header.state)}"></span><h1>${escapeHtml(header.title)}</h1>${mcpActivityEvents().length ? `<span class="mcp-header-state">${escapeHtml(stateLabel(header.state))}</span>` : ''}</div>
-          <div class="mcp-mode-subtitle">${escapeHtml(header.subtitle)}${header.project ? ` · Projeto ${escapeHtml(header.project)}` : ''}${header.run ? ` · ${escapeHtml(header.run.slice(0, 16))}` : ''}</div>
-        </div>
-        <div class="mcp-header-actions">${header.clientId === 'autocodez-chat' && header.chatId && (header.state === 'running' || header.state === 'waiting' || header.state === 'pending') ? `<button class="mcp-stop-button" type="button" data-mcp-stop="${escapeHtml(header.chatId)}">■ Parar</button>` : ''}<button class="mcp-refresh-button" type="button" data-mcp-clients>Clientes</button><button class="mcp-refresh-button" type="button" data-mcp-advanced>${showAdvanced ? 'Ocultar técnico' : 'Avançado'}</button><button class="mcp-refresh-button" type="button" data-mcp-refresh>Atualizar</button></div>
-      </header>
-      <div class="mcp-mode-toolbar">
-        <div class="mcp-filter-group">
-          ${([['all','Tudo'],['activity','Atividade'],['errors','Erros'],['artifacts','Artifacts']] as Array<[ModeFilter,string]>).map(([value,label]) => `<button class="mcp-filter ${filter === value ? 'active' : ''}" data-mcp-filter="${value}">${label}</button>`).join('')}
-        </div>
-        <div class="mcp-mode-count">${timeline.length} de ${currentEvents().length} eventos</div>
-      </div>
-      <section class="mcp-connection-summary">
-        <span class="mcp-connection-dot ${gatewayStatus.running && gatewayPreflight ? 'ready' : ''}"></span>
-        <div><strong>${gatewayStatus.running && gatewayPreflight ? 'MCP ativo e protegido' : 'MCP local indisponível'}</strong><small>${gatewayPreflight ? `${gatewayPreflight.toolCount} ferramentas · ${gatewayPreflight.writeToolCount} com escrita · aprovação local ativa` : 'Abra Avançado para diagnosticar a conexão local.'}</small></div>
-        <span class="mcp-connection-client">${tunnelStatus.ready ? 'Tunnel conectado' : 'Aguardando cliente'}</span>
+  if (selectedConnectionId) {
+    renderConnectionDetail(root, selectedConnectionId);
+    return;
+  }
+
+  const ready = Boolean(gatewayStatus.running && gatewayPreflight);
+  root.innerHTML = `<section class="mcp-hub-page">
+    <header class="mcp-hub-header">
+      <div><span class="mcp-page-eyebrow">AUTO CODEZ · MCP</span><h1>MCP Mode</h1><p>Conecte ferramentas e aplicativos e deixe suas IAs usarem somente o que você autorizou.</p></div>
+      <div class="mcp-hub-actions"><button class="mcp-icon-action" type="button" data-mcp-refresh aria-label="Atualizar conexões" title="Atualizar conexões">↻</button><button class="mcp-primary-action" type="button" data-mcp-open-connect><span>＋</span>Conectar ferramenta</button></div>
+    </header>
+    <main class="mcp-hub-content">
+      <section class="mcp-health-card ${ready ? 'ready' : ''}">
+        <span class="mcp-health-indicator"><i></i></span>
+        <div><strong>${ready ? 'MCP pronto' : 'Preparando conexões'}</strong><small>${ready ? `${gatewayPreflight!.toolCount} ferramentas disponíveis · alterações continuam protegidas por aprovação` : gatewayPreflightError || 'O Auto CodeZ está preparando o runtime local necessário para suas conexões.'}</small></div>
+        <span class="mcp-health-count">${configured.length} ${configured.length === 1 ? 'conexão' : 'conexões'}</span>
       </section>
-      <section class="mcp-gateway-card ${gatewayStatus.running ? 'running' : ''}">
-        <div class="mcp-gateway-copy">
-          <div class="mcp-section-label">MCP Gateway</div>
-          <strong>${gatewayStatus.running ? 'Ativo somente em localhost' : 'Desligado'}</strong>
-          <span>${gatewayStatus.running ? `${escapeHtml(gatewayStatus.endpoint)} · MCP 2026-07-28` : 'Nenhuma porta local é aberta até você iniciar explicitamente.'}</span>
-          ${gatewayStatus.running && gatewayToken ? `<code>Bearer ${escapeHtml(gatewayToken)}</code>` : gatewayStatus.running ? '<small>Token não é persistido. Reinicie o Gateway para gerar e revelar uma nova credencial.</small>' : ''}
-          ${gatewayPreflight ? `<small class="mcp-gateway-preflight-ok">Preflight OK · MCP ${escapeHtml(gatewayPreflight.protocolVersion)} · ${gatewayPreflight.toolCount} tools · ${gatewayPreflight.writeToolCount} write</small>` : ''}
-          ${gatewayPreflightError ? `<div class="mcp-gateway-preflight-error">${escapeHtml(gatewayPreflightError)}</div>` : ''}
-        </div>
-        <div class="mcp-gateway-actions">
-          ${gatewayStatus.running ? '<button data-mcp-gateway-preflight>Preflight</button>' : ''}
-          ${gatewayStatus.running && gatewayToken ? '<button data-mcp-copy-gateway>Copiar conexão</button>' : ''}
-          <button class="${gatewayStatus.running ? 'danger' : 'primary'}" data-mcp-gateway-toggle>${gatewayStatus.running ? 'Parar Gateway' : 'Iniciar Gateway'}</button>
-        </div>
+
+      ${pending.length ? `<section class="mcp-approval-stack"><div class="mcp-section-heading"><div><span>AGUARDANDO VOCÊ</span><h2>Aprovações pendentes</h2></div></div>${pending.map((approval) => `<div class="mcp-approval-card"><div><strong>${escapeHtml(approval.toolCall.name)}</strong><span>A execução está pausada até sua decisão.</span></div><div><button data-mcp-deny="${escapeHtml(approval.id)}">Rejeitar</button><button class="primary" data-mcp-approve="${escapeHtml(approval.id)}">Permitir esta ação</button></div></div>`).join('')}</section>` : ''}
+
+      <section class="mcp-hub-section">
+        <div class="mcp-section-heading"><div><span>CONEXÕES</span><h2>Prontas para suas IAs</h2></div><small>${configured.length ? 'Abra uma conexão para ver ferramentas e segurança.' : 'Adicione sua primeira conexão para começar.'}</small></div>
+        <div class="mcp-connection-grid">${configured.length ? configured.map((client) => renderConnectionCard(client, true)).join('') : '<div class="mcp-empty-state"><strong>Nenhuma conexão configurada.</strong><span>Use “Conectar ferramenta” para escolher um aplicativo compatível.</span><button class="mcp-text-action" type="button" data-mcp-open-connect>Escolher uma conexão</button></div>'}</div>
       </section>
-      <section class="mcp-tunnel-card ${tunnelStatus.ready ? 'ready' : tunnelStatus.running ? 'running' : ''}">
-        <div class="mcp-tunnel-copy">
-          <div class="mcp-section-label">Secure MCP Tunnel</div>
-          <strong>${tunnelStatus.ready ? 'Conectado e pronto' : tunnelStatus.running ? 'Inicializando…' : 'Opcional · desligado'}</strong>
-          <span>${tunnelStatus.ready
-            ? `${escapeHtml(tunnelStatus.tunnelId || '')}${tunnelStatus.version ? ` · tunnel-client ${escapeHtml(tunnelStatus.version)}` : ''}`
-            : 'Use apenas para desenvolvimento privado com o ChatGPT. O Tunnel nunca substitui as políticas do Auto CodeZ.'}</span>
-          ${tunnelDoctorResult ? `<small>${escapeHtml(tunnelDoctorResult)}</small>` : ''}
-          ${tunnelStatus.error || tunnelError ? `<div class="mcp-tunnel-error">${escapeHtml(tunnelStatus.error || tunnelError)}</div>` : ''}
-        </div>
-        <div class="mcp-tunnel-controls">
-          ${tunnelStatus.running
-            ? '<button class="danger" type="button" data-mcp-tunnel-stop>Parar Tunnel</button>'
-            : `<input type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="tunnel_…" value="${escapeHtml(tunnelIdDraft)}" data-mcp-tunnel-id aria-label="Tunnel ID">
-               <input type="password" maxlength="8192" autocomplete="new-password" placeholder="${tunnelStatus.credentialAvailable ? 'Credencial detectada no ambiente' : 'Chave do control plane (somente sessão)'}" data-mcp-tunnel-key aria-label="Chave do control plane">
-               <button type="button" data-mcp-tunnel-doctor ${gatewayStatus.running ? '' : 'disabled'}>Doctor real</button>
-               <button class="primary" type="button" data-mcp-tunnel-start ${gatewayStatus.running ? '' : 'disabled'}>Conectar</button>`}
-        </div>
+
+      ${available.length ? `<section class="mcp-hub-section"><div class="mcp-section-heading"><div><span>DISPONÍVEIS</span><h2>Adicionar outra conexão</h2></div><small>Somente clientes com fluxo conhecido aparecem aqui.</small></div><div class="mcp-connection-grid available">${available.slice(0, 3).map((client) => renderConnectionCard(client, false)).join('')}</div></section>` : ''}
+
+      <section class="mcp-activity-section">
+        <div class="mcp-section-heading"><div><span>ATIVIDADE</span><h2>Atividade recente</h2></div><small>${recent.length ? 'Ações MCP mais recentes' : 'Nenhuma sessão externa usou ferramentas ainda'}</small></div>
+        <div class="mcp-timeline compact">${loading ? '<div class="mcp-empty-state compact"><strong>Atualizando conexões…</strong></div>' : recent.length ? recent.map(renderEvent).join('') : '<div class="mcp-empty-state compact"><strong>Nenhuma atividade ainda.</strong><span>Quando uma IA usar uma ferramenta MCP, a ação aparecerá aqui em tempo real.</span></div>'}</div>
       </section>
-      ${pending.length ? `<section class="mcp-approval-stack"><div class="mcp-section-label">Aguardando aprovação</div>${pending.map((approval) => `<div class="mcp-approval-card"><div><strong>${escapeHtml(approval.toolCall.name)}</strong><span>A execução está pausada até sua decisão.</span></div><div><button data-mcp-deny="${escapeHtml(approval.id)}">Rejeitar</button><button class="primary" data-mcp-approve="${escapeHtml(approval.id)}">Aceitar</button></div></div>`).join('')}</section>` : ''}
-      ${artifactIds.length ? `<section class="mcp-artifact-strip"><div class="mcp-section-label">Artifacts</div><div class="mcp-artifact-row">${artifactIds.map((id) => { const info = artifactMetadata(id); return `<button class="mcp-artifact-chip ${selectedArtifactId === id ? 'active' : ''}" data-mcp-artifact="${escapeHtml(id)}"><span></span><b>${escapeHtml(info.label)}</b><small>${escapeHtml(info.meta || id.slice(0, 14))}</small></button>`; }).join('')}</div></section>` : ''}
-      <section class="mcp-timeline">
-        ${loading ? '<div class="mcp-empty">Carregando sessões MCP…</div>' : timeline.length ? timeline.map(renderEvent).join('') : mcpActivityEvents().length ? '<div class="mcp-empty">Nenhum evento corresponde a este filtro.</div>' : '<div class="mcp-empty mcp-empty-session"><strong>Nenhuma sessão conectada.</strong><span>Quando ChatGPT, Codex ou outro cliente usar o Auto CodeZ, cada ação aparecerá aqui em tempo real.</span></div>'}
-      </section>
-    </section>`;
-  const tunnelKeyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
-  if (tunnelKeyInput && tunnelKeyDraft) tunnelKeyInput.value = tunnelKeyDraft;
+    </main>
+    ${connectPanelOpen ? renderConnectPanel() : ''}
+  </section>`;
 }
 
 async function ensureOperationalRuntime(): Promise<void> {
@@ -582,25 +700,7 @@ function hide(): void {
   if (rootAfterHide) rootAfterHide.hidden = true;
 }
 
-function installStyles(): void {
-  if (document.getElementById('mcp-mode-styles')) return;
-  const style = document.createElement('style');
-  style.id = 'mcp-mode-styles';
-  style.textContent = `
-    .mcp-onboarding{grid-column:1/-1;position:relative;min-width:0;min-height:0;display:grid;place-items:center;overflow:auto;padding:42px;background:radial-gradient(circle at 50% 18%,#122238 0,#0b1119 30%,#080b10 72%)}.mcp-onboarding-glow{position:absolute;width:520px;height:260px;top:6%;left:50%;transform:translateX(-50%);background:radial-gradient(ellipse,#3478d522,transparent 68%);pointer-events:none}.mcp-onboarding-card{position:relative;width:min(590px,92vw);padding:38px 42px;border:1px solid #253140;border-radius:22px;background:linear-gradient(145deg,rgba(17,23,32,.98),rgba(10,14,20,.98));box-shadow:0 34px 90px #0008;text-align:center}.mcp-onboarding-card.wide{width:min(900px,94vw)}.mcp-onboarding-icon{width:62px;height:62px;margin:0 auto 20px;border:1px solid #33445a;border-radius:19px;background:linear-gradient(145deg,#172233,#101720);display:flex;align-items:center;justify-content:center;gap:5px;box-shadow:0 14px 40px #0005}.mcp-onboarding-icon span{width:7px;height:7px;border-radius:50%;background:#72a9f2;box-shadow:0 0 18px #4c91ef}.mcp-onboarding-kicker{font-size:9px;font-weight:750;letter-spacing:.18em;color:#718197}.mcp-onboarding h1{margin:9px 0 0;font-size:27px;letter-spacing:-.035em;font-weight:650;color:#f1f4f8}.mcp-onboarding p{max-width:610px;margin:12px auto 0;color:#7f8b9b;font-size:11px;line-height:1.75}.mcp-onboarding-points{display:flex;justify-content:center;gap:9px;flex-wrap:wrap;margin:22px 0}.mcp-onboarding-points span{padding:7px 10px;border:1px solid #243140;border-radius:999px;background:#0d141c;color:#8190a3;font-size:9px}.mcp-onboarding-primary,.mcp-onboarding-secondary{height:38px;padding:0 17px;border-radius:9px;font-size:10px;font-weight:650}.mcp-onboarding-primary{border:1px solid #4287e1;background:linear-gradient(180deg,#3c83df,#2f70ca);color:white;box-shadow:0 9px 25px #245b9c33}.mcp-onboarding-primary:hover:not(:disabled){background:linear-gradient(180deg,#4a91eb,#377bd3);transform:translateY(-1px)}.mcp-onboarding-primary:disabled{opacity:.4}.mcp-onboarding-secondary{border:1px solid #293544;background:#101720;color:#96a3b3}.mcp-onboarding-card>small{display:block;margin-top:14px;color:#4f5b6a;font-size:8px}.mcp-onboarding-progress,.mcp-onboarding-error{margin:18px auto 0;padding:10px 12px;border-radius:9px;font-size:9px;text-align:left}.mcp-onboarding-progress{border:1px solid #29415f;background:#0c1724;color:#8eacd0}.mcp-onboarding-progress span{display:inline-block;width:6px;height:6px;margin-right:8px;border-radius:50%;background:#4f9cff;box-shadow:0 0 0 4px #4f9cff18}.mcp-onboarding-error{border:1px solid #553139;background:#1a1013;color:#d99098}.mcp-ready-mark{width:42px;height:42px;margin:0 auto 14px;border-radius:50%;display:grid;place-items:center;background:#10251c;border:1px solid #315a45;color:#77d39e;font-size:18px}.mcp-client-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:26px;text-align:left}.mcp-client-option{min-height:78px;display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:10px;padding:13px;border:1px solid #202b38;border-radius:12px;background:#0c1219;color:#a7b1bf}.mcp-client-option:hover{border-color:#34455a;background:#101923}.mcp-client-option.selected{border-color:#356da9;background:linear-gradient(145deg,#102239,#0d1825);box-shadow:inset 0 0 0 1px #3a7bc722}.mcp-client-check{width:19px;height:19px;border:1px solid #38485c;border-radius:6px;display:grid;place-items:center;color:#fff;background:#0a1016;font-size:10px}.mcp-client-option.selected .mcp-client-check{background:#3478d5;border-color:#4a91eb}.mcp-client-option strong,.mcp-client-option small{display:block}.mcp-client-option strong{font-size:11px;color:#e3e8ef}.mcp-client-option small{margin-top:4px;font-size:8px;color:#687688}.mcp-client-option em{font-style:normal;font-size:7px;padding:4px 6px;border-radius:999px;background:#141c26;color:#738196}.mcp-onboarding-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}.mcp-instructions-shell{width:min(920px,94vw);margin:auto;padding:8px 0 30px}.mcp-instructions-shell>header{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:18px}.mcp-instructions-shell>header h1{text-align:left}.mcp-instructions-shell>header p{text-align:left;margin-left:0}.mcp-guide-list{display:flex;flex-direction:column;gap:10px}.mcp-guide-card{padding:18px 20px;border:1px solid #202b38;border-radius:14px;background:linear-gradient(145deg,#0f151d,#0b1016);text-align:left}.mcp-guide-card.featured{border-color:#2d4563;background:linear-gradient(145deg,#111c2a,#0c131c)}.mcp-guide-head{display:flex;align-items:center;gap:11px}.mcp-guide-head strong,.mcp-guide-head small{display:block}.mcp-guide-head strong{font-size:12px;color:#e8edf3}.mcp-guide-head small{margin-top:3px;font-size:8px;color:#687688}.mcp-client-mark{width:30px;height:30px;border:1px solid #314054;border-radius:9px;display:grid;place-items:center;background:#121a24;color:#9fb4ce;font-size:9px;font-weight:750}.mcp-guide-card ol{margin:15px 0 0;padding-left:18px;color:#8c98a8;font-size:10px;line-height:1.75}.mcp-guide-card li+li{margin-top:5px}.mcp-guide-card b{color:#dce4ed}.mcp-guide-note{margin-top:13px;padding:10px 11px;border-left:2px solid #3b78bf;background:#0c1622;color:#71849b;font-size:9px;line-height:1.6}.mcp-copy-line{display:flex;align-items:center;gap:8px;margin-top:12px}.mcp-copy-line code{flex:1;padding:9px 10px;border:1px solid #24303d;border-radius:8px;background:#090e14;color:#94a8bf;font-size:9px}.mcp-copy-line button,.mcp-inline-advanced button{height:31px;padding:0 10px;border:1px solid #2f4053;border-radius:7px;color:#9fb0c4;background:#101720;font-size:8px}.mcp-inline-advanced{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:12px;padding:14px;border:1px solid #2b3948;border-radius:12px;background:#0a1118;text-align:left}.mcp-inline-advanced strong,.mcp-inline-advanced span,.mcp-inline-advanced small{display:block}.mcp-inline-advanced strong{font-size:10px}.mcp-inline-advanced span{margin-top:4px;color:#8090a3;font-size:9px;font-family:Consolas,monospace}.mcp-inline-advanced small{margin-top:4px;color:#6d9b7f;font-size:8px}@media(max-width:820px){.mcp-client-grid{grid-template-columns:1fr}.mcp-onboarding{padding:20px}.mcp-onboarding-card{padding:28px 22px}.mcp-instructions-shell>header{align-items:flex-start;flex-direction:column}}
-    .rail-button[data-mcp-mode]:before{mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 18h6'/%3E%3Cpath d='M6 18h.01'/%3E%3Cpath d='M8 6h1'/%3E%3Crect x='2' y='14' width='20' height='8' rx='2'/%3E%3Crect x='4' y='2' width='16' height='12' rx='2'/%3E%3C/svg%3E")}
-    #${rootId}[hidden]{display:none!important}#${rootId}{position:absolute;inset:0 0 0 58px;z-index:70;display:grid;grid-template-columns:282px minmax(0,1fr);background:#090c11;color:#dce3ec}
-    .body{position:relative}.mcp-mode-sidebar{min-width:0;border-right:1px solid #1b222c;background:#0c1016;padding:17px 10px;overflow:auto}.mcp-mode-sidebar-head{padding:0 9px 12px;display:flex;flex-direction:column;gap:4px}.mcp-mode-sidebar-head strong{font-size:13px}.mcp-mode-kicker,.mcp-section-label{font-size:8px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#657181}
-    .mcp-sidebar-empty{margin:12px 8px;padding:12px;border:1px dashed #202b38;border-radius:9px;color:#5e6b7b;font-size:9px;line-height:1.5}.mcp-empty-session strong,.mcp-empty-session span{display:block}.mcp-empty-session strong{font-size:12px;color:#9eabba}.mcp-empty-session span{max-width:420px;margin:7px auto 0;color:#657284;font-size:9px;line-height:1.6}.mcp-session-list{margin-top:3px}.mcp-session-item{width:100%;display:grid;background:transparent;grid-template-columns:8px minmax(0,1fr);gap:9px;align-items:center;text-align:left;padding:9px;border:1px solid transparent;border-radius:8px;color:#9ba6b5}.mcp-session-item:hover,.mcp-session-item.active{background:#141a22;border-color:#232c38;color:#e9edf3}.mcp-session-item strong,.mcp-session-item small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mcp-session-item strong{font-size:10px;font-weight:600}.mcp-session-item small{margin-top:3px;font-size:8px;color:#687486}.mcp-session-led,.mcp-live-dot{display:block;border-radius:50%;background:#566273}.mcp-session-led{width:6px;height:6px}.mcp-live-dot{width:7px;height:7px}.state-running{--mcp-state:#69a7ff}.state-success{--mcp-state:#6fd49a}.state-failed{--mcp-state:#e87f87}.state-waiting,.state-pending{--mcp-state:#ddb86c}.state-cancelled{--mcp-state:#778191}.mcp-session-led[class*="state-"],.mcp-live-dot[class*="state-"]{background:var(--mcp-state,#566273)}
-    .mcp-mode-main{min-width:0;display:flex;flex-direction:column;overflow:hidden}.mcp-mode-header{height:69px;flex:none;padding:0 26px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1b222c;background:#0a0e13}.mcp-mode-title-row{display:flex;align-items:center;gap:8px}.mcp-mode-title-row h1{margin:0;font-size:14px;font-weight:650}.mcp-header-state{padding:4px 7px;border:1px solid #283343;border-radius:999px;color:#8d99aa;font-size:8px}.mcp-mode-subtitle{margin-top:5px;color:#667283;font-size:8px}.mcp-header-actions{display:flex;gap:7px}.mcp-refresh-button,.mcp-stop-button{height:30px;padding:0 10px;border:1px solid #293341;border-radius:7px;color:#9ca8b8;font-size:9px;background:#11161d}.mcp-refresh-button:hover{color:#eef2f7;border-color:#3b4859}.mcp-stop-button{border-color:#57333a;color:#d58a91;background:#1b1013}.mcp-stop-button:hover{border-color:#7b454f;color:#f0a8af}
-    .mcp-mode-toolbar{height:47px;flex:none;padding:0 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #171e27}.mcp-connection-summary{flex:none;margin:12px 24px 0;padding:12px 14px;display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid #213043;border-radius:10px;background:linear-gradient(145deg,#0e151e,#0b1118)}.mcp-connection-dot{width:7px;height:7px;border-radius:50%;background:#667181}.mcp-connection-dot.ready{background:#66d091;box-shadow:0 0 0 4px #66d09112}.mcp-connection-summary strong,.mcp-connection-summary small{display:block}.mcp-connection-summary strong{font-size:10px;color:#dce4ee}.mcp-connection-summary small{margin-top:3px;color:#687688;font-size:8px}.mcp-connection-client{padding:5px 8px;border:1px solid #293849;border-radius:999px;color:#7f8fa3;font-size:8px}.mcp-gateway-card,.mcp-tunnel-card{display:none!important}#${rootId}.show-advanced .mcp-gateway-card,#${rootId}.show-advanced .mcp-tunnel-card{display:flex!important}.mcp-gateway-card{flex:none;margin:12px 24px 0;padding:11px 12px;display:flex;align-items:center;justify-content:space-between;gap:18px;border:1px solid #24303d;border-radius:9px;background:#0d131a}.mcp-gateway-card.running{border-color:#2e493d;background:#0e1714}.mcp-gateway-copy{min-width:0}.mcp-gateway-copy strong,.mcp-gateway-copy span,.mcp-gateway-copy code,.mcp-gateway-copy small{display:block}.mcp-gateway-preflight-ok{color:#79b997!important}.mcp-gateway-preflight-error{margin-top:6px;color:#d58a91;font-size:8px}.mcp-gateway-copy strong{margin-top:4px;font-size:10px}.mcp-gateway-copy span,.mcp-gateway-copy small{margin-top:3px;color:#6e7a8a;font-size:8px}.mcp-gateway-copy code{margin-top:6px;max-width:640px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#90a8bf;font:8px/1.4 Consolas,monospace}.mcp-gateway-actions{display:flex;gap:6px;flex:none}.mcp-gateway-actions button{height:29px;padding:0 9px;border:1px solid #304052;border-radius:6px;background:#101720;color:#9bacbf;font-size:8px}.mcp-gateway-actions button.primary{border-color:#365b49;color:#9dd3b4;background:#102019}.mcp-gateway-actions button.danger{border-color:#59343a;color:#d28c93;background:#1a1012}.mcp-tunnel-card{flex:none;margin:8px 24px 0;padding:11px 12px;display:flex;align-items:center;justify-content:space-between;gap:18px;border:1px solid #202a36;border-radius:9px;background:#0c1117}.mcp-tunnel-card.running,.mcp-tunnel-card.ready{border-color:#34485b}.mcp-tunnel-card.ready{background:#0d1715;border-color:#315142}.mcp-tunnel-copy{min-width:0;flex:1}.mcp-tunnel-copy strong,.mcp-tunnel-copy span,.mcp-tunnel-copy small{display:block}.mcp-tunnel-copy strong{margin-top:4px;font-size:10px}.mcp-tunnel-copy span,.mcp-tunnel-copy small{margin-top:3px;color:#6e7a8a;font-size:8px}.mcp-tunnel-error{margin-top:6px;color:#d58a91;font-size:8px}.mcp-tunnel-controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;max-width:58%}.mcp-tunnel-controls input{height:29px;min-width:132px;padding:0 8px;border:1px solid #293746;border-radius:6px;background:#0a0f15;color:#aab5c4;font-size:8px;outline:none}.mcp-tunnel-controls input:focus{border-color:#45627f}.mcp-tunnel-controls button{height:29px;padding:0 9px;border:1px solid #304052;border-radius:6px;background:#101720;color:#9bacbf;font-size:8px}.mcp-tunnel-controls button.primary{border-color:#365b49;color:#9dd3b4;background:#102019}.mcp-tunnel-controls button.danger{border-color:#59343a;color:#d28c93;background:#1a1012}.mcp-tunnel-controls button:disabled{opacity:.45;cursor:not-allowed}.mcp-filter-group{display:flex;gap:4px}.mcp-filter{padding:6px 9px;border:1px solid transparent;border-radius:6px;background:transparent;color:#6d7888;font-size:9px}.mcp-filter:hover,.mcp-filter.active{background:#151b23;color:#dce3ec}.mcp-mode-count{font-size:8px;color:#5d6877}
-    .mcp-approval-stack,.mcp-artifact-strip{flex:none;padding:13px 24px;border-bottom:1px solid #171e27}.mcp-approval-stack{display:flex;flex-direction:column;gap:7px}.mcp-approval-card{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 11px;border:1px solid #594b2b;border-radius:8px;background:#18150d}.mcp-approval-card strong,.mcp-approval-card span{display:block}.mcp-approval-card strong{font-size:10px}.mcp-approval-card span{margin-top:3px;color:#93866a;font-size:8px}.mcp-approval-card>div:last-child{display:flex;gap:5px}.mcp-approval-card button{padding:6px 9px;border:1px solid #3a3426;border-radius:6px;background:#15120c;color:#b3a88d;font-size:8px}.mcp-approval-card button.primary{background:#6e5722;border-color:#8d7132;color:#fff2c9}
-    .mcp-artifact-strip{display:flex;flex-direction:column;gap:8px}.mcp-artifact-row{display:flex;gap:6px;overflow:auto}.mcp-artifact-chip{display:grid;grid-template-columns:8px auto;grid-template-rows:auto auto;column-gap:6px;flex:none;padding:7px 9px;border:1px solid #263141;border-radius:7px;color:#8794a6;background:#10151c;text-align:left}.mcp-artifact-chip.active{border-color:#496584;background:#131d28}.mcp-artifact-chip span{grid-row:1/3;width:8px;height:8px;margin-top:2px;border-radius:2px;background:#53657b}.mcp-artifact-chip b{font-size:8px;font-weight:600;color:#a8b4c4}.mcp-artifact-chip small{font:7px/1.2 Consolas,monospace;color:#617084}
-    .mcp-timeline{min-height:0;flex:1;overflow:auto;padding:20px 24px 50px}.mcp-event{position:relative;margin:0 0 8px;padding:0 12px 10px 20px;border:1px solid #1c2530;border-radius:8px;background:#0e1319}.mcp-event-toggle{display:block;width:100%;padding:10px 0 0;border:0;background:transparent;appearance:none;text-align:left;color:inherit;font:inherit}.mcp-event.expanded{border-color:#2d3948;background:#10161e}.mcp-event:before{content:"";position:absolute;left:9px;top:14px;bottom:-14px;width:1px;background:#1c2631}.mcp-event:last-child:before{display:none}.mcp-event-line{display:flex;align-items:center;gap:8px;min-width:0}.mcp-event-dot{position:absolute;left:6px;top:13px;width:7px;height:7px;border-radius:50%;background:var(--mcp-state,#536071);box-shadow:0 0 0 3px #0e1319}.mcp-event-time{font:8px/1 Consolas,monospace;color:#596474}.mcp-event-meta{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#748194;font-size:8px}.mcp-event-state{font-size:8px;color:var(--mcp-state,#718096)}.mcp-event-summary{margin-top:7px;color:#d7dde6;font-size:10px;line-height:1.45}.mcp-event-details{display:flex;gap:7px;flex-wrap:wrap;margin-top:6px}.mcp-event-details span{padding:3px 5px;border-radius:4px;background:#151c24;color:#788597;font-size:8px}.mcp-event-details .mcp-diff{color:#92b7a1}.mcp-event-error{margin-top:7px;padding:7px 8px;border-left:2px solid #a8525a;background:#1a1013;color:#d79096;font:8px/1.5 Consolas,monospace}.mcp-event-expanded{margin:9px 0 0;padding:8px 0 0;border-top:1px solid #1d2732;display:grid;gap:5px}.mcp-event-expanded div{display:grid;grid-template-columns:95px minmax(0,1fr);gap:9px}.mcp-event-expanded span{font-size:7px;color:#596678;text-transform:uppercase;letter-spacing:.08em}.mcp-event-expanded code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#8f9daf;font:8px/1.4 Consolas,monospace}.mcp-empty{padding:60px 20px;text-align:center;color:#606b79;font-size:9px}
-    @media(max-width:900px){#${rootId}{grid-template-columns:220px minmax(0,1fr)}}
-  `;
-  document.head.appendChild(style);
-}
+function installStyles(): void {}
 
 function install(): void {
   const rail = document.querySelector<HTMLElement>('.rail');
@@ -648,6 +748,40 @@ function install(): void {
 
   root.addEventListener('click', async (event) => {
     const target = event.target as HTMLElement;
+    if (target.closest('[data-mcp-open-connect]')) {
+      connectPanelOpen = true;
+      render();
+      return;
+    }
+    if (target.closest('[data-mcp-close-connect]')) {
+      connectPanelOpen = false;
+      render();
+      return;
+    }
+    const connectClient = target.closest<HTMLElement>('[data-mcp-connect-client]')?.dataset.mcpConnectClient as McpClientId | undefined;
+    if (connectClient) {
+      selectedClients.add(connectClient);
+      persistClientSelection();
+      connectPanelOpen = false;
+      selectedConnectionId = connectClient;
+      showAdvanced = false;
+      render();
+      return;
+    }
+    const openConnection = target.closest<HTMLElement>('[data-mcp-open-connection]')?.dataset.mcpOpenConnection as McpClientId | undefined;
+    if (openConnection) {
+      selectedConnectionId = openConnection;
+      connectPanelOpen = false;
+      showAdvanced = false;
+      render();
+      return;
+    }
+    if (target.closest('[data-mcp-back-hub]')) {
+      selectedConnectionId = '';
+      showAdvanced = false;
+      render();
+      return;
+    }
     if (target.closest('[data-mcp-activate]')) {
       activationBusy = true;
       activationError = '';

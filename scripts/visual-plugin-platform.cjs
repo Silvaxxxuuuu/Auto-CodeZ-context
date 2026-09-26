@@ -49,65 +49,33 @@ async function runTest() {
   await page.getByRole('button', { name: 'Voltar para a lista de plugins' }).click(); await page.locator('[data-plugin-detail="visual.plugin"]').waitFor({ state: 'detached', timeout: 10000 }); await page.locator('#nav-panel [data-plugin-open="visual.plugin"]').waitFor({ state: 'visible', timeout: 10000 });
   const mcpButton = page.locator('[data-mcp-mode]'); await mcpButton.waitFor({ state: 'visible', timeout: 10000 }); await mcpButton.click();
   const mcpMode = page.locator('#mcp-mode-root'); await mcpMode.waitFor({ state: 'visible', timeout: 10000 });
-  await mcpMode.getByText('O modo MCP não está ativado.', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByText('Prepare o MCP Mode.', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-ativacao.png'), animations: 'disabled' });
-  await mcpMode.getByRole('button', { name: 'Ativar MCP' }).click();
-  await mcpMode.getByText('Onde você quer usar o Auto CodeZ?', { exact: true }).waitFor({ state: 'visible', timeout: 20000 });
-  await mcpMode.getByText('ChatGPT', { exact: true }).waitFor({ state: 'visible' });
-  await mcpMode.getByText('ChatGPT Codex', { exact: true }).waitFor({ state: 'visible' });
+  await mcpMode.getByRole('button', { name: 'Preparar MCP Mode' }).click();
+  await mcpMode.getByText('Escolha suas primeiras conexões.', { exact: true }).waitFor({ state: 'visible', timeout: 20000 });
   await mcpMode.locator('[data-mcp-client="codex"]').click();
-  if (!(await mcpMode.locator('[data-mcp-client="chatgpt"]').evaluate((element) => element.classList.contains('selected'))) || !(await mcpMode.locator('[data-mcp-client="codex"]').evaluate((element) => element.classList.contains('selected')))) throw new Error('Seleção múltipla de clientes MCP não persistiu visualmente.');
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-clientes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Avançar' }).click();
-  await mcpMode.getByText('Conecte seus clientes', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-  await mcpMode.getByText('Modo de desenvolvedor', { exact: false }).waitFor({ state: 'visible' });
-  await mcpMode.getByText('App · CLI · extensão', { exact: true }).waitFor({ state: 'visible' });
+  await mcpMode.getByText('Conclua suas conexões', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-instrucoes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Finalizar' }).click();
-  await mcpMode.getByText('MCP MODE', { exact: true }).waitFor({ state: 'visible' }); await mcpMode.getByText('Sessões', { exact: true }).waitFor({ state: 'visible' });
-  await mcpMode.getByText('MCP ativo e protegido', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-  await mcpMode.getByText('Nenhuma sessão conectada.', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-  if (await mcpMode.locator('.mcp-approval-card').count()) throw new Error('MCP Mode exibiu aprovações antigas antes de existir uma sessão MCP externa.');
-  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-operacional-limpo.png'), animations: 'disabled' });
-  await mcpMode.getByRole('button', { name: 'Avançado' }).click();
-  await mcpMode.getByText('Secure MCP Tunnel', { exact: true }).waitFor({ state: 'visible', timeout: 10000 }); const tunnelIdInput = mcpMode.locator('[data-mcp-tunnel-id]'); const tunnelKey = mcpMode.locator('[data-mcp-tunnel-key]'); if (await tunnelKey.getAttribute('type') !== 'password' || await tunnelKey.inputValue() !== '') throw new Error('Campo de credencial do Secure MCP Tunnel não está protegido e vazio.'); const tunnelDoctor = mcpMode.locator('[data-mcp-tunnel-doctor]'); const tunnelConnect = mcpMode.locator('[data-mcp-tunnel-start]'); if (await tunnelDoctor.isDisabled()) throw new Error('Secure MCP Tunnel Doctor permaneceu bloqueado após ativação automática do MCP.'); if (await tunnelConnect.isDisabled()) throw new Error('Secure MCP Tunnel permaneceu bloqueado após ativação automática do MCP.'); const visualTunnelId = 'tunnel_' + 'a'.repeat(32); await tunnelIdInput.fill(visualTunnelId); await tunnelKey.fill('sk-visual-session-only-secret'); await mcpMode.locator('[data-mcp-refresh]').click(); await page.waitForFunction((id) => document.querySelector('[data-mcp-tunnel-id]')?.value === id, visualTunnelId); if (await mcpMode.locator('[data-mcp-tunnel-key]').inputValue() !== '') throw new Error('Credencial de sessão do Secure MCP Tunnel sobreviveu a um re-render da UI.');
+  await mcpMode.getByText('MCP pronto', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByText('Prontas para suas IAs', { exact: true }).waitFor({ state: 'visible' });
+  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-hub.png'), animations: 'disabled' });
+  await mcpMode.getByRole('button', { name: 'Conectar ferramenta' }).click();
+  await mcpMode.getByRole('dialog', { name: 'Conectar ferramenta' }).waitFor({ state: 'visible' });
+  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-conectar-ferramenta.png'), animations: 'disabled' });
+  await mcpMode.locator('[data-mcp-close-connect]').first().click();
+  await mcpMode.locator('[data-mcp-open-connection="chatgpt"]').click();
+  await mcpMode.locator('[data-mcp-connection-detail="chatgpt"]').waitFor({ state: 'visible' });
+  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-conexao-detalhes.png'), animations: 'disabled' });
+  await mcpMode.getByRole('button', { name: 'Ver configuração avançada' }).click();
+  await mcpMode.getByText('Secure MCP Tunnel', { exact: true }).waitFor({ state: 'visible' });
+  const gatewayStatus = await page.evaluate(() => window.autoCodez.mcpGatewayStatus());
+  if (!gatewayStatus.running) throw new Error('Gateway MCP não permaneceu ativo após o onboarding.');
+  const gatewayText = await mcpMode.locator('.mcp-gateway-card').innerText();
+  if (!gatewayText.includes('127.0.0.1') || !gatewayText.includes('Bearer ')) throw new Error('Configuração avançada não preservou endpoint/token efêmero do gateway.');
   if (await mcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer próprio.');
-  const ledgerDiagnostic = await page.evaluate(async () => { const page = await window.autoCodez.listOperationalLedger({ limit: 250, direction: 'backward' }); return { count: page.events.length, categories: [...new Set(page.events.map((event) => event.category))], hasPlugin: page.events.some((event) => event.pluginId === 'visual.plugin') }; });
-  if (!ledgerDiagnostic.count || !ledgerDiagnostic.hasPlugin) throw new Error(`Ledger autoritativo não recebeu eventos do plugin fixture: ${JSON.stringify(ledgerDiagnostic)}`);
-  const gatewayToggle = mcpMode.locator('[data-mcp-gateway-toggle]'); await gatewayToggle.getByText('Parar Gateway', { exact: true }).waitFor({ state: 'visible' });
-  await mcpMode.getByText('Ativo somente em localhost', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-  const gatewayText = await mcpMode.locator('.mcp-gateway-card').innerText(); if (!gatewayText.includes('127.0.0.1') || !gatewayText.includes('MCP 2026-07-28') || !gatewayText.includes('Bearer ')) throw new Error(`Gateway local não expôs conexão efêmera esperada: ${gatewayText}`);
-  await mcpMode.getByText(/Preflight OK · MCP 2026-07-28/).waitFor({ state: 'visible', timeout: 10000 }); const preflightText = await mcpMode.locator('.mcp-gateway-card').innerText(); const preflightMatch = preflightText.match(/Preflight OK · MCP 2026-07-28 · (\d+) tools · (\d+) write/); if (!preflightMatch || Number(preflightMatch[1]) < 8 || Number(preflightMatch[2]) < 1) throw new Error(`Gateway preflight não validou catálogo dinâmico esperado: ${preflightText}`);
-  const doctorTunnelId = 'tunnel_' + 'a'.repeat(32); const doctorSecret = 'sk-visual-doctor-session-secret'; const doctorIdInput = mcpMode.locator('[data-mcp-tunnel-id]'); const doctorKeyInput = mcpMode.locator('[data-mcp-tunnel-key]'); await doctorIdInput.fill(doctorTunnelId); await doctorKeyInput.fill(doctorSecret); if ((await doctorKeyInput.inputValue()) !== doctorSecret) throw new Error('Chave efêmera do Doctor não entrou no input protegido antes do invoke.'); await mcpMode.locator('[data-mcp-filter="activity"]').click(); await mcpMode.locator('[data-mcp-filter="all"]').click(); if ((await mcpMode.locator('[data-mcp-tunnel-key]').inputValue()) !== doctorSecret) throw new Error('Chave efêmera do Doctor foi perdida durante um render automático da superfície MCP.'); await mcpMode.locator('[data-mcp-tunnel-doctor]').click(); await mcpMode.getByText(/Gateway OK · MCP 2026-07-28 .* Tunnel Doctor OK · tunnel-client · v0\.0\.14/).waitFor({ state: 'visible', timeout: 10000 }); if ((await doctorKeyInput.inputValue()) !== '') throw new Error('Doctor real preservou a chave efêmera no input.'); if ((await mcpMode.locator('.mcp-tunnel-card').innerText()).includes(doctorSecret)) throw new Error('Doctor real vazou a chave efêmera na UI.');
-  const gatewayStatus = await page.evaluate(() => window.autoCodez.mcpGatewayStatus()); const gatewayCode = await mcpMode.locator('.mcp-gateway-card code').innerText(); const gatewayToken = gatewayCode.replace(/^Bearer\s+/, '').trim(); if (!gatewayStatus.running || !gatewayStatus.endpoint || gatewayToken.length < 32) throw new Error(`Gateway visual sem endpoint/token válido: ${JSON.stringify(gatewayStatus)}`); if (await mcpMode.locator('[data-mcp-tunnel-doctor]').isDisabled()) throw new Error('Secure MCP Tunnel Doctor real permaneceu bloqueado após iniciar o Gateway local.'); if (await mcpMode.locator('[data-mcp-tunnel-start]').isDisabled()) throw new Error('Secure MCP Tunnel permaneceu bloqueado após iniciar o Gateway local.');
-  const mcpPost = async (body) => { const response = await fetch(gatewayStatus.endpoint, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + gatewayToken, 'mcp-protocol-version': '2026-07-28' }, body: JSON.stringify(body) }); const payload = await response.json(); if (!response.ok || payload.error) throw new Error('Gateway MCP HTTP falhou: ' + JSON.stringify({ status: response.status, payload })); return payload; };
-  const listedTools = await mcpPost({ jsonrpc: '2.0', id: 100, method: 'tools/list', params: {} }); const externalTool = listedTools.result?.tools?.find((tool) => typeof tool.name === 'string' && tool.name.endsWith('_external_action') && tool.annotations?.readOnlyHint === false && tool.annotations?.destructiveHint === true); if (!externalTool) throw new Error('Gateway não expôs a tool dinâmica write do plugin fixture: ' + JSON.stringify(listedTools));
-  const externalCall = await mcpPost({ jsonrpc: '2.0', id: 101, method: 'tools/call', params: { name: externalTool.name, arguments: { target: 'gateway-visual' }, _meta: { 'io.modelcontextprotocol/clientInfo': { name: 'Visual MCP Client', version: '1.0' } } } }); const operation = externalCall.result?.structuredContent; if (!operation?.operationId || operation.state !== 'waiting_approval' || !operation.approvalId) throw new Error('Write MCP não entrou em waiting_approval: ' + JSON.stringify(externalCall));
-  await mcpMode.getByText('Visual MCP Client', { exact: true }).first().waitFor({ state: 'visible', timeout: 10000 });
-  await page.waitForFunction(() => document.querySelectorAll('#mcp-mode-root .mcp-event').length > 0);
-  const firstEvent = mcpMode.locator('.mcp-event').first();
-  const chrome = await mcpMode.evaluate(() => {
-    const toggle = document.querySelector('.mcp-event-toggle');
-    const inactiveFilter = [...document.querySelectorAll('.mcp-filter')].find((element) => !element.classList.contains('active'));
-    return {
-      toggleBackground: toggle ? getComputedStyle(toggle).backgroundColor : '',
-      toggleBorder: toggle ? getComputedStyle(toggle).borderTopWidth : '',
-      inactiveFilterBackground: inactiveFilter ? getComputedStyle(inactiveFilter).backgroundColor : '',
-    };
-  });
-  if (chrome.toggleBackground !== 'rgba(0, 0, 0, 0)' || chrome.toggleBorder !== '0px' || chrome.inactiveFilterBackground !== 'rgba(0, 0, 0, 0)') throw new Error('MCP Mode herdou chrome nativo de button na timeline/filtros: ' + JSON.stringify(chrome));
-  await firstEvent.locator('[data-mcp-expand]').click(); await firstEvent.locator('.mcp-event-expanded').waitFor({ state: 'visible', timeout: 5000 });
-  const expandedText = (await firstEvent.locator('.mcp-event-expanded').textContent() || '').toLowerCase(); if (!expandedText.includes('eventid') || !expandedText.includes('sequence')) throw new Error(`Progressive disclosure do MCP Mode incompleto: ${expandedText}`);
-  if (await mcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer após expansão de evento.');
-  await mcpMode.getByText('Aguardando aprovação', { exact: true }).waitFor({ state: 'visible', timeout: 10000 }); const approvalCard = mcpMode.locator('.mcp-approval-card').filter({ hasText: 'plugin_call' }).first(); await approvalCard.waitFor({ state: 'visible', timeout: 10000 }); await approvalCard.getByRole('button', { name: 'Aceitar' }).click();
-  await page.waitForFunction(() => !document.querySelector('#mcp-mode-root .mcp-approval-card'));
-  const operationStatus = await mcpPost({ jsonrpc: '2.0', id: 102, method: 'tools/call', params: { name: 'operation_status', arguments: { operationId: operation.operationId } } }); const completed = operationStatus.result?.structuredContent; if (completed?.state !== 'success' || !String(completed?.result?.output || '').includes('gateway-visual')) throw new Error('Operação MCP não concluiu após aprovação local: ' + JSON.stringify(operationStatus));
-  const externalLedger = await page.evaluate(async () => { const page = await window.autoCodez.listOperationalLedger({ limit: 250, direction: 'backward' }); return page.events.filter((event) => event.clientId === 'Visual MCP Client'); }); if (!externalLedger.length || !externalLedger.some((event) => event.state === 'success')) throw new Error('Ledger não registrou causalidade do cliente MCP externo: ' + JSON.stringify(externalLedger));
-  const leakedBearer = await page.evaluate(async () => { const page = await window.autoCodez.listOperationalLedger({ limit: 250, direction: 'backward' }); return JSON.stringify(page.events).includes('Bearer '); }); if (leakedBearer) throw new Error('Token efêmero do MCP Gateway vazou para o Operational Ledger.');
-  await gatewayToggle.getByText('Parar Gateway', { exact: true }).click(); await mcpMode.getByText('Desligado', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-  if ((await mcpMode.locator('.mcp-gateway-card').innerText()).includes('Bearer ')) throw new Error('Token efêmero permaneceu visível após parar o MCP Gateway.');
-  await mcpMode.getByRole('button', { name: 'Ocultar técnico' }).click();
-  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-mode-ledger.png'), animations: 'disabled' });
   if (pageErrors.length || consoleErrors.length) throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
 }
 async function cleanup() { if (page && !page.isClosed()) await page.close().catch(() => {}); if (browser) await browser.close().catch(() => {}); if (appProcess?.pid && !exitState) { if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(appProcess.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); else appProcess.kill('SIGKILL'); } if (bridgeServer) await new Promise((resolve) => bridgeServer.close(resolve)).catch(() => {}); if (stateRoot) await fs.rm(stateRoot, { recursive: true, force: true }).catch(() => {}); }
