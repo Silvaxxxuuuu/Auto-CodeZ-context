@@ -54,7 +54,7 @@ function toRemote(row: DeviceRow) {
 export class DeviceRegistryService {
   constructor(
     private readonly database: Database,
-    private readonly environment: AccountApiEnvironment,
+    private readonly environment: Pick<AccountApiEnvironment, 'publicUrl' | 'accessTokenSecret'> | undefined,
     private readonly now: () => number = Date.now,
     private readonly accessVerifier?: DeviceAccessVerifier,
   ) {}
@@ -62,6 +62,7 @@ export class DeviceRegistryService {
   async authenticate(accessToken: string): Promise<AccessContext> {
     if (this.accessVerifier) return await this.accessVerifier.validate(accessToken);
 
+    if (!this.environment) throw new Error('identity_unavailable');
     const claims = verifyAccessToken(accessToken, {
       secret: this.environment.accessTokenSecret,
       issuer: this.environment.publicUrl,
