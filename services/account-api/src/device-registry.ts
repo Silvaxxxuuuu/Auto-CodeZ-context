@@ -244,32 +244,34 @@ export class DeviceRegistryService {
       throw new Error('forbidden');
     }
 
-    const rows = await this.database.query<{ public_key: string; revoked_at: Date | null }>(
-      'SELECT public_key, revoked_at FROM device_registry WHERE user_id = $1 AND device_id = $2',
-      [context.userId, input.deviceId],
-    );
-    const device = rows[0];
-    if (!device || device.revoked_at) throw new Error('forbidden');
-
-    const challenge = `autocodez-device-v1\n${input.pathname}\n${input.timestamp}\n${input.nonce}\n${input.bodyHash}`;
-    let valid = false;
-    try {
-      valid = crypto.verify(
-        null,
-        Buffer.from(challenge, 'utf8'),
-        device.public_key,
-        Buffer.from(input.signature, 'base64'),
+    return await this.database.transaction(async (client) => {
+      const result = await client.query<{ public_key: string; revoked_at: Date | null }>(
+        'SELECT public_key, revoked_at FROM device_registry WHERE user_id = $1 AND device_id = $2 FOR UPDATE',
+        [context.userId, input.deviceId],
       );
-    } catch {
-      valid = false;
-    }
-    if (!valid) throw new Error('forbidden');
+      const device = result.rows[0];
+      if (!device || device.revoked_at) throw new Error('forbidden');
 
-    await this.database.query(
-      'UPDATE device_registry SET last_seen_at = NOW() WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL',
-      [context.userId, input.deviceId],
-    );
-    return { ...context, deviceId: input.deviceId };
+      const challenge = `autocodez-device-v1\n${input.pathname}\n${input.timestamp}\n${input.nonce}\n${input.bodyHash}`;
+      let valid = false;
+      try {
+        valid = crypto.verify(
+          null,
+          Buffer.from(challenge, 'utf8'),
+          device.public_key,
+          Buffer.from(input.signature, 'base64'),
+        );
+      } catch {
+        valid = false;
+      }
+      if (!valid) throw new Error('forbidden');
+
+      await client.query(
+        'UPDATE device_registry SET last_seen_at = NOW() WHERE user_id = $1 AND device_id = $2',
+        [context.userId, input.deviceId],
+      );
+      return { ...context, deviceId: input.deviceId };
+    });
   }
 
   async list(context: AccessContext) {
