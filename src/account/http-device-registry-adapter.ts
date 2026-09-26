@@ -114,8 +114,11 @@ export class HttpDeviceRegistryAdapter implements DeviceRegistryAdapter {
         signal: controller.signal,
       });
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
+        if (response.status === 401) {
           throw new DeviceRegistryAdapterError('unauthorized', 'Sessão não autorizada pelo Device Registry.');
+        }
+        if (response.status === 403) {
+          throw new DeviceRegistryAdapterError('revoked', 'Este dispositivo foi revogado no Device Registry.');
         }
         throw new DeviceRegistryAdapterError('server', `Device Registry respondeu HTTP ${response.status}.`);
       }
