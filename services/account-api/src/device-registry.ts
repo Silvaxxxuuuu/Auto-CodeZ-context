@@ -2,12 +2,9 @@ import crypto from 'node:crypto';
 import type { Database } from './db.js';
 import type { AccountApiEnvironment } from './env.js';
 import { verifyAccessToken } from './crypto.js';
+import type { DeviceAccessContext, DeviceAccessVerifier } from './descope-session-verifier.js';
 
-type AccessContext = {
-  userId: string;
-  sessionId: string;
-  deviceId: string;
-};
+type AccessContext = DeviceAccessContext;
 
 type DeviceRow = {
   device_id: string;
@@ -24,7 +21,6 @@ type DeviceRow = {
 type RegistrationRow = {
   registration_id: string;
   user_id: string;
-  session_id: string;
   device_id: string;
   name: string;
   platform: string;
@@ -60,9 +56,12 @@ export class DeviceRegistryService {
     private readonly database: Database,
     private readonly environment: AccountApiEnvironment,
     private readonly now: () => number = Date.now,
+    private readonly accessVerifier?: DeviceAccessVerifier,
   ) {}
 
   async authenticate(accessToken: string): Promise<AccessContext> {
+    if (this.accessVerifier) return await this.accessVerifier.validate(accessToken);
+
     const claims = verifyAccessToken(accessToken, {
       secret: this.environment.accessTokenSecret,
       issuer: this.environment.publicUrl,
@@ -94,7 +93,7 @@ export class DeviceRegistryService {
     appVersion: string;
     publicKey: string;
   }): Promise<{ registrationId: string; challenge: string; expiresAt: number }> {
-    if (device.id !== context.deviceId) throw new Error('forbidden');
+    if (context.deviceId && device.id !== context.deviceId) throw new Error('forbidden');
     if (!device.publicKey.includes('BEGIN PUBLIC KEY')) throw new Error('public key invalid.');
 
     const nowMs = this.now();
@@ -104,16 +103,15 @@ export class DeviceRegistryService {
 
     await this.database.query(
       `INSERT INTO device_registration (
-        registration_id, user_id, session_id, device_id, name, platform, arch,
+        registration_id, user_id, device_id, name, platform, arch,
         app_version, public_key, challenge, created_at, expires_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        to_timestamp($11 / 1000.0), to_timestamp($12 / 1000.0)
+        $1, $2, $3, $4, $5, $6, $7, $8, $9,
+        to_timestamp($10 / 1000.0), to_timestamp($11 / 1000.0)
       )`,
       [
         registrationId,
         context.userId,
-        context.sessionId,
         device.id,
         device.name,
         device.platform,
@@ -138,7 +136,7 @@ export class DeviceRegistryService {
 
     return await this.database.transaction(async (client) => {
       const result = await client.query<RegistrationRow>(
-        `SELECT registration_id, user_id, session_id, device_id, name, platform, arch,
+        `SELECT registration_id, user_id, device_id, name, platform, arch,
                 app_version, public_key, challenge,
                 EXTRACT(EPOCH FROM expires_at) * 1000 AS expires_at_ms,
                 EXTRACT(EPOCH FROM consumed_at) * 1000 AS consumed_at_ms
@@ -151,8 +149,7 @@ export class DeviceRegistryService {
       if (
         !registration
         || registration.user_id !== context.userId
-        || registration.session_id !== context.sessionId
-        || registration.device_id !== context.deviceId
+        || (context.deviceId !== undefined && registration.device_id !== context.deviceId)
         || registration.device_id !== input.deviceId
         || registration.consumed_at_ms !== null
         || numberValue(registration.expires_at_ms) <= nowMs
