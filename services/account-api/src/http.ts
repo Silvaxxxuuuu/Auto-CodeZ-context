@@ -50,13 +50,22 @@ export function sendError(response: { status(code: number): { json(value: unknow
     ? 401
     : message === 'not_found'
       ? 404
-      : message === 'forbidden'
+      : message === 'forbidden' || message === 'device_revoked'
         ? 403
         : message.endsWith('invalid.')
           ? 400
           : 500;
+  const code = message === 'device_revoked'
+    ? 'device_revoked'
+    : message === 'forbidden'
+      ? 'forbidden'
+      : message === 'not_found'
+        ? 'not_found'
+        : status === 401
+          ? 'invalid_grant'
+          : 'server';
   response.status(status).json({
-    code: message === 'invalid_grant' ? 'invalid_grant' : status === 401 ? 'invalid_grant' : 'server',
+    code,
     message: status >= 500 ? 'Falha no serviço de autenticação.' : message,
   });
 }

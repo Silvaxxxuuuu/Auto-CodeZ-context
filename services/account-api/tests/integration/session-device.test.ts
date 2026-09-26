@@ -478,7 +478,7 @@ test('Device Registry accepts a Descope subject without legacy desktop account o
         appVersion: '2.0.0-test',
         publicKey,
       }),
-      /forbidden/,
+      /device_revoked/,
     );
   } finally {
     await database.close();
@@ -547,7 +547,7 @@ test('revoked Descope device proof cannot access registry with an otherwise vali
 
     await assert.rejects(
       registry.authenticateDeviceRequest(context, proof('proof-nonce-after-revoke')),
-      /forbidden/,
+      /device_revoked/,
     );
   } finally {
     await database.close();

@@ -35,7 +35,7 @@ export type DeviceRequestProofSigner = (challenge: string) => Promise<{
   signature: string;
 }>;
 
-export type DeviceRegistryAdapterErrorCode = 'offline' | 'unauthorized' | 'revoked' | 'server' | 'not_configured';
+export type DeviceRegistryAdapterErrorCode = 'offline' | 'unauthorized' | 'forbidden' | 'revoked' | 'server' | 'not_configured';
 
 export class DeviceRegistryAdapterError extends Error {
   constructor(

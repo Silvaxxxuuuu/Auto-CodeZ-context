@@ -52,6 +52,19 @@ function parseDevice(value: unknown): RemoteDeviceRecord {
   };
 }
 
+async function responseErrorCode(response: Response): Promise<string | undefined> {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) return undefined;
+  try {
+    const payload = await response.json();
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
+    const code = (payload as Record<string, unknown>).code;
+    return typeof code === 'string' ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class HttpDeviceRegistryAdapter implements DeviceRegistryAdapter {
   private readonly origin: string;
   private readonly fetchImpl: FetchLike;
@@ -136,7 +149,11 @@ export class HttpDeviceRegistryAdapter implements DeviceRegistryAdapter {
           throw new DeviceRegistryAdapterError('unauthorized', 'Sessão não autorizada pelo Device Registry.');
         }
         if (response.status === 403) {
-          throw new DeviceRegistryAdapterError('revoked', 'Este dispositivo foi revogado no Device Registry.');
+          const code = await responseErrorCode(response);
+          if (code === 'device_revoked') {
+            throw new DeviceRegistryAdapterError('revoked', 'Este dispositivo foi revogado no Device Registry.');
+          }
+          throw new DeviceRegistryAdapterError('forbidden', 'O Device Registry recusou a prova deste dispositivo.');
         }
         throw new DeviceRegistryAdapterError('server', `Device Registry respondeu HTTP ${response.status}.`);
       }

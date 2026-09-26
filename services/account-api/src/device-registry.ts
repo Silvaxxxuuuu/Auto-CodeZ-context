@@ -101,7 +101,7 @@ export class DeviceRegistryService {
       'SELECT revoked_at FROM device_registry WHERE user_id = $1 AND device_id = $2',
       [context.userId, device.id],
     );
-    if (existing[0]?.revoked_at) throw new Error('forbidden');
+    if (existing[0]?.revoked_at) throw new Error('device_revoked');
 
     const nowMs = this.now();
     const expiresAt = nowMs + CHALLENGE_TTL_MS;
@@ -181,7 +181,7 @@ export class DeviceRegistryService {
         'SELECT revoked_at FROM device_registry WHERE user_id = $1 AND device_id = $2 FOR UPDATE',
         [context.userId, registration.device_id],
       );
-      if (existingDevice.rows[0]?.revoked_at) throw new Error('forbidden');
+      if (existingDevice.rows[0]?.revoked_at) throw new Error('device_revoked');
 
       await client.query(
         `INSERT INTO device_registry (
@@ -250,7 +250,8 @@ export class DeviceRegistryService {
         [context.userId, input.deviceId],
       );
       const device = result.rows[0];
-      if (!device || device.revoked_at) throw new Error('forbidden');
+      if (!device) throw new Error('forbidden');
+      if (device.revoked_at) throw new Error('device_revoked');
 
       const challenge = `autocodez-device-v1\n${input.pathname}\n${input.timestamp}\n${input.nonce}\n${input.bodyHash}`;
       let valid = false;

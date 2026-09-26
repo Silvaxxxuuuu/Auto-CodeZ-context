@@ -316,3 +316,18 @@ test('DeviceRegistryRuntime completes logout before returning a revoked refresh 
   assert.match(snapshot.lastError ?? '', /revogado/);
   assert.equal(sessions.snapshot().state, 'signed_out');
 });
+
+
+test('DeviceRegistryRuntime keeps the session when device proof is forbidden but not revoked', async () => {
+  const { registry, adapter, sessions } = await setup();
+  await registry.ensureRegistered();
+  adapter.list = async () => {
+    throw new DeviceRegistryAdapterError('forbidden', 'O Device Registry recusou a prova deste dispositivo.');
+  };
+
+  const snapshot = await registry.refresh();
+
+  assert.equal(snapshot.state, 'error');
+  assert.match(snapshot.lastError ?? '', /recusou/);
+  assert.equal(sessions.snapshot().state, 'authenticated');
+});

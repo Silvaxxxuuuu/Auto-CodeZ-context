@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import express, { type Request, type Response } from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -438,8 +439,44 @@ app.get('/desktop/passkey/enroll', async (request, response) => {
   }
 });
 
-async function deviceContext(request: Request) {
-  return await devices.authenticate(bearerToken(request));
+async function deviceContext(request: Request, requireProof = false) {
+  const context = await devices.authenticate(bearerToken(request));
+  if (!requireProof) return context;
+
+  let proof: {
+    deviceId: string;
+    pathname: string;
+    timestamp: number;
+    nonce: string;
+    bodyHash: string;
+    signature: string;
+  };
+  try {
+    const timestamp = Number(requireString(
+      request.header('x-autocodez-device-timestamp'),
+      'device proof timestamp',
+      32,
+    ));
+    if (!Number.isFinite(timestamp)) throw new Error('invalid timestamp');
+    proof = {
+      deviceId: requireString(request.header('x-autocodez-device-id'), 'device proof id', 256),
+      pathname: request.path,
+      timestamp,
+      nonce: requireString(request.header('x-autocodez-device-nonce'), 'device proof nonce', 128),
+      bodyHash: crypto.createHash('sha256')
+        .update(JSON.stringify(request.body ?? {}), 'utf8')
+        .digest('base64url'),
+      signature: requireString(
+        request.header('x-autocodez-device-signature'),
+        'device proof signature',
+        16_384,
+      ),
+    };
+  } catch {
+    throw new Error('forbidden');
+  }
+
+  return await devices.authenticateDeviceRequest(context, proof);
 }
 
 app.post('/v1/devices/register/begin', async (request, response) => {
@@ -475,7 +512,7 @@ app.post('/v1/devices/register/complete', async (request, response) => {
 
 app.post('/v1/devices/list', async (request, response) => {
   try {
-    response.json(await devices.list(await deviceContext(request)));
+    response.json(await devices.list(await deviceContext(request, true)));
   } catch (error) {
     sendError(response, error);
   }
@@ -483,7 +520,7 @@ app.post('/v1/devices/list', async (request, response) => {
 
 app.post('/v1/devices/rename', async (request, response) => {
   try {
-    const context = await deviceContext(request);
+    const context = await deviceContext(request, true);
     const body = requireObject(request.body, 'body');
     response.json(await devices.rename(
       context,
@@ -497,7 +534,7 @@ app.post('/v1/devices/rename', async (request, response) => {
 
 app.post('/v1/devices/revoke', async (request, response) => {
   try {
-    const context = await deviceContext(request);
+    const context = await deviceContext(request, true);
     const body = requireObject(request.body, 'body');
     await devices.revoke(
       context,
