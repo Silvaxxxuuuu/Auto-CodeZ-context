@@ -4,6 +4,8 @@ export type AccountApiEnvironment = {
   databaseUrl: string;
   betterAuthSecret: string;
   accessTokenSecret: string;
+  descopeProjectId?: string;
+  descopeBaseUrl?: string;
   github?: { clientId: string; clientSecret: string };
   google?: { clientId: string; clientSecret: string };
   microsoft?: { clientId: string; clientSecret: string; tenantId: string };
@@ -63,6 +65,12 @@ export function loadEnvironment(): AccountApiEnvironment {
     databaseUrl: required('DATABASE_URL'),
     betterAuthSecret: secret('BETTER_AUTH_SECRET'),
     accessTokenSecret: secret('ACCOUNT_ACCESS_TOKEN_SECRET'),
+    ...(process.env.DESCOPE_PROJECT_ID?.trim()
+      ? { descopeProjectId: process.env.DESCOPE_PROJECT_ID.trim() }
+      : {}),
+    ...(process.env.DESCOPE_BASE_URL?.trim()
+      ? { descopeBaseUrl: process.env.DESCOPE_BASE_URL.trim() }
+      : {}),
     ...(github ? { github } : {}),
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
