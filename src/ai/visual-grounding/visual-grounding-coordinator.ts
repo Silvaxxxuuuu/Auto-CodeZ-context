@@ -5,9 +5,9 @@ import type { WebGroundingSource } from '../../web/web-grounding-coordinator';
 import { visualSearchQuery } from './visual-grounding-query';
 import type { ReverseImageSearchProvider, ReverseImageSearchResult, VisualGroundingDecision, VisualGroundingReason, VisualGroundingResult } from './visual-grounding-types';
 
-const IDENTIFICATION = /\b(quem [ée]|quem e|who is|what character|qual personagem|que personagem|de onde [ée]|de onde e|qual obra|que obra|qual anime|qual manga|qual mang[aá]|qual jogo|que jogo|que lugar|qual lugar|o que [ée] isso|o que e isso|what is this|origem da imagem|fonte da imagem|source of (?:this|the) image)\b/i;
-const GUIDANCE = /\b(o que (?:eu )?(?:fa[cç]o|devo fazer)|onde (?:eu )?clico|qual (?:bot[aã]o|op[cç][aã]o)|me gui[ae]|me explique (?:essa|esta) tela|n[aã]o entendi|como (?:eu )?fa[cç]o aqui|what should i do|where (?:should|do) i click|guide me|walk me through|which (?:button|option))\b/i;
-const ERROR = /\b(erro|error|falhou|failed|deu nisso|n[aã]o funciona|not working|exception|invalid|denied|forbidden|unauthorized)\b/i;
+const IDENTIFICATION = /\b(quem e|who is|what character|qual personagem|que personagem|de onde e|qual obra|que obra|qual anime|qual manga|qual jogo|que jogo|que lugar|qual lugar|o que e isso|what is this|origem da imagem|fonte da imagem|source of (?:this|the) image)\b/i;
+const GUIDANCE = /\b(o que (?:eu )?(?:faco|devo fazer)|onde (?:eu )?clico|qual (?:botao|opcao)|me gui[ae]|me explique (?:essa|esta) tela|nao entendi|como (?:eu )?faco aqui|what should i do|where (?:should|do) i click|guide me|walk me through|which (?:button|option))\b/i;
+const ERROR = /\b(erro|error|falhou|failed|deu nisso|nao funciona|not working|exception|invalid|denied|forbidden|unauthorized)\b/i;
 
 function latestVisualUser(messages: readonly AIMessage[]): { message: AIMessage; text: string; attachment: AIAttachment } | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -21,9 +21,10 @@ function latestVisualUser(messages: readonly AIMessage[]): { message: AIMessage;
 }
 
 function reasonFor(message: string): VisualGroundingReason | undefined {
-  if (IDENTIFICATION.test(message)) return 'visual-identification';
-  if (GUIDANCE.test(message)) return 'visual-guidance';
-  if (ERROR.test(message)) return 'visual-error';
+  const normalized = message.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (IDENTIFICATION.test(normalized)) return 'visual-identification';
+  if (GUIDANCE.test(normalized)) return 'visual-guidance';
+  if (ERROR.test(normalized)) return 'visual-error';
   return undefined;
 }
 
