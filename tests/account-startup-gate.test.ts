@@ -36,5 +36,5 @@ test('device onboarding only completes after Device Registry rename succeeds', a
   assert.ok(completion > localRename);
   assert.doesNotMatch(body, /renameAccountDeviceRegistryCurrent\(normalized\)\.catch/);
   assert.match(source, /const deviceError = flowState\.status === 'error' \? flowState\.lastError : undefined;/);
-  assert.match(source, /account-inline-error\" role=\"alert/);
+  assert.match(source, /account-inline-error" role="alert/);
 });
