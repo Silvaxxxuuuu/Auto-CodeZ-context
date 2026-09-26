@@ -33,6 +33,8 @@ type RegistrationRow = {
 };
 
 const CHALLENGE_TTL_MS = 2 * 60 * 1000;
+const REQUEST_PROOF_MAX_SKEW_MS = 5 * 60 * 1000;
+const REQUEST_NONCE_RETENTION_MS = 10 * 60 * 1000;
 
 function numberValue(value: string | number): number {
   return typeof value === 'number' ? value : Number(value);
@@ -228,15 +230,12 @@ export class DeviceRegistryService {
     bodyHash: string;
     signature: string;
   }): Promise<AccessContext> {
-    if (context.deviceId) {
-      if (context.deviceId !== input.deviceId) throw new Error('forbidden');
-      return context;
-    }
+    if (context.deviceId && context.deviceId !== input.deviceId) throw new Error('forbidden');
 
     const nowMs = this.now();
     if (
       !Number.isFinite(input.timestamp)
-      || Math.abs(nowMs - input.timestamp) > 5 * 60_000
+      || Math.abs(nowMs - input.timestamp) > REQUEST_PROOF_MAX_SKEW_MS
       || !/^[A-Za-z0-9_-]{16,128}$/.test(input.nonce)
       || !/^[A-Za-z0-9_-]{20,128}$/.test(input.bodyHash)
       || input.signature.length > 16_384
@@ -266,6 +265,18 @@ export class DeviceRegistryService {
         valid = false;
       }
       if (!valid) throw new Error('forbidden');
+
+      await client.query(
+        'DELETE FROM device_request_nonce WHERE expires_at <= to_timestamp($1 / 1000.0)',
+        [nowMs],
+      );
+      const nonceInsert = await client.query(
+        `INSERT INTO device_request_nonce (user_id, device_id, nonce, expires_at)
+         VALUES ($1, $2, $3, to_timestamp($4 / 1000.0))
+         ON CONFLICT (user_id, device_id, nonce) DO NOTHING`,
+        [context.userId, input.deviceId, input.nonce, nowMs + REQUEST_NONCE_RETENTION_MS],
+      );
+      if (nonceInsert.rowCount !== 1) throw new Error('forbidden');
 
       await client.query(
         'UPDATE device_registry SET last_seen_at = NOW() WHERE user_id = $1 AND device_id = $2',

@@ -51,23 +51,30 @@ async function deviceContext(request: Request) {
 
 async function registeredDeviceContext(request: Request) {
   const context = await deviceContext(request);
-  const deviceId = requireString(request.header('x-autocodez-device-id'), 'device proof id', 256);
-  const timestampText = requireString(request.header('x-autocodez-device-timestamp'), 'device proof timestamp', 32);
-  const timestamp = Number(timestampText);
-  if (!Number.isFinite(timestamp)) throw new Error('forbidden');
-  const nonce = requireString(request.header('x-autocodez-device-nonce'), 'device proof nonce', 128);
-  const signature = requireString(request.header('x-autocodez-device-signature'), 'device proof signature', 16_384);
-  const bodyHash = crypto.createHash('sha256')
-    .update(JSON.stringify(request.body ?? {}), 'utf8')
-    .digest('base64url');
-  return await devices.authenticateDeviceRequest(context, {
-    deviceId,
-    pathname: request.path,
-    timestamp,
-    nonce,
-    bodyHash,
-    signature,
-  });
+  const proof = (() => {
+    try {
+      const deviceId = requireString(request.header('x-autocodez-device-id'), 'device proof id', 256);
+      const timestampText = requireString(request.header('x-autocodez-device-timestamp'), 'device proof timestamp', 32);
+      const timestamp = Number(timestampText);
+      if (!Number.isFinite(timestamp)) throw new Error('invalid timestamp');
+      const nonce = requireString(request.header('x-autocodez-device-nonce'), 'device proof nonce', 128);
+      const signature = requireString(request.header('x-autocodez-device-signature'), 'device proof signature', 16_384);
+      const bodyHash = crypto.createHash('sha256')
+        .update(JSON.stringify(request.body ?? {}), 'utf8')
+        .digest('base64url');
+      return {
+        deviceId,
+        pathname: request.path,
+        timestamp,
+        nonce,
+        bodyHash,
+        signature,
+      };
+    } catch {
+      throw new Error('forbidden');
+    }
+  })();
+  return await devices.authenticateDeviceRequest(context, proof);
 }
 
 app.post('/v1/devices/register/begin', async (request, response) => {

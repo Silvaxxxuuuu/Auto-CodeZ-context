@@ -155,12 +155,49 @@ test('Device Registry requires proof of Ed25519 private-key possession and revoc
     assert.equal(registered.id, 'device-registry-1');
     assert.equal(registered.name, 'Principal');
 
-    const listed = await registry.list(context);
+    const requestPath = '/v1/devices/list';
+    const requestNonce = 'legacy-proof-nonce-1';
+    const requestBodyHash = crypto.createHash('sha256').update('{}', 'utf8').digest('base64url');
+    const requestChallenge = `autocodez-device-v1\n${requestPath}\n${now}\n${requestNonce}\n${requestBodyHash}`;
+
+    await assert.rejects(
+      registry.authenticateDeviceRequest(context, {
+        deviceId: 'device-registry-1',
+        pathname: requestPath,
+        timestamp: now,
+        nonce: requestNonce,
+        bodyHash: requestBodyHash,
+        signature: crypto.randomBytes(64).toString('base64'),
+      }),
+      /forbidden/,
+    );
+
+    const requestProof = {
+      deviceId: 'device-registry-1',
+      pathname: requestPath,
+      timestamp: now,
+      nonce: requestNonce,
+      bodyHash: requestBodyHash,
+      signature: crypto.sign(
+        null,
+        Buffer.from(requestChallenge, 'utf8'),
+        keyPair.privateKey,
+      ).toString('base64'),
+    };
+    const boundContext = await registry.authenticateDeviceRequest(context, requestProof);
+    assert.equal(boundContext.deviceId, 'device-registry-1');
+
+    await assert.rejects(
+      registry.authenticateDeviceRequest(context, requestProof),
+      /forbidden/,
+    );
+
+    const listed = await registry.list(boundContext);
     assert.equal(listed.length, 1);
     assert.equal(listed[0]?.revokedAt, undefined);
 
     now += 1_000;
-    await registry.revoke(context, 'device-registry-1');
+    await registry.revoke(boundContext, 'device-registry-1');
 
     await assert.rejects(
       registry.authenticate(grant.accessToken),
@@ -539,8 +576,14 @@ test('revoked Descope device proof cannot access registry with an otherwise vali
       };
     };
 
-    const bound = await registry.authenticateDeviceRequest(context, proof('proof-nonce-before-revoke'));
+    const originalProof = proof('proof-nonce-before-revoke');
+    const bound = await registry.authenticateDeviceRequest(context, originalProof);
     assert.equal(bound.deviceId, deviceId);
+
+    await assert.rejects(
+      registry.authenticateDeviceRequest(context, originalProof),
+      /forbidden/,
+    );
 
     await registry.revoke(bound, deviceId);
     now += 1_000;
