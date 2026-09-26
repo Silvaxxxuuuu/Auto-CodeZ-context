@@ -301,3 +301,18 @@ test('DeviceRegistryRuntime signs out instead of refreshing forever when current
   assert.equal(sessions.snapshot().state, 'signed_out');
   assert.equal(adapter.beginCalls, 0);
 });
+
+
+test('DeviceRegistryRuntime completes logout before returning a revoked refresh state', async () => {
+  const { registry, adapter, sessions } = await setup();
+  await registry.ensureRegistered();
+  adapter.list = async () => {
+    throw new DeviceRegistryAdapterError('revoked', 'Este dispositivo foi revogado no Device Registry.');
+  };
+
+  const snapshot = await registry.refresh();
+
+  assert.equal(snapshot.state, 'unavailable');
+  assert.match(snapshot.lastError ?? '', /revogado/);
+  assert.equal(sessions.snapshot().state, 'signed_out');
+});

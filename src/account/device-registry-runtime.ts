@@ -198,7 +198,7 @@ export class DeviceRegistryRuntime {
     } catch (error) {
       if (error instanceof DeviceRegistryAdapterError) {
         if (error.code === 'unauthorized') void this.sessions.refreshSession();
-        else if (error.code === 'revoked') void this.sessions.logout();
+        else if (error.code === 'revoked') await this.sessions.logout();
       }
       return this.setState({
         state: registryFailureState(error),
