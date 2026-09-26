@@ -75,6 +75,7 @@ let account: AccountSnapshot | undefined;
 let registry: RegistrySnapshot | undefined;
 let authConfiguration: AuthConfiguration | undefined;
 let confirmingAction = '';
+let profileActionError: string | undefined;
 let unsubscribeAccount: (() => void) | undefined;
 let unsubscribeRegistry: (() => void) | undefined;
 
@@ -98,6 +99,10 @@ function relativeTime(timestamp: number): string {
   if (delta < 3_600_000) return `Há ${Math.max(1, Math.floor(delta / 60_000))} min`;
   if (delta < 86_400_000) return `Há ${Math.max(1, Math.floor(delta / 3_600_000))} h`;
   return new Date(timestamp).toLocaleDateString('pt-BR');
+}
+
+function actionErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
 
 function stateLabel(): { label: string; tone: string } {
@@ -188,6 +193,7 @@ function panelMarkup(): string {
           <strong>${escapeHtml(account.device.name)}</strong>
         </div>
       </div>
+      ${profileActionError ? `<div class="account-profile-warning" role="alert">${escapeHtml(profileActionError)}</div>` : ''}
 
       <div class="account-profile-subsection">
         <div class="account-profile-subheading row">
@@ -236,7 +242,12 @@ function enhanceProfile(): void {
 
 async function refreshRegistry(): Promise<void> {
   if (!bridge || account?.state !== 'authenticated') return;
-  registry = await bridge.refreshAccountDeviceRegistry().catch(() => registry);
+  profileActionError = undefined;
+  try {
+    registry = await bridge.refreshAccountDeviceRegistry();
+  } catch (error) {
+    profileActionError = actionErrorMessage(error, 'Não foi possível atualizar os dispositivos.');
+  }
   enhanceProfile();
 }
 
@@ -245,24 +256,49 @@ async function revokeDevice(deviceId: string): Promise<void> {
   const key = `revoke:${deviceId}`;
   if (confirmingAction !== key) {
     confirmingAction = key;
+    profileActionError = undefined;
     enhanceProfile();
     return;
   }
   confirmingAction = '';
-  registry = await bridge.revokeAccountDevice(deviceId);
+  profileActionError = undefined;
+  try {
+    registry = await bridge.revokeAccountDevice(deviceId);
+  } catch (error) {
+    profileActionError = actionErrorMessage(error, 'Não foi possível revogar o dispositivo.');
+  }
   enhanceProfile();
+}
+
+async function openPasskeyEnrollment(): Promise<void> {
+  if (!bridge) return;
+  profileActionError = undefined;
+  try {
+    const result = await bridge.openAccountPasskeyEnrollment();
+    if (!result.opened) throw new Error('Não foi possível abrir o cadastro de passkey.');
+  } catch (error) {
+    profileActionError = actionErrorMessage(error, 'Não foi possível abrir o cadastro de passkey.');
+    enhanceProfile();
+  }
 }
 
 async function logout(): Promise<void> {
   if (!bridge) return;
   if (confirmingAction !== 'logout') {
     confirmingAction = 'logout';
+    profileActionError = undefined;
     enhanceProfile();
     return;
   }
   confirmingAction = '';
-  account = await bridge.logoutAccount();
-  document.querySelector<HTMLElement>('[data-profile-close]')?.click();
+  profileActionError = undefined;
+  try {
+    account = await bridge.logoutAccount();
+    document.querySelector<HTMLElement>('[data-profile-close]')?.click();
+  } catch (error) {
+    profileActionError = actionErrorMessage(error, 'Não foi possível sair da conta.');
+    enhanceProfile();
+  }
 }
 
 document.addEventListener('click', (event) => {
@@ -275,7 +311,7 @@ document.addEventListener('click', (event) => {
   }
 
   if (target.closest('[data-account-add-passkey]')) {
-    void bridge?.openAccountPasskeyEnrollment();
+    void openPasskeyEnrollment();
     return;
   }
 
@@ -332,4 +368,7 @@ window.addEventListener('beforeunload', () => {
   unsubscribeRegistry?.();
 }, { once: true });
 
-void initialize();
+void initialize().catch((error: unknown) => {
+  profileActionError = actionErrorMessage(error, 'Não foi possível carregar os dados da conta.');
+  enhanceProfile();
+});

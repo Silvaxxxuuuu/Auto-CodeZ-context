@@ -38,3 +38,17 @@ test('device onboarding only completes after Device Registry rename succeeds', a
   assert.match(source, /const deviceError = flowState\.status === 'error' \? flowState\.lastError : undefined;/);
   assert.match(source, /account-inline-error" role="alert/);
 });
+
+
+test('account profile actions surface async failures instead of creating unhandled rejections', async () => {
+  const source = await fs.readFile('src/account-profile-ui.ts', 'utf8');
+
+  assert.match(source, /let profileActionError: string \| undefined;/);
+  assert.match(source, /account-profile-warning" role="alert"/);
+  assert.match(source, /async function refreshRegistry[\s\S]*?catch \(error\)[\s\S]*?Não foi possível atualizar os dispositivos\./);
+  assert.match(source, /async function revokeDevice[\s\S]*?catch \(error\)[\s\S]*?Não foi possível revogar o dispositivo\./);
+  assert.match(source, /async function openPasskeyEnrollment[\s\S]*?catch \(error\)[\s\S]*?Não foi possível abrir o cadastro de passkey\./);
+  assert.match(source, /async function logout[\s\S]*?catch \(error\)[\s\S]*?Não foi possível sair da conta\./);
+  assert.match(source, /void initialize\(\)\.catch/);
+  assert.doesNotMatch(source, /void bridge\?\.openAccountPasskeyEnrollment\(\)/);
+});
