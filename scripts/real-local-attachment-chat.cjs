@@ -313,9 +313,9 @@ async function testPasteAndAnswer(chatId, sourcePath) {
   await attachButton.click();
   const attachMenu = page.locator('#attachment-menu');
   await attachMenu.waitFor({ state: 'visible', timeout: 5_000 });
-  await attachMenu.getByRole('menuitem', { name: /Imagens/i }).waitFor();
-  await attachMenu.getByRole('menuitem', { name: /Arquivos/i }).waitFor();
-  if (await attachMenu.getByRole('menuitem').count() !== 2) {
+  await attachMenu.locator('[data-attachment-option="image"]').waitFor();
+  await attachMenu.locator('[data-attachment-option="file"]').waitFor();
+  if (await attachMenu.locator('[data-attachment-option]').count() !== 2) {
     throw new Error('Menu de anexos deve conter somente Imagens e Arquivos nesta versão.');
   }
   await page.screenshot({

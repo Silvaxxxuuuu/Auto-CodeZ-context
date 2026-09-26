@@ -279,6 +279,10 @@ async function verifyAttachmentComposer() {
   const attach = page.locator('.attach-button').first();
   await attach.waitFor({ state: 'visible', timeout: 10_000 });
   await attach.click();
+  const attachMenu = page.locator('#attachment-menu');
+  await attachMenu.waitFor({ state: 'visible', timeout: 5_000 });
+  await page.screenshot({ path: path.join(outputDir, 'funcional-menu-anexos.png'), animations: 'disabled' });
+  await attachMenu.locator('[data-attachment-option="image"]').click();
 
   const tray = page.locator('#attachment-tray');
   await tray.waitFor({ state: 'visible', timeout: 15_000 });
