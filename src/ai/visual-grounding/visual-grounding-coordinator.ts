@@ -3,7 +3,7 @@ import { WebRetrievalRuntime } from '../../web/web-retrieval-runtime';
 import type { WebFetchedDocument, WebSearchResult } from '../../web/web-types';
 import type { WebGroundingSource } from '../../web/web-grounding-coordinator';
 import { visualSearchQuery } from './visual-grounding-query';
-import type { ReverseImageSearchProvider, VisualGroundingDecision, VisualGroundingReason, VisualGroundingResult } from './visual-grounding-types';
+import type { ReverseImageSearchProvider, ReverseImageSearchResult, VisualGroundingDecision, VisualGroundingReason, VisualGroundingResult } from './visual-grounding-types';
 
 const IDENTIFICATION = /\b(quem [ée]|quem e|who is|what character|qual personagem|que personagem|de onde [ée]|de onde e|qual obra|que obra|qual anime|qual manga|qual mang[aá]|qual jogo|que jogo|que lugar|qual lugar|o que [ée] isso|o que e isso|what is this|origem da imagem|fonte da imagem|source of (?:this|the) image)\b/i;
 const GUIDANCE = /\b(o que (?:eu )?(?:fa[cç]o|devo fazer)|onde (?:eu )?clico|qual (?:bot[aã]o|op[cç][aã]o)|me gui[ae]|me explique (?:essa|esta) tela|n[aã]o entendi|como (?:eu )?fa[cç]o aqui|what should i do|where (?:should|do) i click|guide me|walk me through|which (?:button|option))\b/i;
@@ -99,7 +99,7 @@ export class VisualGroundingCoordinator {
     const decision = this.classify(messages);
     if (!decision.required || !decision.reason || !decision.userMessage || !decision.attachment) return undefined;
 
-    let reverse;
+    let reverse: ReverseImageSearchResult | undefined;
     if (decision.reason === 'visual-identification' && this.reverseProvider?.available()) {
       try {
         reverse = await this.reverseProvider.search(decision.attachment, signal);
