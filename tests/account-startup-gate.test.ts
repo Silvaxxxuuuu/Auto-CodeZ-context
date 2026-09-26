@@ -52,3 +52,17 @@ test('account profile actions surface async failures instead of creating unhandl
   assert.match(source, /void initialize\(\)\.catch/);
   assert.doesNotMatch(source, /void bridge\?\.openAccountPasskeyEnrollment\(\)/);
 });
+
+
+test('authenticated profile owns a stable account slot and exposes every access method', async () => {
+  const profileSource = await fs.readFile('src/profile-ui.ts', 'utf8');
+  const accountSource = await fs.readFile('src/account-profile-ui.ts', 'utf8');
+
+  assert.match(profileSource, /data-account-profile-slot/);
+  assert.match(accountSource, /const ACCESS_METHODS:[\s\S]*?'google'[\s\S]*?'github'[\s\S]*?'microsoft'[\s\S]*?'magic_link'[\s\S]*?'passkey'/);
+  assert.match(accountSource, /data-account-access-method/);
+  assert.match(accountSource, /slot\.replaceChildren\(\)/);
+  assert.doesNotMatch(accountSource, /content\.insertBefore\(panel/);
+  assert.doesNotMatch(accountSource, /beginAccountOAuth/);
+  assert.match(accountSource, /data-account-link-method/);
+});

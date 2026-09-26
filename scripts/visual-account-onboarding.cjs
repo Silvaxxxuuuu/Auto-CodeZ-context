@@ -57,7 +57,7 @@ async function prepareState() {
   }
 }
 
-function environment() {
+function environment(extraEnv = {}) {
   const env = {
     ...process.env,
     HOME: stateRoot,
@@ -65,6 +65,7 @@ function environment() {
     AUTO_CODEZ_DESCOPE_PROJECT_ID: 'P2abcDEF_123',
     AUTO_CODEZ_DESCOPE_PASSKEY_OIDC_FLOW_ENABLED: '1',
     ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+    ...extraEnv,
   };
   if (process.platform === 'win32') {
     env.USERPROFILE = stateRoot;
@@ -74,7 +75,7 @@ function environment() {
   return env;
 }
 
-async function startElectron() {
+async function startElectron(extraEnv = {}) {
   const cdpPort = await reservePort();
   appProcess = spawn(
     executable,
@@ -85,7 +86,7 @@ async function startElectron() {
     ],
     {
       cwd: root,
-      env: environment(),
+      env: environment(extraEnv),
       windowsHide: true,
       stdio: 'ignore',
     },
@@ -111,6 +112,17 @@ async function startElectron() {
   }
 
   throw lastError || new Error('Renderer indisponível.');
+}
+
+async function stopElectron() {
+  if (page && !page.isClosed()) await page.close().catch(() => {});
+  if (browser) await browser.close().catch(() => {});
+  page = undefined;
+  browser = undefined;
+  await delay(300);
+  killTree(appProcess?.pid);
+  appProcess = undefined;
+  await delay(350);
 }
 
 async function main() {
@@ -178,6 +190,43 @@ async function main() {
     animations: 'disabled',
   });
 
+  await stopElectron();
+  await startElectron({ AUTO_CODEZ_VISUAL_ACCOUNT_PROFILE: '1' });
+  page.on('pageerror', (error) => pageErrors.push(String(error)));
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30_000 });
+  await page.evaluate(() => document.querySelector('#account-onboarding')?.remove());
+  await page.locator('[data-action="profile"]').click();
+
+  const authenticatedProfile = page.locator('.profile-overlay');
+  await authenticatedProfile.waitFor({ state: 'visible', timeout: 10_000 });
+  const accountSlot = authenticatedProfile.locator('[data-account-profile-slot]');
+  await accountSlot.locator('[data-account-cloud-panel]').waitFor({ state: 'visible', timeout: 10_000 });
+
+  const methodRows = accountSlot.locator('[data-account-access-method]');
+  if (await methodRows.count() !== 5) {
+    throw new Error('Perfil autenticado não renderizou os cinco métodos de acesso.');
+  }
+  for (const method of ['google', 'github', 'microsoft', 'magic_link', 'passkey']) {
+    await accountSlot.locator('[data-account-access-method="' + method + '"]').waitFor();
+  }
+  const microsoftText = await accountSlot.locator('[data-account-access-method="microsoft"]').textContent();
+  if (!microsoftText?.includes('Conectado')) {
+    throw new Error('Método Microsoft vinculado não aparece como Conectado no perfil autenticado.');
+  }
+  if (await accountSlot.locator('[data-account-link-method="google"]').isEnabled()) {
+    throw new Error('Perfil expôs login OAuth comum como se fosse vínculo autenticado de identidade.');
+  }
+
+  await page.screenshot({
+    path: path.join(outputDir, 'funcional-profile-account-authenticated.png'),
+    animations: 'disabled',
+    fullPage: true,
+  });
+
   if (pageErrors.length || consoleErrors.length) {
     throw new Error(
       'Erros no renderer: page=' + JSON.stringify(pageErrors) +
@@ -196,10 +245,7 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 }).finally(async () => {
-  if (page && !page.isClosed()) await page.close().catch(() => {});
-  if (browser) await browser.close().catch(() => {});
-  await delay(250);
-  killTree(appProcess?.pid);
+  await stopElectron();
   if (stateRoot) {
     await fs.rm(stateRoot, {
       recursive: true,

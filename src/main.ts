@@ -777,8 +777,51 @@ async function buildExecutionContext(
   return `${computerContext}\n\n${projectContext}`;
 }
 
+function accountStateForRenderer(): ReturnType<AccountSessionRuntime['snapshot']> {
+  const current = accountSessionRuntime.snapshot();
+  if (
+    process.env.AUTO_CODEZ_VISUAL_TEST !== '1'
+    || process.env.AUTO_CODEZ_VISUAL_ACCOUNT_PROFILE !== '1'
+  ) return current;
+
+  const now = Date.now();
+  return {
+    state: 'authenticated',
+    account: {
+      id: 'visual-account-user',
+      primaryEmail: 'visual.account@example.com',
+      displayName: 'Conta de teste visual',
+      status: 'active',
+      identities: [{
+        id: 'microsoft:visual-account-user',
+        provider: 'microsoft',
+        providerAccountId: 'visual-account-user',
+        email: 'visual.account@example.com',
+        displayName: 'Conta de teste visual',
+        linkedAt: now - 86_400_000,
+        lastUsedAt: now,
+      }],
+      createdAt: now - 86_400_000,
+      updatedAt: now,
+    },
+    session: {
+      id: 'visual-session',
+      accountId: 'visual-account-user',
+      deviceId: current.device.id,
+      identityProvider: 'microsoft',
+      createdAt: now - 60_000,
+      lastActivityAt: now,
+      accessExpiresAt: now + 3_600_000,
+    },
+    device: {
+      ...current.device,
+      name: 'Silva PC',
+    },
+  };
+}
+
 ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.list(), chats: await chatManager.list(), projects: await projectManager.list() }));
-ipcMain.handle('account:get-state', async () => accountSessionRuntime.snapshot());
+ipcMain.handle('account:get-state', async () => accountStateForRenderer());
 ipcMain.handle('account:logout', async () => accountSessionRuntime.logout());
 ipcMain.handle('account:rename-device', async (_event, name: string) => accountSessionRuntime.renameDevice(requireNonEmptyString(name, 'Nome do dispositivo')));
 ipcMain.handle('account-auth-flow:get-state', async () => accountAuthFlowRuntime.snapshot());

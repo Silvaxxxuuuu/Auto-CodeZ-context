@@ -112,6 +112,8 @@ async function renderProfile(): Promise<void> {
       <span class="profile-status profile-status-neutral">Local</span>
     </section>
 
+    <div class="profile-account-slot" data-account-profile-slot></div>
+
     <div class="profile-grid">
       <section class="profile-section">
         <div class="profile-section-heading"><div class="profile-section-icon">${icon('user-round')}</div><div><h2>Identidade neste dispositivo</h2><p>Edite seu nome local e consulte a identidade persistente desta instalação.</p></div></div>

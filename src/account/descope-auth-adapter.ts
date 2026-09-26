@@ -49,6 +49,9 @@ type DescopeUser = {
   name?: string;
   picture?: string;
   loginIds: string[];
+  verifiedEmail?: boolean;
+  oauthProviders: OAuthProvider[];
+  webauthn?: boolean;
 };
 
 type DirectAuthResponse = {
@@ -168,12 +171,22 @@ function parseDescopeUser(value: unknown): DescopeUser {
     throw new AuthAdapterError('server', 'O serviço de identidade não retornou um e-mail válido.');
   }
 
+  const oauthSource = source.OAuth && typeof source.OAuth === 'object' && !Array.isArray(source.OAuth)
+    ? source.OAuth as Record<string, unknown>
+    : {};
+  const oauthProviders = (['google', 'github', 'microsoft'] as const).filter((provider) =>
+    Object.entries(oauthSource).some(([key, enabled]) => key.toLowerCase() === provider && enabled === true),
+  );
+
   return {
     userId: requiredString(source.userId, 'ID da conta', 512),
     email,
     name: optionalString(source.name, 256),
     picture: optionalString(source.picture, 2_048),
     loginIds,
+    verifiedEmail: source.verifiedEmail === true,
+    oauthProviders,
+    webauthn: source.webauthn === true,
   };
 }
 
@@ -563,6 +576,9 @@ export class DescopeAuthAdapter implements AuthAdapter {
       name: userInfo.name || userInfo.preferred_username,
       picture: userInfo.picture,
       loginIds: [userInfo.email],
+      verifiedEmail: true,
+      oauthProviders: [],
+      webauthn: provider === 'passkey',
     };
     return this.buildGrant(
       user,
@@ -586,16 +602,23 @@ export class DescopeAuthAdapter implements AuthAdapter {
   ): AuthGrant {
     const now = this.now();
     const displayName = user.name || user.email.split('@')[0] || 'Auto CodeZ User';
-    const identity = {
-      id: `${provider}:${user.userId}`,
-      provider,
+    const linkedProviders: IdentityProvider[] = [
+      ...user.oauthProviders,
+      ...(user.verifiedEmail ? ['magic_link' as const] : []),
+      ...(user.webauthn ? ['passkey' as const] : []),
+    ];
+    if (provider !== 'descope' && !linkedProviders.includes(provider)) linkedProviders.push(provider);
+
+    const identities = linkedProviders.map((linkedProvider) => ({
+      id: `${linkedProvider}:${user.userId}`,
+      provider: linkedProvider,
       providerAccountId: user.userId,
       email: user.email,
       displayName,
       ...(user.picture ? { avatarUrl: user.picture } : {}),
       linkedAt: now,
-      lastUsedAt: now,
-    };
+      ...(linkedProvider === provider ? { lastUsedAt: now } : {}),
+    }));
 
     const account: AccountProfile = {
       id: user.userId,
@@ -604,7 +627,7 @@ export class DescopeAuthAdapter implements AuthAdapter {
       ...(username ? { username } : {}),
       ...(user.picture ? { avatarUrl: user.picture } : {}),
       status: 'active',
-      identities: [identity],
+      identities,
       createdAt: now,
       updatedAt: now,
     };

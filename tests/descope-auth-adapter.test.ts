@@ -57,7 +57,7 @@ function jwks() {
   };
 }
 
-function directUser() {
+function directUser(overrides: Record<string, unknown> = {}) {
   return {
     userId: 'user-123',
     email: 'user@example.com',
@@ -65,12 +65,14 @@ function directUser() {
     picture: 'https://example.com/avatar.png',
     loginIds: ['user@example.com'],
     createdTime: 1_700_000_000,
+    verifiedEmail: false,
     TOTP: false,
     SAML: false,
     SCIM: false,
     password: false,
     status: 'enabled',
     test: false,
+    ...overrides,
   };
 }
 
@@ -331,6 +333,51 @@ test('native Google/GitHub/Microsoft OAuth starts at Descope API and returns dir
     assert.equal(grant.refreshToken, `descope-direct:${provider}:refresh-direct`);
     assert.equal(calls.length, 3);
   }
+});
+
+test('Descope account profile preserves every linked access method instead of only the current provider', async () => {
+  const adapter = new DescopeAuthAdapter('P2abcDEF_123', {
+    now: () => 1_700_000_000_000,
+    fetch: async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/v1/auth/oauth/exchange') {
+        return jsonResponse({
+          sessionJwt: sessionJwt(),
+          refreshJwt: 'refresh-direct',
+          user: directUser({
+            verifiedEmail: true,
+            OAuth: { Google: true, github: true, microsoft: true },
+            webauthn: true,
+          }),
+        });
+      }
+      if (url.pathname === '/v2/keys/P2abcDEF_123') return jsonResponse(jwks());
+      throw new Error('unexpected request');
+    },
+  });
+
+  const grant = await adapter.completeOAuth({
+    flowId: 'flow',
+    provider: 'microsoft',
+    deviceId: 'device-1',
+    code: 'code',
+    state: 'state',
+    nonce: 'nonce',
+    codeVerifier: 'verifier',
+  });
+
+  assert.deepEqual(
+    grant.account.identities.map((identity) => identity.provider),
+    ['google', 'github', 'microsoft', 'magic_link', 'passkey'],
+  );
+  assert.equal(
+    grant.account.identities.find((identity) => identity.provider === 'microsoft')?.lastUsedAt,
+    1_700_000_000_000,
+  );
+  assert.equal(
+    grant.account.identities.find((identity) => identity.provider === 'google')?.lastUsedAt,
+    undefined,
+  );
 });
 
 test('native OAuth rejects a signed session for a different Descope project', async () => {

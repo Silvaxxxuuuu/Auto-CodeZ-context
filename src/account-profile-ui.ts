@@ -9,6 +9,16 @@ type LinkedIdentity = {
   lastUsedAt?: number;
 };
 
+type AccessMethod = Exclude<LinkedIdentity['provider'], 'descope'>;
+
+const ACCESS_METHODS: readonly AccessMethod[] = [
+  'google',
+  'github',
+  'microsoft',
+  'magic_link',
+  'passkey',
+];
+
 type AccountSnapshot = {
   state: 'signed_out' | 'authenticated' | 'offline' | 'restoring' | 'revoked' | 'error';
   account?: {
@@ -114,18 +124,33 @@ function stateLabel(): { label: string; tone: string } {
 
 function identityRows(): string {
   const identities = account?.account?.identities ?? [];
-  if (!identities.length) {
-    return '<div class="account-profile-empty">Nenhum método vinculado foi carregado ainda.</div>';
-  }
-  return identities.map((identity) => `
-    <div class="account-profile-method">
-      <div>
-        <strong>${escapeHtml(providerName(identity.provider))}</strong>
-        <span>${escapeHtml(identity.email || identity.displayName || 'Vinculado à conta')}</span>
+  return ACCESS_METHODS.map((method) => {
+    const identity = identities.find((candidate) => candidate.provider === method);
+    const loginEnabled = authConfiguration?.methods.includes(method) === true;
+    const passkeyEnrollment = method === 'passkey'
+      && account?.state === 'authenticated'
+      && authConfiguration?.passkeyEnrollmentSupported === true;
+    const detail = identity
+      ? identity.email || identity.displayName || 'Vinculado à conta'
+      : loginEnabled
+        ? 'Disponível para login. O vínculo adicional exige autenticação da conta atual.'
+        : 'Método ainda não habilitado neste projeto.';
+    const action = identity
+      ? `<span class="account-profile-method-state connected">Conectado</span>`
+      : passkeyEnrollment
+        ? '<button type="button" class="profile-secondary-button enabled account-profile-connect" data-account-add-passkey>Conectar</button>'
+        : `<button type="button" class="profile-secondary-button account-profile-connect" data-account-link-method="${method}" disabled title="O vínculo seguro deste método ainda não está configurado.">Conectar</button>`;
+
+    return `
+      <div class="account-profile-method" data-account-access-method="${method}">
+        <div class="account-profile-method-copy">
+          <strong>${escapeHtml(providerName(method))}</strong>
+          <span>${escapeHtml(detail)}</span>
+        </div>
+        ${action}
       </div>
-      <small>${identity.lastUsedAt ? `Usado ${escapeHtml(relativeTime(identity.lastUsedAt))}` : 'Vinculado'}</small>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 function deviceRows(): string {
@@ -177,7 +202,7 @@ function panelMarkup(): string {
         <div class="profile-section-icon account-profile-cloud-icon">A</div>
         <div>
           <h2>Conta Auto CodeZ</h2>
-          <p>Identidade, sessão e dispositivos vinculados à sua conta.</p>
+          <p>Identidade, métodos de acesso e segurança da sua conta.</p>
         </div>
         <span class="account-profile-state ${state.tone}">${state.label}</span>
       </div>
@@ -197,8 +222,7 @@ function panelMarkup(): string {
 
       <div class="account-profile-subsection">
         <div class="account-profile-subheading row">
-          <div><strong>Métodos de acesso</strong><span>Vincule métodos passwordless à sua conta.</span></div>
-          ${account.state === 'authenticated' && authConfiguration?.passkeyEnrollmentSupported === true ? '<button type="button" class="profile-secondary-button enabled" data-account-add-passkey>Adicionar passkey</button>' : ''}
+          <div><strong>Métodos de acesso</strong><span>Veja o que já está vinculado e quais métodos podem ser adicionados com segurança.</span></div>
         </div>
         <div class="account-profile-methods">${identityRows()}</div>
       </div>
@@ -226,18 +250,16 @@ function panelMarkup(): string {
 }
 
 function enhanceProfile(): void {
-  document.querySelectorAll<HTMLElement>('[data-account-cloud-panel]').forEach((element) => element.remove());
-  if (!account?.account) return;
-  const content = document.querySelector<HTMLElement>('.profile-overlay .profile-content');
-  if (!content) return;
+  const slot = document.querySelector<HTMLElement>('[data-account-profile-slot]');
+  if (!slot) return;
+  slot.replaceChildren();
+  const markup = panelMarkup();
+  if (!markup) return;
 
-  const firstGrid = content.querySelector('.profile-grid');
   const wrapper = document.createElement('div');
-  wrapper.innerHTML = panelMarkup();
+  wrapper.innerHTML = markup;
   const panel = wrapper.firstElementChild;
-  if (!panel) return;
-  if (firstGrid) content.insertBefore(panel, firstGrid);
-  else content.appendChild(panel);
+  if (panel) slot.appendChild(panel);
 }
 
 async function refreshRegistry(): Promise<void> {
@@ -335,7 +357,8 @@ document.addEventListener('click', (event) => {
 }, true);
 
 const observer = new MutationObserver(() => {
-  if (document.querySelector('.profile-overlay') && !document.querySelector('[data-account-cloud-panel]')) {
+  const slot = document.querySelector('[data-account-profile-slot]');
+  if (document.querySelector('.profile-overlay') && slot && !slot.querySelector('[data-account-cloud-panel]')) {
     enhanceProfile();
   }
 });
