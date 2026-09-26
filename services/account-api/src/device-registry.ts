@@ -40,6 +40,29 @@ function numberValue(value: string | number): number {
   return typeof value === 'number' ? value : Number(value);
 }
 
+function canonicalDevicePublicKey(value: string): string {
+  try {
+    const key = crypto.createPublicKey(value);
+    if (key.asymmetricKeyType !== 'ed25519') throw new Error('invalid algorithm');
+    return key.export({ type: 'spki', format: 'pem' }).toString();
+  } catch {
+    throw new Error('public key invalid.');
+  }
+}
+
+function sameDevicePublicKey(left: string, right: string): boolean {
+  try {
+    const leftKey = crypto.createPublicKey(left);
+    const rightKey = crypto.createPublicKey(right);
+    if (leftKey.asymmetricKeyType !== 'ed25519' || rightKey.asymmetricKeyType !== 'ed25519') return false;
+    const leftDer = leftKey.export({ type: 'spki', format: 'der' });
+    const rightDer = rightKey.export({ type: 'spki', format: 'der' });
+    return leftDer.length === rightDer.length && crypto.timingSafeEqual(leftDer, rightDer);
+  } catch {
+    return false;
+  }
+}
+
 function toRemote(row: DeviceRow) {
   return {
     id: row.device_id,
@@ -97,13 +120,14 @@ export class DeviceRegistryService {
     publicKey: string;
   }): Promise<{ registrationId: string; challenge: string; expiresAt: number }> {
     if (context.deviceId && device.id !== context.deviceId) throw new Error('forbidden');
-    if (!device.publicKey.includes('BEGIN PUBLIC KEY')) throw new Error('public key invalid.');
+    const publicKey = canonicalDevicePublicKey(device.publicKey);
 
-    const existing = await this.database.query<{ revoked_at: Date | null }>(
-      'SELECT revoked_at FROM device_registry WHERE user_id = $1 AND device_id = $2',
+    const existing = await this.database.query<{ public_key: string; revoked_at: Date | null }>(
+      'SELECT public_key, revoked_at FROM device_registry WHERE user_id = $1 AND device_id = $2',
       [context.userId, device.id],
     );
     if (existing[0]?.revoked_at) throw new Error('device_revoked');
+    if (existing[0] && !sameDevicePublicKey(existing[0].public_key, publicKey)) throw new Error('forbidden');
 
     const nowMs = this.now();
     const expiresAt = nowMs + CHALLENGE_TTL_MS;
@@ -126,7 +150,7 @@ export class DeviceRegistryService {
         device.platform,
         device.arch,
         device.appVersion,
-        device.publicKey,
+        publicKey,
         challenge,
         nowMs,
         expiresAt,
@@ -179,11 +203,17 @@ export class DeviceRegistryService {
       }
       if (!valid) throw new Error('invalid_grant');
 
-      const existingDevice = await client.query<{ revoked_at: Date | null }>(
-        'SELECT revoked_at FROM device_registry WHERE user_id = $1 AND device_id = $2 FOR UPDATE',
+      const existingDevice = await client.query<{ public_key: string; revoked_at: Date | null }>(
+        'SELECT public_key, revoked_at FROM device_registry WHERE user_id = $1 AND device_id = $2 FOR UPDATE',
         [context.userId, registration.device_id],
       );
       if (existingDevice.rows[0]?.revoked_at) throw new Error('device_revoked');
+      if (
+        existingDevice.rows[0]
+        && !sameDevicePublicKey(existingDevice.rows[0].public_key, registration.public_key)
+      ) {
+        throw new Error('forbidden');
+      }
 
       await client.query(
         `INSERT INTO device_registry (
@@ -198,7 +228,6 @@ export class DeviceRegistryService {
           platform = EXCLUDED.platform,
           arch = EXCLUDED.arch,
           app_version = EXCLUDED.app_version,
-          public_key = EXCLUDED.public_key,
           last_seen_at = EXCLUDED.last_seen_at,
           revoked_at = NULL`,
         [

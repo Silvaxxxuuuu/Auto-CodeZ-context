@@ -523,6 +523,225 @@ test('Device Registry accepts a Descope subject without legacy desktop account o
 });
 
 
+test('Device Registry prevents public-key replacement for an existing active device', async () => {
+  const env = environment();
+  const database = new Database(env);
+  try {
+    await migrateDesktopSchema(database);
+    await reset(database);
+
+    const verifier: DeviceAccessVerifier = {
+      async validate() {
+        return { userId: 'descope-key-binding-user' };
+      },
+    };
+    let now = 1_800_000_000_000;
+    const registry = new DeviceRegistryService(database, undefined, () => now, verifier);
+    const context = await registry.authenticate('descope-session-token');
+    const originalKeys = crypto.generateKeyPairSync('ed25519');
+    const replacementKeys = crypto.generateKeyPairSync('ed25519');
+    const originalPublicKey = originalKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const replacementPublicKey = replacementKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+    const first = await registry.beginRegistration(context, {
+      id: 'bound-device-1',
+      name: 'PC Original',
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      publicKey: originalPublicKey,
+    });
+    const firstSignature = crypto.sign(
+      null,
+      Buffer.from(first.challenge, 'utf8'),
+      originalKeys.privateKey,
+    ).toString('base64');
+    await registry.completeRegistration(context, {
+      registrationId: first.registrationId,
+      deviceId: 'bound-device-1',
+      signature: firstSignature,
+    });
+
+    await assert.rejects(
+      registry.beginRegistration(context, {
+        id: 'bound-device-1',
+        name: 'PC Substituído',
+        platform: 'win32',
+        arch: 'x64',
+        appVersion: '2.0.1-test',
+        publicKey: replacementPublicKey,
+      }),
+      /forbidden/,
+    );
+
+    const rows = await database.query<{ public_key: string }>(
+      'SELECT public_key FROM device_registry WHERE user_id = $1 AND device_id = $2',
+      ['descope-key-binding-user', 'bound-device-1'],
+    );
+    assert.equal(rows[0]?.public_key, originalPublicKey);
+  } finally {
+    await database.close();
+  }
+});
+
+test('Device Registry rejects a racing registration that tries to replace the winning device key', async () => {
+  const env = environment();
+  const database = new Database(env);
+  try {
+    await migrateDesktopSchema(database);
+    await reset(database);
+
+    const verifier: DeviceAccessVerifier = {
+      async validate() {
+        return { userId: 'descope-key-race-user' };
+      },
+    };
+    let now = 1_800_000_000_000;
+    const registry = new DeviceRegistryService(database, undefined, () => now, verifier);
+    const context = await registry.authenticate('descope-session-token');
+    const firstKeys = crypto.generateKeyPairSync('ed25519');
+    const secondKeys = crypto.generateKeyPairSync('ed25519');
+    const firstPublicKey = firstKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const secondPublicKey = secondKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+    const first = await registry.beginRegistration(context, {
+      id: 'race-device-1',
+      name: 'Primeiro',
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      publicKey: firstPublicKey,
+    });
+    const second = await registry.beginRegistration(context, {
+      id: 'race-device-1',
+      name: 'Segundo',
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      publicKey: secondPublicKey,
+    });
+
+    await registry.completeRegistration(context, {
+      registrationId: first.registrationId,
+      deviceId: 'race-device-1',
+      signature: crypto.sign(
+        null,
+        Buffer.from(first.challenge, 'utf8'),
+        firstKeys.privateKey,
+      ).toString('base64'),
+    });
+
+    await assert.rejects(
+      registry.completeRegistration(context, {
+        registrationId: second.registrationId,
+        deviceId: 'race-device-1',
+        signature: crypto.sign(
+          null,
+          Buffer.from(second.challenge, 'utf8'),
+          secondKeys.privateKey,
+        ).toString('base64'),
+      }),
+      /forbidden/,
+    );
+
+    const rows = await database.query<{ public_key: string }>(
+      'SELECT public_key FROM device_registry WHERE user_id = $1 AND device_id = $2',
+      ['descope-key-race-user', 'race-device-1'],
+    );
+    assert.equal(rows[0]?.public_key, firstPublicKey);
+  } finally {
+    await database.close();
+  }
+});
+
+test('Device Registry allows same-key re-registration and keeps the bound key immutable', async () => {
+  const env = environment();
+  const database = new Database(env);
+  try {
+    await migrateDesktopSchema(database);
+    await reset(database);
+
+    const verifier: DeviceAccessVerifier = {
+      async validate() {
+        return { userId: 'descope-same-key-user' };
+      },
+    };
+    let now = 1_800_000_000_000;
+    const registry = new DeviceRegistryService(database, undefined, () => now, verifier);
+    const context = await registry.authenticate('descope-session-token');
+    const keys = crypto.generateKeyPairSync('ed25519');
+    const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+    const register = async (name: string, appVersion: string) => {
+      const pending = await registry.beginRegistration(context, {
+        id: 'same-key-device-1',
+        name,
+        platform: 'win32',
+        arch: 'x64',
+        appVersion,
+        publicKey,
+      });
+      return await registry.completeRegistration(context, {
+        registrationId: pending.registrationId,
+        deviceId: 'same-key-device-1',
+        signature: crypto.sign(
+          null,
+          Buffer.from(pending.challenge, 'utf8'),
+          keys.privateKey,
+        ).toString('base64'),
+      });
+    };
+
+    await register('Nome Inicial', '2.0.0-test');
+    now += 1_000;
+    const updated = await register('Nome Atualizado', '2.0.1-test');
+
+    assert.equal(updated.name, 'Nome Atualizado');
+    assert.equal(updated.appVersion, '2.0.1-test');
+    const rows = await database.query<{ public_key: string }>(
+      'SELECT public_key FROM device_registry WHERE user_id = $1 AND device_id = $2',
+      ['descope-same-key-user', 'same-key-device-1'],
+    );
+    assert.equal(rows[0]?.public_key, publicKey);
+  } finally {
+    await database.close();
+  }
+});
+
+test('Device Registry rejects non-Ed25519 registration keys', async () => {
+  const env = environment();
+  const database = new Database(env);
+  try {
+    await migrateDesktopSchema(database);
+    await reset(database);
+
+    const verifier: DeviceAccessVerifier = {
+      async validate() {
+        return { userId: 'descope-invalid-key-user' };
+      },
+    };
+    const registry = new DeviceRegistryService(database, undefined, () => 1_800_000_000_000, verifier);
+    const context = await registry.authenticate('descope-session-token');
+    const rsaKeys = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const publicKey = rsaKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+    await assert.rejects(
+      registry.beginRegistration(context, {
+        id: 'invalid-key-device-1',
+        name: 'RSA Device',
+        platform: 'win32',
+        arch: 'x64',
+        appVersion: '2.0.0-test',
+        publicKey,
+      }),
+      /public key invalid/,
+    );
+  } finally {
+    await database.close();
+  }
+});
+
+
 test('revoked Descope device proof cannot access registry with an otherwise valid session token', async () => {
   const env = environment();
   const database = new Database(env);
