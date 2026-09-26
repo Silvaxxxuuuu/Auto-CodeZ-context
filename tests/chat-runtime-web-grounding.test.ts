@@ -7,6 +7,7 @@ import type { AIProviderConfig, ChatRecord, ToolName } from '../src/ai/types';
 import { WebGroundingCoordinator } from '../src/web/web-grounding-coordinator';
 import { WebRetrievalRuntime } from '../src/web/web-retrieval-runtime';
 import type { WebSearchAdapter } from '../src/web/web-types';
+import { VisualGroundingCoordinator } from '../src/ai/visual-grounding/visual-grounding-coordinator';
 
 const config: AIProviderConfig = { id: 'grounding-provider', displayName: 'Grounding Provider', apiKey: '', enabled: true };
 
@@ -171,4 +172,62 @@ test('normal chats expose web tools while still excluding project Git tools', as
   const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [tool('web_search'), tool('web_fetch'), tool('git_status')], undefined, noGrounding);
   await runtime.send(config, chat);
   assert.deepEqual(requestTools, ['web_search', 'web_fetch']);
+});
+
+
+test('ChatRuntime grounds screenshot guidance using attachment evidence and current Web sources', async () => {
+  const registry = new ProviderRegistry();
+  const requests: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+  registry.register({
+    id: config.id,
+    displayName: config.displayName,
+    requiresApiKey: false,
+    async listModels() { return [{ id: 'text-only', name: 'Text Only', providerId: config.id, capabilities: ['text'] }]; },
+    async send(_config, request) {
+      requests.push(request as typeof requests[number]);
+      return { content: 'Clique em Authentication e confira o Redirect URI [1].', model: request.model, providerId: config.id };
+    },
+  });
+  let query = '';
+  const searchAdapter: WebSearchAdapter = {
+    id: 'visual-fixture',
+    displayName: 'Visual Fixture',
+    async search(value) {
+      query = value;
+      return [{ title: 'Microsoft Entra documentation', url: 'https://learn.example/entra', snippet: 'Configure Authentication and redirect URIs.' }];
+    },
+  };
+  const visual = new VisualGroundingCoordinator({
+    runtime: new WebRetrievalRuntime({ searchAdapter }),
+    fetchLimit: 0,
+  });
+  const chat = currentChat();
+  chat.messages = [{
+    role: 'user',
+    content: 'Não entendi essa tela. O que eu faço aqui?',
+    attachments: [{
+      id: 'screen-1',
+      kind: 'image',
+      name: 'private-screenshot.png',
+      mediaType: 'image/png',
+      size: 120,
+      storageKey: 'a'.repeat(64),
+      sha256: 'a'.repeat(64),
+      createdAt: 1,
+      contexts: [
+        { kind: 'caption', text: 'Microsoft Entra Admin Center application registration authentication page', createdAt: 1 },
+        { kind: 'ocr', text: 'Authentication Preview Redirect URI sebastiao54@gmail.com C:\\Users\\User\\Desktop\\secret.txt', createdAt: 1 },
+      ],
+    }],
+  }];
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [], undefined, undefined, undefined, visual);
+
+  const response = await runtime.send(config, chat);
+  assert.match(response.content, /Authentication/);
+  assert.match(query, /Microsoft Entra Admin Center/);
+  assert.doesNotMatch(query, /sebastiao54/i);
+  assert.doesNotMatch(query, /Users|Desktop|secret\.txt/i);
+  const visualContext = requests[0].messages.find((message) => message.role === 'system' && /Grounding visual: visual-guidance/.test(message.content));
+  assert.ok(visualContext);
+  assert.match(visualContext.content, /Microsoft Entra documentation/);
 });

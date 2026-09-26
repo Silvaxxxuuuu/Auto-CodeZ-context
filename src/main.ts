@@ -56,6 +56,8 @@ import { requireIdentifier, requireNonEmptyString, requireObject } from './core/
 import type { AIAttachment, AIProviderConfig, AIStreamEvent, ChatRecord } from './ai/types';
 import { AttachmentStore } from './ai/attachment-store';
 import { ManagedVisionAttachmentIndexer } from './ai/attachment-indexer';
+import { VisualGroundingCoordinator } from './ai/visual-grounding/visual-grounding-coordinator';
+import { GoogleVisionWebProvider } from './ai/visual-grounding/providers/google-vision-web';
 import { operationalLedger, type OperationalLedgerQuery, type OperationalLedgerState } from './operational-ledger';
 import { OperationalLedgerPersistence, OperationalLedgerStore } from './operational-ledger-store';
 import { OperationalLedgerRetrieval, type OperationalLedgerScope } from './operational-ledger-retrieval';
@@ -95,6 +97,11 @@ const attachmentIndexer = new ManagedVisionAttachmentIndexer(
   attachmentVisionRoot,
   attachmentStore,
 );
+const visualGrounding = new VisualGroundingCoordinator({
+  reverseProvider: new GoogleVisionWebProvider(attachmentStore, {
+    apiKey: process.env.AUTO_CODEZ_GOOGLE_VISION_API_KEY?.trim(),
+  }),
+});
 const accountCredentials = new LocalProtectedCredentialStore(storage);
 const accountDeviceIdentity = new DeviceIdentityStore(
   storage,
@@ -258,6 +265,7 @@ const chatRuntime = new ChatRuntime(
   providerRequestJournal,
   undefined,
   attachmentIndexer,
+  visualGrounding,
 );
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const executionManager = new ExecutionManager();

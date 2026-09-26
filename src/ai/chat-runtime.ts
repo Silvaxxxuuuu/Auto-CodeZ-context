@@ -13,6 +13,7 @@ import { WebGroundingCoordinator } from '../web/web-grounding-coordinator';
 import { prepareMessagesForAttachments } from './attachment-context';
 import type { AttachmentIndexer } from './attachment-indexer';
 import { isNativeImageMediaType } from './provider-attachments';
+import { VisualGroundingCoordinator } from './visual-grounding/visual-grounding-coordinator';
 
 const PROVIDER_RECENT_TOOL_ROUNDS = 2;
 const PROVIDER_RECENT_TOOL_RESULT_CHARS = 12_000;
@@ -220,6 +221,7 @@ export class ChatRuntime {
     private readonly requestJournal = new ProviderRequestJournal(),
     private readonly webGrounding = new WebGroundingCoordinator(),
     private readonly attachmentIndexer?: AttachmentIndexer,
+    private readonly visualGrounding = new VisualGroundingCoordinator(),
   ) {}
 
   async init(): Promise<void> {
@@ -308,7 +310,25 @@ export class ChatRuntime {
 
     let webContext: string | undefined;
     if (!lightweightTurn) {
-      const groundingDecision = this.webGrounding.classify(attachmentMessages);
+      const visualDecision = this.visualGrounding.classify(indexedMessages);
+      if (visualDecision.required) {
+        const activityMessage = visualDecision.reason === 'visual-identification'
+          ? 'Pesquisando correspondências e fontes para a imagem…'
+          : visualDecision.reason === 'visual-guidance'
+            ? 'Consultando informações atuais sobre esta tela…'
+            : 'Pesquisando o erro visível e documentação relacionada…';
+        this.activity.emit({ type: 'action', message: activityMessage, status: 'running' });
+        try {
+          const grounding = await runWithAbortSignal(signal, () => this.visualGrounding.ground(indexedMessages, signal));
+          if (grounding) webContext = grounding.context;
+        } catch (error) {
+          if (isAbortError(error)) throw error;
+          const message = error instanceof Error ? error.message : String(error);
+          this.activity.emit({ type: 'action', message: 'A pesquisa visual complementar falhou; continuando com a análise da imagem.', status: 'failed', error: message });
+        }
+      }
+
+      const groundingDecision = webContext ? { required: false } : this.webGrounding.classify(attachmentMessages);
       if (groundingDecision.required) {
         this.activity.emit({ type: 'action', message: 'Pesquisando informações relacionadas…', status: 'running' });
         try {
