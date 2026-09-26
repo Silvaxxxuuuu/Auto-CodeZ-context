@@ -1,5 +1,5 @@
 AUTO CODEZ — DOCUMENTO DE CONTEXTO PERMANENTE
-Última atualização: 04/09/2026
+Última atualização: 26/09/2026
 
 ============================================================
 1. PRODUTO
@@ -9704,3 +9704,313 @@ PR #9:
 - deve continuar OPEN;
 - deve continuar DRAFT;
 - não fazer merge sem autorização explícita.
+
+------------------------------------------------------------
+24.57. FECHAMENTO ACCOUNT CORE / DEVICE REGISTRY / PERFIL
+------------------------------------------------------------
+
+ESTADO ATUAL:
+- autenticação do desktop continua baseada em Descope;
+- Azure NÃO participa da autenticação; Azure permanece reservado para testes de IA/inferência;
+- Google e GitHub foram configurados com credenciais próprias e tiveram login real validado anteriormente;
+- Microsoft foi configurado com app próprio no Microsoft Entra e teve login real confirmado no Auto CodeZ;
+- Magic Link e Passkey continuam como métodos previstos, mas a configuração/teste real externo ainda pode ser retomada depois;
+- Account Core / Device Registry está considerado fechado para V1 no código;
+- PR #9 continua OPEN / DRAFT / sem merge.
+
+HARDENING RECENTE DO DEVICE REGISTRY:
+- prova de requisição Ed25519 passou a ser obrigatória sem bypass legado;
+- anti-replay usa nonce persistente e rejeição atômica de duplicatas;
+- requests assinadas têm janela temporal limitada;
+- onboarding de dispositivo só conclui depois que rename remoto + local passam;
+- falha de rename remoto não altera silenciosamente o nome local;
+- perfil agora mostra erros assíncronos de refresh/revoke/passkey/logout em vez de rejeições não tratadas;
+- revogação, rename, startup, persistência e comportamento offline possuem regressões automatizadas.
+
+COMMITS DE REFERÊNCIA:
+- 98d6dc505f807791ceb9a58e3192ddc0b3e7408d
+  fix(device): reject replayed request proofs
+- dbe4125ff102eef8c595ecb4a63c95d881059174
+  fix(device): require registry rename before onboarding completion
+- 0ffb846593a91443c6335293fcd1a9dbdfa4bb9b
+  test(device): fix onboarding lint assertion
+- 1140f982c19e08a33852ce63dcf4b86bd3e05982
+  fix(account): surface profile action failures
+
+PERFIL / MÉTODOS DE ACESSO:
+- o Perfil não deve mostrar somente o provider usado na sessão atual;
+- o adapter Descope lê o mapa real de OAuth/webAuthn do usuário quando disponível;
+- os métodos canônicos visíveis são:
+  - Google;
+  - GitHub;
+  - Microsoft;
+  - Magic Link;
+  - Passkey;
+- login comum NÃO deve ser reutilizado como vínculo de identidade;
+- vinculação adicional precisa de fluxo autenticado seguro de update/link da conta atual;
+- o Perfil ganhou slot estrutural próprio para evitar a antiga injeção fora da hierarquia;
+- espaçamento/hierarquia do painel autenticado foi reorganizado;
+- CI visual ganhou fixture autenticada específica para impedir regressão dessa superfície.
+
+COMMIT DE REFERÊNCIA:
+- 95fc548ac646d555414d75e80564ccded632ddb7
+  fix(account): restore linked methods and profile hierarchy
+
+
+------------------------------------------------------------
+24.58. ANEXOS / VISÃO V1 + VISUAL WEB GROUNDING
+------------------------------------------------------------
+
+STATUS:
+- Anexos/Visão V1 está fechado e validado;
+- Ctrl+V de imagem continua suportado;
+- imagem permanece visível na conversa;
+- o botão "+" NÃO abre mais o Explorer imediatamente;
+- agora existe popover próprio com exatamente:
+  - Imagens;
+  - Arquivos.
+
+PICKER:
+- "Imagens" usa filtro dedicado para formatos gráficos;
+- lista de seleção cobre formatos comuns e avançados, incluindo JPEG/JPG, PNG, GIF, SVG, WebP, AVIF, HEIC/HEIF, TIFF, BMP, RAW variantes, PSD, AI, EPS, PDF, INDD, CDR, ICO, TGA, EXR, DDS e outros formatos gráficos conhecidos;
+- aceitação no seletor NÃO significa que todo formato é diretamente decodificável pelo modelo;
+- formatos que o pipeline não consegue rasterizar/decodificar com segurança permanecem como arquivo/binário até existir conversor real;
+- "Arquivos" aceita qualquer arquivo;
+- pastas não são suportadas pelo picker de arquivos.
+
+ANTI-VIÉS DE NOME:
+- nome do arquivo de imagem não entra mais no contexto textual de fallback;
+- isso evita inferências do tipo "miyamto.jpg" -> "Shigeru Miyamoto";
+- imagens usam label neutro no fallback textual.
+
+FALLBACK LOCAL DE VISÃO:
+- OCR do Windows e startup do VLM local passam a progredir em paralelo;
+- contexto do VLM foi reduzido onde apropriado;
+- caption local foi reduzido de até 1400 tokens para 384 tokens;
+- prompt visual agora pede descrição discriminativa e proíbe inferir identidade por filename/metadata;
+- objetivo: reduzir latência e diminuir chutes quando o modelo atual é text-only.
+
+VISÃO NATIVA DO PROVIDER:
+- quando o provider/modelo suporta vision, os pixels devem ir diretamente para ele;
+- correção adicionada para preservar capability "vision" por modelId no fallback de discovery do Azure Foundry;
+- ProviderRegistry passou a preservar fallbackCapabilitiesForModel;
+- Kimi/text-only não deve ser marcado como vision por engano.
+
+COMMITS DE REFERÊNCIA:
+- 09841d48d394e0f2fb58535c97f63a2b9b68785e
+  fix(attachments): speed vision fallback and add picker menu
+- e11a2236c072f7b129f4a1f03f09eed1fcd073a6
+  fix(attachments): preserve vision fallback metadata
+- 02c4383793c1f13441ef9ee820fbbf6ede2bd645
+  test(attachments): exercise picker menu explicitly
+
+VISUAL WEB GROUNDING:
+- foi adicionado um VisualGroundingCoordinator reutilizável;
+- ele NÃO é somente reverse-image search;
+- finalidades atuais:
+  1. visual-identification:
+     - "quem é?";
+     - "qual personagem?";
+     - "de onde é essa imagem?";
+     - "qual obra/jogo/lugar?";
+  2. visual-guidance:
+     - "o que faço aqui?";
+     - "onde clico?";
+     - "qual opção escolho?";
+     - orientação a partir de screenshots de sites/apps/painéis;
+  3. visual-error:
+     - "deu esse erro";
+     - "não funciona";
+     - "o que faço?";
+     - pesquisa erro visível + documentação atual.
+
+ORIENTAÇÃO POR SCREENSHOT:
+- objetivo de produto é semelhante ao comportamento usado durante o próprio desenvolvimento do Auto CodeZ:
+  - usuário envia print;
+  - IA entende o estado visual atual;
+  - identifica controles/rótulos realmente visíveis;
+  - pesquisa documentação/fontes atuais quando necessário;
+  - guia o usuário em passos concretos;
+- não depender de reverse-image search para screenshots de UI;
+- OCR/caption sanitizados alimentam o Web Grounding já existente;
+- resposta final deve diferenciar:
+  - fatos visíveis no print;
+  - fatos confirmados em fontes atuais.
+
+PRIVACIDADE DO VISUAL GROUNDING:
+- OCR bruto não deve ser despejado diretamente em query externa;
+- sanitização remove/evita:
+  - e-mails;
+  - caminhos locais;
+  - tokens/segredos comuns;
+  - IDs longos;
+  - IPs;
+  - URLs potencialmente sensíveis;
+  - filename da imagem;
+- dados recuperados da Web e conteúdo visual são tratados como não confiáveis;
+- instruções contidas em páginas/imagens não devem sobrescrever o pedido explícito do usuário.
+
+GOOGLE CLOUD VISION / WEB DETECTION:
+- existe provider opcional GoogleVisionWebProvider;
+- usa WEB_DETECTION para:
+  - best guess;
+  - web entities;
+  - pagesWithMatchingImages;
+  - full matches;
+  - partial matches;
+  - visually similar images;
+- atualmente há suporte de desenvolvimento via AUTO_CODEZ_GOOGLE_VISION_API_KEY;
+- NÃO usar chave global do Auto CodeZ em produção;
+- usuário deve ser responsável pela própria chave BYOK;
+- imagem só deve sair do PC para esse provider quando a integração estiver explicitamente configurada/permitida.
+
+COMMITS DE REFERÊNCIA DO VISUAL GROUNDING:
+- e3bda4214807f8c9598a6d4bef6ea80fe7bda99e
+  feat(vision): ground screenshots with current web evidence
+- cdc057902df82ad30e5eda19ae895b85da99e167
+  fix(vision): type reverse grounding result
+- d2c1ef3b443896bfca24de2900a4a7b091be69bd
+  fix(vision): normalize visual intent matching
+- b78d4c779e419ae31324c663b9fec829fe41717a
+  fix(vision): prioritize screenshot errors
+
+HEAD VALIDADO ANTES DESTA ATUALIZAÇÃO DOCUMENTAL:
+- b78d4c779e419ae31324c663b9fec829fe41717a
+
+CI EXATO DESSE HEAD:
+- Validate Auto CodeZ #4994: SUCCESS;
+- Validate Account API #490: SUCCESS;
+- Real Vision Integration #103: SUCCESS;
+- Real Local Attachment Chat #69: SUCCESS;
+- Visual Auto CodeZ #1318: SUCCESS;
+- TypeScript: SUCCESS;
+- Core tests: SUCCESS;
+- ESLint: SUCCESS;
+- Electron Forge package build: SUCCESS;
+- Electron startup smoke: SUCCESS;
+- Ctrl+V + local image understanding: SUCCESS;
+- visual regression suite: SUCCESS.
+
+
+------------------------------------------------------------
+24.59. BLUEPRINT INTEGRAÇÕES + IMAGES E PRIORIDADE CANÔNICA
+------------------------------------------------------------
+
+INTEGRAÇÕES — DEFINIÇÃO:
+- Integração conecta o Auto CodeZ a um serviço externo existente;
+- exemplos:
+  - Google Cloud Vision;
+  - GitHub;
+  - Google Drive;
+  - OneDrive;
+  - Figma;
+  - Notion;
+  - Slack;
+- linguagem de UX:
+  - Conectar;
+  - Desconectar;
+  - Credenciais;
+  - Conta;
+  - Status da conexão;
+- integração NÃO é plugin;
+- integração não possui versão instalada, instalação/desinstalação de pacote ou sandbox próprio.
+
+PLUGINS — DIFERENÇA:
+- Plugin instala/adiciona capacidade executável ao Auto CodeZ;
+- possui manifesto, versão, capabilities, permissões, jobs, settings, sandbox e lifecycle próprio;
+- linguagem de UX:
+  - Instalar;
+  - Desinstalar;
+  - Ativar;
+  - Desativar;
+  - Atualizar;
+- regra arquitetural:
+  - plugin PODE consumir uma integração;
+  - integração NÃO depende de plugin.
+
+MCP — DIFERENÇA:
+- MCP é conexão/protocolo de ferramentas em runtime;
+- não é credencial externa simples;
+- não é pacote/plugin instalado;
+- permanece uma superfície própria do produto.
+
+ABA INTEGRAÇÕES — BLUEPRINT DE UX:
+- ficará dentro de Configurações;
+- visual em cards/blocos de discover, não lista seca de credenciais;
+- Google Cloud Vision deve aparecer primeiro na hierarquia inicial;
+- cada card mostra:
+  - logo;
+  - nome;
+  - descrição curta;
+  - status;
+  - CTA Conectar/Gerenciar;
+- filtros iniciais simples:
+  - Todos;
+  - Conectados;
+  - busca;
+- categorias mais amplas podem entrar depois.
+
+GOOGLE VISION BYOK:
+- primeira integração funcional prevista;
+- chave pertence ao usuário;
+- credencial deve ficar no armazenamento protegido do processo Main;
+- NUNCA localStorage;
+- NUNCA JSON plaintext;
+- renderer só recebe status/configured, nunca a chave salva;
+- qualquer IA adicionada ao Auto CodeZ poderá aproveitar Google Vision através do VisualGroundingCoordinator;
+- integração é provider-independent;
+- opções futuras de privacidade:
+  - Automático;
+  - Perguntar antes de enviar;
+  - Desativado;
+- env var deve permanecer apenas para desenvolvimento/CI quando necessário.
+
+IMAGES — BLUEPRINT CONGELADO:
+- futura aba própria no rail, abaixo de Projetos e acima de Plugins/MCP Mode;
+- primeiro frame deve conter o ícone image no HTML base;
+- tela:
+  - visualizador;
+  - loading ghost;
+  - composer inferior;
+  - biblioteca/galeria;
+- prompt passa por micro-agent local ultraleve;
+- micro-agent traduz para inglês e expande sem mudar intenção;
+- geração usa provider programático legítimo;
+- NÃO automatizar login/scraping de Perchance;
+- NÃO depender de violação de ToS;
+- preferir APIs oficiais/BYOP/BYOK quando aplicável;
+- não prometer "ilimitado e 100% grátis" como garantia arquitetural;
+- artifacts de imagem devem ir para disco imediatamente;
+- evitar base64 persistente no DOM;
+- biblioteca deve usar metadata/artifactId, não operational-ledger como banco primário da coleção;
+- ledger registra eventos de mídia, não o estado completo da biblioteca;
+- PluginArtifactRuntime não deve ser reutilizado diretamente como storage da aba Images; extrair storage genérico de artifacts quando esse bloco começar.
+
+ORDEM CANÔNICA MAIS RECENTE:
+1. Account Core / Device Registry: V1 fechada no código.
+2. Anexos / Visão / Visual Grounding: V1 fechada e verde.
+3. PRÓXIMO BLOCO PRINCIPAL: MCP MODE COMPLETO.
+4. Depois do MCP Mode:
+   - Integrações V1;
+   - Google Vision BYOK como primeira integração funcional de produção;
+5. Depois:
+   - Images V1;
+6. Expansões posteriores:
+   - novas integrações;
+   - novos plugins;
+   - image-to-image / editing / upscale / modelos adicionais;
+   - Restore Points / Backups por sessão conforme roadmap.
+
+DECISÃO DE FOCO:
+- NÃO iniciar agora a implementação completa de Integrações;
+- NÃO iniciar agora Images;
+- NÃO voltar a Account Core salvo bug real;
+- após esta atualização de contexto, retomar diretamente o MCP Mode do estado real já existente no branch;
+- antes de alterar MCP, reauditar plataforma atual e continuar de onde parou, sem recomeçar arquitetura;
+- não iniciar plugins Roblox/Blender antes de a plataforma MCP/Plugin estar totalmente validada.
+
+PR #9:
+- OPEN;
+- DRAFT;
+- não fazer merge sem autorização explícita.
+
