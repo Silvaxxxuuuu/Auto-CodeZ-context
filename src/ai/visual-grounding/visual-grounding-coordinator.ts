@@ -23,8 +23,8 @@ function latestVisualUser(messages: readonly AIMessage[]): { message: AIMessage;
 function reasonFor(message: string): VisualGroundingReason | undefined {
   const normalized = message.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   if (IDENTIFICATION.test(normalized)) return 'visual-identification';
-  if (GUIDANCE.test(normalized)) return 'visual-guidance';
   if (ERROR.test(normalized)) return 'visual-error';
+  if (GUIDANCE.test(normalized)) return 'visual-guidance';
   return undefined;
 }
 
