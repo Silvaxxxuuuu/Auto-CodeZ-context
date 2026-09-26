@@ -484,3 +484,72 @@ test('Device Registry accepts a Descope subject without legacy desktop account o
     await database.close();
   }
 });
+
+
+test('revoked Descope device proof cannot access registry with an otherwise valid session token', async () => {
+  const env = environment();
+  const database = new Database(env);
+  try {
+    await migrateDesktopSchema(database);
+    await reset(database);
+
+    let now = 1_800_000_000_000;
+    const verifier: DeviceAccessVerifier = {
+      async validate(token) {
+        assert.equal(token, 'descope-device-proof-token');
+        return { userId: 'descope-device-proof-user' };
+      },
+    };
+    const registry = new DeviceRegistryService(database, undefined, () => now, verifier);
+    const context = await registry.authenticate('descope-device-proof-token');
+    const keyPair = crypto.generateKeyPairSync('ed25519');
+    const publicKey = keyPair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const deviceId = 'descope-proof-device-1';
+
+    const pending = await registry.beginRegistration(context, {
+      id: deviceId,
+      name: 'PC proof',
+      platform: 'win32',
+      arch: 'x64',
+      appVersion: '2.0.0-test',
+      publicKey,
+    });
+    const registrationSignature = crypto.sign(
+      null,
+      Buffer.from(pending.challenge, 'utf8'),
+      keyPair.privateKey,
+    ).toString('base64');
+    await registry.completeRegistration(context, {
+      registrationId: pending.registrationId,
+      deviceId,
+      signature: registrationSignature,
+    });
+
+    const proof = (nonce: string) => {
+      const pathname = '/v1/devices/list';
+      const bodyHash = crypto.createHash('sha256').update('{}', 'utf8').digest('base64url');
+      const challenge = `autocodez-device-v1\n${pathname}\n${now}\n${nonce}\n${bodyHash}`;
+      return {
+        deviceId,
+        pathname,
+        timestamp: now,
+        nonce,
+        bodyHash,
+        signature: crypto.sign(null, Buffer.from(challenge, 'utf8'), keyPair.privateKey).toString('base64'),
+      };
+    };
+
+    const bound = await registry.authenticateDeviceRequest(context, proof('proof-nonce-before-revoke'));
+    assert.equal(bound.deviceId, deviceId);
+
+    await registry.revoke(bound, deviceId);
+    now += 1_000;
+
+    await assert.rejects(
+      registry.authenticateDeviceRequest(context, proof('proof-nonce-after-revoke')),
+      /forbidden/,
+    );
+  } finally {
+    await database.close();
+  }
+});

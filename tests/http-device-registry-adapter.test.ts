@@ -103,3 +103,27 @@ test('HttpDeviceRegistryAdapter classifies 403 as revoked device access', async 
     (error: unknown) => error instanceof DeviceRegistryAdapterError && error.code === 'revoked',
   );
 });
+
+
+test('HttpDeviceRegistryAdapter signs registered-device requests', async () => {
+  let capturedHeaders: Record<string, string> | undefined;
+  let signedChallenge = '';
+  const adapter = new HttpDeviceRegistryAdapter('https://accounts.example.com', {
+    proofSigner: async (challenge) => {
+      signedChallenge = challenge;
+      return { deviceId: 'device-proof-1', signature: 'signed-proof' };
+    },
+    fetch: async (_input, init) => {
+      capturedHeaders = init?.headers as Record<string, string>;
+      return json([]);
+    },
+  });
+
+  await adapter.list('access-secret');
+
+  assert.equal(capturedHeaders?.['x-autocodez-device-id'], 'device-proof-1');
+  assert.equal(capturedHeaders?.['x-autocodez-device-signature'], 'signed-proof');
+  assert.match(capturedHeaders?.['x-autocodez-device-timestamp'] ?? '', /^\d+$/);
+  assert.match(capturedHeaders?.['x-autocodez-device-nonce'] ?? '', /^[A-Za-z0-9_-]{16,128}$/);
+  assert.match(signedChallenge, /^autocodez-device-v1\n\/v1\/devices\/list\n\d+\n[A-Za-z0-9_-]+\n[A-Za-z0-9_-]+$/);
+});

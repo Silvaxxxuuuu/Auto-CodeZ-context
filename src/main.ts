@@ -107,6 +107,16 @@ const accountAuth = createAccountAuthAdapter({
   descopeBaseUrl: process.env.AUTO_CODEZ_DESCOPE_BASE_URL,
   descopePasskeyOidcFlowEnabled: process.env.AUTO_CODEZ_DESCOPE_PASSKEY_OIDC_FLOW_ENABLED === '1',
   accountDataBaseUrl: process.env.AUTO_CODEZ_ACCOUNT_DATA_BASE_URL,
+  deviceProofSigner: async (challenge) => {
+    const device = await accountDeviceIdentity.getOrCreate();
+    if (device.credentialPersistence !== 'protected') {
+      throw new Error('Armazenamento seguro do sistema indisponível para autenticar este dispositivo.');
+    }
+    return {
+      deviceId: device.id,
+      signature: await accountDeviceIdentity.signChallenge(challenge),
+    };
+  },
 });
 const accountAuthAdapter = accountAuth.adapter;
 const accountSessionRuntime = new AccountSessionRuntime(

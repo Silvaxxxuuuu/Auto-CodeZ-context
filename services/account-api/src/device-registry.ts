@@ -220,6 +220,58 @@ export class DeviceRegistryService {
     });
   }
 
+  async authenticateDeviceRequest(context: AccessContext, input: {
+    deviceId: string;
+    pathname: string;
+    timestamp: number;
+    nonce: string;
+    bodyHash: string;
+    signature: string;
+  }): Promise<AccessContext> {
+    if (context.deviceId) {
+      if (context.deviceId !== input.deviceId) throw new Error('forbidden');
+      return context;
+    }
+
+    const nowMs = this.now();
+    if (
+      !Number.isFinite(input.timestamp)
+      || Math.abs(nowMs - input.timestamp) > 5 * 60_000
+      || !/^[A-Za-z0-9_-]{16,128}$/.test(input.nonce)
+      || !/^[A-Za-z0-9_-]{20,128}$/.test(input.bodyHash)
+      || input.signature.length > 16_384
+    ) {
+      throw new Error('forbidden');
+    }
+
+    const rows = await this.database.query<{ public_key: string; revoked_at: Date | null }>(
+      'SELECT public_key, revoked_at FROM device_registry WHERE user_id = $1 AND device_id = $2',
+      [context.userId, input.deviceId],
+    );
+    const device = rows[0];
+    if (!device || device.revoked_at) throw new Error('forbidden');
+
+    const challenge = `autocodez-device-v1\n${input.pathname}\n${input.timestamp}\n${input.nonce}\n${input.bodyHash}`;
+    let valid = false;
+    try {
+      valid = crypto.verify(
+        null,
+        Buffer.from(challenge, 'utf8'),
+        device.public_key,
+        Buffer.from(input.signature, 'base64'),
+      );
+    } catch {
+      valid = false;
+    }
+    if (!valid) throw new Error('forbidden');
+
+    await this.database.query(
+      'UPDATE device_registry SET last_seen_at = NOW() WHERE user_id = $1 AND device_id = $2 AND revoked_at IS NULL',
+      [context.userId, input.deviceId],
+    );
+    return { ...context, deviceId: input.deviceId };
+  }
+
   async list(context: AccessContext) {
     const rows = await this.database.query<DeviceRow>(
       `SELECT device_id, name, platform, arch, app_version, public_key,

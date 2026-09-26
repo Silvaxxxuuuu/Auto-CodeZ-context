@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import express, { type Request } from 'express';
 import { loadAccountDataEnvironment } from './account-data-env.js';
 import { Database } from './db.js';
@@ -48,6 +49,27 @@ async function deviceContext(request: Request) {
   return await devices.authenticate(bearerToken(request));
 }
 
+async function registeredDeviceContext(request: Request) {
+  const context = await deviceContext(request);
+  const deviceId = requireString(request.header('x-autocodez-device-id'), 'device proof id', 256);
+  const timestampText = requireString(request.header('x-autocodez-device-timestamp'), 'device proof timestamp', 32);
+  const timestamp = Number(timestampText);
+  if (!Number.isFinite(timestamp)) throw new Error('forbidden');
+  const nonce = requireString(request.header('x-autocodez-device-nonce'), 'device proof nonce', 128);
+  const signature = requireString(request.header('x-autocodez-device-signature'), 'device proof signature', 16_384);
+  const bodyHash = crypto.createHash('sha256')
+    .update(JSON.stringify(request.body ?? {}), 'utf8')
+    .digest('base64url');
+  return await devices.authenticateDeviceRequest(context, {
+    deviceId,
+    pathname: request.path,
+    timestamp,
+    nonce,
+    bodyHash,
+    signature,
+  });
+}
+
 app.post('/v1/devices/register/begin', async (request, response) => {
   try {
     const context = await deviceContext(request);
@@ -81,7 +103,7 @@ app.post('/v1/devices/register/complete', async (request, response) => {
 
 app.post('/v1/devices/list', async (request, response) => {
   try {
-    response.json(await devices.list(await deviceContext(request)));
+    response.json(await devices.list(await registeredDeviceContext(request)));
   } catch (error) {
     sendError(response, error);
   }
@@ -89,7 +111,7 @@ app.post('/v1/devices/list', async (request, response) => {
 
 app.post('/v1/devices/rename', async (request, response) => {
   try {
-    const context = await deviceContext(request);
+    const context = await registeredDeviceContext(request);
     const body = requireObject(request.body, 'body');
     response.json(await devices.rename(
       context,
@@ -103,7 +125,7 @@ app.post('/v1/devices/rename', async (request, response) => {
 
 app.post('/v1/devices/revoke', async (request, response) => {
   try {
-    const context = await deviceContext(request);
+    const context = await registeredDeviceContext(request);
     const body = requireObject(request.body, 'body');
     await devices.revoke(
       context,

@@ -2,7 +2,7 @@ import type { AuthAdapter } from './auth-adapter';
 import { UnavailableAuthAdapter } from './auth-adapter';
 import { HttpAuthAdapter } from './http-auth-adapter';
 import { DescopeAuthAdapter } from './descope-auth-adapter';
-import type { DeviceRegistryAdapter } from './device-registry-adapter';
+import type { DeviceRegistryAdapter, DeviceRequestProofSigner } from './device-registry-adapter';
 import { UnavailableDeviceRegistryAdapter } from './device-registry-adapter';
 import { HttpDeviceRegistryAdapter } from './http-device-registry-adapter';
 
@@ -27,6 +27,7 @@ export interface AccountAuthFactoryOptions {
   descopePasskeyOidcFlowEnabled?: boolean;
   accountDataBaseUrl?: string;
   legacyBaseUrl?: string;
+  deviceProofSigner?: DeviceRequestProofSigner;
 }
 
 export function createAccountAuthAdapter(
@@ -44,7 +45,7 @@ export function createAccountAuthAdapter(
         passkeyOidcFlowEnabled: options.descopePasskeyOidcFlowEnabled === true,
       });
       const deviceRegistry = options.accountDataBaseUrl?.trim()
-        ? new HttpDeviceRegistryAdapter(options.accountDataBaseUrl)
+        ? new HttpDeviceRegistryAdapter(options.accountDataBaseUrl, { proofSigner: options.deviceProofSigner })
         : new UnavailableDeviceRegistryAdapter();
       return {
         adapter,
@@ -91,7 +92,7 @@ export function createAccountAuthAdapter(
 
   try {
     const adapter = new HttpAuthAdapter(value);
-    const deviceRegistry = new HttpDeviceRegistryAdapter(value);
+    const deviceRegistry = new HttpDeviceRegistryAdapter(value, { proofSigner: options.deviceProofSigner });
     return {
       adapter,
       deviceRegistry,

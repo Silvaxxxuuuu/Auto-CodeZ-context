@@ -30,6 +30,11 @@ export interface CompleteDeviceRegistrationInput {
   signature: string;
 }
 
+export type DeviceRequestProofSigner = (challenge: string) => Promise<{
+  deviceId: DeviceId;
+  signature: string;
+}>;
+
 export type DeviceRegistryAdapterErrorCode = 'offline' | 'unauthorized' | 'revoked' | 'server' | 'not_configured';
 
 export class DeviceRegistryAdapterError extends Error {

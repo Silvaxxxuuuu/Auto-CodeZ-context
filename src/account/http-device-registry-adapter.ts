@@ -1,8 +1,10 @@
+import crypto from 'node:crypto';
 import {
   DeviceRegistryAdapterError,
   type BeginDeviceRegistrationInput,
   type CompleteDeviceRegistrationInput,
   type DeviceRegistryAdapter,
+  type DeviceRequestProofSigner,
   type RemoteDeviceRecord,
 } from './device-registry-adapter';
 
@@ -11,6 +13,7 @@ type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<
 interface HttpDeviceRegistryAdapterOptions {
   fetch?: FetchLike;
   timeoutMs?: number;
+  proofSigner?: DeviceRequestProofSigner;
 }
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
@@ -53,6 +56,7 @@ export class HttpDeviceRegistryAdapter implements DeviceRegistryAdapter {
   private readonly origin: string;
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
+  private readonly proofSigner?: DeviceRequestProofSigner;
 
   constructor(baseUrl: string, options: HttpDeviceRegistryAdapterOptions = {}) {
     const parsed = new URL(baseUrl);
@@ -61,6 +65,7 @@ export class HttpDeviceRegistryAdapter implements DeviceRegistryAdapter {
     this.origin = parsed.origin;
     this.fetchImpl = options.fetch ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
+    this.proofSigner = options.proofSigner;
   }
 
   async beginRegistration(input: BeginDeviceRegistrationInput): Promise<{ registrationId: string; challenge: string; expiresAt: number }> {
@@ -81,33 +86,46 @@ export class HttpDeviceRegistryAdapter implements DeviceRegistryAdapter {
   }
 
   async list(accessToken: string): Promise<RemoteDeviceRecord[]> {
-    const payload = await this.request('/v1/devices/list', accessToken, {});
+    const payload = await this.request('/v1/devices/list', accessToken, {}, true);
     if (!Array.isArray(payload)) throw new Error('Lista de dispositivos inválida.');
     return payload.map(parseDevice);
   }
 
   async rename(accessToken: string, deviceId: string, name: string): Promise<RemoteDeviceRecord> {
-    return parseDevice(await this.request('/v1/devices/rename', accessToken, { deviceId, name }));
+    return parseDevice(await this.request('/v1/devices/rename', accessToken, { deviceId, name }, true));
   }
 
   async revoke(accessToken: string, deviceId: string): Promise<void> {
-    await this.request('/v1/devices/revoke', accessToken, { deviceId });
+    await this.request('/v1/devices/revoke', accessToken, { deviceId }, true);
   }
 
-  private async request(pathname: string, accessToken: string, body: unknown): Promise<unknown> {
+  private async request(pathname: string, accessToken: string, body: unknown, requireDeviceProof = false): Promise<unknown> {
     const token = accessToken.trim();
     if (!token || token.length > 32_768) throw new Error('Access token inválido.');
+    const bodyText = JSON.stringify(body);
+    const headers: Record<string, string> = {
+      accept: 'application/json',
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    };
+    if (requireDeviceProof && this.proofSigner) {
+      const timestamp = Date.now();
+      const nonce = crypto.randomBytes(18).toString('base64url');
+      const bodyHash = crypto.createHash('sha256').update(bodyText, 'utf8').digest('base64url');
+      const challenge = `autocodez-device-v1\n${pathname}\n${timestamp}\n${nonce}\n${bodyHash}`;
+      const proof = await this.proofSigner(challenge);
+      headers['x-autocodez-device-id'] = proof.deviceId;
+      headers['x-autocodez-device-timestamp'] = String(timestamp);
+      headers['x-autocodez-device-nonce'] = nonce;
+      headers['x-autocodez-device-signature'] = proof.signature;
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const response = await this.fetchImpl(new URL(pathname, this.origin), {
         method: 'POST',
-        headers: {
-          accept: 'application/json',
-          authorization: `Bearer ${token}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(body),
+        headers,
+        body: bodyText,
         redirect: 'error',
         cache: 'no-store',
         credentials: 'omit',
