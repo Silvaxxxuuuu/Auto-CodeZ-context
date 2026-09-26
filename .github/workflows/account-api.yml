@@ -38,6 +38,7 @@ jobs:
       ACCOUNT_ACCESS_TOKEN_SECRET: desktop-access-ci-secret-000000000000000000
       PASSKEY_RP_ID: accounts.example.test
       PASSKEY_RP_NAME: Auto CodeZ
+      DESCOPE_PROJECT_ID: P2abcDEF_123
 
     defaults:
       run:
@@ -67,8 +68,33 @@ jobs:
       - name: PostgreSQL integration tests
         run: npm run test:integration
 
+      - name: Account Data migrations
+        run: npm run migrate:data:build
+
       - name: Production build
         run: npm run build
 
+      - name: Account Data startup smoke
+        shell: bash
+        run: |
+          node dist/account-data-server.js > /tmp/account-data.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$PID" 2>/dev/null; then
+              cat /tmp/account-data.log
+              exit 1
+            fi
+            sleep 1
+          done
+          cat /tmp/account-data.log
+          exit 1
+
       - name: Production container build
         run: docker build --tag auto-codez-account-api:ci .
+
+      - name: Account Data container build
+        run: docker build --file Dockerfile.account-data --tag auto-codez-account-data:ci .
