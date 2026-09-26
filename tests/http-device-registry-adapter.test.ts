@@ -91,3 +91,15 @@ test('HttpDeviceRegistryAdapter classifies 401 as unauthorized', async () => {
     (error: unknown) => error instanceof DeviceRegistryAdapterError && error.code === 'unauthorized',
   );
 });
+
+
+test('HttpDeviceRegistryAdapter classifies 403 as revoked device access', async () => {
+  const adapter = new HttpDeviceRegistryAdapter('https://accounts.example.com', {
+    fetch: async () => json({ code: 'server', message: 'forbidden' }, 403),
+  });
+
+  await assert.rejects(
+    adapter.list('access-secret'),
+    (error: unknown) => error instanceof DeviceRegistryAdapterError && error.code === 'revoked',
+  );
+});
