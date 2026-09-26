@@ -331,3 +331,20 @@ test('DeviceRegistryRuntime keeps the session when device proof is forbidden but
   assert.match(snapshot.lastError ?? '', /recusou/);
   assert.equal(sessions.snapshot().state, 'authenticated');
 });
+
+
+test('DeviceRegistryRuntime preserves the local device name when remote rename fails', async () => {
+  const { registry, adapter, devices } = await setup();
+  await registry.ensureRegistered();
+  const before = (await devices.getOrCreate()).name;
+  adapter.rename = async () => {
+    throw new DeviceRegistryAdapterError('offline', 'Sem conexão para renomear o dispositivo.');
+  };
+
+  await assert.rejects(
+    registry.renameCurrent('Nome remoto pendente'),
+    /Sem conexão/,
+  );
+
+  assert.equal((await devices.getOrCreate()).name, before);
+});

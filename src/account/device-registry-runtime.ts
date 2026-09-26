@@ -213,7 +213,8 @@ export class DeviceRegistryRuntime {
     const accessToken = this.sessions.getAccessToken();
     if (!accessToken) throw new Error('Sessão autenticada indisponível.');
 
-    const local = await this.devices.rename(normalizeDeviceName(name));
+    const normalizedName = normalizeDeviceName(name);
+    const local = await this.devices.getOrCreate();
     const remoteCurrent = this.state.devices.find((device) => device.id === local.id && !device.revokedAt);
     if (this.state.state !== 'ready' || !remoteCurrent) {
       const registered = await this.ensureRegistered();
@@ -222,7 +223,8 @@ export class DeviceRegistryRuntime {
         throw new Error(registered.lastError || 'Dispositivo ainda não foi registrado remotamente.');
       }
     }
-    await this.adapter.rename(accessToken, local.id, local.name);
+    await this.adapter.rename(accessToken, local.id, normalizedName);
+    await this.devices.rename(normalizedName);
     return await this.refresh();
   }
 
