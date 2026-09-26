@@ -1,10 +1,8 @@
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
-import type { AccountApiEnvironment } from './env.js';
-
 export class Database {
   readonly pool: Pool;
 
-  constructor(environment: AccountApiEnvironment) {
+  constructor(environment: { databaseUrl: string }) {
     this.pool = new Pool({
       connectionString: environment.databaseUrl,
       max: 10,
