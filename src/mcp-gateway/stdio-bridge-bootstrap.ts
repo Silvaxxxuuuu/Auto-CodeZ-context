@@ -24,6 +24,8 @@ function launchMainApplication(): void {
 }
 
 async function main(): Promise<void> {
+  const canonicalUserData = path.join(app.getPath('appData'), 'Auto CodeZ');
+  if (app.getPath('userData') !== canonicalUserData) app.setPath('userData', canonicalUserData);
   await app.whenReady();
   const candidateRoots = [...new Set([
     path.join(app.getPath('userData'), 'data'),
