@@ -710,7 +710,7 @@ async function refresh(): Promise<void> {
   try {
     const cursorStatusPromise = window.autoCodez.mcpClientConfigStatus('cursor')
       .then((status) => status as McpClientConfigStatus)
-      .catch((error) => {
+      .catch((error): undefined => {
         clientConfigError = error instanceof Error ? error.message : String(error);
         return undefined;
       });
