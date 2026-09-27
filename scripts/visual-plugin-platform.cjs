@@ -77,7 +77,7 @@ async function runTest() {
     });
     return { count: icons.length, icons };
   });
-  if (brandIconCheck.count < 2 || brandIconCheck.icons.some((icon) => !icon.loaded || !icon.src.endsWith('.svg') || icon.text)) throw new Error('Ícones SVG locais dos clientes MCP não renderizaram corretamente: ' + JSON.stringify(brandIconCheck));
+  if (brandIconCheck.count < 2 || brandIconCheck.icons.some((icon) => !icon.loaded || (!icon.src.endsWith('.svg') && !icon.src.startsWith('data:image/svg+xml')) || icon.text)) throw new Error('Ícones SVG locais dos clientes MCP não renderizaram corretamente: ' + JSON.stringify(brandIconCheck));
 
   if (!['flex', 'inline-flex'].includes(instructionLayout.copyDisplay) || instructionLayout.copyRadius === '0px' || instructionLayout.copyBackground === 'rgba(0, 0, 0, 0)') throw new Error('Ação de copiar não recebeu o tratamento visual do MCP Mode: ' + JSON.stringify(instructionLayout));
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-instrucoes.png'), animations: 'disabled' });
