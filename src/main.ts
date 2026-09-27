@@ -1211,45 +1211,53 @@ ipcMain.handle('mcp-connections:list', async () => mcpConnectionRegistry.list())
 ipcMain.handle('mcp-connections:add', async (_event, clientIdInput: unknown) => mcpConnectionRegistry.add(requireIdentifier(clientIdInput, 'Cliente MCP')));
 ipcMain.handle('mcp-connections:remove', async (_event, clientIdInput: unknown) => ({ removed: await mcpConnectionRegistry.remove(requireIdentifier(clientIdInput, 'Cliente MCP')) }));
 
-function cursorConfigurator(): McpClientConfigurator {
+function localMcpClientConfigurator(): McpClientConfigurator {
   return new McpClientConfigurator({
     cursorConfigPath: path.join(app.getPath('home'), '.cursor', 'mcp.json'),
+    codexConfigPath: path.join(app.getPath('home'), '.codex', 'config.toml'),
     bridgeScriptPath: path.join(process.resourcesPath, 'mcp-bridge.ps1'),
     brokerAddress: mcpBindingBrokerAddress(app.getPath('appData')),
     appPath: process.execPath,
   });
 }
 
+function requireAutoConfigClient(value: unknown): 'cursor' | 'codex' {
+  const clientId = requireIdentifier(value, 'Cliente MCP');
+  if (clientId !== 'cursor' && clientId !== 'codex') {
+    throw new Error('Configuração automática ainda não está disponível para este cliente.');
+  }
+  return clientId;
+}
+
 ipcMain.handle('mcp-client-config:status', async (_event, clientIdInput: unknown) => {
-  const clientId = requireIdentifier(clientIdInput, 'Cliente MCP');
-  if (clientId !== 'cursor') throw new Error('Configuração automática ainda não está disponível para este cliente.');
-  return cursorConfigurator().status('cursor');
+  const clientId = requireAutoConfigClient(clientIdInput);
+  return localMcpClientConfigurator().status(clientId);
 });
 ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknown) => {
-  const clientId = requireIdentifier(clientIdInput, 'Cliente MCP');
-  if (clientId !== 'cursor') throw new Error('Configuração automática ainda não está disponível para este cliente.');
-  const status = await cursorConfigurator().install('cursor');
-  await mcpConnectionRegistry.markConfigured('cursor');
+  const clientId = requireAutoConfigClient(clientIdInput);
+  const status = await localMcpClientConfigurator().install(clientId);
+  await mcpConnectionRegistry.markConfigured(clientId);
+  const clientName = clientId === 'cursor' ? 'Cursor' : 'Codex';
   operationalLedger.record({
     actor: 'runtime',
     category: 'system',
     state: 'success',
-    summary: 'Conexão MCP configurada automaticamente no Cursor.',
-    clientId: 'cursor',
+    summary: `Conexão MCP configurada automaticamente no ${clientName}.`,
+    clientId,
     details: { configPath: status.configPath },
   });
   return status;
 });
 ipcMain.handle('mcp-client-config:remove', async (_event, clientIdInput: unknown) => {
-  const clientId = requireIdentifier(clientIdInput, 'Cliente MCP');
-  if (clientId !== 'cursor') throw new Error('Configuração automática ainda não está disponível para este cliente.');
-  const status = await cursorConfigurator().remove('cursor');
+  const clientId = requireAutoConfigClient(clientIdInput);
+  const status = await localMcpClientConfigurator().remove(clientId);
+  const clientName = clientId === 'cursor' ? 'Cursor' : 'Codex';
   operationalLedger.record({
     actor: 'runtime',
     category: 'system',
     state: 'success',
-    summary: 'Configuração MCP gerenciada pelo Auto CodeZ foi removida do Cursor.',
-    clientId: 'cursor',
+    summary: `Configuração MCP gerenciada pelo Auto CodeZ foi removida do ${clientName}.`,
+    clientId,
   });
   return status;
 });
