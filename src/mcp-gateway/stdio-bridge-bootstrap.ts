@@ -40,5 +40,5 @@ void main()
     process.exitCode = 1;
   })
   .finally(() => {
-    app.exit(process.exitCode ?? 0);
+    app.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
   });
