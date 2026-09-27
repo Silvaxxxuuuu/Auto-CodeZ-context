@@ -172,7 +172,10 @@ export class McpConnectionRegistry {
   }
 
   async markConnected(clientId: string, metadata?: { tunnelId?: string }): Promise<McpConnectionRecord> {
-    const configured = await this.markConfigured(clientId, { ...(metadata ?? {}), autoReconnect: clientId === 'chatgpt' ? true : metadata && 'autoReconnect' in metadata ? Boolean((metadata as { autoReconnect?: boolean }).autoReconnect) : undefined });
+    const configured = await this.markConfigured(clientId, {
+      ...(metadata ?? {}),
+      ...(clientId === 'chatgpt' ? { autoReconnect: true } : {}),
+    });
     const now = this.now();
     const record: McpConnectionRecord = {
       ...configured,
