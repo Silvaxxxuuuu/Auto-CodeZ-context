@@ -311,6 +311,59 @@ async function stopManagedMcpGateway(): Promise<boolean> {
   await mcpGatewayBindingStore.clear();
   return stopped;
 }
+
+function mcpTunnelEnvironmentCredentialAvailable(): boolean {
+  return Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim());
+}
+
+async function restorePersistedChatGptTunnel(): Promise<void> {
+  const connection = mcpConnectionRegistry.get('chatgpt');
+  const tunnelId = connection?.metadata?.tunnelId;
+  if (
+    !connection
+    || connection.setupState !== 'configured'
+    || connection.metadata?.autoReconnect !== true
+    || !tunnelId
+    || !mcpTunnelEnvironmentCredentialAvailable()
+  ) return;
+
+  try {
+    await startManagedMcpGateway();
+    await mcpGatewayServer.preflight();
+    const runtime = await mcpRuntimeInstaller.prepare();
+    if (!runtime.executable) throw new Error('Runtime MCP indisponível.');
+    const binding = mcpGatewayServer.trustedTunnelBinding();
+    const status = await mcpTunnelRuntime.start({
+      tunnelId,
+      localEndpoint: binding.endpoint,
+      localBearerToken: binding.bearerToken,
+      executable: runtime.executable,
+    });
+    await mcpConnectionRegistry.markConnected('chatgpt', { tunnelId: status.tunnelId ?? tunnelId });
+    operationalLedger.record({
+      actor: 'runtime',
+      category: 'system',
+      state: 'success',
+      summary: 'Secure MCP Tunnel restaurado automaticamente.',
+      clientId: 'autocodez-secure-mcp-tunnel',
+      details: {
+        tunnelId: status.tunnelId ?? tunnelId,
+        version: status.version ?? '',
+        ready: status.ready,
+      },
+    });
+  } catch (error) {
+    operationalLedger.record({
+      actor: 'runtime',
+      category: 'system',
+      state: 'failed',
+      summary: 'Secure MCP Tunnel não pôde ser restaurado automaticamente.',
+      clientId: 'autocodez-secure-mcp-tunnel',
+      details: { tunnelId },
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
 const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
@@ -1298,7 +1351,7 @@ ipcMain.handle('mcp-runtime:prepare', async () => {
 });
 ipcMain.handle('mcp-tunnel:status', async () => ({
   ...mcpTunnelRuntime.status(),
-  credentialAvailable: Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()),
+  credentialAvailable: mcpTunnelEnvironmentCredentialAvailable(),
 }));
 ipcMain.handle('mcp-tunnel:doctor', async (_event, tunnelIdInput: unknown, controlPlaneApiKeyInput: unknown) => {
   const tunnelId = requireIdentifier(tunnelIdInput, 'Tunnel ID');
@@ -1368,6 +1421,7 @@ ipcMain.handle('mcp-tunnel:stop', async () => {
   const previous = mcpTunnelRuntime.status();
   const stopped = await mcpTunnelRuntime.stop();
   if (stopped) {
+    await mcpConnectionRegistry.markDisconnected('chatgpt');
     operationalLedger.record({
       actor: 'runtime',
       category: 'system',
@@ -1839,7 +1893,7 @@ app.whenReady().then(async () => {
   mcpTunnelRuntime.subscribe((status) => {
     sendMcpTunnelStatus({
       ...status,
-      credentialAvailable: Boolean(process.env.CONTROL_PLANE_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim()),
+      credentialAvailable: mcpTunnelEnvironmentCredentialAvailable(),
     });
   });
   activityRuntime.subscribe((event) => {
@@ -1892,6 +1946,7 @@ app.whenReady().then(async () => {
   terminalService.subscribe((event: TerminalEvent) => sendTerminalEvent(event));
   Menu.setApplicationMenu(null);
   createWindow();
+  void restorePersistedChatGptTunnel();
   if (pendingAccountAuthCallback) {
     const callback = pendingAccountAuthCallback;
     pendingAccountAuthCallback = undefined;
