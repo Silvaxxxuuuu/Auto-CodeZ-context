@@ -407,6 +407,15 @@ function clientEvents(client: McpClientId): LedgerEvent[] {
   return mcpActivityEvents().filter((event) => eventMatchesClient(event, client));
 }
 
+function clientSetupSummary(client: McpClientId): string {
+  if (client === 'chatgpt') return 'No ChatGPT, crie a conexão Auto CodeZ e escolha Secure MCP Tunnel. Quando ele solicitar o Tunnel ID, use a configuração avançada desta conexão.';
+  if (client === 'codex') return 'No Codex, adicione Auto CodeZ em Servidores MCP usando a conexão local exibida na configuração avançada.';
+  if (client === 'claude-desktop') return 'No Claude Desktop, adicione Auto CodeZ como servidor MCP local nas configurações de integrações ou extensões.';
+  if (client === 'claude-code') return 'No Claude Code, adicione o servidor MCP do Auto CodeZ e use a conexão local exibida na configuração avançada.';
+  if (client === 'cursor') return 'No Cursor, adicione Auto CodeZ nas configurações MCP do editor usando a conexão local desta conexão.';
+  return 'No cliente MCP escolhido, adicione um servidor usando os dados locais exibidos na configuração avançada.';
+}
+
 function clientPublicState(client: McpClientId): { label: string; tone: string; detail: string } {
   const latest = clientEvents(client).at(-1);
   if (latest?.state === 'failed') return { label: 'Precisa de atenção', tone: 'attention', detail: latest.error || latest.summary };
@@ -433,8 +442,8 @@ function renderConnectionCard(client: (typeof MCP_CLIENTS)[number], configured: 
     <div class="mcp-connection-card-meta"><span>${escapeHtml(state.detail)}</span><span>${escapeHtml(client.badge)}</span></div>
     <div class="mcp-connection-card-actions">
       ${configured
-        ? `<button class="mcp-text-action" type="button" data-mcp-open-connection="${client.id}">Ver ferramentas</button>`
-        : `<button class="mcp-primary-action compact" type="button" data-mcp-connect-client="${client.id}">Conectar ${escapeHtml(client.name)}</button>`}
+        ? `<button class="mcp-text-action" type="button" data-mcp-open-connection="${client.id}">${state.tone === 'connected' || state.tone === 'active' ? 'Abrir conexão' : state.tone === 'attention' || state.tone === 'waiting' ? 'Revisar conexão' : 'Concluir conexão'}</button>`
+        : `<button class="mcp-card-add-action" type="button" data-mcp-connect-client="${client.id}">Adicionar ${escapeHtml(client.name)}</button>`}
     </div>
   </article>`;
 }
@@ -495,6 +504,7 @@ function renderConnectionDetail(root: HTMLElement, clientId: McpClientId): void 
         ${renderClientIcon(client.id, 'mcp-client-logo large')}
         <div class="mcp-detail-identity"><span class="mcp-detail-eyebrow">CONEXÃO MCP</span><h1>${escapeHtml(client.name)}</h1><p>${escapeHtml(client.description)}</p><span class="mcp-status-pill ${escapeHtml(state.tone)}"><i></i>${escapeHtml(state.label)}</span></div>
       </section>
+      ${state.tone === 'connected' || state.tone === 'active' ? '' : `<section class="mcp-setup-callout"><span>PRÓXIMO PASSO</span><strong>Conclua no ${escapeHtml(client.name)}</strong><p>${escapeHtml(clientSetupSummary(client.id))}</p></section>`}
       <div class="mcp-detail-grid">
         <section class="mcp-detail-card">
           <div class="mcp-detail-card-heading"><span>FERRAMENTAS</span><h2>Disponíveis para esta conexão</h2></div>
@@ -527,9 +537,9 @@ function renderConnectPanel(): string {
   return `<div class="mcp-connect-backdrop" data-mcp-close-connect>
     <section class="mcp-connect-panel" role="dialog" aria-modal="true" aria-label="Conectar ferramenta">
       <header><div><span>CONEXÕES MCP</span><h2>Conectar uma ferramenta</h2><p>Escolha um aplicativo compatível. O Auto CodeZ mantém os detalhes técnicos fora do caminho.</p></div><button class="mcp-icon-action" type="button" data-mcp-close-connect aria-label="Fechar">×</button></header>
-      <div class="mcp-connect-discovery"><span class="mcp-discovery-icon" aria-hidden="true"><img src="${escapeHtml(MCP_ICON_URL)}" alt="" draggable="false"></span><div><strong>Clientes conhecidos neste Auto CodeZ</strong><small>Mostramos somente opções que já possuem fluxo de configuração no produto.</small></div></div>
+      <div class="mcp-connect-discovery"><span class="mcp-discovery-icon" aria-hidden="true"><img src="${escapeHtml(MCP_ICON_URL)}" alt="" draggable="false"></span><div><strong>Conexões compatíveis</strong><small>Escolha um aplicativo com fluxo de configuração disponível no Auto CodeZ.</small></div></div>
       <div class="mcp-connect-list">
-        ${available.length ? available.map((client) => `<button type="button" class="mcp-connect-option" data-mcp-connect-client="${client.id}">${renderClientIcon(client.id)}<span><strong>${escapeHtml(client.name)}</strong><small>${escapeHtml(client.description)}</small></span><em>Conectar</em></button>`).join('') : '<div class="mcp-empty-state compact"><strong>Todas as conexões conhecidas já foram adicionadas.</strong><span>Novos tipos de conexão entrarão aqui conforme o runtime MCP evoluir.</span></div>'}
+        ${available.length ? available.map((client) => `<button type="button" class="mcp-connect-option" data-mcp-connect-client="${client.id}">${renderClientIcon(client.id)}<span><strong>${escapeHtml(client.name)}</strong><small>${escapeHtml(client.description)}</small></span><em>Adicionar</em></button>`).join('') : '<div class="mcp-empty-state compact"><strong>Todas as conexões conhecidas já foram adicionadas.</strong><span>Novos tipos de conexão entrarão aqui conforme o runtime MCP evoluir.</span></div>'}
       </div>
       <footer><span>Precisa de um servidor personalizado?</span><button class="mcp-text-action" type="button" data-mcp-advanced>Usar configuração avançada</button></footer>
     </section>
@@ -615,13 +625,13 @@ function render(): void {
       <section class="mcp-health-card ${ready ? 'ready' : ''}">
         <span class="mcp-health-indicator"><i></i></span>
         <div><strong>${ready ? 'MCP pronto' : 'Preparando conexões'}</strong><small>${ready ? `${gatewayPreflight!.toolCount} ferramentas disponíveis · alterações continuam protegidas por aprovação` : gatewayPreflightError || 'O Auto CodeZ está preparando o runtime local necessário para suas conexões.'}</small></div>
-        <span class="mcp-health-count">${configured.length} ${configured.length === 1 ? 'conexão' : 'conexões'}</span>
+        <span class="mcp-health-count">${configured.length === 1 ? '1 conexão adicionada' : `${configured.length} conexões adicionadas`}</span>
       </section>
 
       ${pending.length ? `<section class="mcp-approval-stack"><div class="mcp-section-heading"><div><span>AGUARDANDO VOCÊ</span><h2>Aprovações pendentes</h2></div></div>${pending.map((approval) => `<div class="mcp-approval-card"><div><strong>${escapeHtml(approval.toolCall.name)}</strong><span>A execução está pausada até sua decisão.</span></div><div><button data-mcp-deny="${escapeHtml(approval.id)}">Rejeitar</button><button class="primary" data-mcp-approve="${escapeHtml(approval.id)}">Permitir esta ação</button></div></div>`).join('')}</section>` : ''}
 
       <section class="mcp-hub-section">
-        <div class="mcp-section-heading"><div><span>CONEXÕES</span><h2>Prontas para suas IAs</h2></div><small>${configured.length ? 'Abra uma conexão para ver ferramentas e segurança.' : 'Adicione sua primeira conexão para começar.'}</small></div>
+        <div class="mcp-section-heading"><div><span>CONEXÕES</span><h2>Suas conexões</h2></div><small>${configured.length ? 'Abra uma conexão para revisar status, ferramentas e segurança.' : 'Adicione sua primeira conexão para começar.'}</small></div>
         <div class="mcp-connection-grid">${configured.length ? configured.map((client) => renderConnectionCard(client, true)).join('') : '<div class="mcp-empty-state"><strong>Nenhuma conexão configurada.</strong><span>Use “Conectar ferramenta” para escolher um aplicativo compatível.</span><button class="mcp-text-action" type="button" data-mcp-open-connect>Escolher uma conexão</button></div>'}</div>
       </section>
 
