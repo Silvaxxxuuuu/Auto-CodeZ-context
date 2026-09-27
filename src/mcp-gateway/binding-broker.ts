@@ -7,6 +7,7 @@ import type { McpGatewayBridgeBinding } from './binding-store';
 
 const MAX_RESPONSE_BYTES = 8 * 1024;
 const CONNECT_TIMEOUT_MS = 1_500;
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
 export function mcpBindingBrokerAddress(appDataRoot: string): string {
   const digest = crypto.createHash('sha256').update(path.resolve(appDataRoot)).digest('hex').slice(0, 24);
@@ -103,12 +104,46 @@ export async function readMcpGatewayBindingFromBroker(address: string): Promise<
           return;
         }
         const record = value as Record<string, unknown>;
-        if (typeof record.endpoint !== 'string' || typeof record.bearerToken !== 'string' || !Number.isInteger(record.ownerPid) || typeof record.updatedAt !== 'number') {
+        if (
+          typeof record.endpoint !== 'string'
+          || typeof record.bearerToken !== 'string'
+          || !record.bearerToken.trim()
+          || record.bearerToken.length > 8192
+          || /[\u0000\r\n]/.test(record.bearerToken)
+          || !Number.isInteger(record.ownerPid)
+          || Number(record.ownerPid) <= 0
+          || typeof record.updatedAt !== 'number'
+          || !Number.isFinite(record.updatedAt)
+          || record.updatedAt < 0
+        ) {
+          finish();
+          return;
+        }
+        let endpoint: URL;
+        try {
+          endpoint = new URL(record.endpoint);
+        } catch {
+          finish();
+          return;
+        }
+        const port = Number(endpoint.port);
+        if (
+          endpoint.protocol !== 'http:'
+          || !LOOPBACK_HOSTS.has(endpoint.hostname)
+          || endpoint.pathname !== '/mcp'
+          || endpoint.username
+          || endpoint.password
+          || endpoint.search
+          || endpoint.hash
+          || !Number.isInteger(port)
+          || port < 1
+          || port > 65535
+        ) {
           finish();
           return;
         }
         finish({
-          endpoint: record.endpoint,
+          endpoint: endpoint.toString(),
           bearerToken: record.bearerToken,
           ownerPid: Number(record.ownerPid),
           updatedAt: record.updatedAt,
