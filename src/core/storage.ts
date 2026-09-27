@@ -24,6 +24,7 @@ const SENSITIVE_JSON_FILES = new Set([
   'execution-shadow-workspaces.json',
   'plugins.json',
   'plugin-settings.json',
+  'mcp-connections.json',
   'account-session.json',
   'chats.json',
 ]);
