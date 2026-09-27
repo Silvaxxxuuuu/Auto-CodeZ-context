@@ -210,6 +210,30 @@ async function runTest() {
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-codex-configurado.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Voltar para MCP Mode' }).click();
 
+  await mcpMode.locator('.mcp-connection-card.available [data-mcp-connect-client="claude-code"]').click();
+  await mcpMode.locator('[data-mcp-connection-detail="claude-code"]').waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByText('Conectar ao Claude Code', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByRole('button', { name: 'Configurar automaticamente' }).click();
+  await mcpMode.getByText('Auto CodeZ adicionado ao Claude Code', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
+  const claudeCodeConfigStatus = await page.evaluate(() => window.autoCodez.mcpClientConfigStatus('claude-code'));
+  if (claudeCodeConfigStatus.state !== 'configured') throw new Error('Claude Code não ficou configurado automaticamente: ' + JSON.stringify(claudeCodeConfigStatus));
+  const claudeCodeConfig = JSON.parse(await fs.readFile(claudeCodeConfigStatus.configPath, 'utf8'));
+  const claudeCodeServer = claudeCodeConfig?.mcpServers?.['auto-codez'];
+  if (!claudeCodeServer || claudeCodeServer.type !== 'stdio' || claudeCodeServer.command !== 'powershell.exe' || !Array.isArray(claudeCodeServer.args)) {
+    throw new Error('Configuração MCP do Claude Code não contém servidor Auto CodeZ stdio gerenciado: ' + JSON.stringify(claudeCodeConfig));
+  }
+  if (!claudeCodeServer.args.includes('-File') || !claudeCodeServer.args.includes('-BrokerAddress') || !claudeCodeServer.args.includes('-AppPath') || !claudeCodeServer.args.includes('-ClientId') || !claudeCodeServer.args.includes('claude-code')) {
+    throw new Error('Configuração MCP do Claude Code não aponta para o bridge universal completo: ' + JSON.stringify(claudeCodeServer));
+  }
+  if (JSON.stringify(claudeCodeServer).includes('Bearer ') || JSON.stringify(claudeCodeServer).includes('bearerToken')) {
+    throw new Error('Configuração MCP do Claude Code vazou credencial efêmera: ' + JSON.stringify(claudeCodeServer));
+  }
+  const claudeBridgeArgumentIndex = claudeCodeServer.args.indexOf('-File') + 1;
+  if (claudeBridgeArgumentIndex <= 0 || !claudeCodeServer.args[claudeBridgeArgumentIndex]) throw new Error('Configuração MCP do Claude Code não contém caminho do helper empacotado.');
+  await fs.access(claudeCodeServer.args[claudeBridgeArgumentIndex]);
+  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-claude-code-configurado.png'), animations: 'disabled' });
+  await mcpMode.getByRole('button', { name: 'Voltar para MCP Mode' }).click();
+
   await mcpMode.locator('[data-mcp-open-connection="chatgpt"]').click();
   await mcpMode.locator('[data-mcp-connection-detail="chatgpt"]').waitFor({ state: 'visible' });
   await mcpMode.getByText('Conclua no ChatGPT', { exact: true }).waitFor({ state: 'visible' });
