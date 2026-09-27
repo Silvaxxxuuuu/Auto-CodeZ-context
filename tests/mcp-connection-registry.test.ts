@@ -66,6 +66,35 @@ test('MCP connection registry keeps configuration metadata without storing contr
   }
 });
 
+test('MCP connection registry can downgrade a configured client back to added state', async () => {
+  const f = await fixture();
+  try {
+    const tunnelId = 'tunnel_' + 'b'.repeat(32);
+    const connected = await f.registry.markConnected('chatgpt', { tunnelId });
+    assert.equal(connected.setupState, 'configured');
+    assert.ok(connected.configuredAt);
+    assert.ok(connected.lastConnectedAt);
+    assert.equal(connected.metadata?.tunnelId, tunnelId);
+
+    const added = await f.registry.markAdded('chatgpt');
+    assert.equal(added.setupState, 'added');
+    assert.equal(added.addedAt, connected.addedAt);
+    assert.equal(added.configuredAt, undefined);
+    assert.equal(added.lastConnectedAt, undefined);
+    assert.equal(added.metadata, undefined);
+
+    const restored = new McpConnectionRegistry(f.storage);
+    await restored.init();
+    const persisted = restored.get('chatgpt');
+    assert.equal(persisted?.setupState, 'added');
+    assert.equal(persisted?.configuredAt, undefined);
+    assert.equal(persisted?.lastConnectedAt, undefined);
+    assert.equal(persisted?.metadata, undefined);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test('MCP connection registry is idempotent and rejects unsupported clients or malformed tunnel ids', async () => {
   const f = await fixture();
   try {
