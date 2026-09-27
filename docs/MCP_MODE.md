@@ -99,6 +99,8 @@ PluginToolCatalog remains authoritative for plugin tools.
 
 The Gateway binds to localhost when used locally. Secure MCP Tunnel opens an outbound connection and does not expose the local MCP server directly to the public internet.
 
+The local binding broker uses OS-local IPC only. Unix sockets are restricted to mode 0600. Windows named pipes are opened with `readableAll: false`, `writableAll: false` and `exclusive: true`. Bindings received from the broker are accepted only when they point to `http://loopback:<port>/mcp` with no userinfo, query string or fragment.
+
 Secrets are not written to the operational ledger.
 
 ## Managed tunnel runtime
