@@ -72,8 +72,22 @@ public static class TunnelClientFixture {
     return 2;
   }
 }`; await fs.writeFile(sourcePath, source, 'utf8'); const csc = path.join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'); const compiled = spawnSync(csc, ['/nologo', '/target:exe', `/out:${executablePath}`, sourcePath], { windowsHide: true, encoding: 'utf8' }); if (compiled.status !== 0) throw new Error(`Não foi possível compilar tunnel-client.exe fixture: ${compiled.stderr || compiled.stdout || compiled.error || 'erro desconhecido'}`); const roaming = path.join(stateRoot, 'AppData', 'Roaming'); const local = path.join(stateRoot, 'AppData', 'Local'); await Promise.all([fs.mkdir(roaming, { recursive: true }), fs.mkdir(local, { recursive: true })]); await Promise.all([createPluginPackage(path.join(roaming, 'Auto CodeZ')), createPluginPackage(path.join(roaming, 'auto-codez'))]); } else { const script = '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "tunnel-client v0.0.14"; exit 0; fi\nif [ "$1" = "doctor" ]; then echo "synthetic tunnel doctor ready"; exit 0; fi\necho "unsupported synthetic tunnel command" >&2\nexit 2\n'; const executable = path.join(tunnelFixtureBin, 'tunnel-client'); await fs.writeFile(executable, script, { encoding: 'utf8', mode: 0o755 }); const config = path.join(stateRoot, '.config'); const cache = path.join(stateRoot, '.cache'); await Promise.all([fs.mkdir(config, { recursive: true }), fs.mkdir(cache, { recursive: true })]); await Promise.all([createPluginPackage(path.join(config, 'Auto CodeZ')), createPluginPackage(path.join(config, 'auto-codez'))]); } }
-function environment() { const env = { ...process.env, AUTO_CODEZ_VISUAL_TEST: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true', HOME: stateRoot, PATH: [tunnelFixtureBin, process.env.PATH || process.env.Path || ''].filter(Boolean).join(path.delimiter) }; if (process.platform === 'win32') { env.USERPROFILE = stateRoot; env.APPDATA = path.join(stateRoot, 'AppData', 'Roaming'); env.LOCALAPPDATA = path.join(stateRoot, 'AppData', 'Local'); } else { env.XDG_CONFIG_HOME = path.join(stateRoot, '.config'); env.XDG_CACHE_HOME = path.join(stateRoot, '.cache'); } return env; }
+function environment() { const env = { ...process.env, AUTO_CODEZ_VISUAL_TEST: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true', CONTROL_PLANE_API_KEY: 'sk-visual-tunnel-connection-key-1234567890', HOME: stateRoot, PATH: [tunnelFixtureBin, process.env.PATH || process.env.Path || ''].filter(Boolean).join(path.delimiter) }; if (process.platform === 'win32') { env.USERPROFILE = stateRoot; env.APPDATA = path.join(stateRoot, 'AppData', 'Roaming'); env.LOCALAPPDATA = path.join(stateRoot, 'AppData', 'Local'); } else { env.XDG_CONFIG_HOME = path.join(stateRoot, '.config'); env.XDG_CACHE_HOME = path.join(stateRoot, '.cache'); } return env; }
 async function startElectron() { if (!electronExecutable) throw new Error('AUTO_CODEZ_ELECTRON_EXECUTABLE não foi definido.'); const port = await reservePort(); appProcess = spawn(electronExecutable, [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--no-first-run'], { cwd: root, env: environment(), windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] }); appProcess.stderr?.setEncoding('utf8'); appProcess.stderr?.on('data', (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-256 * 1024); }); appProcess.once('exit', (code, signal) => { exitState = { code, signal }; }); const endpoint = `http://127.0.0.1:${port}`; const deadline = Date.now() + 60000; while (Date.now() < deadline) { if (exitState) throw new Error(`Electron encerrou antes do CDP: ${JSON.stringify(exitState)}\n${stderr}`); try { browser = await chromium.connectOverCDP(endpoint, { timeout: 2500 }); const context = browser.contexts()[0]; if (!context) throw new Error('Contexto Chromium indisponível.'); page = context.pages().find((candidate) => !candidate.url().startsWith('devtools://')) || await context.waitForEvent('page', { timeout: 5000 }); return; } catch { if (browser) await browser.close().catch(() => {}); browser = undefined; await new Promise((resolve) => setTimeout(resolve, 350)); } } throw new Error('CDP não ficou disponível.'); }
+async function restartElectron() {
+  if (page && !page.isClosed()) await page.close().catch(() => {});
+  if (browser) await browser.close().catch(() => {});
+  if (appProcess?.pid && !exitState) {
+    if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(appProcess.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    else appProcess.kill('SIGKILL');
+  }
+  appProcess = undefined;
+  browser = undefined;
+  page = undefined;
+  exitState = undefined;
+  stderr = '';
+  await startElectron();
+}
 async function updateManifest(result) { let manifest = { results: [], pageErrors: [], consoleErrors: [] }; try { manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')); } catch {} manifest.results = Array.isArray(manifest.results) ? manifest.results.filter((item) => item?.name !== testName) : []; manifest.results.push(result); await fs.mkdir(outputDir, { recursive: true }); await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8'); }
 async function verifyPackagedMcpStdioBridge() {
   if (!electronExecutable) throw new Error('Executável empacotado ausente para validar MCP stdio bridge.');
@@ -345,18 +359,56 @@ async function runTest() {
   }
   const connectedRegistry = await page.evaluate(() => window.autoCodez.listMcpConnections());
   const chatgptRegistry = connectedRegistry.find((connection) => connection.clientId === 'chatgpt');
-  if (!chatgptRegistry || chatgptRegistry.setupState !== 'configured' || chatgptRegistry.metadata?.tunnelId !== visualTunnelId || !chatgptRegistry.lastConnectedAt) {
+  if (!chatgptRegistry || chatgptRegistry.setupState !== 'configured' || chatgptRegistry.metadata?.tunnelId !== visualTunnelId || chatgptRegistry.metadata?.autoReconnect !== true || !chatgptRegistry.lastConnectedAt) {
     throw new Error('Registro do ChatGPT não refletiu a conexão real: ' + JSON.stringify(chatgptRegistry));
   }
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-chatgpt-conectado.png'), animations: 'disabled' });
-  await mcpMode.getByRole('button', { name: 'Ver configuração avançada' }).click();
-  await mcpMode.getByText('Secure MCP Tunnel · diagnóstico', { exact: true }).waitFor({ state: 'visible' });
+
+  await restartElectron();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('.app-shell').waitFor({ state: 'visible', timeout: 30000 });
+  const reconnectDeadline = Date.now() + 30000;
+  let restoredTunnelStatus;
+  while (Date.now() < reconnectDeadline) {
+    restoredTunnelStatus = await page.evaluate(() => window.autoCodez.mcpTunnelStatus());
+    if (restoredTunnelStatus.running && restoredTunnelStatus.ready) break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  if (!restoredTunnelStatus?.running || !restoredTunnelStatus?.ready || restoredTunnelStatus.tunnelId !== visualTunnelId) {
+    throw new Error('Secure MCP Tunnel não foi restaurado automaticamente após restart: ' + JSON.stringify(restoredTunnelStatus));
+  }
+  const registryAfterRestart = (await page.evaluate(() => window.autoCodez.listMcpConnections())).find((connection) => connection.clientId === 'chatgpt');
+  if (!registryAfterRestart || registryAfterRestart.metadata?.autoReconnect !== true || registryAfterRestart.metadata?.tunnelId !== visualTunnelId || !registryAfterRestart.lastConnectedAt) {
+    throw new Error('Registro do ChatGPT perdeu intenção de reconexão após restart: ' + JSON.stringify(registryAfterRestart));
+  }
+
+  const restartedMcpButton = page.locator('[data-mcp-mode]');
+  await restartedMcpButton.waitFor({ state: 'visible', timeout: 10000 });
+  await restartedMcpButton.click();
+  const restartedMcpMode = page.locator('#mcp-mode-root');
+  await restartedMcpMode.waitFor({ state: 'visible', timeout: 10000 });
+  await restartedMcpMode.locator('[data-mcp-open-connection="chatgpt"]').click();
+  await restartedMcpMode.getByText('ChatGPT conectado ao Auto CodeZ', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
+  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-chatgpt-reconectado-restart.png'), animations: 'disabled' });
+
+  await restartedMcpMode.getByRole('button', { name: 'Ver configuração avançada' }).click();
+  await restartedMcpMode.getByText('Secure MCP Tunnel · diagnóstico', { exact: true }).waitFor({ state: 'visible' });
   const gatewayStatus = await page.evaluate(() => window.autoCodez.mcpGatewayStatus());
-  if (!gatewayStatus.running) throw new Error('Gateway MCP não permaneceu ativo após o onboarding.');
+  if (!gatewayStatus.running) throw new Error('Gateway MCP não permaneceu ativo após restart.');
   await verifyPackagedMcpStdioBridge();
-  const gatewayText = await mcpMode.locator('.mcp-gateway-card').innerText();
+  const gatewayText = await restartedMcpMode.locator('.mcp-gateway-card').innerText();
   if (!gatewayText.includes('127.0.0.1') || !gatewayText.includes('Bearer ')) throw new Error('Configuração avançada não preservou endpoint/token efêmero do gateway.');
-  if (await mcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer próprio.');
+  if (await restartedMcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer próprio.');
+
+  await restartedMcpMode.getByRole('button', { name: 'Desconectar ChatGPT' }).click();
+  await restartedMcpMode.getByText('Concluir no ChatGPT', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  const disconnectedTunnelStatus = await page.evaluate(() => window.autoCodez.mcpTunnelStatus());
+  if (disconnectedTunnelStatus.running || disconnectedTunnelStatus.ready) throw new Error('Secure MCP Tunnel permaneceu ativo após desconexão manual: ' + JSON.stringify(disconnectedTunnelStatus));
+  const registryAfterManualStop = (await page.evaluate(() => window.autoCodez.listMcpConnections())).find((connection) => connection.clientId === 'chatgpt');
+  if (!registryAfterManualStop || registryAfterManualStop.setupState !== 'configured' || registryAfterManualStop.metadata?.autoReconnect !== false || registryAfterManualStop.metadata?.tunnelId !== visualTunnelId) {
+    throw new Error('Desconexão manual não desativou autoReconnect sem perder configuração: ' + JSON.stringify(registryAfterManualStop));
+  }
+  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-chatgpt-desconectado.png'), animations: 'disabled' });
   if (pageErrors.length || consoleErrors.length) throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
 }
 async function cleanup() { if (page && !page.isClosed()) await page.close().catch(() => {}); if (browser) await browser.close().catch(() => {}); if (appProcess?.pid && !exitState) { if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(appProcess.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); else appProcess.kill('SIGKILL'); } if (bridgeServer) await new Promise((resolve) => bridgeServer.close(resolve)).catch(() => {}); if (stateRoot) await fs.rm(stateRoot, { recursive: true, force: true }).catch(() => {}); }
