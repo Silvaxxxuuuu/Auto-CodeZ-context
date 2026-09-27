@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const crypto = require('node:crypto');
 const http = require('node:http');
 const net = require('node:net');
 const os = require('node:os');
@@ -23,8 +24,24 @@ async function startElectron() { if (!electronExecutable) throw new Error('AUTO_
 async function updateManifest(result) { let manifest = { results: [], pageErrors: [], consoleErrors: [] }; try { manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')); } catch {} manifest.results = Array.isArray(manifest.results) ? manifest.results.filter((item) => item?.name !== testName) : []; manifest.results.push(result); await fs.mkdir(outputDir, { recursive: true }); await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8'); }
 async function verifyPackagedMcpStdioBridge() {
   if (!electronExecutable) throw new Error('Executável empacotado ausente para validar MCP stdio bridge.');
+  if (process.platform !== 'win32') return;
+  const appDataRoot = environment().APPDATA;
+  if (!appDataRoot) throw new Error('APPDATA ausente no ambiente do teste MCP.');
+  const digest = crypto.createHash('sha256').update(path.resolve(appDataRoot)).digest('hex').slice(0, 24);
+  const brokerAddress = `\\\\.\\pipe\\auto-codez-mcp-${digest}`;
+  const bridgeScript = path.join(path.dirname(electronExecutable), 'resources', 'mcp-bridge.ps1');
+  await fs.access(bridgeScript);
+
   await new Promise((resolve, reject) => {
-    const child = spawn(electronExecutable, ['--mcp-stdio-bridge', '--mcp-client=codex'], { cwd: root, env: environment(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', bridgeScript,
+      '-BrokerAddress', brokerAddress,
+      '-AppPath', electronExecutable,
+      '-ClientId', 'codex',
+    ], { cwd: root, env: environment(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', childStderr = '', settled = false;
     const finish = (error) => {
       if (settled) return;
@@ -34,7 +51,7 @@ async function verifyPackagedMcpStdioBridge() {
     };
     const timer = setTimeout(() => {
       try { child.kill(); } catch {}
-      if (process.platform === 'win32' && child.pid) {
+      if (child.pid) {
         try {
           const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
           killer.unref();
