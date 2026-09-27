@@ -828,7 +828,8 @@ function install(): void {
       render();
       return;
     }
-    if (target.closest('[data-mcp-close-connect]')) {
+    const closeConnectButton = target.closest('button[data-mcp-close-connect]');
+    if (closeConnectButton || target.matches('.mcp-connect-backdrop')) {
       connectPanelOpen = false;
       render();
       return;
