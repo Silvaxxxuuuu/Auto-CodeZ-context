@@ -76,6 +76,7 @@ let tunnelDoctorResult = '';
 let tunnelError = '';
 let tunnelIdDraft = '';
 let tunnelKeyDraft = '';
+let chatgptConnectBusy = false;
 let refreshSequence = 0;
 let runtimeStatus: McpRuntimeStatus = { platform: '', arch: '', supported: true, ready: false, version: '0.0.14', managed: false };
 let onboardingStep: OnboardingStep = (() => {
@@ -367,12 +368,11 @@ function renderClientInstructions(client: McpClientId): string {
     return `<article class="mcp-guide-card featured">
       <div class="mcp-guide-head">${renderClientIcon('chatgpt', 'mcp-client-mark')}<div><strong>ChatGPT</strong><small>Plugin · Secure MCP Tunnel</small></div></div>
       <ol>
-        <li>Abra <b>Configurações → Segurança e login</b> e ative <b>Modo de desenvolvedor</b>.</li>
-        <li>Abra <b>Plugins</b>, clique em <b>+</b> e crie um novo plugin chamado <b>Auto CodeZ</b>.</li>
-        <li>Em <b>Conexão</b>, escolha <b>Túnel</b>. O ChatGPT pedirá um Tunnel ID válido.</li>
-        <li>Volte ao Auto CodeZ e abra <b>Configuração avançada</b> somente para informar o Tunnel ID e a chave da sessão. Depois, o Auto CodeZ valida e conecta.</li>
+        <li>No ChatGPT, ative o <b>Modo de desenvolvedor</b> e abra <b>Plugins</b>.</li>
+        <li>Crie a conexão <b>Auto CodeZ</b> e escolha <b>Túnel</b>.</li>
+        <li>Finalize este onboarding e abra a conexão <b>ChatGPT</b> no MCP Mode. O Auto CodeZ pedirá somente o Tunnel ID e, se necessário, a credencial da sua conta.</li>
       </ol>
-      <div class="mcp-guide-note">O Auto CodeZ cuida do servidor local, runtime e segurança. Você só conclui a autorização que pertence à sua conta do ChatGPT.</div>
+      <div class="mcp-guide-note">Servidor local, runtime, preflight, autenticação local e aprovações ficam por conta do Auto CodeZ. Você não precisa abrir a configuração avançada.</div>
     </article>`;
   }
   if (client === 'codex') {
@@ -455,7 +455,7 @@ function clientEvents(client: McpClientId): LedgerEvent[] {
 }
 
 function clientSetupSummary(client: McpClientId): string {
-  if (client === 'chatgpt') return 'No ChatGPT, crie a conexão Auto CodeZ e escolha Secure MCP Tunnel. Quando ele solicitar o Tunnel ID, use a configuração avançada desta conexão.';
+  if (client === 'chatgpt') return 'No ChatGPT, crie a conexão Auto CodeZ e escolha Túnel. Depois cole o Tunnel ID diretamente nesta página; não é necessário abrir a configuração avançada.';
   if (client === 'codex') return 'No Codex, adicione Auto CodeZ em Servidores MCP usando a conexão local exibida na configuração avançada.';
   if (client === 'claude-desktop') return 'No Claude Desktop, adicione Auto CodeZ como servidor MCP local nas configurações de integrações ou extensões.';
   if (client === 'claude-code') return 'No Claude Code, adicione o servidor MCP do Auto CodeZ e use a conexão local exibida na configuração avançada.';
@@ -514,21 +514,13 @@ function renderTechnicalPanels(): string {
     </section>
     <section class="mcp-tunnel-card ${tunnelStatus.ready ? 'ready' : tunnelStatus.running ? 'running' : ''}">
       <div class="mcp-tunnel-copy">
-        <div class="mcp-section-label">Secure MCP Tunnel</div>
-        <strong>${tunnelStatus.ready ? 'Conectado e pronto' : tunnelStatus.running ? 'Inicializando…' : 'Somente quando necessário'}</strong>
+        <div class="mcp-section-label">Secure MCP Tunnel · diagnóstico</div>
+        <strong>${tunnelStatus.ready ? 'Conectado e pronto' : tunnelStatus.running ? 'Inicializando…' : 'Inativo'}</strong>
         <span>${tunnelStatus.ready
           ? `${escapeHtml(tunnelStatus.tunnelId || '')}${tunnelStatus.version ? ` · tunnel-client ${escapeHtml(tunnelStatus.version)}` : ''}`
-          : 'Use para clientes que precisam alcançar o MCP local por um túnel protegido.'}</span>
+          : 'A conexão do ChatGPT é controlada pela página principal da conexão.'}</span>
         ${tunnelDoctorResult ? `<small>${escapeHtml(tunnelDoctorResult)}</small>` : ''}
         ${tunnelStatus.error || tunnelError ? `<div class="mcp-tunnel-error">${escapeHtml(tunnelStatus.error || tunnelError)}</div>` : ''}
-      </div>
-      <div class="mcp-tunnel-controls">
-        ${tunnelStatus.running
-          ? '<button class="danger" type="button" data-mcp-tunnel-stop>Desconectar tunnel</button>'
-          : `<input type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="Tunnel ID" value="${escapeHtml(tunnelIdDraft)}" data-mcp-tunnel-id aria-label="Tunnel ID">
-             <input type="password" maxlength="8192" autocomplete="new-password" placeholder="${tunnelStatus.credentialAvailable ? 'Credencial detectada no ambiente' : 'Chave do control plane'}" data-mcp-tunnel-key aria-label="Chave do control plane">
-             <button type="button" data-mcp-tunnel-doctor ${gatewayStatus.running ? '' : 'disabled'}>Testar tunnel</button>
-             <button class="primary" type="button" data-mcp-tunnel-start ${gatewayStatus.running ? '' : 'disabled'}>Conectar tunnel</button>`}
       </div>
     </section>
   </div>`;
@@ -539,6 +531,21 @@ function isAutoConfigClient(client: McpClientId): client is McpAutoConfigClientI
 }
 
 function renderConnectionSetup(client: McpClientId, state: { label: string; tone: string; detail: string }): string {
+  if (client === 'chatgpt') {
+    if (tunnelStatus.ready) {
+      return `<section class="mcp-setup-callout configured mcp-chatgpt-setup"><span>CONECTADO</span><strong>ChatGPT conectado ao Auto CodeZ</strong><p>Secure MCP Tunnel pronto${tunnelStatus.tunnelId ? ` · ${escapeHtml(tunnelStatus.tunnelId)}` : ''}. As ferramentas continuam seguindo as aprovações locais do Auto CodeZ.</p><button class="mcp-text-action" type="button" data-mcp-tunnel-stop ${chatgptConnectBusy ? 'disabled' : ''}>Desconectar ChatGPT</button></section>`;
+    }
+    const needsCredential = !tunnelStatus.credentialAvailable;
+    return `<section class="mcp-setup-callout mcp-chatgpt-setup"><span>PRÓXIMO PASSO</span><strong>Concluir no ChatGPT</strong><p>No ChatGPT, crie a conexão Auto CodeZ, escolha Túnel e cole abaixo o Tunnel ID mostrado pela sua conta. O Auto CodeZ prepara e valida todo o restante.</p>
+      <div class="mcp-chatgpt-fields">
+        <label><span>Tunnel ID</span><input type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="tunnel_…" value="${escapeHtml(tunnelIdDraft)}" data-mcp-tunnel-id aria-label="Tunnel ID"></label>
+        ${needsCredential ? '<label><span>Credencial da conexão</span><input type="password" maxlength="8192" autocomplete="new-password" placeholder="Cole somente para esta conexão" data-mcp-tunnel-key aria-label="Credencial da conexão"></label>' : '<div class="mcp-chatgpt-credential-ready"><i>✓</i><span>Credencial segura detectada no ambiente</span></div>'}
+      </div>
+      <div class="mcp-chatgpt-actions"><button class="mcp-primary-action compact" type="button" data-mcp-chatgpt-connect ${chatgptConnectBusy ? 'disabled' : ''}>${chatgptConnectBusy ? 'Conectando…' : 'Validar e conectar'}</button></div>
+      ${tunnelStatus.running && !tunnelStatus.ready ? '<div class="mcp-chatgpt-progress">Inicializando Secure MCP Tunnel…</div>' : ''}
+      ${tunnelError || tunnelStatus.error ? `<div class="mcp-client-config-error">${escapeHtml(tunnelError || tunnelStatus.error || '')}</div>` : ''}
+    </section>`;
+  }
   if (!isAutoConfigClient(client)) {
     return state.tone === 'connected' || state.tone === 'active'
       ? ''
@@ -776,6 +783,10 @@ async function refresh(): Promise<void> {
     gatewayStatus = nextGatewayStatus as GatewayStatus;
     tunnelStatus = nextTunnelStatus as TunnelStatus;
     runtimeStatus = nextRuntimeStatus as McpRuntimeStatus;
+    if (!tunnelIdDraft) {
+      const persistedChatGpt = nextConnections.find((connection) => connection.clientId === 'chatgpt');
+      tunnelIdDraft = tunnelStatus.tunnelId || persistedChatGpt?.metadata?.tunnelId || '';
+    }
     if (nextCursorConfigStatus) clientConfigStatuses.cursor = nextCursorConfigStatus;
     if (nextCodexConfigStatus) clientConfigStatuses.codex = nextCodexConfigStatus;
     if (nextClaudeCodeConfigStatus) clientConfigStatuses['claude-code'] = nextClaudeCodeConfigStatus;
@@ -1086,8 +1097,9 @@ function install(): void {
       render();
       return;
     }
-    if (target.closest('[data-mcp-tunnel-start]')) {
+    if (target.closest('[data-mcp-tunnel-start],[data-mcp-chatgpt-connect]')) {
       tunnelError = '';
+      chatgptConnectBusy = true;
       const tunnelIdInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-id]');
       const keyInput = root.querySelector<HTMLInputElement>('[data-mcp-tunnel-key]');
       const tunnelId = (tunnelIdInput?.value ?? tunnelIdDraft).trim();
@@ -1099,20 +1111,31 @@ function install(): void {
       };
       tunnelKeyDraft = '';
       if (keyInput) keyInput.value = '';
+      render();
       try {
+        if (!gatewayStatus.running) {
+          const started = await window.autoCodez.startMcpGateway();
+          gatewayStatus = { running: true, host: started.host, port: started.port, endpoint: started.endpoint };
+          gatewayToken = started.bearerToken;
+          gatewayPreflight = await window.autoCodez.preflightMcpGateway();
+        }
         await window.autoCodez.startMcpTunnel(request);
         tunnelDoctorResult = '';
       } catch (error) {
         tunnelError = error instanceof Error ? error.message : String(error);
+      } finally {
+        chatgptConnectBusy = false;
       }
       await refresh();
       return;
     }
     if (target.closest('[data-mcp-tunnel-stop]')) {
       tunnelError = '';
+      chatgptConnectBusy = true;
       await window.autoCodez.stopMcpTunnel().catch((error: unknown) => {
         tunnelError = error instanceof Error ? error.message : String(error);
       });
+      chatgptConnectBusy = false;
       await refresh();
       return;
     }
