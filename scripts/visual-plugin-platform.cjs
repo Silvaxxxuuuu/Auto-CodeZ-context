@@ -274,6 +274,26 @@ async function runTest() {
   if (!cursorRegistryAfterReinstall || cursorRegistryAfterReinstall.setupState !== 'configured' || !cursorRegistryAfterReinstall.configuredAt) {
     throw new Error('Registro MCP do Cursor não voltou a configured após reinstalação: ' + JSON.stringify(cursorRegistryAfterReinstall));
   }
+
+  const cursorExternalConfig = JSON.parse(await fs.readFile(cursorConfigStatus.configPath, 'utf8'));
+  delete cursorExternalConfig.mcpServers?.['auto-codez'];
+  await fs.writeFile(cursorConfigStatus.configPath, JSON.stringify(cursorExternalConfig, null, 2) + '\n', 'utf8');
+  const cursorStatusAfterExternalRemoval = await page.evaluate(() => window.autoCodez.mcpClientConfigStatus('cursor'));
+  if (cursorStatusAfterExternalRemoval.state !== 'not-configured') {
+    throw new Error('Status do Cursor não detectou remoção externa: ' + JSON.stringify(cursorStatusAfterExternalRemoval));
+  }
+  const cursorRegistryAfterExternalRemoval = (await page.evaluate(() => window.autoCodez.listMcpConnections())).find((connection) => connection.clientId === 'cursor');
+  if (!cursorRegistryAfterExternalRemoval || cursorRegistryAfterExternalRemoval.setupState !== 'added' || cursorRegistryAfterExternalRemoval.configuredAt) {
+    throw new Error('Registro MCP do Cursor não reconciliou remoção externa: ' + JSON.stringify(cursorRegistryAfterExternalRemoval));
+  }
+
+  await mcpMode.getByRole('button', { name: 'Configurar automaticamente' }).click();
+  await mcpMode.getByText('Auto CodeZ adicionado ao Cursor', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
+  const cursorRegistryAfterDriftRepair = (await page.evaluate(() => window.autoCodez.listMcpConnections())).find((connection) => connection.clientId === 'cursor');
+  if (!cursorRegistryAfterDriftRepair || cursorRegistryAfterDriftRepair.setupState !== 'configured' || !cursorRegistryAfterDriftRepair.configuredAt) {
+    throw new Error('Registro MCP do Cursor não recuperou configured após reparar drift externo: ' + JSON.stringify(cursorRegistryAfterDriftRepair));
+  }
+
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-cursor-ciclo-configuracao.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Voltar para MCP Mode' }).click();
 
