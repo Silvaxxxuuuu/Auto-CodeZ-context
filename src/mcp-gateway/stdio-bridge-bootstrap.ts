@@ -30,11 +30,10 @@ async function main(): Promise<void> {
     path.join(app.getPath('appData'), 'Auto CodeZ', 'data'),
     path.join(app.getPath('appData'), 'auto-codez', 'data'),
   ])];
-  const bindingStores = candidateRoots.map((root) => new McpGatewayBindingStore(new LocalStorage(root)));
-  await Promise.all(bindingStores.map(async (store, index) => {
-    const storage = new LocalStorage(candidateRoots[index]);
+  const bindingStores = await Promise.all(candidateRoots.map(async (root) => {
+    const storage = new LocalStorage(root);
     await storage.init();
-    bindingStores[index] = new McpGatewayBindingStore(storage);
+    return new McpGatewayBindingStore(storage);
   }));
   const bridge = new McpStdioBridgeRuntime(
     async () => {
