@@ -67,6 +67,7 @@ import { McpGatewayExecutionRuntime } from './mcp-gateway/execution-runtime';
 import { McpTunnelRuntime } from './mcp-gateway/tunnel-runtime';
 import { McpRuntimeInstaller } from './mcp-gateway/runtime-installer';
 import { McpConnectionRegistry } from './mcp-gateway/connection-registry';
+import { McpGatewayBindingStore } from './mcp-gateway/binding-store';
 import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
 import { LocalProtectedCredentialStore } from './account/protected-credential-store';
 import { DeviceIdentityStore } from './account/device-identity';
@@ -284,6 +285,29 @@ const mcpGatewayServer = new McpGatewayHttpServer(mcpGatewayProtocol);
 const mcpTunnelRuntime = new McpTunnelRuntime();
 const mcpRuntimeInstaller = new McpRuntimeInstaller(() => app.getPath('userData'));
 const mcpConnectionRegistry = new McpConnectionRegistry(storage);
+const mcpGatewayBindingStore = new McpGatewayBindingStore(storage);
+
+async function startManagedMcpGateway(options: { port?: number } = {}) {
+  const current = mcpGatewayServer.status();
+  if (current.running) {
+    const binding = mcpGatewayServer.trustedTunnelBinding();
+    return { host: current.host, port: current.port, endpoint: current.endpoint, bearerToken: binding.bearerToken };
+  }
+  const info = await mcpGatewayServer.start(options);
+  try {
+    await mcpGatewayBindingStore.write({ endpoint: info.endpoint, bearerToken: info.bearerToken, ownerPid: process.pid });
+    return info;
+  } catch (error) {
+    await mcpGatewayServer.stop().catch((): undefined => undefined);
+    throw error;
+  }
+}
+
+async function stopManagedMcpGateway(): Promise<boolean> {
+  const stopped = await mcpGatewayServer.stop();
+  await mcpGatewayBindingStore.clear();
+  return stopped;
+}
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
 const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
@@ -1302,7 +1326,7 @@ ipcMain.handle('mcp-gateway:start', async (_event, input: unknown) => {
   const value = input === undefined ? {} : requireObject(input, 'Configuração do MCP Gateway');
   const port = value.port === undefined ? undefined : Number(value.port);
   if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) throw new Error('Porta do MCP Gateway inválida.');
-  const info = await mcpGatewayServer.start(port === undefined ? {} : { port });
+  const info = await startManagedMcpGateway(port === undefined ? {} : { port });
   operationalLedger.record({
     actor: 'runtime',
     category: 'system',
@@ -1315,7 +1339,7 @@ ipcMain.handle('mcp-gateway:start', async (_event, input: unknown) => {
 });
 ipcMain.handle('mcp-gateway:stop', async () => {
   await mcpTunnelRuntime.stop();
-  const stopped = await mcpGatewayServer.stop();
+  const stopped = await stopManagedMcpGateway();
   if (stopped) {
     operationalLedger.record({
       actor: 'runtime',
@@ -1658,6 +1682,7 @@ app.whenReady().then(async () => {
     }
   }
   await storage.init();
+  await mcpGatewayBindingStore.clear();
   await mcpConnectionRegistry.init();
   const initialAccountState = await accountSessionRuntime.hydrate();
   scheduleAccountRefresh(initialAccountState);
@@ -1680,6 +1705,30 @@ app.whenReady().then(async () => {
   executionPathScopeRuntime.restore(await executionPathScopeStore.load());
   await toolRuntime.init();
   await agentRuntime.init();
+  if (mcpConnectionRegistry.list().length) {
+    try {
+      await startManagedMcpGateway();
+      const preflight = await mcpGatewayServer.preflight();
+      operationalLedger.record({
+        actor: 'runtime',
+        category: 'system',
+        state: 'success',
+        summary: 'MCP Gateway local restaurado para conexões configuradas.',
+        clientId: 'autocodez-mcp-gateway',
+        details: { protocolVersion: preflight.protocolVersion, toolCount: preflight.toolCount, writeToolCount: preflight.writeToolCount },
+      });
+    } catch (error) {
+      await stopManagedMcpGateway().catch((): undefined => undefined);
+      operationalLedger.record({
+        actor: 'runtime',
+        category: 'system',
+        state: 'failed',
+        summary: 'MCP Gateway local não pôde ser restaurado.',
+        clientId: 'autocodez-mcp-gateway',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   await restoreShadowWorkspaceBootstrapState();
   executionTimeline.restore(await executionTimelineStore.load());
   executionPlanHistory.restore(await executionPlanHistoryStore.load());
@@ -1790,7 +1839,7 @@ app.on('before-quit', (event) => {
   void (async () => {
     clearAccountRefreshTimer();
     await mcpTunnelRuntime.stop().catch((): undefined => undefined);
-    await mcpGatewayServer.stop().catch((): undefined => undefined);
+    await stopManagedMcpGateway().catch((): undefined => undefined);
     await attachmentIndexer.stop().catch((): undefined => undefined);
     app.quit();
   })();
