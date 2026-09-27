@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Net.Http
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 
