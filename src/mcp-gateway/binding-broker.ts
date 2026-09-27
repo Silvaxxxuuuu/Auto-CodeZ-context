@@ -49,7 +49,16 @@ export class McpGatewayBindingBroker {
       };
       server.once('error', onError);
       server.once('listening', onListening);
-      server.listen(this.address);
+      if (process.platform === 'win32') {
+        server.listen({
+          path: this.address,
+          exclusive: true,
+          readableAll: false,
+          writableAll: false,
+        });
+      } else {
+        server.listen(this.address);
+      }
     });
     this.server = server;
     if (process.platform !== 'win32') await fs.chmod(this.address, 0o600).catch((): undefined => undefined);
