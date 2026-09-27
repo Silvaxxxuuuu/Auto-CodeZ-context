@@ -11,7 +11,7 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
-    extraResource: ['plugins'],
+    extraResource: ['plugins', 'resources/mcp-bridge.ps1'],
     protocols: [
       {
         name: 'Auto CodeZ Authentication',
