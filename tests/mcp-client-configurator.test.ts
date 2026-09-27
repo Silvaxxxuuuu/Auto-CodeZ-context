@@ -9,17 +9,19 @@ async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'autocodez-cursor-mcp-'));
   const configPath = path.join(root, '.cursor', 'mcp.json');
   const codexConfigPath = path.join(root, '.codex', 'config.toml');
+  const claudeCodeConfigPath = path.join(root, '.claude.json');
   const bridgeScriptPath = path.join(root, 'mcp-bridge.ps1');
   await fs.writeFile(bridgeScriptPath, 'Write-Output bridge', 'utf8');
   const runtime = new McpClientConfigurator({
     cursorConfigPath: configPath,
     codexConfigPath,
+    claudeCodeConfigPath,
     bridgeScriptPath,
     brokerAddress: '\\\\.\\pipe\\auto-codez-mcp-test',
     appPath: 'C:\\Program Files\\Auto CodeZ\\Auto CodeZ.exe',
     platform: 'win32',
   });
-  return { root, configPath, codexConfigPath, runtime, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
+  return { root, configPath, codexConfigPath, claudeCodeConfigPath, runtime, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
 }
 
 test('Cursor adapter installs Auto CodeZ globally without touching unrelated MCP servers', async () => {
@@ -148,6 +150,71 @@ test('Codex adapter refuses an external auto-codez table instead of overwriting 
     assert.equal((await f.runtime.status('codex')).state, 'conflict');
     await assert.rejects(() => f.runtime.install('codex'), /não vai sobrescrever/);
     await assert.rejects(() => f.runtime.remove('codex'), /não pertence/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+
+test('Claude Code adapter installs a user-scope stdio server without touching unrelated settings', async () => {
+  const f = await fixture();
+  try {
+    await fs.writeFile(f.claudeCodeConfigPath, JSON.stringify({
+      numStartups: 17,
+      projects: { 'C:\\repo': { hasTrustDialogAccepted: true } },
+      mcpServers: {
+        existing: { type: 'stdio', command: 'existing.exe', args: ['serve'] },
+      },
+    }), 'utf8');
+
+    const status = await f.runtime.install('claude-code');
+    assert.equal(status.state, 'configured');
+
+    const config = JSON.parse(await fs.readFile(f.claudeCodeConfigPath, 'utf8'));
+    assert.equal(config.numStartups, 17);
+    assert.deepEqual(config.mcpServers.existing, { type: 'stdio', command: 'existing.exe', args: ['serve'] });
+    assert.equal(config.mcpServers['auto-codez'].type, 'stdio');
+    assert.equal(config.mcpServers['auto-codez'].command, 'powershell.exe');
+    assert.ok(config.mcpServers['auto-codez'].args.includes('-BrokerAddress'));
+    assert.ok(config.mcpServers['auto-codez'].args.includes('-ClientId'));
+    assert.ok(config.mcpServers['auto-codez'].args.includes('claude-code'));
+    assert.equal(JSON.stringify(config).includes('Bearer '), false);
+    assert.equal(JSON.stringify(config).includes('bearerToken'), false);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('Claude Code adapter is idempotent and removes only its managed user-scope entry', async () => {
+  const f = await fixture();
+  try {
+    await fs.writeFile(f.claudeCodeConfigPath, JSON.stringify({ theme: 'dark' }), 'utf8');
+    await f.runtime.install('claude-code');
+    await f.runtime.install('claude-code');
+    assert.equal((await f.runtime.status('claude-code')).state, 'configured');
+
+    const removed = await f.runtime.remove('claude-code');
+    assert.equal(removed.state, 'not-configured');
+    const config = JSON.parse(await fs.readFile(f.claudeCodeConfigPath, 'utf8'));
+    assert.equal(config.theme, 'dark');
+    assert.equal(config.mcpServers, undefined);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('Claude Code adapter refuses a conflicting user-scope auto-codez server', async () => {
+  const f = await fixture();
+  try {
+    await fs.writeFile(f.claudeCodeConfigPath, JSON.stringify({
+      mcpServers: {
+        'auto-codez': { type: 'stdio', command: 'custom.exe', args: [] },
+      },
+    }), 'utf8');
+
+    assert.equal((await f.runtime.status('claude-code')).state, 'conflict');
+    await assert.rejects(() => f.runtime.install('claude-code'), /não vai sobrescrever/);
+    await assert.rejects(() => f.runtime.remove('claude-code'), /não pertence/);
   } finally {
     await f.cleanup();
   }
