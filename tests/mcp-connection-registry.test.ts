@@ -59,8 +59,19 @@ test('MCP connection registry keeps configuration metadata without storing contr
 
     const connected = await f.registry.markConnected('chatgpt', { tunnelId });
     assert.ok(connected.lastConnectedAt);
+    assert.equal(connected.metadata?.autoReconnect, true);
     assert.equal(JSON.stringify(connected).includes('apiKey'), false);
     assert.equal(JSON.stringify(connected).includes('bearer'), false);
+
+    const disconnected = await f.registry.markDisconnected('chatgpt');
+    assert.equal(disconnected.setupState, 'configured');
+    assert.equal(disconnected.metadata?.tunnelId, tunnelId);
+    assert.equal(disconnected.metadata?.autoReconnect, false);
+    assert.ok(disconnected.lastConnectedAt);
+
+    const restored = new McpConnectionRegistry(f.storage);
+    await restored.init();
+    assert.equal(restored.get('chatgpt')?.metadata?.autoReconnect, false);
   } finally {
     await f.cleanup();
   }
