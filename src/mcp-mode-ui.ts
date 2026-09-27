@@ -46,7 +46,7 @@ type TunnelStatus = { running: boolean; ready: boolean; version?: string; tunnel
 type McpRuntimeStatus = { platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string };
 type OnboardingStep = 'activation' | 'clients' | 'instructions' | 'operational';
 type McpClientId = 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other';
-type McpAutoConfigClientId = 'cursor' | 'codex';
+type McpAutoConfigClientId = 'cursor' | 'codex' | 'claude-code';
 type McpStoredConnection = { clientId: McpClientId; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string } };
 type McpClientConfigStatus = { clientId: McpAutoConfigClientId; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string };
 
@@ -394,7 +394,18 @@ function renderClientInstructions(client: McpClientId): string {
     return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('claude-desktop', 'mcp-client-mark')}<div><strong>Claude Desktop</strong><small>Aplicativo desktop · MCP local</small></div></div><p>Abra as configurações de integrações/extensões do Claude Desktop e adicione o Auto CodeZ como servidor MCP local. O Auto CodeZ manterá os dados técnicos em <b>Configuração avançada</b>.</p><div class="mcp-guide-note">A configuração exata varia conforme a versão do Claude Desktop. O Auto CodeZ não altera sua conta nem instala extensões sem sua confirmação.</div></article>`;
   }
   if (client === 'claude-code') {
-    return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('claude-code', 'mcp-client-mark')}<div><strong>Claude Code</strong><small>MCP local</small></div></div><p>Adicione o servidor MCP do Auto CodeZ nas configurações MCP do Claude Code. Depois peça:</p><div class="mcp-copy-line"><code>Conecte-se ao MCP do Auto CodeZ e use as ferramentas disponíveis.</code><button class="mcp-copy-action" type="button" data-mcp-copy-text="Conecte-se ao MCP do Auto CodeZ e use as ferramentas disponíveis." aria-label="Copiar instrução para o Claude Code"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M15 9V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/></svg><span>Copiar</span></button></div></article>`;
+    const status = clientConfigStatuses['claude-code'];
+    const error = clientConfigErrors['claude-code'];
+    return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('claude-code', 'mcp-client-mark')}<div><strong>Claude Code</strong><small>MCP local · escopo de usuário</small></div></div>
+      ${status?.state === 'configured'
+        ? '<p>O Auto CodeZ já está configurado no Claude Code para este usuário.</p><div class="mcp-guide-note">Configuração concluída automaticamente.</div>'
+        : status?.state === 'conflict'
+          ? `<p>${escapeHtml(status.detail)}</p><div class="mcp-guide-note">O Auto CodeZ não sobrescreve conexões MCP que não criou.</div>`
+          : status?.state === 'unsupported'
+            ? '<p>A configuração automática do Claude Code ainda não está disponível neste sistema. Use a configuração avançada.</p>'
+            : `<p>O Auto CodeZ pode adicionar esta conexão ao Claude Code automaticamente no escopo de usuário, preservando o restante do ~/.claude.json e sem salvar tokens.</p><button class="mcp-primary-action compact" type="button" data-mcp-install-client-config="claude-code" ${clientConfigBusy ? 'disabled' : ''}>${clientConfigBusy === 'claude-code' ? 'Configurando…' : 'Configurar automaticamente'}</button>`}
+      ${error ? `<div class="mcp-client-config-error">${escapeHtml(error)}</div>` : ''}
+    </article>`;
   }
   if (client === 'cursor') {
     const status = clientConfigStatuses.cursor;
@@ -513,7 +524,7 @@ function renderTechnicalPanels(): string {
 }
 
 function isAutoConfigClient(client: McpClientId): client is McpAutoConfigClientId {
-  return client === 'cursor' || client === 'codex';
+  return client === 'cursor' || client === 'codex' || client === 'claude-code';
 }
 
 function renderConnectionSetup(client: McpClientId, state: { label: string; tone: string; detail: string }): string {
@@ -528,7 +539,9 @@ function renderConnectionSetup(client: McpClientId, state: { label: string; tone
   const error = clientConfigErrors[client];
   const configuredExtra = client === 'cursor'
     ? ' Se o Cursor já estava aberto, recarregue as integrações MCP.'
-    : ' App, CLI e extensão do Codex compartilham esta configuração.';
+    : client === 'codex'
+      ? ' App, CLI e extensão do Codex compartilham esta configuração.'
+      : ' O Claude Code usa esta conexão no escopo de usuário.';
   if (status?.state === 'configured') {
     return `<section class="mcp-setup-callout configured"><span>CONFIGURADO</span><strong>Auto CodeZ adicionado ao ${escapeHtml(definition.name)}</strong><p>${escapeHtml(status.detail)}${escapeHtml(configuredExtra)}</p><button class="mcp-text-action" type="button" data-mcp-remove-client-config="${client}" ${clientConfigBusy ? 'disabled' : ''}>Remover configuração</button></section>`;
   }
@@ -732,7 +745,7 @@ async function refresh(): Promise<void> {
         clientConfigErrors[clientId] = error instanceof Error ? error.message : String(error);
         return undefined;
       });
-    const [page, nextApprovals, nextGatewayStatus, nextTunnelStatus, nextRuntimeStatus, nextConnections, nextCursorConfigStatus, nextCodexConfigStatus] = await Promise.all([
+    const [page, nextApprovals, nextGatewayStatus, nextTunnelStatus, nextRuntimeStatus, nextConnections, nextCursorConfigStatus, nextCodexConfigStatus, nextClaudeCodeConfigStatus] = await Promise.all([
       window.autoCodez.listOperationalLedger({ limit: MAX_RENDERED_EVENTS, direction: 'backward' }),
       window.autoCodez.listApprovals(),
       window.autoCodez.mcpGatewayStatus(),
@@ -741,6 +754,7 @@ async function refresh(): Promise<void> {
       window.autoCodez.listMcpConnections() as Promise<McpStoredConnection[]>,
       clientStatusPromise('cursor'),
       clientStatusPromise('codex'),
+      clientStatusPromise('claude-code'),
     ]);
     if (!active || token !== refreshSequence) return;
     events = page.events.map(asLedgerEvent).filter((event): event is LedgerEvent => Boolean(event)).reverse();
@@ -750,6 +764,7 @@ async function refresh(): Promise<void> {
     runtimeStatus = nextRuntimeStatus as McpRuntimeStatus;
     if (nextCursorConfigStatus) clientConfigStatuses.cursor = nextCursorConfigStatus;
     if (nextCodexConfigStatus) clientConfigStatuses.codex = nextCodexConfigStatus;
+    if (nextClaudeCodeConfigStatus) clientConfigStatuses['claude-code'] = nextClaudeCodeConfigStatus;
     if (onboardingStep === 'operational') {
       const persistedClients = nextConnections
         .map((connection) => connection.clientId)
@@ -879,7 +894,7 @@ function install(): void {
       return;
     }
     const installClientConfig = target.closest<HTMLElement>('[data-mcp-install-client-config]')?.dataset.mcpInstallClientConfig as McpAutoConfigClientId | undefined;
-    if (installClientConfig && (installClientConfig === 'cursor' || installClientConfig === 'codex')) {
+    if (installClientConfig && (installClientConfig === 'cursor' || installClientConfig === 'codex' || installClientConfig === 'claude-code')) {
       clientConfigBusy = installClientConfig;
       delete clientConfigErrors[installClientConfig];
       render();
@@ -895,7 +910,7 @@ function install(): void {
       return;
     }
     const removeClientConfig = target.closest<HTMLElement>('[data-mcp-remove-client-config]')?.dataset.mcpRemoveClientConfig as McpAutoConfigClientId | undefined;
-    if (removeClientConfig && (removeClientConfig === 'cursor' || removeClientConfig === 'codex')) {
+    if (removeClientConfig && (removeClientConfig === 'cursor' || removeClientConfig === 'codex' || removeClientConfig === 'claude-code')) {
       clientConfigBusy = removeClientConfig;
       delete clientConfigErrors[removeClientConfig];
       render();
