@@ -48,6 +48,11 @@ type OnboardingStep = 'activation' | 'clients' | 'instructions' | 'operational';
 type McpClientId = 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other';
 
 const MAX_RENDERED_EVENTS = 250;
+const OPENAI_ICON_URL = new URL('./assets/mcp-clients/openai.svg', import.meta.url).href;
+const CLAUDE_ICON_URL = new URL('./assets/mcp-clients/claude.svg', import.meta.url).href;
+const CURSOR_ICON_URL = new URL('./assets/mcp-clients/cursor.svg', import.meta.url).href;
+const MCP_ICON_URL = new URL('./assets/mcp-clients/model-context-protocol.svg', import.meta.url).href;
+
 const rootId = 'mcp-mode-root';
 let active = false;
 let loading = false;
@@ -91,13 +96,13 @@ let showAdvanced = false;
 let selectedConnectionId: McpClientId | '' = '';
 let connectPanelOpen = false;
 
-const MCP_CLIENTS: Array<{ id: McpClientId; name: string; detail: string; badge: string; description: string; mark: string }> = [
-  { id: 'chatgpt', name: 'ChatGPT', detail: 'Secure MCP Tunnel', badge: 'Configuração guiada', description: 'Permite que o ChatGPT use as ferramentas autorizadas do Auto CodeZ com sua aprovação local.', mark: 'C' },
-  { id: 'codex', name: 'ChatGPT Codex', detail: 'App, CLI ou extensão', badge: 'Conexão local', description: 'Conecte o Codex ao workspace para ler contexto e executar ferramentas MCP autorizadas.', mark: 'X' },
-  { id: 'claude-desktop', name: 'Claude Desktop', detail: 'Aplicativo desktop', badge: 'Configuração guiada', description: 'Disponibilize as ferramentas do Auto CodeZ para conversas e agentes no Claude Desktop.', mark: 'A' },
-  { id: 'claude-code', name: 'Claude Code', detail: 'Ambiente de desenvolvimento', badge: 'Conexão local', description: 'Use o MCP do Auto CodeZ diretamente em tarefas executadas pelo Claude Code.', mark: 'CC' },
-  { id: 'cursor', name: 'Cursor', detail: 'Editor de código', badge: 'Conexão local', description: 'Conecte o Cursor para usar ferramentas e contexto do Auto CodeZ durante o desenvolvimento.', mark: '⌁' },
-  { id: 'other', name: 'Outro cliente MCP', detail: 'Cliente compatível', badge: 'Configuração manual', description: 'Conecte outro aplicativo compatível com MCP usando a configuração avançada do Auto CodeZ.', mark: 'M' },
+const MCP_CLIENTS: Array<{ id: McpClientId; name: string; detail: string; badge: string; description: string; icon: string }> = [
+  { id: 'chatgpt', name: 'ChatGPT', detail: 'Secure MCP Tunnel', badge: 'Configuração guiada', description: 'Permite que o ChatGPT use as ferramentas autorizadas do Auto CodeZ com sua aprovação local.', icon: OPENAI_ICON_URL },
+  { id: 'codex', name: 'ChatGPT Codex', detail: 'App, CLI ou extensão', badge: 'Conexão local', description: 'Conecte o Codex ao workspace para ler contexto e executar ferramentas MCP autorizadas.', icon: OPENAI_ICON_URL },
+  { id: 'claude-desktop', name: 'Claude Desktop', detail: 'Aplicativo desktop', badge: 'Configuração guiada', description: 'Disponibilize as ferramentas do Auto CodeZ para conversas e agentes no Claude Desktop.', icon: CLAUDE_ICON_URL },
+  { id: 'claude-code', name: 'Claude Code', detail: 'Ambiente de desenvolvimento', badge: 'Conexão local', description: 'Use o MCP do Auto CodeZ diretamente em tarefas executadas pelo Claude Code.', icon: CLAUDE_ICON_URL },
+  { id: 'cursor', name: 'Cursor', detail: 'Editor de código', badge: 'Conexão local', description: 'Conecte o Cursor para usar ferramentas e contexto do Auto CodeZ durante o desenvolvimento.', icon: CURSOR_ICON_URL },
+  { id: 'other', name: 'Outro cliente MCP', detail: 'Cliente compatível', badge: 'Configuração manual', description: 'Conecte outro aplicativo compatível com MCP usando a configuração avançada do Auto CodeZ.', icon: MCP_ICON_URL },
 ];
 
 function escapeHtml(value: unknown): string {
@@ -346,10 +351,15 @@ function persistOnboardingComplete(): void {
   } catch {}
 }
 
+function renderClientIcon(client: McpClientId, className = 'mcp-client-logo'): string {
+  const definition = clientDefinition(client);
+  return `<span class="${className}" aria-hidden="true"><img src="${escapeHtml(definition.icon)}" alt="" draggable="false"></span>`;
+}
+
 function renderClientInstructions(client: McpClientId): string {
   if (client === 'chatgpt') {
     return `<article class="mcp-guide-card featured">
-      <div class="mcp-guide-head"><span class="mcp-client-mark">C</span><div><strong>ChatGPT</strong><small>Plugin · Secure MCP Tunnel</small></div></div>
+      <div class="mcp-guide-head">${renderClientIcon('chatgpt', 'mcp-client-mark')}<div><strong>ChatGPT</strong><small>Plugin · Secure MCP Tunnel</small></div></div>
       <ol>
         <li>Abra <b>Configurações → Segurança e login</b> e ative <b>Modo de desenvolvedor</b>.</li>
         <li>Abra <b>Plugins</b>, clique em <b>+</b> e crie um novo plugin chamado <b>Auto CodeZ</b>.</li>
@@ -361,21 +371,21 @@ function renderClientInstructions(client: McpClientId): string {
   }
   if (client === 'codex') {
     return `<article class="mcp-guide-card">
-      <div class="mcp-guide-head"><span class="mcp-client-mark">X</span><div><strong>ChatGPT Codex</strong><small>App · CLI · extensão</small></div></div>
+      <div class="mcp-guide-head">${renderClientIcon('codex', 'mcp-client-mark')}<div><strong>ChatGPT Codex</strong><small>App · CLI · extensão</small></div></div>
       <p>O Codex suporta servidores MCP locais. Abra <b>Configurações → Servidores MCP</b>, adicione <b>Auto CodeZ</b> e use a conexão local exibida em <b>Configuração avançada</b>.</p>
       <div class="mcp-copy-line"><code>Use o MCP do Auto CodeZ para trabalhar neste projeto.</code><button class="mcp-copy-action" type="button" data-mcp-copy-text="Use o MCP do Auto CodeZ para trabalhar neste projeto." aria-label="Copiar instrução para o Codex"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M15 9V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/></svg><span>Copiar</span></button></div>
     </article>`;
   }
   if (client === 'claude-desktop') {
-    return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">A</span><div><strong>Claude Desktop</strong><small>Aplicativo desktop · MCP local</small></div></div><p>Abra as configurações de integrações/extensões do Claude Desktop e adicione o Auto CodeZ como servidor MCP local. O Auto CodeZ manterá os dados técnicos em <b>Configuração avançada</b>.</p><div class="mcp-guide-note">A configuração exata varia conforme a versão do Claude Desktop. O Auto CodeZ não altera sua conta nem instala extensões sem sua confirmação.</div></article>`;
+    return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('claude-desktop', 'mcp-client-mark')}<div><strong>Claude Desktop</strong><small>Aplicativo desktop · MCP local</small></div></div><p>Abra as configurações de integrações/extensões do Claude Desktop e adicione o Auto CodeZ como servidor MCP local. O Auto CodeZ manterá os dados técnicos em <b>Configuração avançada</b>.</p><div class="mcp-guide-note">A configuração exata varia conforme a versão do Claude Desktop. O Auto CodeZ não altera sua conta nem instala extensões sem sua confirmação.</div></article>`;
   }
   if (client === 'claude-code') {
-    return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">CC</span><div><strong>Claude Code</strong><small>MCP local</small></div></div><p>Adicione o servidor MCP do Auto CodeZ nas configurações MCP do Claude Code. Depois peça:</p><div class="mcp-copy-line"><code>Conecte-se ao MCP do Auto CodeZ e use as ferramentas disponíveis.</code><button class="mcp-copy-action" type="button" data-mcp-copy-text="Conecte-se ao MCP do Auto CodeZ e use as ferramentas disponíveis." aria-label="Copiar instrução para o Claude Code"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M15 9V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/></svg><span>Copiar</span></button></div></article>`;
+    return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('claude-code', 'mcp-client-mark')}<div><strong>Claude Code</strong><small>MCP local</small></div></div><p>Adicione o servidor MCP do Auto CodeZ nas configurações MCP do Claude Code. Depois peça:</p><div class="mcp-copy-line"><code>Conecte-se ao MCP do Auto CodeZ e use as ferramentas disponíveis.</code><button class="mcp-copy-action" type="button" data-mcp-copy-text="Conecte-se ao MCP do Auto CodeZ e use as ferramentas disponíveis." aria-label="Copiar instrução para o Claude Code"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M15 9V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/></svg><span>Copiar</span></button></div></article>`;
   }
   if (client === 'cursor') {
-    return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">⌁</span><div><strong>Cursor</strong><small>Servidor MCP no editor</small></div></div><p>Abra as configurações MCP do Cursor, adicione <b>Auto CodeZ</b> e use a conexão local mostrada em <b>Configuração avançada</b>.</p></article>`;
+    return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('cursor', 'mcp-client-mark')}<div><strong>Cursor</strong><small>Servidor MCP no editor</small></div></div><p>Abra as configurações MCP do Cursor, adicione <b>Auto CodeZ</b> e use a conexão local mostrada em <b>Configuração avançada</b>.</p></article>`;
   }
-  return `<article class="mcp-guide-card"><div class="mcp-guide-head"><span class="mcp-client-mark">M</span><div><strong>Outro cliente MCP</strong><small>Configuração manual</small></div></div><p>Adicione um servidor MCP usando os dados de conexão local mostrados em <b>Configuração avançada</b>. Se o seu cliente exigir um formato específico, consulte a documentação dele.</p></article>`;
+  return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('other', 'mcp-client-mark')}<div><strong>Outro cliente MCP</strong><small>Configuração manual</small></div></div><p>Adicione um servidor MCP usando os dados de conexão local mostrados em <b>Configuração avançada</b>. Se o seu cliente exigir um formato específico, consulte a documentação dele.</p></article>`;
 }
 
 function clientDefinition(id: McpClientId) {
@@ -413,7 +423,7 @@ function renderConnectionCard(client: (typeof MCP_CLIENTS)[number], configured: 
   const state = configured ? clientPublicState(client.id) : { label: 'Disponível', tone: 'available', detail: client.detail };
   return `<article class="mcp-connection-card ${configured ? 'configured' : 'available'}" data-mcp-connection-card="${client.id}">
     <div class="mcp-connection-card-top">
-      <span class="mcp-client-logo" aria-hidden="true">${escapeHtml(client.mark)}</span>
+      ${renderClientIcon(client.id)}
       <span class="mcp-status-pill ${escapeHtml(state.tone)}"><i></i>${escapeHtml(state.label)}</span>
     </div>
     <div class="mcp-connection-card-copy">
@@ -482,7 +492,7 @@ function renderConnectionDetail(root: HTMLElement, clientId: McpClientId): void 
     </header>
     <main class="mcp-detail-content">
       <section class="mcp-detail-hero">
-        <span class="mcp-client-logo large" aria-hidden="true">${escapeHtml(client.mark)}</span>
+        ${renderClientIcon(client.id, 'mcp-client-logo large')}
         <div class="mcp-detail-identity"><span class="mcp-detail-eyebrow">CONEXÃO MCP</span><h1>${escapeHtml(client.name)}</h1><p>${escapeHtml(client.description)}</p><span class="mcp-status-pill ${escapeHtml(state.tone)}"><i></i>${escapeHtml(state.label)}</span></div>
       </section>
       <div class="mcp-detail-grid">
@@ -517,9 +527,9 @@ function renderConnectPanel(): string {
   return `<div class="mcp-connect-backdrop" data-mcp-close-connect>
     <section class="mcp-connect-panel" role="dialog" aria-modal="true" aria-label="Conectar ferramenta">
       <header><div><span>CONEXÕES MCP</span><h2>Conectar uma ferramenta</h2><p>Escolha um aplicativo compatível. O Auto CodeZ mantém os detalhes técnicos fora do caminho.</p></div><button class="mcp-icon-action" type="button" data-mcp-close-connect aria-label="Fechar">×</button></header>
-      <div class="mcp-connect-discovery"><span class="mcp-discovery-icon">⌁</span><div><strong>Clientes conhecidos neste Auto CodeZ</strong><small>Mostramos somente opções que já possuem fluxo de configuração no produto.</small></div></div>
+      <div class="mcp-connect-discovery"><span class="mcp-discovery-icon" aria-hidden="true"><img src="${escapeHtml(MCP_ICON_URL)}" alt="" draggable="false"></span><div><strong>Clientes conhecidos neste Auto CodeZ</strong><small>Mostramos somente opções que já possuem fluxo de configuração no produto.</small></div></div>
       <div class="mcp-connect-list">
-        ${available.length ? available.map((client) => `<button type="button" class="mcp-connect-option" data-mcp-connect-client="${client.id}"><span class="mcp-client-logo">${escapeHtml(client.mark)}</span><span><strong>${escapeHtml(client.name)}</strong><small>${escapeHtml(client.description)}</small></span><em>Conectar</em></button>`).join('') : '<div class="mcp-empty-state compact"><strong>Todas as conexões conhecidas já foram adicionadas.</strong><span>Novos tipos de conexão entrarão aqui conforme o runtime MCP evoluir.</span></div>'}
+        ${available.length ? available.map((client) => `<button type="button" class="mcp-connect-option" data-mcp-connect-client="${client.id}">${renderClientIcon(client.id)}<span><strong>${escapeHtml(client.name)}</strong><small>${escapeHtml(client.description)}</small></span><em>Conectar</em></button>`).join('') : '<div class="mcp-empty-state compact"><strong>Todas as conexões conhecidas já foram adicionadas.</strong><span>Novos tipos de conexão entrarão aqui conforme o runtime MCP evoluir.</span></div>'}
       </div>
       <footer><span>Precisa de um servidor personalizado?</span><button class="mcp-text-action" type="button" data-mcp-advanced>Usar configuração avançada</button></footer>
     </section>
@@ -552,7 +562,7 @@ function renderOnboarding(root: HTMLElement): void {
         <div class="mcp-onboarding-kicker">MCP PRONTO</div>
         <h1>Escolha suas primeiras conexões.</h1>
         <p>Você poderá adicionar ou remover conexões depois. Mostraremos somente os passos necessários para cada aplicativo.</p>
-        <div class="mcp-client-grid">${MCP_CLIENTS.map((client) => `<button class="mcp-client-option ${selectedClients.has(client.id) ? 'selected' : ''}" data-mcp-client="${client.id}"><span class="mcp-client-check">${selectedClients.has(client.id) ? '✓' : ''}</span><span><strong>${escapeHtml(client.name)}</strong><small>${escapeHtml(client.detail)}</small></span><em>${escapeHtml(client.badge)}</em></button>`).join('')}</div>
+        <div class="mcp-client-grid">${MCP_CLIENTS.map((client) => `<button class="mcp-client-option ${selectedClients.has(client.id) ? 'selected' : ''}" data-mcp-client="${client.id}"><span class="mcp-client-check">${selectedClients.has(client.id) ? '✓' : ''}</span>${renderClientIcon(client.id)}<span class="mcp-client-option-copy"><strong>${escapeHtml(client.name)}</strong><small>${escapeHtml(client.detail)}</small></span><em>${escapeHtml(client.badge)}</em></button>`).join('')}</div>
         ${activationMessage ? `<div class="mcp-onboarding-progress"><span></span>${escapeHtml(activationMessage)}</div>` : ''}
         ${activationError ? `<div class="mcp-onboarding-error">${escapeHtml(activationError)}</div>` : ''}
         <div class="mcp-onboarding-actions"><button class="mcp-onboarding-secondary" data-mcp-onboarding-back ${activationBusy ? 'disabled' : ''}>Voltar</button><button class="mcp-onboarding-primary" data-mcp-onboarding-next ${selectedClients.size && !activationBusy ? '' : 'disabled'}>${activationBusy ? 'Preparando…' : 'Avançar'}</button></div>

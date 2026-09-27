@@ -69,6 +69,16 @@ async function runTest() {
     return { headingGap: subtitleRect.top - titleRect.bottom, copyRadius: style.borderRadius, copyBackground: style.backgroundColor, copyDisplay: style.display };
   });
   if (!instructionLayout || instructionLayout.headingGap < 3) throw new Error('Título e subtítulo do ChatGPT Codex continuam visualmente colados: ' + JSON.stringify(instructionLayout));
+  const brandIconCheck = await mcpMode.evaluate(() => {
+    const cards = [...document.querySelectorAll('.mcp-guide-card')];
+    const icons = cards.map((card) => {
+      const image = card.querySelector('.mcp-client-mark img');
+      return { text: card.querySelector('.mcp-client-mark')?.textContent?.trim() || '', src: image?.getAttribute('src') || '', loaded: image instanceof HTMLImageElement ? image.complete && image.naturalWidth > 0 : false };
+    });
+    return { count: icons.length, icons };
+  });
+  if (brandIconCheck.count < 2 || brandIconCheck.icons.some((icon) => !icon.loaded || !icon.src.endsWith('.svg') || icon.text)) throw new Error('Ícones SVG locais dos clientes MCP não renderizaram corretamente: ' + JSON.stringify(brandIconCheck));
+
   if (!['flex', 'inline-flex'].includes(instructionLayout.copyDisplay) || instructionLayout.copyRadius === '0px' || instructionLayout.copyBackground === 'rgba(0, 0, 0, 0)') throw new Error('Ação de copiar não recebeu o tratamento visual do MCP Mode: ' + JSON.stringify(instructionLayout));
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-instrucoes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Finalizar' }).click();
