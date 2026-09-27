@@ -35,9 +35,9 @@ declare global {
       listMcpConnections: () => Promise<Array<{ clientId: 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other'; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string } }>>;
       addMcpConnection: (clientId: string) => Promise<{ clientId: string; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number }>;
       removeMcpConnection: (clientId: string) => Promise<{ removed: boolean }>;
-      mcpClientConfigStatus: (clientId: string) => Promise<{ clientId: 'cursor' | 'codex'; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string }>;
-      installMcpClientConfig: (clientId: string) => Promise<{ clientId: 'cursor' | 'codex'; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string }>;
-      removeMcpClientConfig: (clientId: string) => Promise<{ clientId: 'cursor' | 'codex'; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string }>;
+      mcpClientConfigStatus: (clientId: string) => Promise<{ clientId: 'cursor' | 'codex' | 'claude-code'; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string }>;
+      installMcpClientConfig: (clientId: string) => Promise<{ clientId: 'cursor' | 'codex' | 'claude-code'; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string }>;
+      removeMcpClientConfig: (clientId: string) => Promise<{ clientId: 'cursor' | 'codex' | 'claude-code'; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string }>;
       mcpRuntimeStatus: () => Promise<{ platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string }>;
       prepareMcpRuntime: () => Promise<{ platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string }>;
       mcpTunnelStatus: () => Promise<{ running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean }>;
