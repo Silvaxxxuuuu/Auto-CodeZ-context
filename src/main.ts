@@ -1215,15 +1215,16 @@ function localMcpClientConfigurator(): McpClientConfigurator {
   return new McpClientConfigurator({
     cursorConfigPath: path.join(app.getPath('home'), '.cursor', 'mcp.json'),
     codexConfigPath: path.join(app.getPath('home'), '.codex', 'config.toml'),
+    claudeCodeConfigPath: path.join(app.getPath('home'), '.claude.json'),
     bridgeScriptPath: path.join(process.resourcesPath, 'mcp-bridge.ps1'),
     brokerAddress: mcpBindingBrokerAddress(app.getPath('appData')),
     appPath: process.execPath,
   });
 }
 
-function requireAutoConfigClient(value: unknown): 'cursor' | 'codex' {
+function requireAutoConfigClient(value: unknown): 'cursor' | 'codex' | 'claude-code' {
   const clientId = requireIdentifier(value, 'Cliente MCP');
-  if (clientId !== 'cursor' && clientId !== 'codex') {
+  if (clientId !== 'cursor' && clientId !== 'codex' && clientId !== 'claude-code') {
     throw new Error('Configuração automática ainda não está disponível para este cliente.');
   }
   return clientId;
@@ -1237,7 +1238,7 @@ ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknow
   const clientId = requireAutoConfigClient(clientIdInput);
   const status = await localMcpClientConfigurator().install(clientId);
   await mcpConnectionRegistry.markConfigured(clientId);
-  const clientName = clientId === 'cursor' ? 'Cursor' : 'Codex';
+  const clientName = clientId === 'cursor' ? 'Cursor' : clientId === 'codex' ? 'Codex' : 'Claude Code';
   operationalLedger.record({
     actor: 'runtime',
     category: 'system',
@@ -1251,7 +1252,7 @@ ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknow
 ipcMain.handle('mcp-client-config:remove', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
   const status = await localMcpClientConfigurator().remove(clientId);
-  const clientName = clientId === 'cursor' ? 'Cursor' : 'Codex';
+  const clientName = clientId === 'cursor' ? 'Cursor' : clientId === 'codex' ? 'Codex' : 'Claude Code';
   operationalLedger.record({
     actor: 'runtime',
     category: 'system',
