@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-export type McpLocalClientId = 'cursor';
+export type McpLocalClientId = 'cursor' | 'codex';
 export type McpClientConfigurationState = 'not-configured' | 'configured' | 'conflict' | 'unsupported';
 
 export type McpClientConfigurationStatus = {
@@ -23,6 +23,7 @@ type CursorServerConfig = {
 
 export type McpClientConfiguratorOptions = {
   cursorConfigPath: string;
+  codexConfigPath: string;
   bridgeScriptPath: string;
   brokerAddress: string;
   appPath: string;
@@ -30,6 +31,8 @@ export type McpClientConfiguratorOptions = {
 };
 
 const SERVER_NAME = 'auto-codez';
+const CODEX_MANAGED_START = '# >>> Auto CodeZ MCP: auto-codez';
+const CODEX_MANAGED_END = '# <<< Auto CodeZ MCP: auto-codez';
 
 function isMissingFile(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
@@ -39,7 +42,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function expectedServer(options: McpClientConfiguratorOptions): CursorServerConfig {
+function expectedServer(options: McpClientConfiguratorOptions, clientId: McpLocalClientId): CursorServerConfig {
   return {
     command: 'powershell.exe',
     args: [
@@ -54,9 +57,62 @@ function expectedServer(options: McpClientConfiguratorOptions): CursorServerConf
       '-AppPath',
       options.appPath,
       '-ClientId',
-      'cursor',
+      clientId,
     ],
   };
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function codexManagedBlock(options: McpClientConfiguratorOptions): string {
+  const server = expectedServer(options, 'codex');
+  return [
+    CODEX_MANAGED_START,
+    '[mcp_servers.auto-codez]',
+    `command = ${tomlString(server.command)}`,
+    `args = [${server.args.map((value) => tomlString(value)).join(', ')}]`,
+    CODEX_MANAGED_END,
+  ].join('\n');
+}
+
+function codexManagedRange(text: string): { start: number; end: number; block: string } | undefined {
+  const start = text.indexOf(CODEX_MANAGED_START);
+  if (start < 0) return undefined;
+  const endMarker = text.indexOf(CODEX_MANAGED_END, start + CODEX_MANAGED_START.length);
+  if (endMarker < 0) throw new Error('A seção MCP gerenciada pelo Auto CodeZ no config.toml está incompleta.');
+  const end = endMarker + CODEX_MANAGED_END.length;
+  return { start, end, block: text.slice(start, end) };
+}
+
+function codexHasExternalConflict(text: string): boolean {
+  const withoutManaged = (() => {
+    const range = codexManagedRange(text);
+    return range ? `${text.slice(0, range.start)}${text.slice(range.end)}` : text;
+  })();
+  return /^\s*\[\s*mcp_servers\s*\.\s*(?:auto-codez|"auto-codez"|'auto-codez')\s*\]\s*$/mi.test(withoutManaged)
+    || /^\s*mcp_servers\s*\.\s*(?:auto-codez|"auto-codez"|'auto-codez')\s*=/mi.test(withoutManaged);
+}
+
+async function readText(configPath: string): Promise<string> {
+  try {
+    return await fs.readFile(configPath, 'utf8');
+  } catch (error) {
+    if (isMissingFile(error)) return '';
+    throw error;
+  }
+}
+
+async function writeTextAtomic(configPath: string, value: string): Promise<void> {
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  const temporary = `${configPath}.autocodez-${process.pid}-${Date.now()}.tmp`;
+  try {
+    await fs.writeFile(temporary, value, { encoding: 'utf8', flag: 'wx' });
+    await fs.rename(temporary, configPath);
+  } finally {
+    await fs.rm(temporary, { force: true }).catch((): undefined => undefined);
+  }
 }
 
 function sameStringArray(left: unknown, right: string[]): boolean {
@@ -110,14 +166,39 @@ export class McpClientConfigurator {
   }
 
   async status(clientId: McpLocalClientId): Promise<McpClientConfigurationStatus> {
-    if (clientId !== 'cursor') throw new Error('Cliente MCP local inválido.');
+    const configPath = clientId === 'cursor' ? this.options.cursorConfigPath : this.options.codexConfigPath;
     if (this.options.platform !== 'win32') {
       return {
         clientId,
         state: 'unsupported',
-        configPath: this.options.cursorConfigPath,
-        detail: 'A configuração automática do Cursor está disponível no Windows nesta versão.',
+        configPath,
+        detail: `A configuração automática do ${clientId === 'cursor' ? 'Cursor' : 'Codex'} está disponível no Windows nesta versão.`,
       };
+    }
+
+    if (clientId === 'codex') {
+      const text = await readText(this.options.codexConfigPath);
+      if (codexHasExternalConflict(text)) {
+        return {
+          clientId,
+          state: 'conflict',
+          configPath,
+          detail: 'Já existe uma conexão chamada auto-codez no Codex que não foi criada por esta instalação.',
+        };
+      }
+      const range = codexManagedRange(text);
+      if (!range) {
+        return {
+          clientId,
+          state: 'not-configured',
+          configPath,
+          detail: 'Codex disponível para configuração automática.',
+        };
+      }
+      const expected = codexManagedBlock(this.options);
+      return range.block.trim() === expected.trim()
+        ? { clientId, state: 'configured', configPath, detail: 'Auto CodeZ já está configurado no Codex.' }
+        : { clientId, state: 'not-configured', configPath, detail: 'A configuração gerenciada do Codex precisa ser atualizada.' };
     }
 
     const config = await readCursorConfig(this.options.cursorConfigPath);
@@ -131,7 +212,7 @@ export class McpClientConfigurator {
       };
     }
 
-    if (isManagedServer(current, expectedServer(this.options))) {
+    if (isManagedServer(current, expectedServer(this.options, 'cursor'))) {
       return {
         clientId,
         state: 'configured',
@@ -149,16 +230,30 @@ export class McpClientConfigurator {
   }
 
   async install(clientId: McpLocalClientId): Promise<McpClientConfigurationStatus> {
-    if (clientId !== 'cursor') throw new Error('Cliente MCP local inválido.');
     if (this.options.platform !== 'win32') return this.status(clientId);
 
     await fs.access(this.options.bridgeScriptPath).catch(() => {
       throw new Error('O helper MCP do Auto CodeZ não foi encontrado nesta instalação.');
     });
 
+    if (clientId === 'codex') {
+      const current = await readText(this.options.codexConfigPath);
+      if (codexHasExternalConflict(current)) {
+        throw new Error('Já existe uma conexão chamada auto-codez no Codex. O Auto CodeZ não vai sobrescrever uma configuração que não criou.');
+      }
+      const managed = codexManagedRange(current);
+      const base = managed
+        ? `${current.slice(0, managed.start)}${current.slice(managed.end)}`.trimEnd()
+        : current.trimEnd();
+      const block = codexManagedBlock(this.options);
+      const next = base ? `${base}\n\n${block}\n` : `${block}\n`;
+      await writeTextAtomic(this.options.codexConfigPath, next);
+      return this.status(clientId);
+    }
+
     const config = await readCursorConfig(this.options.cursorConfigPath);
     const current = config.mcpServers?.[SERVER_NAME];
-    const expected = expectedServer(this.options);
+    const expected = expectedServer(this.options, 'cursor');
     if (current !== undefined && !isManagedServer(current, expected)) {
       throw new Error('Já existe uma conexão chamada auto-codez no Cursor. O Auto CodeZ não vai sobrescrever uma configuração que não criou.');
     }
@@ -175,14 +270,27 @@ export class McpClientConfigurator {
   }
 
   async remove(clientId: McpLocalClientId): Promise<McpClientConfigurationStatus> {
-    if (clientId !== 'cursor') throw new Error('Cliente MCP local inválido.');
     if (this.options.platform !== 'win32') return this.status(clientId);
+
+    if (clientId === 'codex') {
+      const current = await readText(this.options.codexConfigPath);
+      if (codexHasExternalConflict(current)) {
+        throw new Error('A conexão auto-codez existente no Codex não pertence a esta instalação e não será removida.');
+      }
+      const managed = codexManagedRange(current);
+      if (!managed) return this.status(clientId);
+      const next = `${current.slice(0, managed.start)}${current.slice(managed.end)}`
+        .replace(/\n{3,}/g, '\n\n')
+        .trimEnd();
+      await writeTextAtomic(this.options.codexConfigPath, next ? `${next}\n` : '');
+      return this.status(clientId);
+    }
 
     const config = await readCursorConfig(this.options.cursorConfigPath);
     const current = config.mcpServers?.[SERVER_NAME];
     if (current === undefined) return this.status(clientId);
 
-    const expected = expectedServer(this.options);
+    const expected = expectedServer(this.options, 'cursor');
     if (!isManagedServer(current, expected)) {
       throw new Error('A conexão auto-codez existente no Cursor não pertence a esta instalação e não será removida.');
     }
