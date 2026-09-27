@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { app } from 'electron';
 import { LocalStorage } from '../core/storage';
 import { McpGatewayBindingStore } from './binding-store';
@@ -24,11 +25,25 @@ function launchMainApplication(): void {
 
 async function main(): Promise<void> {
   await app.whenReady();
-  const storage = new LocalStorage();
-  await storage.init();
-  const bindings = new McpGatewayBindingStore(storage);
+  const candidateRoots = [...new Set([
+    path.join(app.getPath('userData'), 'data'),
+    path.join(app.getPath('appData'), 'Auto CodeZ', 'data'),
+    path.join(app.getPath('appData'), 'auto-codez', 'data'),
+  ])];
+  const bindingStores = candidateRoots.map((root) => new McpGatewayBindingStore(new LocalStorage(root)));
+  await Promise.all(bindingStores.map(async (store, index) => {
+    const storage = new LocalStorage(candidateRoots[index]);
+    await storage.init();
+    bindingStores[index] = new McpGatewayBindingStore(storage);
+  }));
   const bridge = new McpStdioBridgeRuntime(
-    () => bindings.read(),
+    async () => {
+      for (const bindings of bindingStores) {
+        const binding = await bindings.read();
+        if (binding) return binding;
+      }
+      return undefined;
+    },
     () => launchMainApplication(),
   );
   await bridge.run(process.stdin, process.stdout, clientIdFromArgs());
