@@ -1253,6 +1253,7 @@ ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknow
 ipcMain.handle('mcp-client-config:remove', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
   const status = await localMcpClientConfigurator().remove(clientId);
+  await mcpConnectionRegistry.markAdded(clientId);
   const clientName = clientId === 'cursor' ? 'Cursor' : clientId === 'codex' ? 'Codex' : clientId === 'claude-code' ? 'Claude Code' : 'Claude Desktop';
   operationalLedger.record({
     actor: 'runtime',
