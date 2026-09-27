@@ -33,9 +33,14 @@ async function verifyPackagedMcpStdioBridge() {
       if (error) reject(error); else resolve();
     };
     const timer = setTimeout(() => {
-      if (process.platform === 'win32' && child.pid) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-      else child.kill('SIGKILL');
-      finish(new Error(`MCP stdio bridge empacotado excedeu o tempo limite. stderr=${childStderr}`));
+      try { child.kill(); } catch {}
+      if (process.platform === 'win32' && child.pid) {
+        try {
+          const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+          killer.unref();
+        } catch {}
+      }
+      finish(new Error(`MCP stdio bridge empacotado excedeu o tempo limite. stdout=${stdout} stderr=${childStderr}`));
     }, 20000);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
