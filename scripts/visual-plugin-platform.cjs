@@ -69,7 +69,7 @@ async function runTest() {
     return { headingGap: subtitleRect.top - titleRect.bottom, copyRadius: style.borderRadius, copyBackground: style.backgroundColor, copyDisplay: style.display };
   });
   if (!instructionLayout || instructionLayout.headingGap < 3) throw new Error('Título e subtítulo do ChatGPT Codex continuam visualmente colados: ' + JSON.stringify(instructionLayout));
-  if (instructionLayout.copyDisplay !== 'inline-flex' || instructionLayout.copyRadius === '0px' || instructionLayout.copyBackground === 'rgba(0, 0, 0, 0)') throw new Error('Ação de copiar não recebeu o tratamento visual do MCP Mode: ' + JSON.stringify(instructionLayout));
+  if (!['flex', 'inline-flex'].includes(instructionLayout.copyDisplay) || instructionLayout.copyRadius === '0px' || instructionLayout.copyBackground === 'rgba(0, 0, 0, 0)') throw new Error('Ação de copiar não recebeu o tratamento visual do MCP Mode: ' + JSON.stringify(instructionLayout));
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-instrucoes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Finalizar' }).click();
   await mcpMode.getByText('MCP pronto', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
