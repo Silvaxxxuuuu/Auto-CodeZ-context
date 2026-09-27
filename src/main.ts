@@ -69,6 +69,7 @@ import { McpRuntimeInstaller } from './mcp-gateway/runtime-installer';
 import { McpConnectionRegistry } from './mcp-gateway/connection-registry';
 import { McpGatewayBindingStore } from './mcp-gateway/binding-store';
 import { McpGatewayBindingBroker, mcpBindingBrokerAddress } from './mcp-gateway/binding-broker';
+import { McpClientConfigurator } from './mcp-gateway/client-configurator';
 import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
 import { LocalProtectedCredentialStore } from './account/protected-credential-store';
 import { DeviceIdentityStore } from './account/device-identity';
@@ -1209,6 +1210,49 @@ ipcMain.handle('agent:list-operational-ledger', async (_event, query: Operationa
 ipcMain.handle('mcp-connections:list', async () => mcpConnectionRegistry.list());
 ipcMain.handle('mcp-connections:add', async (_event, clientIdInput: unknown) => mcpConnectionRegistry.add(requireIdentifier(clientIdInput, 'Cliente MCP')));
 ipcMain.handle('mcp-connections:remove', async (_event, clientIdInput: unknown) => ({ removed: await mcpConnectionRegistry.remove(requireIdentifier(clientIdInput, 'Cliente MCP')) }));
+
+function cursorConfigurator(): McpClientConfigurator {
+  return new McpClientConfigurator({
+    cursorConfigPath: path.join(app.getPath('home'), '.cursor', 'mcp.json'),
+    bridgeScriptPath: path.join(process.resourcesPath, 'mcp-bridge.ps1'),
+    brokerAddress: mcpBindingBrokerAddress(app.getPath('appData')),
+    appPath: process.execPath,
+  });
+}
+
+ipcMain.handle('mcp-client-config:status', async (_event, clientIdInput: unknown) => {
+  const clientId = requireIdentifier(clientIdInput, 'Cliente MCP');
+  if (clientId !== 'cursor') throw new Error('Configuração automática ainda não está disponível para este cliente.');
+  return cursorConfigurator().status('cursor');
+});
+ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknown) => {
+  const clientId = requireIdentifier(clientIdInput, 'Cliente MCP');
+  if (clientId !== 'cursor') throw new Error('Configuração automática ainda não está disponível para este cliente.');
+  const status = await cursorConfigurator().install('cursor');
+  await mcpConnectionRegistry.markConfigured('cursor');
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'Conexão MCP configurada automaticamente no Cursor.',
+    clientId: 'cursor',
+    details: { configPath: status.configPath },
+  });
+  return status;
+});
+ipcMain.handle('mcp-client-config:remove', async (_event, clientIdInput: unknown) => {
+  const clientId = requireIdentifier(clientIdInput, 'Cliente MCP');
+  if (clientId !== 'cursor') throw new Error('Configuração automática ainda não está disponível para este cliente.');
+  const status = await cursorConfigurator().remove('cursor');
+  operationalLedger.record({
+    actor: 'runtime',
+    category: 'system',
+    state: 'success',
+    summary: 'Configuração MCP gerenciada pelo Auto CodeZ foi removida do Cursor.',
+    clientId: 'cursor',
+  });
+  return status;
+});
 
 ipcMain.handle('mcp-gateway:status', async () => mcpGatewayServer.status());
 ipcMain.handle('mcp-gateway:preflight', async () => {
