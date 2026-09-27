@@ -21,6 +21,41 @@ async function prepareStateRoot() { stateRoot = await fs.mkdtemp(path.join(os.tm
 function environment() { const env = { ...process.env, AUTO_CODEZ_VISUAL_TEST: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true', HOME: stateRoot, PATH: [tunnelFixtureBin, process.env.PATH || process.env.Path || ''].filter(Boolean).join(path.delimiter) }; if (process.platform === 'win32') { env.USERPROFILE = stateRoot; env.APPDATA = path.join(stateRoot, 'AppData', 'Roaming'); env.LOCALAPPDATA = path.join(stateRoot, 'AppData', 'Local'); } else { env.XDG_CONFIG_HOME = path.join(stateRoot, '.config'); env.XDG_CACHE_HOME = path.join(stateRoot, '.cache'); } return env; }
 async function startElectron() { if (!electronExecutable) throw new Error('AUTO_CODEZ_ELECTRON_EXECUTABLE não foi definido.'); const port = await reservePort(); appProcess = spawn(electronExecutable, [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--no-first-run'], { cwd: root, env: environment(), windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] }); appProcess.stderr?.setEncoding('utf8'); appProcess.stderr?.on('data', (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-256 * 1024); }); appProcess.once('exit', (code, signal) => { exitState = { code, signal }; }); const endpoint = `http://127.0.0.1:${port}`; const deadline = Date.now() + 60000; while (Date.now() < deadline) { if (exitState) throw new Error(`Electron encerrou antes do CDP: ${JSON.stringify(exitState)}\n${stderr}`); try { browser = await chromium.connectOverCDP(endpoint, { timeout: 2500 }); const context = browser.contexts()[0]; if (!context) throw new Error('Contexto Chromium indisponível.'); page = context.pages().find((candidate) => !candidate.url().startsWith('devtools://')) || await context.waitForEvent('page', { timeout: 5000 }); return; } catch { if (browser) await browser.close().catch(() => {}); browser = undefined; await new Promise((resolve) => setTimeout(resolve, 350)); } } throw new Error('CDP não ficou disponível.'); }
 async function updateManifest(result) { let manifest = { results: [], pageErrors: [], consoleErrors: [] }; try { manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')); } catch {} manifest.results = Array.isArray(manifest.results) ? manifest.results.filter((item) => item?.name !== testName) : []; manifest.results.push(result); await fs.mkdir(outputDir, { recursive: true }); await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8'); }
+async function verifyPackagedMcpStdioBridge() {
+  if (!electronExecutable) throw new Error('Executável empacotado ausente para validar MCP stdio bridge.');
+  await new Promise((resolve, reject) => {
+    const child = spawn(electronExecutable, ['--mcp-stdio-bridge', '--mcp-client=codex'], { cwd: root, env: environment(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '', childStderr = '', settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error); else resolve();
+    };
+    const timer = setTimeout(() => {
+      if (process.platform === 'win32' && child.pid) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      else child.kill('SIGKILL');
+      finish(new Error(`MCP stdio bridge empacotado excedeu o tempo limite. stderr=${childStderr}`));
+    }, 20000);
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { childStderr = `${childStderr}${chunk}`.slice(-65536); });
+    child.once('error', (error) => finish(error));
+    child.once('exit', (code, signal) => {
+      if (settled) return;
+      if (code !== 0) { finish(new Error(`MCP stdio bridge empacotado encerrou com code=${code} signal=${signal}. stderr=${childStderr}`)); return; }
+      const messages = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
+      const response = messages.find((message) => message.id === 'packaged-bridge-tools');
+      if (!response || !Array.isArray(response.result?.tools) || response.result.tools.length < 6) {
+        finish(new Error(`MCP stdio bridge empacotado não retornou catálogo válido: stdout=${stdout} stderr=${childStderr}`));
+        return;
+      }
+      finish();
+    });
+    child.stdin.end(JSON.stringify({ jsonrpc: '2.0', id: 'packaged-bridge-tools', method: 'tools/list', params: {} }) + '\n');
+  });
+}
 async function runTest() {
   const pageErrors = [], consoleErrors = [];
   page.on('pageerror', (error) => pageErrors.push(errorText(error))); page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
@@ -120,6 +155,7 @@ async function runTest() {
   await mcpMode.getByText('Secure MCP Tunnel', { exact: true }).waitFor({ state: 'visible' });
   const gatewayStatus = await page.evaluate(() => window.autoCodez.mcpGatewayStatus());
   if (!gatewayStatus.running) throw new Error('Gateway MCP não permaneceu ativo após o onboarding.');
+  await verifyPackagedMcpStdioBridge();
   const gatewayText = await mcpMode.locator('.mcp-gateway-card').innerText();
   if (!gatewayText.includes('127.0.0.1') || !gatewayText.includes('Bearer ')) throw new Error('Configuração avançada não preservou endpoint/token efêmero do gateway.');
   if (await mcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer próprio.');
