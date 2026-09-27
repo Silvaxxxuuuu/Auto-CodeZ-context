@@ -35,6 +35,12 @@ async function main(): Promise<void> {
     await storage.init();
     return new McpGatewayBindingStore(storage);
   }));
+  let lastDiagnostic = '';
+  const reportDiagnostic = (message: string): void => {
+    if (message === lastDiagnostic) return;
+    lastDiagnostic = message;
+    process.stderr.write(`Auto CodeZ MCP bridge: ${message}\n`);
+  };
   const bridge = new McpStdioBridgeRuntime(
     async () => {
       for (const bindings of bindingStores) {
@@ -44,6 +50,10 @@ async function main(): Promise<void> {
       return undefined;
     },
     () => launchMainApplication(),
+    fetch,
+    (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    15_000,
+    reportDiagnostic,
   );
   await bridge.run(process.stdin, process.stdout, clientIdFromArgs());
 }
