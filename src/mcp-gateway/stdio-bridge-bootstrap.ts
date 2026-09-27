@@ -1,9 +1,6 @@
 import { spawn } from 'node:child_process';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import { app } from 'electron';
-import { LocalStorage } from '../core/storage';
-import { McpGatewayBindingStore } from './binding-store';
+import { mcpBindingBrokerAddress, readMcpGatewayBindingFromBroker } from './binding-broker';
 import { McpStdioBridgeRuntime } from './stdio-bridge-runtime';
 
 function clientIdFromArgs(): string {
@@ -24,30 +21,9 @@ function launchMainApplication(): void {
   child.unref();
 }
 
-async function bindingProfile(): Promise<string> {
-  const appData = app.getPath('appData');
-  const candidates = [...new Set([
-    app.getPath('userData'),
-    path.join(appData, 'Auto CodeZ'),
-    path.join(appData, 'auto-codez'),
-  ])];
-  for (const candidate of candidates) {
-    try {
-      await fs.access(path.join(candidate, 'data', 'mcp-gateway-binding.json'));
-      return candidate;
-    } catch {
-    }
-  }
-  return app.getPath('userData');
-}
-
 async function main(): Promise<void> {
-  const userData = await bindingProfile();
-  if (app.getPath('userData') !== userData) app.setPath('userData', userData);
   await app.whenReady();
-  const storage = new LocalStorage(path.join(userData, 'data'));
-  await storage.init();
-  const bindingStore = new McpGatewayBindingStore(storage);
+  const brokerAddress = mcpBindingBrokerAddress(app.getPath('appData'));
   let lastDiagnostic = '';
   const reportDiagnostic = (message: string): void => {
     if (message === lastDiagnostic) return;
@@ -55,7 +31,7 @@ async function main(): Promise<void> {
     process.stderr.write(`Auto CodeZ MCP bridge: ${message}\n`);
   };
   const bridge = new McpStdioBridgeRuntime(
-    () => bindingStore.read(),
+    () => readMcpGatewayBindingFromBroker(brokerAddress),
     () => launchMainApplication(),
     fetch,
     (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
