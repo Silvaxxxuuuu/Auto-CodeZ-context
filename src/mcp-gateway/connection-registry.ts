@@ -121,6 +121,22 @@ export class McpConnectionRegistry {
     return removed;
   }
 
+  async markAdded(clientId: string): Promise<McpConnectionRecord> {
+    this.ensureHydrated();
+    const id = requireClientId(clientId);
+    const existing = this.records.get(id) ?? await this.add(id);
+    const now = this.now();
+    const record: McpConnectionRecord = {
+      clientId: existing.clientId,
+      setupState: 'added',
+      addedAt: existing.addedAt,
+      updatedAt: now,
+    };
+    this.records.set(id, record);
+    await this.persist();
+    return cloneRecord(record);
+  }
+
   async markConfigured(clientId: string, metadata?: { tunnelId?: string }): Promise<McpConnectionRecord> {
     const id = requireClientId(clientId);
     const tunnelId = metadata?.tunnelId;
