@@ -57,6 +57,19 @@ async function runTest() {
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-clientes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Avançar' }).click();
   await mcpMode.getByText('Conclua suas conexões', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  const instructionLayout = await mcpMode.evaluate(() => {
+    const codex = [...document.querySelectorAll('.mcp-guide-card')].find((card) => card.textContent?.includes('ChatGPT Codex'));
+    const title = codex?.querySelector('.mcp-guide-head strong');
+    const subtitle = codex?.querySelector('.mcp-guide-head small');
+    const copy = codex?.querySelector('.mcp-copy-action');
+    if (!codex || !title || !subtitle || !copy) return null;
+    const titleRect = title.getBoundingClientRect();
+    const subtitleRect = subtitle.getBoundingClientRect();
+    const style = getComputedStyle(copy);
+    return { headingGap: subtitleRect.top - titleRect.bottom, copyRadius: style.borderRadius, copyBackground: style.backgroundColor, copyDisplay: style.display };
+  });
+  if (!instructionLayout || instructionLayout.headingGap < 3) throw new Error('Título e subtítulo do ChatGPT Codex continuam visualmente colados: ' + JSON.stringify(instructionLayout));
+  if (instructionLayout.copyDisplay !== 'inline-flex' || instructionLayout.copyRadius === '0px' || instructionLayout.copyBackground === 'rgba(0, 0, 0, 0)') throw new Error('Ação de copiar não recebeu o tratamento visual do MCP Mode: ' + JSON.stringify(instructionLayout));
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-instrucoes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Finalizar' }).click();
   await mcpMode.getByText('MCP pronto', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
@@ -64,6 +77,13 @@ async function runTest() {
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-hub.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Conectar ferramenta' }).click();
   await mcpMode.getByRole('dialog', { name: 'Conectar ferramenta' }).waitFor({ state: 'visible' });
+  const discoveryGap = await mcpMode.locator('.mcp-connect-discovery').evaluate((element) => {
+    const title = element.querySelector('strong');
+    const detail = element.querySelector('small');
+    if (!title || !detail) return -1;
+    return detail.getBoundingClientRect().top - title.getBoundingClientRect().bottom;
+  });
+  if (discoveryGap < 3) throw new Error('Título e descrição do painel Conectar ferramenta continuam encostados: gap=' + discoveryGap);
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-conectar-ferramenta.png'), animations: 'disabled' });
   await mcpMode.locator('[data-mcp-close-connect]').first().click();
   await mcpMode.locator('[data-mcp-open-connection="chatgpt"]').click();
