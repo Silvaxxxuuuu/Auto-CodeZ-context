@@ -10,18 +10,20 @@ async function fixture() {
   const configPath = path.join(root, '.cursor', 'mcp.json');
   const codexConfigPath = path.join(root, '.codex', 'config.toml');
   const claudeCodeConfigPath = path.join(root, '.claude.json');
+  const claudeDesktopConfigPath = path.join(root, 'Claude', 'claude_desktop_config.json');
   const bridgeScriptPath = path.join(root, 'mcp-bridge.ps1');
   await fs.writeFile(bridgeScriptPath, 'Write-Output bridge', 'utf8');
   const runtime = new McpClientConfigurator({
     cursorConfigPath: configPath,
     codexConfigPath,
     claudeCodeConfigPath,
+    claudeDesktopConfigPath,
     bridgeScriptPath,
     brokerAddress: '\\\\.\\pipe\\auto-codez-mcp-test',
     appPath: 'C:\\Program Files\\Auto CodeZ\\Auto CodeZ.exe',
     platform: 'win32',
   });
-  return { root, configPath, codexConfigPath, claudeCodeConfigPath, runtime, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
+  return { root, configPath, codexConfigPath, claudeCodeConfigPath, claudeDesktopConfigPath, runtime, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
 }
 
 test('Cursor adapter installs Auto CodeZ globally without touching unrelated MCP servers', async () => {
@@ -215,6 +217,69 @@ test('Claude Code adapter refuses a conflicting user-scope auto-codez server', a
     assert.equal((await f.runtime.status('claude-code')).state, 'conflict');
     await assert.rejects(() => f.runtime.install('claude-code'), /não vai sobrescrever/);
     await assert.rejects(() => f.runtime.remove('claude-code'), /não pertence/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+
+test('Claude Desktop adapter installs Auto CodeZ without touching unrelated desktop configuration', async () => {
+  const f = await fixture();
+  try {
+    await fs.mkdir(path.dirname(f.claudeDesktopConfigPath), { recursive: true });
+    await fs.writeFile(f.claudeDesktopConfigPath, JSON.stringify({
+      theme: 'dark',
+      mcpServers: {
+        existing: { command: 'existing.exe', args: ['serve'] },
+      },
+    }), 'utf8');
+
+    const status = await f.runtime.install('claude-desktop');
+    assert.equal(status.state, 'configured');
+
+    const config = JSON.parse(await fs.readFile(f.claudeDesktopConfigPath, 'utf8'));
+    assert.equal(config.theme, 'dark');
+    assert.deepEqual(config.mcpServers.existing, { command: 'existing.exe', args: ['serve'] });
+    assert.equal(config.mcpServers['auto-codez'].command, 'powershell.exe');
+    assert.ok(config.mcpServers['auto-codez'].args.includes('-BrokerAddress'));
+    assert.ok(config.mcpServers['auto-codez'].args.includes('-ClientId'));
+    assert.ok(config.mcpServers['auto-codez'].args.includes('claude-desktop'));
+    assert.equal(JSON.stringify(config).includes('Bearer '), false);
+    assert.equal(JSON.stringify(config).includes('bearerToken'), false);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('Claude Desktop adapter is idempotent and removes only its managed entry', async () => {
+  const f = await fixture();
+  try {
+    await f.runtime.install('claude-desktop');
+    await f.runtime.install('claude-desktop');
+    assert.equal((await f.runtime.status('claude-desktop')).state, 'configured');
+
+    const removed = await f.runtime.remove('claude-desktop');
+    assert.equal(removed.state, 'not-configured');
+    const config = JSON.parse(await fs.readFile(f.claudeDesktopConfigPath, 'utf8'));
+    assert.equal(config.mcpServers, undefined);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('Claude Desktop adapter refuses a conflicting auto-codez server', async () => {
+  const f = await fixture();
+  try {
+    await fs.mkdir(path.dirname(f.claudeDesktopConfigPath), { recursive: true });
+    await fs.writeFile(f.claudeDesktopConfigPath, JSON.stringify({
+      mcpServers: {
+        'auto-codez': { command: 'custom.exe', args: [] },
+      },
+    }), 'utf8');
+
+    assert.equal((await f.runtime.status('claude-desktop')).state, 'conflict');
+    await assert.rejects(() => f.runtime.install('claude-desktop'), /não vai sobrescrever/);
+    await assert.rejects(() => f.runtime.remove('claude-desktop'), /não pertence/);
   } finally {
     await f.cleanup();
   }
