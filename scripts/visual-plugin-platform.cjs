@@ -118,12 +118,19 @@ async function runTest() {
     const codex = [...document.querySelectorAll('.mcp-guide-card')].find((card) => card.textContent?.includes('ChatGPT Codex'));
     const title = codex?.querySelector('.mcp-guide-head strong');
     const subtitle = codex?.querySelector('.mcp-guide-head small');
-    const copy = codex?.querySelector('.mcp-copy-action');
-    if (!codex || !title || !subtitle || !copy) return null;
+    const action = codex?.querySelector('[data-mcp-install-client-config="codex"]');
+    if (!codex || !title || !subtitle || !(action instanceof HTMLElement)) return null;
     const titleRect = title.getBoundingClientRect();
     const subtitleRect = subtitle.getBoundingClientRect();
-    const style = getComputedStyle(copy);
-    return { headingGap: subtitleRect.top - titleRect.bottom, copyRadius: style.borderRadius, copyBackground: style.backgroundColor, copyDisplay: style.display };
+    const actionRect = action.getBoundingClientRect();
+    const style = getComputedStyle(action);
+    return {
+      headingGap: subtitleRect.top - titleRect.bottom,
+      actionRadius: style.borderRadius,
+      actionBackground: style.backgroundColor,
+      actionDisplay: style.display,
+      actionHeight: actionRect.height,
+    };
   });
   if (!instructionLayout || instructionLayout.headingGap < 3) throw new Error('Título e subtítulo do ChatGPT Codex continuam visualmente colados: ' + JSON.stringify(instructionLayout));
   const brandIconCheck = await mcpMode.evaluate(() => {
@@ -136,7 +143,7 @@ async function runTest() {
   });
   if (brandIconCheck.count < 2 || brandIconCheck.icons.some((icon) => !icon.loaded || (!icon.src.endsWith('.svg') && !icon.src.startsWith('data:image/svg+xml')) || icon.text)) throw new Error('Ícones SVG locais dos clientes MCP não renderizaram corretamente: ' + JSON.stringify(brandIconCheck));
 
-  if (!['flex', 'inline-flex'].includes(instructionLayout.copyDisplay) || instructionLayout.copyRadius === '0px' || instructionLayout.copyBackground === 'rgba(0, 0, 0, 0)') throw new Error('Ação de copiar não recebeu o tratamento visual do MCP Mode: ' + JSON.stringify(instructionLayout));
+  if (instructionLayout.actionDisplay === 'none' || instructionLayout.actionRadius === '0px' || instructionLayout.actionBackground === 'rgba(0, 0, 0, 0)' || instructionLayout.actionHeight < 28) throw new Error('Ação de configuração automática do Codex não recebeu o tratamento visual esperado: ' + JSON.stringify(instructionLayout));
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-instrucoes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Finalizar' }).click();
   await mcpMode.getByText('MCP pronto', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
