@@ -141,13 +141,13 @@ For a private local Auto CodeZ server, ChatGPT currently uses Secure MCP Tunnel.
 The user-facing steps are intentionally short:
 
 1. Enable Developer Mode in ChatGPT.
-2. Open Plugins.
-3. Press +.
-4. Create an Auto CodeZ connection.
-5. Choose Tunnel.
-6. Select or enter the tunnel associated with the user's workspace.
+2. Open Plugins and create an Auto CodeZ connection.
+3. Choose Tunnel.
+4. Return to the ChatGPT connection page in Auto CodeZ and enter the Tunnel ID shown by the user's account.
+5. If no secure credential is already available in the environment, provide it in the primary ChatGPT setup card.
+6. Press **Validate and connect**. Auto CodeZ prepares the local Gateway, validates the tunnel runtime and waits for the tunnel health endpoint to become ready.
 
-The Auto CodeZ app handles the local server, runtime, preflight and approval system.
+The user does not need to open **Advanced configuration** to connect ChatGPT. Advanced configuration is diagnostic-only for this flow. The Auto CodeZ app handles the local server, runtime, preflight, local authentication and approval system.
 
 Do not hard-code product-plan assumptions. Detect real capabilities exposed to the user's account and workspace.
 
