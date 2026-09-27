@@ -151,6 +151,8 @@ The user-facing steps are intentionally short:
 
 The user does not need to open **Advanced configuration** to connect ChatGPT. Advanced configuration is diagnostic-only for this flow. The Auto CodeZ app handles the local server, runtime, preflight, local authentication and approval system.
 
+When a ChatGPT tunnel was active before the app closed, Auto CodeZ records the reconnect intent without persisting the control-plane credential. On the next start it restores the tunnel automatically only when a secure credential is already available in the environment. A manual disconnect disables automatic reconnection while keeping the Tunnel ID/configuration available for a later explicit reconnect.
+
 Do not hard-code product-plan assumptions. Detect real capabilities exposed to the user's account and workspace.
 
 Official references:
