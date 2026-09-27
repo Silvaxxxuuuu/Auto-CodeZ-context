@@ -37,6 +37,16 @@ const config: ForgeConfig = {
           target: 'main',
         },
         {
+          entry: 'src/bootstrap/app-main.ts',
+          config: 'vite.main.config.ts',
+          target: 'main',
+        },
+        {
+          entry: 'src/bootstrap/mcp-bridge-main.ts',
+          config: 'vite.main.config.ts',
+          target: 'main',
+        },
+        {
           entry: 'src/bootstrap/preload.ts',
           config: 'vite.preload.config.ts',
           target: 'preload',
