@@ -13,6 +13,7 @@ export type McpConnectionRecord = {
   lastConnectedAt?: number;
   metadata?: {
     tunnelId?: string;
+    autoReconnect?: boolean;
   };
 };
 
@@ -49,8 +50,15 @@ function normalizeRecord(value: unknown): McpConnectionRecord | undefined {
 
   if (input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)) {
     const metadata = input.metadata as Record<string, unknown>;
-    if (typeof metadata.tunnelId === 'string' && TUNNEL_ID_PATTERN.test(metadata.tunnelId)) {
-      record.metadata = { tunnelId: metadata.tunnelId };
+    const tunnelId = typeof metadata.tunnelId === 'string' && TUNNEL_ID_PATTERN.test(metadata.tunnelId)
+      ? metadata.tunnelId
+      : undefined;
+    const autoReconnect = typeof metadata.autoReconnect === 'boolean' ? metadata.autoReconnect : undefined;
+    if (tunnelId !== undefined || autoReconnect !== undefined) {
+      record.metadata = {
+        ...(tunnelId ? { tunnelId } : {}),
+        ...(autoReconnect !== undefined ? { autoReconnect } : {}),
+      };
     }
   }
   return record;
@@ -137,7 +145,7 @@ export class McpConnectionRegistry {
     return cloneRecord(record);
   }
 
-  async markConfigured(clientId: string, metadata?: { tunnelId?: string }): Promise<McpConnectionRecord> {
+  async markConfigured(clientId: string, metadata?: { tunnelId?: string; autoReconnect?: boolean }): Promise<McpConnectionRecord> {
     const id = requireClientId(clientId);
     const tunnelId = metadata?.tunnelId;
     if (tunnelId !== undefined && !TUNNEL_ID_PATTERN.test(tunnelId)) throw new Error('Tunnel ID inválido.');
@@ -148,7 +156,15 @@ export class McpConnectionRegistry {
       setupState: 'configured',
       configuredAt: existing.configuredAt ?? now,
       updatedAt: now,
-      ...(tunnelId ? { metadata: { ...(existing.metadata ?? {}), tunnelId } } : {}),
+      ...((tunnelId || metadata?.autoReconnect !== undefined)
+        ? {
+            metadata: {
+              ...(existing.metadata ?? {}),
+              ...(tunnelId ? { tunnelId } : {}),
+              ...(metadata?.autoReconnect !== undefined ? { autoReconnect: metadata.autoReconnect } : {}),
+            },
+          }
+        : {}),
     };
     this.records.set(id, record);
     await this.persist();
@@ -156,7 +172,7 @@ export class McpConnectionRegistry {
   }
 
   async markConnected(clientId: string, metadata?: { tunnelId?: string }): Promise<McpConnectionRecord> {
-    const configured = await this.markConfigured(clientId, metadata);
+    const configured = await this.markConfigured(clientId, { ...(metadata ?? {}), autoReconnect: clientId === 'chatgpt' ? true : metadata && 'autoReconnect' in metadata ? Boolean((metadata as { autoReconnect?: boolean }).autoReconnect) : undefined });
     const now = this.now();
     const record: McpConnectionRecord = {
       ...configured,
@@ -164,6 +180,23 @@ export class McpConnectionRegistry {
       updatedAt: now,
     };
     this.records.set(record.clientId, record);
+    await this.persist();
+    return cloneRecord(record);
+  }
+
+  async markDisconnected(clientId: string): Promise<McpConnectionRecord> {
+    this.ensureHydrated();
+    const id = requireClientId(clientId);
+    const existing = this.records.get(id) ?? await this.add(id);
+    const now = this.now();
+    const record: McpConnectionRecord = {
+      ...existing,
+      updatedAt: now,
+      ...(id === 'chatgpt'
+        ? { metadata: { ...(existing.metadata ?? {}), autoReconnect: false } }
+        : {}),
+    };
+    this.records.set(id, record);
     await this.persist();
     return cloneRecord(record);
   }
