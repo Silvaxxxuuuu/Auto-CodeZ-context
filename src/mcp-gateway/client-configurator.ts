@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-export type McpLocalClientId = 'cursor' | 'codex';
+export type McpLocalClientId = 'cursor' | 'codex' | 'claude-code';
 export type McpClientConfigurationState = 'not-configured' | 'configured' | 'conflict' | 'unsupported';
 
 export type McpClientConfigurationStatus = {
@@ -21,9 +21,14 @@ type CursorServerConfig = {
   args: string[];
 };
 
+type ClaudeCodeServerConfig = CursorServerConfig & {
+  type: 'stdio';
+};
+
 export type McpClientConfiguratorOptions = {
   cursorConfigPath: string;
   codexConfigPath: string;
+  claudeCodeConfigPath: string;
   bridgeScriptPath: string;
   brokerAddress: string;
   appPath: string;
@@ -59,6 +64,13 @@ function expectedServer(options: McpClientConfiguratorOptions, clientId: McpLoca
       '-ClientId',
       clientId,
     ],
+  };
+}
+
+function expectedClaudeCodeServer(options: McpClientConfiguratorOptions): ClaudeCodeServerConfig {
+  return {
+    type: 'stdio',
+    ...expectedServer(options, 'claude-code'),
   };
 }
 
@@ -126,6 +138,12 @@ function isManagedServer(value: unknown, expected: CursorServerConfig): boolean 
   return value.command === expected.command && sameStringArray(value.args, expected.args);
 }
 
+function isManagedClaudeCodeServer(value: unknown, expected: ClaudeCodeServerConfig): boolean {
+  return isRecord(value)
+    && value.type === expected.type
+    && isManagedServer(value, expected);
+}
+
 async function readCursorConfig(configPath: string): Promise<CursorConfigFile> {
   try {
     const raw = await fs.readFile(configPath, 'utf8');
@@ -139,6 +157,24 @@ async function readCursorConfig(configPath: string): Promise<CursorConfigFile> {
     if (isMissingFile(error)) return {};
     if (error instanceof SyntaxError) {
       throw new Error('O arquivo MCP global do Cursor contém JSON inválido. Corrija o arquivo antes de conectar o Auto CodeZ.');
+    }
+    throw error;
+  }
+}
+
+async function readClaudeCodeConfig(configPath: string): Promise<CursorConfigFile> {
+  try {
+    const raw = await fs.readFile(configPath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error('A configuração global do Claude Code precisa ser um objeto JSON.');
+    if (parsed.mcpServers !== undefined && !isRecord(parsed.mcpServers)) {
+      throw new Error('A seção mcpServers do Claude Code está em formato inválido.');
+    }
+    return parsed as CursorConfigFile;
+  } catch (error) {
+    if (isMissingFile(error)) return {};
+    if (error instanceof SyntaxError) {
+      throw new Error('O ~/.claude.json contém JSON inválido. Corrija o arquivo antes de conectar o Auto CodeZ.');
     }
     throw error;
   }
@@ -166,13 +202,17 @@ export class McpClientConfigurator {
   }
 
   async status(clientId: McpLocalClientId): Promise<McpClientConfigurationStatus> {
-    const configPath = clientId === 'cursor' ? this.options.cursorConfigPath : this.options.codexConfigPath;
+    const configPath = clientId === 'cursor'
+      ? this.options.cursorConfigPath
+      : clientId === 'codex'
+        ? this.options.codexConfigPath
+        : this.options.claudeCodeConfigPath;
     if (this.options.platform !== 'win32') {
       return {
         clientId,
         state: 'unsupported',
         configPath,
-        detail: `A configuração automática do ${clientId === 'cursor' ? 'Cursor' : 'Codex'} está disponível no Windows nesta versão.`,
+        detail: `A configuração automática do ${clientId === 'cursor' ? 'Cursor' : clientId === 'codex' ? 'Codex' : 'Claude Code'} está disponível no Windows nesta versão.`,
       };
     }
 
@@ -199,6 +239,34 @@ export class McpClientConfigurator {
       return range.block.trim() === expected.trim()
         ? { clientId, state: 'configured', configPath, detail: 'Auto CodeZ já está configurado no Codex.' }
         : { clientId, state: 'not-configured', configPath, detail: 'A configuração gerenciada do Codex precisa ser atualizada.' };
+    }
+
+    if (clientId === 'claude-code') {
+      const config = await readClaudeCodeConfig(this.options.claudeCodeConfigPath);
+      const current = config.mcpServers?.[SERVER_NAME];
+      if (current === undefined) {
+        return {
+          clientId,
+          state: 'not-configured',
+          configPath,
+          detail: 'Claude Code disponível para configuração automática.',
+        };
+      }
+      const expected = expectedClaudeCodeServer(this.options);
+      if (isManagedClaudeCodeServer(current, expected)) {
+        return {
+          clientId,
+          state: 'configured',
+          configPath,
+          detail: 'Auto CodeZ já está configurado no Claude Code.',
+        };
+      }
+      return {
+        clientId,
+        state: 'conflict',
+        configPath,
+        detail: 'Já existe uma conexão chamada auto-codez no Claude Code que não foi criada por esta instalação.',
+      };
     }
 
     const config = await readCursorConfig(this.options.cursorConfigPath);
@@ -251,6 +319,24 @@ export class McpClientConfigurator {
       return this.status(clientId);
     }
 
+    if (clientId === 'claude-code') {
+      const config = await readClaudeCodeConfig(this.options.claudeCodeConfigPath);
+      const current = config.mcpServers?.[SERVER_NAME];
+      const expected = expectedClaudeCodeServer(this.options);
+      if (current !== undefined && !isManagedClaudeCodeServer(current, expected)) {
+        throw new Error('Já existe uma conexão chamada auto-codez no Claude Code. O Auto CodeZ não vai sobrescrever uma configuração que não criou.');
+      }
+      const next: CursorConfigFile = {
+        ...config,
+        mcpServers: {
+          ...(config.mcpServers ?? {}),
+          [SERVER_NAME]: expected,
+        },
+      };
+      await writeJsonAtomic(this.options.claudeCodeConfigPath, next);
+      return this.status(clientId);
+    }
+
     const config = await readCursorConfig(this.options.cursorConfigPath);
     const current = config.mcpServers?.[SERVER_NAME];
     const expected = expectedServer(this.options, 'cursor');
@@ -283,6 +369,23 @@ export class McpClientConfigurator {
         .replace(/\n{3,}/g, '\n\n')
         .trimEnd();
       await writeTextAtomic(this.options.codexConfigPath, next ? `${next}\n` : '');
+      return this.status(clientId);
+    }
+
+    if (clientId === 'claude-code') {
+      const config = await readClaudeCodeConfig(this.options.claudeCodeConfigPath);
+      const current = config.mcpServers?.[SERVER_NAME];
+      if (current === undefined) return this.status(clientId);
+      const expected = expectedClaudeCodeServer(this.options);
+      if (!isManagedClaudeCodeServer(current, expected)) {
+        throw new Error('A conexão auto-codez existente no Claude Code não pertence a esta instalação e não será removida.');
+      }
+      const servers = { ...(config.mcpServers ?? {}) };
+      delete servers[SERVER_NAME];
+      const next: CursorConfigFile = { ...config };
+      if (Object.keys(servers).length) next.mcpServers = servers;
+      else delete next.mcpServers;
+      await writeJsonAtomic(this.options.claudeCodeConfigPath, next);
       return this.status(clientId);
     }
 
