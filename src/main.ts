@@ -1286,7 +1286,16 @@ function requireAutoConfigClient(value: unknown): 'cursor' | 'codex' | 'claude-c
 
 ipcMain.handle('mcp-client-config:status', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
-  return localMcpClientConfigurator().status(clientId);
+  const status = await localMcpClientConfigurator().status(clientId);
+  const existing = mcpConnectionRegistry.get(clientId);
+  if (existing) {
+    if (status.state === 'configured' && existing.setupState !== 'configured') {
+      await mcpConnectionRegistry.markConfigured(clientId);
+    } else if ((status.state === 'not-configured' || status.state === 'conflict') && existing.setupState !== 'added') {
+      await mcpConnectionRegistry.markAdded(clientId);
+    }
+  }
+  return status;
 });
 ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
