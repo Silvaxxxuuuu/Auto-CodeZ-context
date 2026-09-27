@@ -8,6 +8,7 @@ const RETRY_INTERVAL_MS = 150;
 
 export type McpBridgeBindingResolver = () => Promise<McpGatewayBridgeBinding | undefined>;
 export type McpBridgeLauncher = () => Promise<void> | void;
+export type McpBridgeDiagnosticReporter = (message: string) => void;
 
 function sanitizedClientId(value: string): string {
   const normalized = value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 80);
@@ -28,6 +29,7 @@ export class McpStdioBridgeRuntime {
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly sleep: (milliseconds: number) => Promise<void> = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     private readonly startupTimeoutMs = DEFAULT_STARTUP_TIMEOUT_MS,
+    private readonly reportDiagnostic: McpBridgeDiagnosticReporter = () => undefined,
   ) {}
 
   async run(input: Readable, output: Writable, clientIdInput: string): Promise<void> {
@@ -62,9 +64,11 @@ export class McpStdioBridgeRuntime {
   private async ensureBinding(clientId: string, forceLaunch = false): Promise<McpGatewayBridgeBinding> {
     if (!forceLaunch) {
       const existing = await this.resolveBinding();
-      if (existing && await this.isReachable(existing, clientId)) return existing;
+      if (!existing) this.reportDiagnostic('Nenhum binding MCP local legível foi encontrado.');
+      else if (await this.isReachable(existing, clientId)) return existing;
     }
 
+    this.reportDiagnostic('Tentando iniciar ou restaurar o Auto CodeZ MCP local.');
     await this.launchAutoCodeZ();
     const deadline = Date.now() + this.startupTimeoutMs;
     while (Date.now() < deadline) {
@@ -87,8 +91,13 @@ export class McpStdioBridgeRuntime {
         body: JSON.stringify({ jsonrpc: '2.0', id: 'autocodez-bridge-probe', method: 'server/discover', params: {} }),
         signal: AbortSignal.timeout(1500),
       });
-      return response.ok;
-    } catch {
+      if (!response.ok) {
+        this.reportDiagnostic(`Binding MCP carregado, mas o Gateway respondeu HTTP ${response.status}.`);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      this.reportDiagnostic(`Binding MCP carregado, mas o Gateway não respondeu: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
