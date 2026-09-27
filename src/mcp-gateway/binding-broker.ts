@@ -24,7 +24,7 @@ export class McpGatewayBindingBroker {
 
   async start(): Promise<void> {
     if (this.server) return;
-    if (process.platform !== 'win32') await fs.rm(this.address, { force: true }).catch(() => undefined);
+    if (process.platform !== 'win32') await fs.rm(this.address, { force: true }).catch((): undefined => undefined);
     const server = net.createServer((socket) => {
       socket.setTimeout(2_000);
       void this.resolveBinding()
@@ -52,14 +52,14 @@ export class McpGatewayBindingBroker {
       server.listen(this.address);
     });
     this.server = server;
-    if (process.platform !== 'win32') await fs.chmod(this.address, 0o600).catch(() => undefined);
+    if (process.platform !== 'win32') await fs.chmod(this.address, 0o600).catch((): undefined => undefined);
   }
 
   async stop(): Promise<void> {
     const server = this.server;
     this.server = undefined;
     if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
-    if (process.platform !== 'win32') await fs.rm(this.address, { force: true }).catch(() => undefined);
+    if (process.platform !== 'win32') await fs.rm(this.address, { force: true }).catch((): undefined => undefined);
   }
 }
 
