@@ -9,6 +9,10 @@ export default defineConfig({
   build: {
     rollupOptions: {
       external: ['node-pty'],
+      output: {
+        entryFileNames: 'main.js',
+        chunkFileNames: 'chunks/[name]-[hash].js',
+      },
     },
   },
 });
