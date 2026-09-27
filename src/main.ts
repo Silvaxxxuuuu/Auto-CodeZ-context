@@ -66,6 +66,7 @@ import { McpGatewayHttpServer } from './mcp-gateway/http-server';
 import { McpGatewayExecutionRuntime } from './mcp-gateway/execution-runtime';
 import { McpTunnelRuntime } from './mcp-gateway/tunnel-runtime';
 import { McpRuntimeInstaller } from './mcp-gateway/runtime-installer';
+import { McpConnectionRegistry } from './mcp-gateway/connection-registry';
 import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
 import { LocalProtectedCredentialStore } from './account/protected-credential-store';
 import { DeviceIdentityStore } from './account/device-identity';
@@ -282,6 +283,7 @@ const mcpGatewayProtocol = new McpGatewayProtocol(operationalLedgerRetrieval, mc
 const mcpGatewayServer = new McpGatewayHttpServer(mcpGatewayProtocol);
 const mcpTunnelRuntime = new McpTunnelRuntime();
 const mcpRuntimeInstaller = new McpRuntimeInstaller(() => app.getPath('userData'));
+const mcpConnectionRegistry = new McpConnectionRegistry(storage);
 const executionPlanner = new ExecutionPlanner();
 const executionCoordinator = new ExecutionCoordinator(executionManager, executionPlanner);
 const executionChangeBudgetRuntime = new ExecutionChangeBudgetRuntime();
@@ -1178,6 +1180,10 @@ ipcMain.handle('agent:list-approvals', async (_event, filters?: { chatId?: strin
 ipcMain.handle('agent:list-executions', async (_event, chatId?: string) => chatId === undefined ? executionManager.list() : executionManager.get(requireIdentifier(chatId, 'Chat')) ?? null);
 ipcMain.handle('agent:list-operational-ledger', async (_event, query: OperationalLedgerQuery | undefined) => operationalLedger.query(query ?? {}));
 
+ipcMain.handle('mcp-connections:list', async () => mcpConnectionRegistry.list());
+ipcMain.handle('mcp-connections:add', async (_event, clientIdInput: unknown) => mcpConnectionRegistry.add(requireIdentifier(clientIdInput, 'Cliente MCP')));
+ipcMain.handle('mcp-connections:remove', async (_event, clientIdInput: unknown) => ({ removed: await mcpConnectionRegistry.remove(requireIdentifier(clientIdInput, 'Cliente MCP')) }));
+
 ipcMain.handle('mcp-gateway:status', async () => mcpGatewayServer.status());
 ipcMain.handle('mcp-gateway:preflight', async () => {
   const result = await mcpGatewayServer.preflight();
@@ -1229,6 +1235,7 @@ ipcMain.handle('mcp-tunnel:doctor', async (_event, tunnelIdInput: unknown, contr
     executable: runtime.executable,
     ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
   });
+  await mcpConnectionRegistry.markConfigured('chatgpt', { tunnelId });
   operationalLedger.record({
     actor: 'runtime',
     category: 'system',
@@ -1261,6 +1268,7 @@ ipcMain.handle('mcp-tunnel:start', async (_event, tunnelIdInput: unknown, contro
     executable: runtime.executable,
     ...(controlPlaneApiKey ? { controlPlaneApiKey } : {}),
   });
+  await mcpConnectionRegistry.markConnected('chatgpt', { tunnelId: status.tunnelId ?? tunnelId });
   operationalLedger.record({
     actor: 'runtime',
     category: 'system',
@@ -1650,6 +1658,7 @@ app.whenReady().then(async () => {
     }
   }
   await storage.init();
+  await mcpConnectionRegistry.init();
   const initialAccountState = await accountSessionRuntime.hydrate();
   scheduleAccountRefresh(initialAccountState);
   if (initialAccountState.state === 'authenticated') await deviceRegistryRuntime.ensureRegistered();
