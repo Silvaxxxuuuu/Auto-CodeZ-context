@@ -68,6 +68,7 @@ import { McpTunnelRuntime } from './mcp-gateway/tunnel-runtime';
 import { McpRuntimeInstaller } from './mcp-gateway/runtime-installer';
 import { McpConnectionRegistry } from './mcp-gateway/connection-registry';
 import { McpGatewayBindingStore } from './mcp-gateway/binding-store';
+import { McpGatewayBindingBroker, mcpBindingBrokerAddress } from './mcp-gateway/binding-broker';
 import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
 import { LocalProtectedCredentialStore } from './account/protected-credential-store';
 import { DeviceIdentityStore } from './account/device-identity';
@@ -286,6 +287,7 @@ const mcpTunnelRuntime = new McpTunnelRuntime();
 const mcpRuntimeInstaller = new McpRuntimeInstaller(() => app.getPath('userData'));
 const mcpConnectionRegistry = new McpConnectionRegistry(storage);
 const mcpGatewayBindingStore = new McpGatewayBindingStore(storage);
+let mcpGatewayBindingBroker: McpGatewayBindingBroker | undefined;
 
 async function startManagedMcpGateway(options: { port?: number } = {}) {
   const current = mcpGatewayServer.status();
@@ -1705,6 +1707,19 @@ app.whenReady().then(async () => {
   executionPathScopeRuntime.restore(await executionPathScopeStore.load());
   await toolRuntime.init();
   await agentRuntime.init();
+  mcpGatewayBindingBroker = new McpGatewayBindingBroker(
+    mcpBindingBrokerAddress(app.getPath('appData')),
+    async () => {
+      const info = await startManagedMcpGateway();
+      return {
+        endpoint: info.endpoint,
+        bearerToken: info.bearerToken,
+        ownerPid: process.pid,
+        updatedAt: Date.now(),
+      };
+    },
+  );
+  await mcpGatewayBindingBroker.start();
   if (mcpConnectionRegistry.list().length) {
     try {
       await startManagedMcpGateway();
@@ -1839,6 +1854,7 @@ app.on('before-quit', (event) => {
   void (async () => {
     clearAccountRefreshTimer();
     await mcpTunnelRuntime.stop().catch((): undefined => undefined);
+    await mcpGatewayBindingBroker?.stop().catch((): undefined => undefined);
     await stopManagedMcpGateway().catch((): undefined => undefined);
     await attachmentIndexer.stop().catch((): undefined => undefined);
     app.quit();
