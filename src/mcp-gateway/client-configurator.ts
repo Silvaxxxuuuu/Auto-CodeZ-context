@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-export type McpLocalClientId = 'cursor' | 'codex' | 'claude-code';
+export type McpLocalClientId = 'cursor' | 'codex' | 'claude-code' | 'claude-desktop';
 export type McpClientConfigurationState = 'not-configured' | 'configured' | 'conflict' | 'unsupported';
 
 export type McpClientConfigurationStatus = {
@@ -29,6 +29,7 @@ export type McpClientConfiguratorOptions = {
   cursorConfigPath: string;
   codexConfigPath: string;
   claudeCodeConfigPath: string;
+  claudeDesktopConfigPath: string;
   bridgeScriptPath: string;
   brokerAddress: string;
   appPath: string;
@@ -180,6 +181,24 @@ async function readClaudeCodeConfig(configPath: string): Promise<CursorConfigFil
   }
 }
 
+async function readClaudeDesktopConfig(configPath: string): Promise<CursorConfigFile> {
+  try {
+    const raw = await fs.readFile(configPath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) throw new Error('A configuração do Claude Desktop precisa ser um objeto JSON.');
+    if (parsed.mcpServers !== undefined && !isRecord(parsed.mcpServers)) {
+      throw new Error('A seção mcpServers do Claude Desktop está em formato inválido.');
+    }
+    return parsed as CursorConfigFile;
+  } catch (error) {
+    if (isMissingFile(error)) return {};
+    if (error instanceof SyntaxError) {
+      throw new Error('O claude_desktop_config.json contém JSON inválido. Corrija o arquivo antes de conectar o Auto CodeZ.');
+    }
+    throw error;
+  }
+}
+
 async function writeJsonAtomic(configPath: string, value: CursorConfigFile): Promise<void> {
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   const temporary = `${configPath}.autocodez-${process.pid}-${Date.now()}.tmp`;
@@ -206,13 +225,15 @@ export class McpClientConfigurator {
       ? this.options.cursorConfigPath
       : clientId === 'codex'
         ? this.options.codexConfigPath
-        : this.options.claudeCodeConfigPath;
+        : clientId === 'claude-code'
+          ? this.options.claudeCodeConfigPath
+          : this.options.claudeDesktopConfigPath;
     if (this.options.platform !== 'win32') {
       return {
         clientId,
         state: 'unsupported',
         configPath,
-        detail: `A configuração automática do ${clientId === 'cursor' ? 'Cursor' : clientId === 'codex' ? 'Codex' : 'Claude Code'} está disponível no Windows nesta versão.`,
+        detail: `A configuração automática do ${clientId === 'cursor' ? 'Cursor' : clientId === 'codex' ? 'Codex' : clientId === 'claude-code' ? 'Claude Code' : 'Claude Desktop'} está disponível no Windows nesta versão.`,
       };
     }
 
@@ -266,6 +287,34 @@ export class McpClientConfigurator {
         state: 'conflict',
         configPath,
         detail: 'Já existe uma conexão chamada auto-codez no Claude Code que não foi criada por esta instalação.',
+      };
+    }
+
+    if (clientId === 'claude-desktop') {
+      const config = await readClaudeDesktopConfig(this.options.claudeDesktopConfigPath);
+      const current = config.mcpServers?.[SERVER_NAME];
+      if (current === undefined) {
+        return {
+          clientId,
+          state: 'not-configured',
+          configPath,
+          detail: 'Claude Desktop disponível para configuração automática.',
+        };
+      }
+      const expected = expectedServer(this.options, 'claude-desktop');
+      if (isManagedServer(current, expected)) {
+        return {
+          clientId,
+          state: 'configured',
+          configPath,
+          detail: 'Auto CodeZ já está configurado no Claude Desktop.',
+        };
+      }
+      return {
+        clientId,
+        state: 'conflict',
+        configPath,
+        detail: 'Já existe uma conexão chamada auto-codez no Claude Desktop que não foi criada por esta instalação.',
       };
     }
 
@@ -337,6 +386,24 @@ export class McpClientConfigurator {
       return this.status(clientId);
     }
 
+    if (clientId === 'claude-desktop') {
+      const config = await readClaudeDesktopConfig(this.options.claudeDesktopConfigPath);
+      const current = config.mcpServers?.[SERVER_NAME];
+      const expected = expectedServer(this.options, 'claude-desktop');
+      if (current !== undefined && !isManagedServer(current, expected)) {
+        throw new Error('Já existe uma conexão chamada auto-codez no Claude Desktop. O Auto CodeZ não vai sobrescrever uma configuração que não criou.');
+      }
+      const next: CursorConfigFile = {
+        ...config,
+        mcpServers: {
+          ...(config.mcpServers ?? {}),
+          [SERVER_NAME]: expected,
+        },
+      };
+      await writeJsonAtomic(this.options.claudeDesktopConfigPath, next);
+      return this.status(clientId);
+    }
+
     const config = await readCursorConfig(this.options.cursorConfigPath);
     const current = config.mcpServers?.[SERVER_NAME];
     const expected = expectedServer(this.options, 'cursor');
@@ -386,6 +453,23 @@ export class McpClientConfigurator {
       if (Object.keys(servers).length) next.mcpServers = servers;
       else delete next.mcpServers;
       await writeJsonAtomic(this.options.claudeCodeConfigPath, next);
+      return this.status(clientId);
+    }
+
+    if (clientId === 'claude-desktop') {
+      const config = await readClaudeDesktopConfig(this.options.claudeDesktopConfigPath);
+      const current = config.mcpServers?.[SERVER_NAME];
+      if (current === undefined) return this.status(clientId);
+      const expected = expectedServer(this.options, 'claude-desktop');
+      if (!isManagedServer(current, expected)) {
+        throw new Error('A conexão auto-codez existente no Claude Desktop não pertence a esta instalação e não será removida.');
+      }
+      const servers = { ...(config.mcpServers ?? {}) };
+      delete servers[SERVER_NAME];
+      const next: CursorConfigFile = { ...config };
+      if (Object.keys(servers).length) next.mcpServers = servers;
+      else delete next.mcpServers;
+      await writeJsonAtomic(this.options.claudeDesktopConfigPath, next);
       return this.status(clientId);
     }
 
