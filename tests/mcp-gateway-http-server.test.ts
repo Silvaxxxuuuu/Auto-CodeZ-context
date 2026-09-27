@@ -278,3 +278,38 @@ test('MCP Gateway preflight fails closed on a malformed tools catalog', async ()
     await server.stop();
   }
 });
+
+
+test('MCP Gateway accepts authenticated bridge client identity without exposing it to unauthenticated callers', async () => {
+  let observedClientName: string | undefined;
+  const protocol = {
+    async handle(request: { id?: string | number | null }, context: { clientName?: string }) {
+      observedClientName = context.clientName;
+      return { jsonrpc: '2.0', id: request.id ?? null, result: { tools: [] as unknown[] } };
+    },
+  } as unknown as McpGatewayProtocol;
+  const server = new McpGatewayHttpServer(protocol);
+  const info = await server.start({ bearerToken: 'u'.repeat(48) });
+  try {
+    const response = await post(
+      info.endpoint,
+      info.bearerToken,
+      { jsonrpc: '2.0', id: 'bridge-client', method: 'tools/list' },
+      { 'x-auto-codez-mcp-client': 'codex' },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(observedClientName, 'codex');
+
+    observedClientName = undefined;
+    const unauthorized = await post(
+      info.endpoint,
+      undefined,
+      { jsonrpc: '2.0', id: 'unauthorized-client', method: 'tools/list' },
+      { 'x-auto-codez-mcp-client': 'cursor' },
+    );
+    assert.equal(unauthorized.status, 401);
+    assert.equal(observedClientName, undefined);
+  } finally {
+    await server.stop();
+  }
+});
