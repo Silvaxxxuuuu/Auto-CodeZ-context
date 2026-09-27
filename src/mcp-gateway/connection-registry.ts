@@ -123,10 +123,10 @@ export class McpConnectionRegistry {
 
   async markConfigured(clientId: string, metadata?: { tunnelId?: string }): Promise<McpConnectionRecord> {
     const id = requireClientId(clientId);
-    const existing = this.records.get(id) ?? await this.add(id);
-    const now = this.now();
     const tunnelId = metadata?.tunnelId;
     if (tunnelId !== undefined && !TUNNEL_ID_PATTERN.test(tunnelId)) throw new Error('Tunnel ID inválido.');
+    const existing = this.records.get(id) ?? await this.add(id);
+    const now = this.now();
     const record: McpConnectionRecord = {
       ...existing,
       setupState: 'configured',
