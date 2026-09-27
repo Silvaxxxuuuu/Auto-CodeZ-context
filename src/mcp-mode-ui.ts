@@ -46,8 +46,9 @@ type TunnelStatus = { running: boolean; ready: boolean; version?: string; tunnel
 type McpRuntimeStatus = { platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string };
 type OnboardingStep = 'activation' | 'clients' | 'instructions' | 'operational';
 type McpClientId = 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other';
+type McpAutoConfigClientId = 'cursor' | 'codex';
 type McpStoredConnection = { clientId: McpClientId; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string } };
-type McpClientConfigStatus = { clientId: 'cursor'; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string };
+type McpClientConfigStatus = { clientId: McpAutoConfigClientId; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string };
 
 const MAX_RENDERED_EVENTS = 250;
 const OPENAI_ICON_URL = new URL('./assets/mcp-clients/openai.svg', import.meta.url).href;
@@ -97,9 +98,9 @@ const selectedClients = (() => {
 let showAdvanced = false;
 let selectedConnectionId: McpClientId | '' = '';
 let connectPanelOpen = false;
-let cursorConfigStatus: McpClientConfigStatus | undefined;
-let clientConfigBusy = false;
-let clientConfigError = '';
+const clientConfigStatuses: Partial<Record<McpAutoConfigClientId, McpClientConfigStatus>> = {};
+const clientConfigErrors: Partial<Record<McpAutoConfigClientId, string>> = {};
+let clientConfigBusy: McpAutoConfigClientId | '' = '';
 
 const MCP_CLIENTS: Array<{ id: McpClientId; name: string; detail: string; badge: string; description: string; icon: string }> = [
   { id: 'chatgpt', name: 'ChatGPT', detail: 'Secure MCP Tunnel', badge: 'Configuração guiada', description: 'Permite que o ChatGPT use as ferramentas autorizadas do Auto CodeZ com sua aprovação local.', icon: OPENAI_ICON_URL },
@@ -375,10 +376,18 @@ function renderClientInstructions(client: McpClientId): string {
     </article>`;
   }
   if (client === 'codex') {
+    const status = clientConfigStatuses.codex;
+    const error = clientConfigErrors.codex;
     return `<article class="mcp-guide-card">
       <div class="mcp-guide-head">${renderClientIcon('codex', 'mcp-client-mark')}<div><strong>ChatGPT Codex</strong><small>App · CLI · extensão</small></div></div>
-      <p>O Codex suporta servidores MCP locais. Abra <b>Configurações → Servidores MCP</b>, adicione <b>Auto CodeZ</b> e use a conexão local exibida em <b>Configuração avançada</b>.</p>
-      <div class="mcp-copy-line"><code>Use o MCP do Auto CodeZ para trabalhar neste projeto.</code><button class="mcp-copy-action" type="button" data-mcp-copy-text="Use o MCP do Auto CodeZ para trabalhar neste projeto." aria-label="Copiar instrução para o Codex"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M15 9V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/></svg><span>Copiar</span></button></div>
+      ${status?.state === 'configured'
+        ? '<p>O Auto CodeZ já está configurado no Codex. App, CLI e extensão usam a mesma configuração MCP global.</p><div class="mcp-guide-note">Configuração concluída automaticamente.</div>'
+        : status?.state === 'conflict'
+          ? `<p>${escapeHtml(status.detail)}</p><div class="mcp-guide-note">O Auto CodeZ não sobrescreve conexões MCP que não criou.</div>`
+          : status?.state === 'unsupported'
+            ? '<p>A configuração automática do Codex ainda não está disponível neste sistema. Use a configuração avançada.</p>'
+            : `<p>O Auto CodeZ pode adicionar esta conexão ao Codex automaticamente, preservando seu config.toml atual e sem salvar tokens.</p><button class="mcp-primary-action compact" type="button" data-mcp-install-client-config="codex" ${clientConfigBusy ? 'disabled' : ''}>${clientConfigBusy === 'codex' ? 'Configurando…' : 'Configurar automaticamente'}</button>`}
+      ${error ? `<div class="mcp-client-config-error">${escapeHtml(error)}</div>` : ''}
     </article>`;
   }
   if (client === 'claude-desktop') {
@@ -388,18 +397,17 @@ function renderClientInstructions(client: McpClientId): string {
     return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('claude-code', 'mcp-client-mark')}<div><strong>Claude Code</strong><small>MCP local</small></div></div><p>Adicione o servidor MCP do Auto CodeZ nas configurações MCP do Claude Code. Depois peça:</p><div class="mcp-copy-line"><code>Conecte-se ao MCP do Auto CodeZ e use as ferramentas disponíveis.</code><button class="mcp-copy-action" type="button" data-mcp-copy-text="Conecte-se ao MCP do Auto CodeZ e use as ferramentas disponíveis." aria-label="Copiar instrução para o Claude Code"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="2"/><path d="M15 9V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/></svg><span>Copiar</span></button></div></article>`;
   }
   if (client === 'cursor') {
-    const configured = cursorConfigStatus?.state === 'configured';
-    const conflict = cursorConfigStatus?.state === 'conflict';
-    const unsupported = cursorConfigStatus?.state === 'unsupported';
+    const status = clientConfigStatuses.cursor;
+    const error = clientConfigErrors.cursor;
     return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('cursor', 'mcp-client-mark')}<div><strong>Cursor</strong><small>Servidor MCP no editor</small></div></div>
-      ${configured
+      ${status?.state === 'configured'
         ? '<p>O Auto CodeZ já está configurado no Cursor. Se o editor estava aberto, recarregue as integrações MCP.</p><div class="mcp-guide-note">Configuração concluída automaticamente.</div>'
-        : conflict
-          ? `<p>${escapeHtml(cursorConfigStatus?.detail || '')}</p><div class="mcp-guide-note">O Auto CodeZ não sobrescreve conexões MCP que não criou.</div>`
-          : unsupported
+        : status?.state === 'conflict'
+          ? `<p>${escapeHtml(status.detail)}</p><div class="mcp-guide-note">O Auto CodeZ não sobrescreve conexões MCP que não criou.</div>`
+          : status?.state === 'unsupported'
             ? '<p>A configuração automática do Cursor ainda não está disponível neste sistema. Use a configuração avançada.</p>'
-            : `<p>O Auto CodeZ pode adicionar esta conexão ao Cursor automaticamente, sem expor tokens nem pedir edição de arquivos.</p><button class="mcp-primary-action compact" type="button" data-mcp-install-client-config="cursor" ${clientConfigBusy ? 'disabled' : ''}>${clientConfigBusy ? 'Configurando…' : 'Configurar automaticamente'}</button>`}
-      ${clientConfigError ? `<div class="mcp-client-config-error">${escapeHtml(clientConfigError)}</div>` : ''}
+            : `<p>O Auto CodeZ pode adicionar esta conexão ao Cursor automaticamente, sem expor tokens nem pedir edição de arquivos.</p><button class="mcp-primary-action compact" type="button" data-mcp-install-client-config="cursor" ${clientConfigBusy ? 'disabled' : ''}>${clientConfigBusy === 'cursor' ? 'Configurando…' : 'Configurar automaticamente'}</button>`}
+      ${error ? `<div class="mcp-client-config-error">${escapeHtml(error)}</div>` : ''}
     </article>`;
   }
   return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('other', 'mcp-client-mark')}<div><strong>Outro cliente MCP</strong><small>Configuração manual</small></div></div><p>Adicione um servidor MCP usando os dados de conexão local mostrados em <b>Configuração avançada</b>. Se o seu cliente exigir um formato específico, consulte a documentação dele.</p></article>`;
@@ -504,23 +512,33 @@ function renderTechnicalPanels(): string {
   </div>`;
 }
 
+function isAutoConfigClient(client: McpClientId): client is McpAutoConfigClientId {
+  return client === 'cursor' || client === 'codex';
+}
+
 function renderConnectionSetup(client: McpClientId, state: { label: string; tone: string; detail: string }): string {
-  if (client !== 'cursor') {
+  if (!isAutoConfigClient(client)) {
     return state.tone === 'connected' || state.tone === 'active'
       ? ''
       : `<section class="mcp-setup-callout"><span>PRÓXIMO PASSO</span><strong>Conclua no ${escapeHtml(clientDefinition(client).name)}</strong><p>${escapeHtml(clientSetupSummary(client))}</p></section>`;
   }
 
-  if (cursorConfigStatus?.state === 'configured') {
-    return `<section class="mcp-setup-callout configured"><span>CONFIGURADO</span><strong>Auto CodeZ adicionado ao Cursor</strong><p>${escapeHtml(cursorConfigStatus.detail)} Se o Cursor já estava aberto, recarregue as integrações MCP.</p><button class="mcp-text-action" type="button" data-mcp-remove-client-config="cursor" ${clientConfigBusy ? 'disabled' : ''}>Remover configuração</button></section>`;
+  const definition = clientDefinition(client);
+  const status = clientConfigStatuses[client];
+  const error = clientConfigErrors[client];
+  const configuredExtra = client === 'cursor'
+    ? ' Se o Cursor já estava aberto, recarregue as integrações MCP.'
+    : ' App, CLI e extensão do Codex compartilham esta configuração.';
+  if (status?.state === 'configured') {
+    return `<section class="mcp-setup-callout configured"><span>CONFIGURADO</span><strong>Auto CodeZ adicionado ao ${escapeHtml(definition.name)}</strong><p>${escapeHtml(status.detail)}${escapeHtml(configuredExtra)}</p><button class="mcp-text-action" type="button" data-mcp-remove-client-config="${client}" ${clientConfigBusy ? 'disabled' : ''}>Remover configuração</button></section>`;
   }
-  if (cursorConfigStatus?.state === 'conflict') {
-    return `<section class="mcp-setup-callout attention"><span>AÇÃO NECESSÁRIA</span><strong>Já existe uma conexão auto-codez no Cursor</strong><p>${escapeHtml(cursorConfigStatus.detail)} O Auto CodeZ não sobrescreveu nada.</p></section>`;
+  if (status?.state === 'conflict') {
+    return `<section class="mcp-setup-callout attention"><span>AÇÃO NECESSÁRIA</span><strong>Já existe uma conexão auto-codez no ${escapeHtml(definition.name)}</strong><p>${escapeHtml(status.detail)} O Auto CodeZ não sobrescreveu nada.</p></section>`;
   }
-  if (cursorConfigStatus?.state === 'unsupported') {
-    return `<section class="mcp-setup-callout"><span>PRÓXIMO PASSO</span><strong>Conclua no Cursor</strong><p>${escapeHtml(cursorConfigStatus.detail)}</p></section>`;
+  if (status?.state === 'unsupported') {
+    return `<section class="mcp-setup-callout"><span>PRÓXIMO PASSO</span><strong>Conclua no ${escapeHtml(definition.name)}</strong><p>${escapeHtml(status.detail)}</p></section>`;
   }
-  return `<section class="mcp-setup-callout"><span>PRÓXIMO PASSO</span><strong>Conectar ao Cursor</strong><p>O Auto CodeZ pode configurar esta conexão automaticamente. Nenhum token é salvo no arquivo do Cursor.</p><button class="mcp-primary-action compact" type="button" data-mcp-install-client-config="cursor" ${clientConfigBusy ? 'disabled' : ''}>${clientConfigBusy ? 'Configurando…' : 'Configurar automaticamente'}</button>${clientConfigError ? `<div class="mcp-client-config-error">${escapeHtml(clientConfigError)}</div>` : ''}</section>`;
+  return `<section class="mcp-setup-callout"><span>PRÓXIMO PASSO</span><strong>Conectar ao ${escapeHtml(definition.name)}</strong><p>O Auto CodeZ pode configurar esta conexão automaticamente. Nenhum token é salvo na configuração do cliente.</p><button class="mcp-primary-action compact" type="button" data-mcp-install-client-config="${client}" ${clientConfigBusy ? 'disabled' : ''}>${clientConfigBusy === client ? 'Configurando…' : 'Configurar automaticamente'}</button>${error ? `<div class="mcp-client-config-error">${escapeHtml(error)}</div>` : ''}</section>`;
 }
 
 function renderConnectionDetail(root: HTMLElement, clientId: McpClientId): void {
@@ -708,20 +726,21 @@ async function refresh(): Promise<void> {
   loading = true;
   render();
   try {
-    const cursorStatusPromise = window.autoCodez.mcpClientConfigStatus('cursor')
+    const clientStatusPromise = (clientId: McpAutoConfigClientId) => window.autoCodez.mcpClientConfigStatus(clientId)
       .then((status) => status as McpClientConfigStatus)
       .catch((error): undefined => {
-        clientConfigError = error instanceof Error ? error.message : String(error);
+        clientConfigErrors[clientId] = error instanceof Error ? error.message : String(error);
         return undefined;
       });
-    const [page, nextApprovals, nextGatewayStatus, nextTunnelStatus, nextRuntimeStatus, nextConnections, nextCursorConfigStatus] = await Promise.all([
+    const [page, nextApprovals, nextGatewayStatus, nextTunnelStatus, nextRuntimeStatus, nextConnections, nextCursorConfigStatus, nextCodexConfigStatus] = await Promise.all([
       window.autoCodez.listOperationalLedger({ limit: MAX_RENDERED_EVENTS, direction: 'backward' }),
       window.autoCodez.listApprovals(),
       window.autoCodez.mcpGatewayStatus(),
       window.autoCodez.mcpTunnelStatus(),
       window.autoCodez.mcpRuntimeStatus(),
       window.autoCodez.listMcpConnections() as Promise<McpStoredConnection[]>,
-      cursorStatusPromise,
+      clientStatusPromise('cursor'),
+      clientStatusPromise('codex'),
     ]);
     if (!active || token !== refreshSequence) return;
     events = page.events.map(asLedgerEvent).filter((event): event is LedgerEvent => Boolean(event)).reverse();
@@ -729,7 +748,8 @@ async function refresh(): Promise<void> {
     gatewayStatus = nextGatewayStatus as GatewayStatus;
     tunnelStatus = nextTunnelStatus as TunnelStatus;
     runtimeStatus = nextRuntimeStatus as McpRuntimeStatus;
-    cursorConfigStatus = nextCursorConfigStatus;
+    if (nextCursorConfigStatus) clientConfigStatuses.cursor = nextCursorConfigStatus;
+    if (nextCodexConfigStatus) clientConfigStatuses.codex = nextCodexConfigStatus;
     if (onboardingStep === 'operational') {
       const persistedClients = nextConnections
         .map((connection) => connection.clientId)
@@ -858,34 +878,34 @@ function install(): void {
       render();
       return;
     }
-    const installClientConfig = target.closest<HTMLElement>('[data-mcp-install-client-config]')?.dataset.mcpInstallClientConfig;
-    if (installClientConfig === 'cursor') {
-      clientConfigBusy = true;
-      clientConfigError = '';
+    const installClientConfig = target.closest<HTMLElement>('[data-mcp-install-client-config]')?.dataset.mcpInstallClientConfig as McpAutoConfigClientId | undefined;
+    if (installClientConfig && (installClientConfig === 'cursor' || installClientConfig === 'codex')) {
+      clientConfigBusy = installClientConfig;
+      delete clientConfigErrors[installClientConfig];
       render();
       try {
-        cursorConfigStatus = await window.autoCodez.installMcpClientConfig('cursor') as McpClientConfigStatus;
+        clientConfigStatuses[installClientConfig] = await window.autoCodez.installMcpClientConfig(installClientConfig) as McpClientConfigStatus;
         await refresh();
       } catch (error) {
-        clientConfigError = error instanceof Error ? error.message : String(error);
+        clientConfigErrors[installClientConfig] = error instanceof Error ? error.message : String(error);
       } finally {
-        clientConfigBusy = false;
+        clientConfigBusy = '';
         render();
       }
       return;
     }
-    const removeClientConfig = target.closest<HTMLElement>('[data-mcp-remove-client-config]')?.dataset.mcpRemoveClientConfig;
-    if (removeClientConfig === 'cursor') {
-      clientConfigBusy = true;
-      clientConfigError = '';
+    const removeClientConfig = target.closest<HTMLElement>('[data-mcp-remove-client-config]')?.dataset.mcpRemoveClientConfig as McpAutoConfigClientId | undefined;
+    if (removeClientConfig && (removeClientConfig === 'cursor' || removeClientConfig === 'codex')) {
+      clientConfigBusy = removeClientConfig;
+      delete clientConfigErrors[removeClientConfig];
       render();
       try {
-        cursorConfigStatus = await window.autoCodez.removeMcpClientConfig('cursor') as McpClientConfigStatus;
+        clientConfigStatuses[removeClientConfig] = await window.autoCodez.removeMcpClientConfig(removeClientConfig) as McpClientConfigStatus;
         await refresh();
       } catch (error) {
-        clientConfigError = error instanceof Error ? error.message : String(error);
+        clientConfigErrors[removeClientConfig] = error instanceof Error ? error.message : String(error);
       } finally {
-        clientConfigBusy = false;
+        clientConfigBusy = '';
         render();
       }
       return;
