@@ -226,11 +226,15 @@ export class McpGatewayHttpServer {
     const protocolVersion = typeof request.headers['mcp-protocol-version'] === 'string'
       ? request.headers['mcp-protocol-version']
       : undefined;
+    const rawClientName = request.headers['x-auto-codez-mcp-client'];
+    const clientName = typeof rawClientName === 'string' && rawClientName.length <= 80 && !/[\u0000-\u001f\u007f]/.test(rawClientName)
+      ? rawClientName.trim() || undefined
+      : undefined;
 
     try {
       const raw = await readJson(request);
       const rpc = requestObject(raw);
-      const result = await this.protocol.handle(rpc, { protocolVersion });
+      const result = await this.protocol.handle(rpc, { protocolVersion, clientName });
       if (!result) {
         response.writeHead(202, { 'cache-control': 'no-store' });
         response.end();
