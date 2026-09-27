@@ -95,8 +95,14 @@ try {
         $binding = Resolve-Binding
         $response = Invoke-Mcp $binding $line
       } catch {
-        $message = $_.Exception.Message.Replace('"', '\"')
-        $response = "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"$message\"}}"
+        $response = @{
+          jsonrpc = '2.0'
+          id = $null
+          error = @{
+            code = -32000
+            message = $_.Exception.Message
+          }
+        } | ConvertTo-Json -Compress -Depth 4
       }
     }
     if ($null -ne $response) {
