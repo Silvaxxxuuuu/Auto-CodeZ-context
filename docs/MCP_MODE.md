@@ -61,6 +61,25 @@ It shows:
 
 Infrastructure details stay hidden by default.
 
+## Universal local connection model
+
+The user-facing model is always **add a tool**. Auto CodeZ chooses the transport and client-specific installation path.
+
+Local clients should prefer the Auto CodeZ packaged stdio bridge when they support command-based MCP servers. The client starts the Auto CodeZ executable with a dedicated bridge argument. The bridge:
+
+1. requires no external Node.js, Python, PATH entry or package manager;
+2. reads the active Gateway binding only from Auto CodeZ encrypted local storage;
+3. forwards JSON-RPC over localhost with the ephemeral Gateway credential;
+4. never writes that credential into Codex, Cursor, Claude Code or another client's config;
+5. starts the normal Auto CodeZ application when needed and waits for the protected Gateway to become ready;
+6. preserves the external client identity so activity and approvals remain attributable.
+
+The same Gateway, AgentRuntime, policy layer, approval system, plugin tool catalog and operational ledger remain authoritative for every client.
+
+Client adapters stay thin. A client-specific adapter may install a config entry, register an extension, or package a supported desktop extension, but it must not duplicate the MCP execution stack.
+
+ChatGPT remains the remote-client exception and uses Secure MCP Tunnel when the local Auto CodeZ server must be reachable from ChatGPT.
+
 ## Security model
 
 MCP transport is never an authority boundary.
