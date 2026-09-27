@@ -46,6 +46,7 @@ type TunnelStatus = { running: boolean; ready: boolean; version?: string; tunnel
 type McpRuntimeStatus = { platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string };
 type OnboardingStep = 'activation' | 'clients' | 'instructions' | 'operational';
 type McpClientId = 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other';
+type McpStoredConnection = { clientId: McpClientId; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string } };
 
 const MAX_RENDERED_EVENTS = 250;
 const OPENAI_ICON_URL = new URL('./assets/mcp-clients/openai.svg', import.meta.url).href;
@@ -584,6 +585,7 @@ function renderOnboarding(root: HTMLElement): void {
     <div class="mcp-instructions-shell">
       <header><div><div class="mcp-onboarding-kicker">ÚLTIMO PASSO</div><h1>Conclua suas conexões</h1><p>Siga somente os passos de cada aplicativo. Os detalhes de protocolo continuam escondidos por padrão.</p></div><button class="mcp-onboarding-secondary" data-mcp-advanced>Ver configuração avançada</button></header>
       <div class="mcp-guide-list">${[...selectedClients].map(renderClientInstructions).join('')}</div>
+      ${activationError ? `<div class="mcp-onboarding-error">${escapeHtml(activationError)}</div>` : ''}
       ${showAdvanced ? `<section class="mcp-inline-advanced">
         <div><strong>Conexão local</strong><span>${gatewayStatus.running ? escapeHtml(gatewayStatus.endpoint) : 'Gateway não iniciado'}</span>${gatewayPreflight ? `<small>Validado · MCP ${escapeHtml(gatewayPreflight.protocolVersion)} · ${gatewayPreflight.toolCount} tools</small>` : ''}</div>
         <button data-mcp-copy-gateway ${gatewayStatus.running && gatewayToken ? '' : 'disabled'}>Copiar conexão</button>
@@ -671,12 +673,13 @@ async function refresh(): Promise<void> {
   loading = true;
   render();
   try {
-    const [page, nextApprovals, nextGatewayStatus, nextTunnelStatus, nextRuntimeStatus] = await Promise.all([
+    const [page, nextApprovals, nextGatewayStatus, nextTunnelStatus, nextRuntimeStatus, nextConnections] = await Promise.all([
       window.autoCodez.listOperationalLedger({ limit: MAX_RENDERED_EVENTS, direction: 'backward' }),
       window.autoCodez.listApprovals(),
       window.autoCodez.mcpGatewayStatus(),
       window.autoCodez.mcpTunnelStatus(),
       window.autoCodez.mcpRuntimeStatus(),
+      window.autoCodez.listMcpConnections() as Promise<McpStoredConnection[]>,
     ]);
     if (!active || token !== refreshSequence) return;
     events = page.events.map(asLedgerEvent).filter((event): event is LedgerEvent => Boolean(event)).reverse();
@@ -684,6 +687,18 @@ async function refresh(): Promise<void> {
     gatewayStatus = nextGatewayStatus as GatewayStatus;
     tunnelStatus = nextTunnelStatus as TunnelStatus;
     runtimeStatus = nextRuntimeStatus as McpRuntimeStatus;
+    if (onboardingStep === 'operational') {
+      const persistedClients = nextConnections
+        .map((connection) => connection.clientId)
+        .filter((clientId): clientId is McpClientId => MCP_CLIENTS.some((client) => client.id === clientId));
+      if (persistedClients.length) {
+        selectedClients.clear();
+        for (const clientId of persistedClients) selectedClients.add(clientId);
+        persistClientSelection();
+      } else if (selectedClients.size) {
+        await Promise.all([...selectedClients].map((clientId) => window.autoCodez.addMcpConnection(clientId)));
+      }
+    }
     if (!gatewayStatus.running) {
       gatewayToken = '';
       gatewayPreflight = undefined;
@@ -777,12 +792,18 @@ function install(): void {
     }
     const connectClient = target.closest<HTMLElement>('[data-mcp-connect-client]')?.dataset.mcpConnectClient as McpClientId | undefined;
     if (connectClient) {
-      selectedClients.add(connectClient);
-      persistClientSelection();
-      connectPanelOpen = false;
-      selectedConnectionId = connectClient;
-      showAdvanced = false;
-      render();
+      try {
+        await window.autoCodez.addMcpConnection(connectClient);
+        selectedClients.add(connectClient);
+        persistClientSelection();
+        connectPanelOpen = false;
+        selectedConnectionId = connectClient;
+        showAdvanced = false;
+        render();
+      } catch (error) {
+        activationError = error instanceof Error ? error.message : String(error);
+        render();
+      }
       return;
     }
     const openConnection = target.closest<HTMLElement>('[data-mcp-open-connection]')?.dataset.mcpOpenConnection as McpClientId | undefined;
@@ -857,7 +878,19 @@ function install(): void {
     }
     if (target.closest('[data-mcp-onboarding-back]')) { onboardingStep = 'activation'; render(); return; }
     if (target.closest('[data-mcp-onboarding-clients]')) { onboardingStep = 'clients'; render(); return; }
-    if (target.closest('[data-mcp-onboarding-finish]')) { persistOnboardingComplete(); onboardingStep = 'operational'; render(); return; }
+    if (target.closest('[data-mcp-onboarding-finish]')) {
+      activationError = '';
+      try {
+        await Promise.all([...selectedClients].map((clientId) => window.autoCodez.addMcpConnection(clientId)));
+        persistOnboardingComplete();
+        onboardingStep = 'operational';
+        await refresh();
+      } catch (error) {
+        activationError = error instanceof Error ? error.message : String(error);
+        render();
+      }
+      return;
+    }
     if (target.closest('[data-mcp-clients]')) { onboardingStep = 'clients'; showAdvanced = false; render(); return; }
     if (target.closest('[data-mcp-advanced]')) { showAdvanced = !showAdvanced; render(); return; }
     const copyText = target.closest<HTMLElement>('[data-mcp-copy-text]')?.dataset.mcpCopyText;
