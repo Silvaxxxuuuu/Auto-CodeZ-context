@@ -32,6 +32,9 @@ declare global {
       streamChat: (input: { chatId: string; content: string; attachments?: Attachment[] }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
       stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
+      listMcpConnections: () => Promise<Array<{ clientId: 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other'; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string } }>>;
+      addMcpConnection: (clientId: string) => Promise<{ clientId: string; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number }>;
+      removeMcpConnection: (clientId: string) => Promise<{ removed: boolean }>;
       mcpRuntimeStatus: () => Promise<{ platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string }>;
       prepareMcpRuntime: () => Promise<{ platform: string; arch: string; supported: boolean; ready: boolean; version: string; executable?: string; managed: boolean; error?: string }>;
       mcpTunnelStatus: () => Promise<{ running: boolean; ready: boolean; version?: string; tunnelId?: string; localEndpoint?: string; healthUrl?: string; error?: string; credentialAvailable: boolean }>;
