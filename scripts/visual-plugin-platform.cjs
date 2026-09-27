@@ -83,7 +83,16 @@ async function runTest() {
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-onboarding-instrucoes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Finalizar' }).click();
   await mcpMode.getByText('MCP pronto', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-  await mcpMode.getByText('Prontas para suas IAs', { exact: true }).waitFor({ state: 'visible' });
+  await mcpMode.getByText('Suas conexões', { exact: true }).waitFor({ state: 'visible' });
+  const hubConnectionSemantics = await mcpMode.evaluate(() => ({
+    count: document.querySelector('.mcp-health-count')?.textContent?.trim() || '',
+    availablePrimaryActions: document.querySelectorAll('.mcp-connection-card.available .mcp-primary-action').length,
+    availableActions: [...document.querySelectorAll('.mcp-connection-card.available [data-mcp-connect-client]')].map((item) => item.textContent?.trim() || ''),
+    configuredActions: [...document.querySelectorAll('.mcp-connection-card.configured [data-mcp-open-connection]')].map((item) => item.textContent?.trim() || ''),
+  }));
+  if (hubConnectionSemantics.count !== '2 conexões adicionadas') throw new Error('Resumo do hub continua tratando conexões adicionadas como conexões ativas: ' + JSON.stringify(hubConnectionSemantics));
+  if (hubConnectionSemantics.availablePrimaryActions !== 0 || hubConnectionSemantics.availableActions.some((label) => !label.startsWith('Adicionar '))) throw new Error('Conexões disponíveis continuam competindo com a ação principal ou usando verbo impreciso: ' + JSON.stringify(hubConnectionSemantics));
+  if (hubConnectionSemantics.configuredActions.some((label) => label !== 'Concluir conexão')) throw new Error('Ação das conexões ainda não conectadas não orienta o próximo passo: ' + JSON.stringify(hubConnectionSemantics));
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-hub.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Conectar ferramenta' }).click();
   await mcpMode.getByRole('dialog', { name: 'Conectar ferramenta' }).waitFor({ state: 'visible' });
@@ -94,10 +103,15 @@ async function runTest() {
     return detail.getBoundingClientRect().top - title.getBoundingClientRect().bottom;
   });
   if (discoveryGap < 3) throw new Error('Título e descrição do painel Conectar ferramenta continuam encostados: gap=' + discoveryGap);
+  await mcpMode.getByText('Conexões compatíveis', { exact: true }).waitFor({ state: 'visible' });
+  const connectPanelActions = await mcpMode.locator('.mcp-connect-option em').allTextContents();
+  if (!connectPanelActions.length || connectPanelActions.some((label) => label.trim() !== 'Adicionar')) throw new Error('Painel Conectar ferramenta ainda sugere conexão imediata antes da configuração: ' + JSON.stringify(connectPanelActions));
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-conectar-ferramenta.png'), animations: 'disabled' });
   await mcpMode.locator('[data-mcp-close-connect]').first().click();
   await mcpMode.locator('[data-mcp-open-connection="chatgpt"]').click();
   await mcpMode.locator('[data-mcp-connection-detail="chatgpt"]').waitFor({ state: 'visible' });
+  await mcpMode.getByText('Conclua no ChatGPT', { exact: true }).waitFor({ state: 'visible' });
+  await mcpMode.getByText('No ChatGPT, crie a conexão Auto CodeZ e escolha Secure MCP Tunnel. Quando ele solicitar o Tunnel ID, use a configuração avançada desta conexão.', { exact: true }).waitFor({ state: 'visible' });
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-conexao-detalhes.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Ver configuração avançada' }).click();
   await mcpMode.getByText('Secure MCP Tunnel', { exact: true }).waitFor({ state: 'visible' });
