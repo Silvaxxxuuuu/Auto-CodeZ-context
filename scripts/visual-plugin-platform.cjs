@@ -84,6 +84,9 @@ async function runTest() {
   await mcpMode.getByRole('button', { name: 'Finalizar' }).click();
   await mcpMode.getByText('MCP pronto', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   await mcpMode.getByText('Suas conexões', { exact: true }).waitFor({ state: 'visible' });
+  const persistedMcpConnections = await page.evaluate(() => window.autoCodez.listMcpConnections());
+  const persistedMcpClientIds = persistedMcpConnections.map((connection) => connection.clientId).sort();
+  if (JSON.stringify(persistedMcpClientIds) !== JSON.stringify(['chatgpt', 'codex'])) throw new Error('Onboarding MCP não persistiu as conexões selecionadas no processo principal: ' + JSON.stringify(persistedMcpConnections));
   const hubConnectionSemantics = await mcpMode.evaluate(() => ({
     count: document.querySelector('.mcp-health-count')?.textContent?.trim() || '',
     availablePrimaryActions: document.querySelectorAll('.mcp-connection-card.available .mcp-primary-action').length,
