@@ -167,7 +167,7 @@ async function runTest() {
   const connectPanelActions = await mcpMode.locator('.mcp-connect-option em').allTextContents();
   if (!connectPanelActions.length || connectPanelActions.some((label) => label.trim() !== 'Adicionar')) throw new Error('Painel Conectar ferramenta ainda sugere conexão imediata antes da configuração: ' + JSON.stringify(connectPanelActions));
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-conectar-ferramenta.png'), animations: 'disabled' });
-  await mcpMode.locator('[data-mcp-connect-client="cursor"]').click();
+  await mcpMode.getByRole('dialog', { name: 'Conectar ferramenta' }).locator('[data-mcp-connect-client="cursor"]').click();
   await mcpMode.locator('[data-mcp-connection-detail="cursor"]').waitFor({ state: 'visible', timeout: 10000 });
   await mcpMode.getByText('Conectar ao Cursor', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   await mcpMode.getByRole('button', { name: 'Configurar automaticamente' }).click();
