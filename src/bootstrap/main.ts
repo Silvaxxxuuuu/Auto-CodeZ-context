@@ -1,13 +1,8 @@
-const stdioBridgeMode = process.argv.includes('--mcp-stdio-bridge');
+import path from 'node:path';
+import { createRequire } from 'node:module';
 
-async function start(): Promise<void> {
-  if (stdioBridgeMode) {
-    await import('../mcp-gateway/stdio-bridge-bootstrap');
-    return;
-  }
-  await import('../ai/local-ai-main-bootstrap');
-  await import('../plugins/plugin-main-bootstrap');
-  await import('../main');
-}
+const target = process.argv.includes('--mcp-stdio-bridge')
+  ? 'mcp-bridge-main.js'
+  : 'app-main.js';
 
-void start();
+createRequire(__filename)(path.join(__dirname, target));
