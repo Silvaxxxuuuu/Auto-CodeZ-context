@@ -9,9 +9,6 @@ export default defineConfig({
   build: {
     rollupOptions: {
       external: ['node-pty'],
-      output: {
-        inlineDynamicImports: true,
-      },
     },
   },
 });
