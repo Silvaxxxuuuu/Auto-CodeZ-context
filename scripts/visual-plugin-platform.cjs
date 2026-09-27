@@ -184,6 +184,25 @@ async function runTest() {
   await fs.access(cursorServer.args[bridgeArgumentIndex]);
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-cursor-configurado.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Voltar para MCP Mode' }).click();
+
+  await mcpMode.locator('[data-mcp-open-connection="codex"]').click();
+  await mcpMode.locator('[data-mcp-connection-detail="codex"]').waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByText('Conectar ao ChatGPT Codex', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByRole('button', { name: 'Configurar automaticamente' }).click();
+  await mcpMode.getByText('Auto CodeZ adicionado ao ChatGPT Codex', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
+  const codexConfigStatus = await page.evaluate(() => window.autoCodez.mcpClientConfigStatus('codex'));
+  if (codexConfigStatus.state !== 'configured') throw new Error('Codex não ficou configurado automaticamente: ' + JSON.stringify(codexConfigStatus));
+  const codexConfig = await fs.readFile(codexConfigStatus.configPath, 'utf8');
+  if (!codexConfig.includes('# >>> Auto CodeZ MCP: auto-codez') || !codexConfig.includes('[mcp_servers.auto-codez]') || !codexConfig.includes('command = "powershell.exe"')) {
+    throw new Error('Configuração MCP do Codex não contém bloco Auto CodeZ gerenciado: ' + codexConfig);
+  }
+  for (const required of ['-File', 'mcp-bridge.ps1', '-BrokerAddress', '-AppPath', '-ClientId', '"codex"']) {
+    if (!codexConfig.includes(required)) throw new Error('Configuração MCP do Codex não contém ' + required + ': ' + codexConfig);
+  }
+  if (codexConfig.includes('Bearer ') || codexConfig.includes('bearerToken')) throw new Error('Configuração MCP do Codex vazou credencial efêmera: ' + codexConfig);
+  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-codex-configurado.png'), animations: 'disabled' });
+  await mcpMode.getByRole('button', { name: 'Voltar para MCP Mode' }).click();
+
   await mcpMode.locator('[data-mcp-open-connection="chatgpt"]').click();
   await mcpMode.locator('[data-mcp-connection-detail="chatgpt"]').waitFor({ state: 'visible' });
   await mcpMode.getByText('Conclua no ChatGPT', { exact: true }).waitFor({ state: 'visible' });
