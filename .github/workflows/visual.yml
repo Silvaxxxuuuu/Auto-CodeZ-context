@@ -70,11 +70,41 @@ jobs:
           }
           "AUTO_CODEZ_ELECTRON_EXECUTABLE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Capture visual flow
+      - name: Capture product shell
         env:
           AUTO_CODEZ_VISUAL_DIR: artifacts/visual
           NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
-        run: npm run test:visual
+        run: node scripts/visual-product.cjs
+
+      - name: Capture chat defaults
+        env:
+          AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
+        run: node scripts/visual-chat-defaults.cjs
+
+      - name: Capture provider catalog
+        env:
+          AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
+        run: node scripts/visual-provider-catalog.cjs
+
+      - name: Capture chat sources
+        env:
+          AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
+        run: node scripts/visual-chat-sources.cjs
+
+      - name: Capture user regressions
+        env:
+          AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
+        run: node scripts/visual-user-regressions.cjs
+
+      - name: Capture plugin and MCP platform
+        env:
+          AUTO_CODEZ_VISUAL_DIR: artifacts/visual
+          NODE_PATH: ${{ github.workspace }}\.visual-tools\node_modules
+        run: node scripts/visual-plugin-platform.cjs
 
       - name: Verify unified local AI
         env:
