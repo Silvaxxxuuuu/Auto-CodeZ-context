@@ -72,6 +72,7 @@ import { McpGatewayBindingBroker, mcpBindingBrokerAddress } from './mcp-gateway/
 import { McpClientConfigurator } from './mcp-gateway/client-configurator';
 import { resolveMcpBridgeLaunchConfig } from './mcp-gateway/bridge-resource';
 import { resolveClaudeDesktopConfigPath } from './mcp-gateway/claude-desktop-config-path';
+import { ClaudeDesktopExtensionManager } from './mcp-gateway/claude-desktop-extension';
 import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
 import { LocalProtectedCredentialStore } from './account/protected-credential-store';
 import { DeviceIdentityStore } from './account/device-identity';
@@ -1289,6 +1290,28 @@ async function localMcpClientConfigurator(): Promise<McpClientConfigurator> {
   });
 }
 
+async function localClaudeDesktopExtensionManager(): Promise<ClaudeDesktopExtensionManager> {
+  const bridge = resolveMcpBridgeLaunchConfig({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appRoot: app.getAppPath(),
+  });
+  const claudeDesktopConfigPath = await resolveClaudeDesktopConfigPath({
+    appDataRoot: app.getPath('appData'),
+    localAppDataRoot: process.env.LOCALAPPDATA,
+    platform: process.platform,
+  });
+  return new ClaudeDesktopExtensionManager({
+    extensionRoot: path.join(app.getPath('userData'), 'mcp', 'claude-desktop-extension'),
+    claudeUserDataPath: path.dirname(claudeDesktopConfigPath),
+    brokerAddress: mcpBindingBrokerAddress(app.getPath('appData')),
+    appPath: process.execPath,
+    appArgument: bridge.appArgument,
+    appVersion: app.getVersion(),
+    platform: process.platform,
+  });
+}
+
 function requireAutoConfigClient(value: unknown): 'cursor' | 'codex' | 'claude-code' | 'claude-desktop' {
   const clientId = requireIdentifier(value, 'Cliente MCP');
   if (clientId !== 'cursor' && clientId !== 'codex' && clientId !== 'claude-code' && clientId !== 'claude-desktop') {
@@ -1299,12 +1322,14 @@ function requireAutoConfigClient(value: unknown): 'cursor' | 'codex' | 'claude-c
 
 ipcMain.handle('mcp-client-config:status', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
-  const status = await (await localMcpClientConfigurator()).status(clientId);
+  const status = clientId === 'claude-desktop'
+    ? await (await localClaudeDesktopExtensionManager()).status()
+    : await (await localMcpClientConfigurator()).status(clientId);
   const existing = mcpConnectionRegistry.get(clientId);
   if (existing) {
     if (status.state === 'configured' && existing.setupState !== 'configured') {
       await mcpConnectionRegistry.markConfigured(clientId);
-    } else if ((status.state === 'not-configured' || status.state === 'conflict') && existing.setupState !== 'added') {
+    } else if (status.state !== 'configured' && existing.setupState !== 'added') {
       await mcpConnectionRegistry.markAdded(clientId);
     }
   }
@@ -1312,14 +1337,22 @@ ipcMain.handle('mcp-client-config:status', async (_event, clientIdInput: unknown
 });
 ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
-  const status = await (await localMcpClientConfigurator()).install(clientId);
-  await mcpConnectionRegistry.markConfigured(clientId);
+  const status = clientId === 'claude-desktop'
+    ? await (async () => {
+        await (await localMcpClientConfigurator()).remove('claude-desktop').catch((): undefined => undefined);
+        return (await localClaudeDesktopExtensionManager()).prepare();
+      })()
+    : await (await localMcpClientConfigurator()).install(clientId);
+  if (status.state === 'configured') await mcpConnectionRegistry.markConfigured(clientId);
+  else await mcpConnectionRegistry.markAdded(clientId);
   const clientName = clientId === 'cursor' ? 'Cursor' : clientId === 'codex' ? 'Codex' : clientId === 'claude-code' ? 'Claude Code' : 'Claude Desktop';
   operationalLedger.record({
     actor: 'runtime',
     category: 'system',
     state: 'success',
-    summary: `Conexão MCP configurada automaticamente no ${clientName}.`,
+    summary: clientId === 'claude-desktop'
+      ? 'Extensão MCP local do Auto CodeZ preparada para o Claude Desktop.'
+      : `Conexão MCP configurada automaticamente no ${clientName}.`,
     clientId,
     details: { configPath: status.configPath },
   });
@@ -1327,14 +1360,19 @@ ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknow
 });
 ipcMain.handle('mcp-client-config:remove', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
-  const status = await (await localMcpClientConfigurator()).remove(clientId);
-  await mcpConnectionRegistry.markAdded(clientId);
+  const status = clientId === 'claude-desktop'
+    ? await (await localClaudeDesktopExtensionManager()).removePrepared()
+    : await (await localMcpClientConfigurator()).remove(clientId);
+  if (status.state === 'configured') await mcpConnectionRegistry.markConfigured(clientId);
+  else await mcpConnectionRegistry.markAdded(clientId);
   const clientName = clientId === 'cursor' ? 'Cursor' : clientId === 'codex' ? 'Codex' : clientId === 'claude-code' ? 'Claude Code' : 'Claude Desktop';
   operationalLedger.record({
     actor: 'runtime',
     category: 'system',
     state: 'success',
-    summary: `Configuração MCP gerenciada pelo Auto CodeZ foi removida do ${clientName}.`,
+    summary: clientId === 'claude-desktop'
+      ? 'Arquivos preparados da extensão MCP do Claude Desktop foram removidos.'
+      : `Configuração MCP gerenciada pelo Auto CodeZ foi removida do ${clientName}.`,
     clientId,
   });
   return status;

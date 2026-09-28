@@ -48,7 +48,7 @@ type OnboardingStep = 'activation' | 'clients' | 'instructions' | 'operational';
 type McpClientId = 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other';
 type McpAutoConfigClientId = 'cursor' | 'codex' | 'claude-code' | 'claude-desktop';
 type McpStoredConnection = { clientId: McpClientId; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string; autoReconnect?: boolean } };
-type McpClientConfigStatus = { clientId: McpAutoConfigClientId; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string };
+type McpClientConfigStatus = { clientId: McpAutoConfigClientId; state: 'not-configured' | 'prepared' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string };
 
 const MAX_RENDERED_EVENTS = 250;
 const OPENAI_ICON_URL = new URL('./assets/mcp-clients/openai.svg', import.meta.url).href;
@@ -393,14 +393,14 @@ function renderClientInstructions(client: McpClientId): string {
   if (client === 'claude-desktop') {
     const status = clientConfigStatuses['claude-desktop'];
     const error = clientConfigErrors['claude-desktop'];
-    return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('claude-desktop', 'mcp-client-mark')}<div><strong>Claude Desktop</strong><small>Aplicativo desktop · MCP local</small></div></div>
+    return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('claude-desktop', 'mcp-client-mark')}<div><strong>Claude Desktop</strong><small>Desktop Extension · MCP local</small></div></div>
       ${status?.state === 'configured'
-        ? '<p>O Auto CodeZ já está configurado no Claude Desktop. Feche completamente e abra o Claude Desktop novamente para carregar o servidor MCP local.</p><div class="mcp-guide-note">Não procure Auto CodeZ no diretório de Conectores: essa área é para conectores remotos. Depois do restart, o MCP local fica disponível automaticamente nas conversas.</div>'
-        : status?.state === 'conflict'
-          ? `<p>${escapeHtml(status.detail)}</p><div class="mcp-guide-note">O Auto CodeZ não sobrescreve conexões MCP que não criou.</div>`
+        ? '<p>A extensão Auto CodeZ está registrada no Claude Desktop.</p><div class="mcp-guide-note">A conexão local foi detectada no registro real de extensões do Claude.</div>'
+        : status?.state === 'prepared'
+          ? `<p>A extensão local está pronta. No Claude Desktop, abra <b>Configurações → Extensões → Configurações avançadas → Desenvolvedor de Extensão → Instalar extensão descompactada</b> e selecione esta pasta:</p><code>${escapeHtml(status.configPath)}</code><button class="mcp-text-action" type="button" data-mcp-copy-text="${escapeHtml(status.configPath)}">Copiar pasta da extensão</button><div class="mcp-guide-note">Depois da instalação, volte aqui e atualize o status. O Auto CodeZ só marcará a conexão como configurada quando o Claude realmente registrá-la.</div>`
           : status?.state === 'unsupported'
-            ? '<p>A configuração automática do Claude Desktop ainda não está disponível neste sistema. Use a configuração avançada.</p>'
-            : `<p>O Auto CodeZ pode adicionar esta conexão ao Claude Desktop automaticamente, preservando o arquivo atual e sem salvar tokens.</p><button class="mcp-primary-action compact" type="button" data-mcp-install-client-config="claude-desktop" ${clientConfigBusy ? 'disabled' : ''}>${clientConfigBusy === 'claude-desktop' ? 'Configurando…' : 'Configurar automaticamente'}</button>`}
+            ? '<p>A Desktop Extension do Claude ainda não está disponível neste sistema.</p>'
+            : `<p>O Claude Desktop atual usa Desktop Extensions para servidores MCP locais. O Auto CodeZ prepara a extensão sem salvar tokens ou editar o JSON legado do Claude.</p><button class="mcp-primary-action compact" type="button" data-mcp-install-client-config="claude-desktop" ${clientConfigBusy ? 'disabled' : ''}>${clientConfigBusy === 'claude-desktop' ? 'Preparando…' : 'Preparar extensão'}</button>`}
       ${error ? `<div class="mcp-client-config-error">${escapeHtml(error)}</div>` : ''}
     </article>`;
   }
@@ -560,6 +560,20 @@ function renderConnectionSetup(client: McpClientId, state: { label: string; tone
   const definition = clientDefinition(client);
   const status = clientConfigStatuses[client];
   const error = clientConfigErrors[client];
+
+  if (client === 'claude-desktop') {
+    if (status?.state === 'configured') {
+      return `<section class="mcp-setup-callout configured"><span>CONFIGURADO</span><strong>Extensão Auto CodeZ instalada no Claude Desktop</strong><p>${escapeHtml(status.detail)}</p></section>`;
+    }
+    if (status?.state === 'prepared') {
+      return `<section class="mcp-setup-callout attention"><span>EXTENSÃO PRONTA</span><strong>Concluir uma vez no Claude Desktop</strong><p>Abra <b>Configurações → Extensões → Configurações avançadas → Desenvolvedor de Extensão → Instalar extensão descompactada</b> e selecione a pasta abaixo.</p><code>${escapeHtml(status.configPath)}</code><div class="mcp-chatgpt-actions"><button class="mcp-text-action" type="button" data-mcp-copy-text="${escapeHtml(status.configPath)}">Copiar pasta da extensão</button><button class="mcp-primary-action compact" type="button" data-mcp-refresh>Já instalei · verificar</button></div>${error ? `<div class="mcp-client-config-error">${escapeHtml(error)}</div>` : ''}</section>`;
+    }
+    if (status?.state === 'unsupported') {
+      return `<section class="mcp-setup-callout"><span>PRÓXIMO PASSO</span><strong>Claude Desktop não suportado</strong><p>${escapeHtml(status.detail)}</p></section>`;
+    }
+    return `<section class="mcp-setup-callout"><span>PRÓXIMO PASSO</span><strong>Preparar Desktop Extension do Claude</strong><p>O Claude Desktop atual usa Desktop Extensions para servidores MCP locais. O Auto CodeZ prepara uma extensão local sem tokens persistidos.</p><button class="mcp-primary-action compact" type="button" data-mcp-install-client-config="claude-desktop" ${clientConfigBusy ? 'disabled' : ''}>${clientConfigBusy === 'claude-desktop' ? 'Preparando…' : 'Preparar extensão'}</button>${error ? `<div class="mcp-client-config-error">${escapeHtml(error)}</div>` : ''}</section>`;
+  }
+
   const configuredExtra = client === 'cursor'
     ? ' Se o Cursor já estava aberto, recarregue as integrações MCP.'
     : client === 'codex'

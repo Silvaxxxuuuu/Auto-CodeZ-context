@@ -454,26 +454,20 @@ async function runTest() {
 
   await mcpMode.locator('.mcp-connection-card.available [data-mcp-connect-client="claude-desktop"]').click();
   await mcpMode.locator('[data-mcp-connection-detail="claude-desktop"]').waitFor({ state: 'visible', timeout: 10000 });
-  await mcpMode.getByText('Conectar ao Claude Desktop', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-  await mcpMode.getByRole('button', { name: 'Configurar automaticamente' }).click();
-  await mcpMode.getByText('Auto CodeZ adicionado ao Claude Desktop', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
+  await mcpMode.getByText('Preparar Desktop Extension do Claude', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByRole('button', { name: 'Preparar extensão' }).click();
+  await mcpMode.getByText('Concluir uma vez no Claude Desktop', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
   const claudeDesktopConfigStatus = await page.evaluate(() => window.autoCodez.mcpClientConfigStatus('claude-desktop'));
-  if (claudeDesktopConfigStatus.state !== 'configured') throw new Error('Claude Desktop não ficou configurado automaticamente: ' + JSON.stringify(claudeDesktopConfigStatus));
-  const claudeDesktopConfig = JSON.parse(await fs.readFile(claudeDesktopConfigStatus.configPath, 'utf8'));
-  const claudeDesktopServer = claudeDesktopConfig?.mcpServers?.['auto-codez'];
-  if (!claudeDesktopServer || claudeDesktopServer.command !== 'powershell.exe' || !Array.isArray(claudeDesktopServer.args)) {
-    throw new Error('Configuração MCP do Claude Desktop não contém servidor Auto CodeZ gerenciado: ' + JSON.stringify(claudeDesktopConfig));
+  if (claudeDesktopConfigStatus.state !== 'prepared') throw new Error('Desktop Extension do Claude não ficou preparada: ' + JSON.stringify(claudeDesktopConfigStatus));
+  const claudeManifest = JSON.parse(await fs.readFile(path.join(claudeDesktopConfigStatus.configPath, 'manifest.json'), 'utf8'));
+  const claudeExtensionServer = await fs.readFile(path.join(claudeDesktopConfigStatus.configPath, 'server', 'index.cjs'), 'utf8');
+  if (claudeManifest.name !== 'auto-codez' || claudeManifest.manifest_version !== '0.3' || claudeManifest.server?.type !== 'node' || claudeManifest.server?.entry_point !== 'server/index.cjs') {
+    throw new Error('Desktop Extension do Claude possui manifesto inválido: ' + JSON.stringify(claudeManifest));
   }
-  if (!claudeDesktopServer.args.includes('-File') || !claudeDesktopServer.args.includes('-BrokerAddress') || !claudeDesktopServer.args.includes('-AppPath') || !claudeDesktopServer.args.includes('-ClientId') || !claudeDesktopServer.args.includes('claude-desktop')) {
-    throw new Error('Configuração MCP do Claude Desktop não aponta para o bridge universal completo: ' + JSON.stringify(claudeDesktopServer));
-  }
-  if (JSON.stringify(claudeDesktopServer).includes('Bearer ') || JSON.stringify(claudeDesktopServer).includes('bearerToken')) {
-    throw new Error('Configuração MCP do Claude Desktop vazou credencial efêmera: ' + JSON.stringify(claudeDesktopServer));
-  }
-  const claudeDesktopBridgeArgumentIndex = claudeDesktopServer.args.indexOf('-File') + 1;
-  if (claudeDesktopBridgeArgumentIndex <= 0 || !claudeDesktopServer.args[claudeDesktopBridgeArgumentIndex]) throw new Error('Configuração MCP do Claude Desktop não contém caminho do helper empacotado.');
-  await fs.access(claudeDesktopServer.args[claudeDesktopBridgeArgumentIndex]);
-  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-claude-desktop-configurado.png'), animations: 'disabled' });
+  if (!claudeManifest.tools_generated) throw new Error('Desktop Extension do Claude não declarou tools dinâmicas.');
+  if (!claudeExtensionServer.includes('claude-desktop') || !claudeExtensionServer.includes('auto-codez')) throw new Error('Bridge Node da Desktop Extension não contém identidade MCP esperada.');
+  if (claudeExtensionServer.includes('Bearer ') || /bearerToken\\s*[:=]\\s*['"][^'"]+/.test(claudeExtensionServer)) throw new Error('Desktop Extension do Claude persistiu Bearer MCP.');
+  await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-claude-desktop-extensao-pronta.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Voltar para MCP Mode' }).click();
 
   await mcpMode.locator('[data-mcp-open-connection="chatgpt"]').click();
