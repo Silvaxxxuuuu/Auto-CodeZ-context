@@ -77,6 +77,30 @@ test('MCP connection registry keeps configuration metadata without storing contr
   }
 });
 
+test('MCP connection registry preserves a manual ChatGPT disconnect during restored connection bookkeeping', async () => {
+  const f = await fixture();
+  try {
+    const tunnelId = 'tunnel_' + 'c'.repeat(32);
+    const connected = await f.registry.markConnected('chatgpt', { tunnelId });
+    assert.equal(connected.metadata?.autoReconnect, true);
+
+    const disconnected = await f.registry.markDisconnected('chatgpt');
+    assert.equal(disconnected.metadata?.autoReconnect, false);
+
+    const restoredBookkeeping = await f.registry.markRestoredConnected('chatgpt', { tunnelId });
+    assert.equal(restoredBookkeeping.setupState, 'configured');
+    assert.equal(restoredBookkeeping.metadata?.tunnelId, tunnelId);
+    assert.equal(restoredBookkeeping.metadata?.autoReconnect, false);
+    assert.ok(restoredBookkeeping.lastConnectedAt);
+
+    const restored = new McpConnectionRegistry(f.storage);
+    await restored.init();
+    assert.equal(restored.get('chatgpt')?.metadata?.autoReconnect, false);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test('MCP connection registry can downgrade a configured client back to added state', async () => {
   const f = await fixture();
   try {
