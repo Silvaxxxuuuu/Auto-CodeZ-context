@@ -17,6 +17,18 @@ import { ExecutionChangeBudgetRuntime, type ExecutionChangeBudget, type Executio
 import { ExecutionPathScopeRuntime, type ExecutionPathScopeSnapshot } from '../execution-path-scope';
 import type { IncrementalWorkspaceMutationRuntime } from '../agent-core/incremental-workspace-runtime';
 
+const realWorkspaceTextMutationTools = new Set<ToolName>([
+  'write_file',
+  'replace_range',
+  'replace_text',
+  'insert_before',
+  'insert_after',
+]);
+
+function isRealWorkspaceTextMutation(name: ToolName): boolean {
+  return realWorkspaceTextMutationTools.has(name);
+}
+
 const definitions: AIToolDefinition[] = [
   { name: 'plan_execution', description: 'Declare a concrete execution plan for a multi-step task. Auto CodeZ starts the first step immediately. Use this before substantial multi-step tool work, then execute real tools and call complete_plan_step only after the current step has runtime-recorded evidence.', parameters: { type: 'object', properties: { objective: { type: 'string', description: 'Concrete objective of this execution.' }, steps: { type: 'array', items: { type: 'string' }, description: 'Ordered, concise execution steps.' } }, required: ['objective', 'steps'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'complete_plan_step', description: 'Complete the currently running execution-plan step. Auto CodeZ rejects this unless the current step already contains evidence produced by a real successful tool execution. When successful, the next pending step starts automatically.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -286,9 +298,13 @@ export class ToolRuntime {
       case 'replace_text':
       case 'insert_before':
       case 'insert_after': {
-        const path = this.stringValue(call.input, 'path');
-        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.');
-        const before = await this.workspace.readFile(projectId, path);
+        const requestedPath = this.stringValue(call.input, 'path');
+        const inspected = this.incrementalWorkspace
+          ? await this.incrementalWorkspace.inspectWriteFile(projectId, requestedPath)
+          : undefined;
+        const path = inspected?.path ?? requestedPath;
+        if (!inspected && !(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.');
+        const before = inspected?.content ?? await this.workspace.readFile(projectId, path);
         const after = applyIncrementalEdit(call.name as IncrementalEditToolName, call.input, before);
         if (after === before) throw new Error('A edição incremental não produziria nenhuma alteração.');
         return this.diffs.createPlan([this.diffs.create(path, 'modified', before, after)]);
@@ -358,7 +374,7 @@ export class ToolRuntime {
         if (current !== change.before) throw new Error(`O arquivo '${from}' mudou desde a aprovação.`);
         continue;
       }
-      if (toolName === 'write_file' && this.incrementalWorkspace) {
+      if (isRealWorkspaceTextMutation(toolName) && this.incrementalWorkspace) {
         const inspected = await this.incrementalWorkspace.inspectWriteFile(projectId, change.path).catch(() => {
           throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
         });
@@ -523,7 +539,30 @@ export class ToolRuntime {
       case 'replace_range':
       case 'replace_text':
       case 'insert_before':
-      case 'insert_after': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const before = await this.workspace.readFile(projectId, path); const after = applyIncrementalEdit(name as IncrementalEditToolName, input, before); if (after === before) throw new Error('A edição incremental não produziria nenhuma alteração.'); await this.workspace.writeFile(projectId, path, after); const persisted = await this.workspace.readFile(projectId, path); return { output: 'Trecho do arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] }; }
+      case 'insert_after': {
+        const path = this.stringValue(input, 'path');
+        if (this.incrementalWorkspace && context.runId && context.toolCallId) {
+          const inspected = await this.incrementalWorkspace.inspectWriteFile(projectId, path);
+          const after = applyIncrementalEdit(name as IncrementalEditToolName, input, inspected.content);
+          if (after === inspected.content) throw new Error('A edição incremental não produziria nenhuma alteração.');
+          const result = await this.incrementalWorkspace.writeFile({
+            runId: context.runId,
+            toolCallId: context.toolCallId,
+            projectId,
+          }, inspected.path, after, inspected.content);
+          return {
+            output: JSON.stringify({ type: 'workspace_file_incrementally_updated', tool: name, path: result.path, operationId: result.operationId, beforeHash: result.beforeHash, afterHash: result.afterHash, bytes: result.bytes, rollbackRef: result.rollbackRef }),
+            changes: [this.diffs.create(result.path, 'modified', result.before, result.after)],
+          };
+        }
+        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.');
+        const before = await this.workspace.readFile(projectId, path);
+        const after = applyIncrementalEdit(name as IncrementalEditToolName, input, before);
+        if (after === before) throw new Error('A edição incremental não produziria nenhuma alteração.');
+        await this.workspace.writeFile(projectId, path, after);
+        const persisted = await this.workspace.readFile(projectId, path);
+        return { output: 'Trecho do arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] };
+      }
       case 'replace_symbol': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const before = await this.workspace.readFile(projectId, path); const symbol = this.stringValue(input, 'symbol'); const kind = this.stringValue(input, 'kind') as StructuralSymbolKind; const content = input.content; if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido."); const result = await this.structuralEdits.replaceSymbol(path, before, { name: symbol, kind }, content); await this.workspace.writeFile(projectId, path, result.after); const persisted = await this.workspace.readFile(projectId, path); return { output: 'Símbolo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] }; }
       case 'create_file': {
         const path = this.stringValue(input, 'path');

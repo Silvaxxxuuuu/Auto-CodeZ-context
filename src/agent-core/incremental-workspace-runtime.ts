@@ -183,9 +183,13 @@ export class IncrementalWorkspaceMutationRuntime {
     context: IncrementalMutationContext,
     requestedPath: string,
     content: string,
+    expectedBefore?: string,
   ): Promise<IncrementalWriteFileResult> {
     if (!this.rollbackBlobs) throw new Error('RollbackBlobStore não foi configurado para write_file incremental.');
     const inspected = await this.inspectWriteFile(context.projectId, requestedPath);
+    if (expectedBefore !== undefined && inspected.content !== expectedBefore) {
+      throw new Error(`O arquivo '${inspected.path}' mudou antes da escrita incremental.`);
+    }
     const rollbackRef = await this.rollbackBlobs.putText(inspected.content);
     const beforeSnapshot: OperationSnapshot = {
       ...inspected.snapshot,

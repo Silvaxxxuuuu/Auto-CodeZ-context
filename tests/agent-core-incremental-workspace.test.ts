@@ -166,3 +166,24 @@ test('incremental write_file requires rollback storage before touching the works
     await f.cleanup();
   }
 });
+
+
+test('incremental write_file refuses stale expected content before journaling or mutation', async () => {
+  const f = await fixture();
+  try {
+    await f.workspace.createFile('project-a', 'stale.txt', 'current');
+    const blobs = {
+      putText: async (content: string) => `blob:test:${content}`,
+      getText: async (ref: string) => ref.slice('blob:test:'.length),
+    };
+    const incremental = new IncrementalWorkspaceMutationRuntime(f.workspace, f.journal, blobs);
+    await assert.rejects(
+      incremental.writeFile(context, 'stale.txt', 'next', 'older'),
+      /mudou antes da escrita incremental/i,
+    );
+    assert.equal(await f.workspace.readFile('project-a', 'stale.txt'), 'current');
+    assert.equal(f.journal.list().length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
