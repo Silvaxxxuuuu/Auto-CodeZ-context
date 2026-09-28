@@ -14,6 +14,20 @@ const testName = 'funcional-plugin-platform';
 let stateRoot, tunnelFixtureBin, bridgeServer, bridgePort, appProcess, browser, page, exitState;
 let stderr = '';
 function errorText(error) { return error instanceof Error ? `${error.name}: ${error.message}` : String(error); }
+async function withTimeout(promise, timeoutMs, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} excedeu ${timeoutMs} ms.`)), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 async function reservePort() { return new Promise((resolve, reject) => { const server = net.createServer(); server.unref(); server.once('error', reject); server.listen(0, '127.0.0.1', () => { const address = server.address(); const port = address && typeof address === 'object' ? address.port : 0; server.close((error) => error ? reject(error) : port ? resolve(port) : reject(new Error('Não foi possível reservar uma porta.'))); }); }); }
 async function startBridgeServer() { bridgeServer = http.createServer((request, response) => { if (request.method === 'GET' && request.url === '/health') { response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ ok: true, source: 'visual-plugin-bridge' })); return; } response.writeHead(404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: 'not found' })); }); await new Promise((resolve, reject) => { bridgeServer.once('error', reject); bridgeServer.listen(0, '127.0.0.1', () => { const address = bridgeServer.address(); bridgePort = address && typeof address === 'object' ? address.port : 0; if (!bridgePort || bridgePort < 1024) reject(new Error('Bridge visual recebeu porta inválida.')); else resolve(); }); }); bridgeServer.unref(); }
 function pluginSource() { return `autoCodez.register({async activate(api){const bridge=await api.bridge.request({url:'http://127.0.0.1:${bridgePort}/health'});if(!bridge||bridge.status!==200||!String(bridge.body||'').includes('visual-plugin-bridge'))throw new Error('Bridge local não respondeu corretamente.');await api.settings.set('visual-mode','verified');const stored=await api.settings.get('visual-mode');if(stored!=='verified')throw new Error('Settings do plugin não persistiram.');await api.tools.register([{id:'external_action',description:'Execute a bounded action in the connected visual test application.',risk:'write',parameters:{type:'object',properties:{target:{type:'string'}},required:['target'],additionalProperties:false}}]);const job=await api.jobs.begin('Validando Plugin Platform');await api.jobs.update(job.id,{progress:.5,activity:'Sandbox e bridge validados'});await api.jobs.complete(job.id,'Runtime concluído');await api.activity.publish('Sandbox, settings, jobs, tools e bridge validados.','completed');},async deactivate(api){await api.activity.clear();},async invoke(method,payload){if(method!=='external_action')throw new Error('Método de plugin desconhecido.');return{ok:true,target:payload&&payload.input?payload.input.target:null,chatId:payload&&payload.context?payload.context.chatId:null};}});\n`; }
@@ -454,4 +468,27 @@ async function runTest() {
   if (pageErrors.length || consoleErrors.length) throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
 }
 async function cleanup() { forceStopElectronTree(); await discardCdpHandles(); appProcess = undefined; if (bridgeServer) { try { bridgeServer.closeAllConnections?.(); } catch {} await Promise.race([new Promise((resolve) => bridgeServer.close(resolve)), new Promise((resolve) => setTimeout(resolve, 2000))]).catch(() => {}); bridgeServer.unref(); bridgeServer = undefined; } if (stateRoot) await fs.rm(stateRoot, { recursive: true, force: true, maxRetries: 4, retryDelay: 100 }).catch(() => {}); }
-(async () => { try { await fs.mkdir(outputDir, { recursive: true }); await startBridgeServer(); await prepareStateRoot(); await startElectron(); await runTest(); await updateManifest({ name: testName, status: 'passed' }); } catch (error) { const message = errorText(error); if (page && !page.isClosed()) await page.screenshot({ path: path.join(outputDir, `falha-${testName}.png`), animations: 'disabled', fullPage: true }).catch(() => {}); await fs.writeFile(path.join(outputDir, 'plugin-platform-error.txt'), `${message}\n${stderr}\n`, 'utf8').catch(() => {}); await updateManifest({ name: testName, status: 'failed', error: message }).catch(() => {}); console.error(error); process.exitCode = 1; } finally { await cleanup(); } })();
+(async () => {
+  try {
+    await fs.mkdir(outputDir, { recursive: true });
+    await startBridgeServer();
+    await prepareStateRoot();
+    await startElectron();
+    console.log('[visual-plugin-platform] runTest started');
+    await withTimeout(runTest(), 6 * 60_000, 'E2E completo da Plugin/MCP Platform');
+    console.log('[visual-plugin-platform] runTest completed');
+    await updateManifest({ name: testName, status: 'passed' });
+  } catch (error) {
+    const message = errorText(error);
+    if (page && !page.isClosed()) await page.screenshot({ path: path.join(outputDir, `falha-${testName}.png`), animations: 'disabled', fullPage: true }).catch(() => {});
+    await fs.writeFile(path.join(outputDir, 'plugin-platform-error.txt'), `${message}\n${stderr}\n`, 'utf8').catch(() => {});
+    await updateManifest({ name: testName, status: 'failed', error: message }).catch(() => {});
+    console.error(error);
+    process.exitCode = 1;
+  } finally {
+    console.log('[visual-plugin-platform] cleanup started');
+    await cleanup();
+    console.log('[visual-plugin-platform] cleanup completed');
+    process.exit(process.exitCode || 0);
+  }
+})();
