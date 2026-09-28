@@ -525,7 +525,8 @@ async function runTest() {
   const restartedMcpMode = page.locator('#mcp-mode-root');
   await restartedMcpMode.waitFor({ state: 'visible', timeout: 10000 });
   await restartedMcpMode.locator('[data-mcp-open-connection="chatgpt"]').click();
-  await restartedMcpMode.getByText('ChatGPT conectado ao Auto CodeZ', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
+  await restartedMcpMode.getByText('Agora conclua no ChatGPT', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
+  await restartedMcpMode.getByRole('button', { name: 'Abrir Plugins do ChatGPT' }).waitFor({ state: 'visible', timeout: 10000 });
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-chatgpt-reconectado-restart.png'), animations: 'disabled' });
 
   await restartedMcpMode.getByRole('button', { name: 'Ver configuração avançada' }).click();
@@ -539,7 +540,7 @@ async function runTest() {
   if (!gatewayText.includes('O token é temporário e não é persistido.')) throw new Error('Configuração avançada não explicou que o Bearer restaurado internamente não é persistido nem reexposto.');
   if (await restartedMcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer próprio.');
 
-  await restartedMcpMode.getByRole('button', { name: 'Desconectar ChatGPT' }).click();
+  await restartedMcpMode.getByRole('button', { name: 'Desconectar túnel' }).click();
   await restartedMcpMode.getByText('Concluir no ChatGPT', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   const disconnectedTunnelStatus = await page.evaluate(() => window.autoCodez.mcpTunnelStatus());
   if (disconnectedTunnelStatus.running || disconnectedTunnelStatus.ready) throw new Error('Secure MCP Tunnel permaneceu ativo após desconexão manual: ' + JSON.stringify(disconnectedTunnelStatus));
