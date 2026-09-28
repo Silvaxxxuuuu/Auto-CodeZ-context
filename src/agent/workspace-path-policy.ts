@@ -13,6 +13,7 @@ export type WorkspacePathPolicyResult = {
 const fileMutationTools = new Set<ToolName>([
   'write_file',
   'create_file',
+  'create_folder',
   'replace_range',
   'replace_text',
   'replace_symbol',

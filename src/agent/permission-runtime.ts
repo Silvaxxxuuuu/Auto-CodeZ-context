@@ -14,7 +14,7 @@ const readTools = new Set<ToolName>([
   'git_log',
   'git_branches',
 ]);
-const safeWriteTools = new Set<ToolName>(['write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after']);
+const safeWriteTools = new Set<ToolName>(['write_file', 'create_file', 'create_folder', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after']);
 const sensitiveWriteTools = new Set<ToolName>([
   'delete_file',
   'rename_file',

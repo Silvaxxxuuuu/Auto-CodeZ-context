@@ -15,6 +15,7 @@ import { TypeScriptStructuralLocator } from './typescript-structural-locator';
 import { ExecutionPlanner, type ExecutionPlan } from '../execution-planner';
 import { ExecutionChangeBudgetRuntime, type ExecutionChangeBudget, type ExecutionChangeUsage } from '../execution-change-budget';
 import { ExecutionPathScopeRuntime, type ExecutionPathScopeSnapshot } from '../execution-path-scope';
+import type { IncrementalWorkspaceMutationRuntime } from '../agent-core/incremental-workspace-runtime';
 
 const definitions: AIToolDefinition[] = [
   { name: 'plan_execution', description: 'Declare a concrete execution plan for a multi-step task. Auto CodeZ starts the first step immediately. Use this before substantial multi-step tool work, then execute real tools and call complete_plan_step only after the current step has runtime-recorded evidence.', parameters: { type: 'object', properties: { objective: { type: 'string', description: 'Concrete objective of this execution.' }, steps: { type: 'array', items: { type: 'string' }, description: 'Ordered, concise execution steps.' } }, required: ['objective', 'steps'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -27,7 +28,8 @@ const definitions: AIToolDefinition[] = [
   { name: 'replace_symbol', description: 'Replace one uniquely named TypeScript or JavaScript syntax symbol using the real TypeScript AST. Supported kinds are function, method, class, interface, type and enum. Use this when replacing an entire named declaration; ambiguity or unsupported files fail instead of guessing.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative TypeScript or JavaScript file path.' }, symbol: { type: 'string', description: 'Exact declared symbol name.' }, kind: { type: 'string', enum: ['function', 'method', 'class', 'interface', 'type', 'enum'], description: 'Declared syntax kind.' }, content: { type: 'string', description: 'Complete replacement declaration for the selected symbol.' } }, required: ['path', 'symbol', 'kind', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'insert_before', description: 'Insert one or more lines immediately before a 1-based line in an existing UTF-8 text file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, line: { type: 'number', description: '1-based line before which content is inserted.' }, content: { type: 'string', description: 'Line content to insert.' } }, required: ['path', 'line', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'insert_after', description: 'Insert one or more lines immediately after a 1-based line in an existing UTF-8 text file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' }, line: { type: 'number', description: '1-based line after which content is inserted.' }, content: { type: 'string', description: 'Line content to insert.' } }, required: ['path', 'line', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
-  { name: 'create_file', description: 'Create a new UTF-8 text file inside the active workspace. Prefer this tool over shell commands for workspace file creation so Auto CodeZ can preview and review the exact diff.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'create_file', description: 'Create a new UTF-8 text file directly in the real active workspace. Missing parent directories are created automatically. Use this when the file itself is known; do not create parent folders separately just to prepare for this file. The operation is journaled and verified when Agent Core V2 incremental execution is configured.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative path.' }, content: { type: 'string', description: 'Initial file contents.' } }, required: ['path', 'content'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
+  { name: 'create_folder', description: 'Create a directory directly in the real active workspace. Use this when the directory itself is part of the requested result, must exist empty, or needs to exist before a later operation. Do not use it merely to prepare parent directories for create_file because create_file already creates them safely.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative directory path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'delete_file', description: 'Delete a file inside the active workspace. Prefer this tool over shell commands for workspace file deletion so Auto CodeZ can preview and review the exact change.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'rename_file', description: 'Rename or move a file inside the active workspace. Prefer this tool over shell commands for workspace file renames so Auto CodeZ can preview and review the exact change.', parameters: { type: 'object', properties: { from: { type: 'string', description: 'Current workspace-relative path.' }, to: { type: 'string', description: 'Destination workspace-relative path.' } }, required: ['from', 'to'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'search_files', description: 'Search workspace file names for a text query.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'Text to search for in workspace file names.' } }, required: ['query'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -50,7 +52,7 @@ type ExecutionCheckpointRecord = { chatId: string; runId: string; projectId: str
 type ExecutionCheckpointRecorder = (record: ExecutionCheckpointRecord) => void;
 const JOURNAL_FILE = 'tool-execution-journal.json';
 
-type ActivityContext = { chatId?: string; runId?: string };
+type ActivityContext = { chatId?: string; runId?: string; toolCallId?: string };
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
@@ -103,6 +105,7 @@ function executionActivityMessage(call: AIToolCall): string {
     case 'insert_before': return value('path') ? `Inserindo conteúdo em ${value('path')}` : 'Inserindo conteúdo no arquivo.';
     case 'insert_after': return value('path') ? `Inserindo conteúdo em ${value('path')}` : 'Inserindo conteúdo no arquivo.';
     case 'create_file': return value('path') ? `Criando ${value('path')}` : 'Criando arquivo.';
+    case 'create_folder': return value('path') ? `Criando pasta ${value('path')}` : 'Criando pasta.';
     case 'delete_file': return value('path') ? `Excluindo ${value('path')}` : 'Excluindo arquivo.';
     case 'rename_file': return value('from') && value('to') ? `Renomeando ${value('from')} → ${value('to')}` : 'Renomeando arquivo.';
     case 'search_files': return value('query') ? `Pesquisando por ${value('query')}` : 'Pesquisando arquivos.';
@@ -126,6 +129,7 @@ export class ToolRuntime {
   private executionChangeBudget?: ExecutionChangeBudgetRuntime;
   private executionPathScope?: ExecutionPathScopeRuntime;
   private executionCheckpointRecorder?: ExecutionCheckpointRecorder;
+  private incrementalWorkspace?: IncrementalWorkspaceMutationRuntime;
 
   constructor(private readonly workspace: WorkspaceRuntime, permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()]), workspacePathPolicy = new WorkspacePathPolicy(), commandSafetyPolicy = new CommandSafetyPolicy(workspacePathPolicy), private readonly toolPolicy = new ToolPolicyRuntime(permissions, workspacePathPolicy, commandSafetyPolicy)) {}
 
@@ -134,6 +138,7 @@ export class ToolRuntime {
   configureExecutionChangeBudget(runtime: ExecutionChangeBudgetRuntime): void { this.executionChangeBudget = runtime; }
   configureExecutionPathScope(runtime: ExecutionPathScopeRuntime): void { this.executionPathScope = runtime; this.toolPolicy.configureExecutionPathScope(runtime); }
   configureExecutionCheckpointRecorder(recorder: ExecutionCheckpointRecorder): void { this.executionCheckpointRecorder = recorder; }
+  configureIncrementalWorkspaceRuntime(runtime: IncrementalWorkspaceMutationRuntime): void { this.incrementalWorkspace = runtime; }
   configureChangeBudget(chatId: string, runId: string, budget: ExecutionChangeBudget): ExecutionChangeBudget {
     if (!this.executionChangeBudget) throw new Error('O runtime de Change Budget não foi configurado.');
     return this.executionChangeBudget.configure(chatId, runId, budget);
@@ -296,10 +301,21 @@ export class ToolRuntime {
         return this.diffs.createPlan([this.diffs.create(path, 'modified', before, result.after)]);
       }
       case 'create_file': {
-        const path = this.stringValue(call.input, 'path');
-        if (await this.workspace.exists(projectId, path)) throw new Error('O arquivo já existe. Use write_file para substituí-lo.');
+        const requestedPath = this.stringValue(call.input, 'path');
+        const path = this.incrementalWorkspace
+          ? await this.incrementalWorkspace.inspectCreateFile(projectId, requestedPath)
+          : requestedPath;
+        if (!this.incrementalWorkspace && await this.workspace.exists(projectId, path)) throw new Error('O arquivo já existe. Use write_file para substituí-lo.');
+        if (this.incrementalWorkspace && await this.workspace.exists(projectId, path)) {
+          throw new Error(`O caminho '${path}' já existe em uma execução legada isolada. Conclua ou descarte essa execução antes de criar o arquivo incrementalmente.`);
+        }
         const content = String(call.input.content ?? '');
         return this.diffs.createPlan([this.diffs.create(path, 'created', '', content)]);
+      }
+      case 'create_folder': {
+        const requestedPath = this.stringValue(call.input, 'path');
+        if (this.incrementalWorkspace) await this.incrementalWorkspace.inspectCreateFolder(projectId, requestedPath);
+        return undefined;
       }
       case 'delete_file': {
         const path = this.stringValue(call.input, 'path');
@@ -321,7 +337,14 @@ export class ToolRuntime {
     if (!plan) return;
     for (const change of plan.changes) {
       if (change.type === 'created') {
-        if (await this.workspace.exists(projectId, change.path)) throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
+        if (this.incrementalWorkspace) {
+          await this.incrementalWorkspace.inspectCreateFile(projectId, change.path).catch(() => {
+            throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
+          });
+          if (await this.workspace.exists(projectId, change.path)) throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
+        } else if (await this.workspace.exists(projectId, change.path)) {
+          throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
+        }
         continue;
       }
       if (change.type === 'renamed') {
@@ -369,7 +392,7 @@ export class ToolRuntime {
     try {
       this.assertChangeBudget(context.chatId, context.runId, call, diffPlan);
       if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);
-      const execution = await this.executeAllowed(projectId, call.name, call.input, context);
+      const execution = await this.executeAllowed(projectId, call.name, call.input, { ...context, toolCallId: call.id });
       this.recordChangeBudget(context, call, execution);
       this.recordCheckpoint(projectId, context, call, execution);
       this.recordPlanEvidence(context, call, execution);
@@ -406,7 +429,7 @@ export class ToolRuntime {
     } catch {}
   }
 
-  private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'replace_range' || name === 'replace_text' || name === 'replace_symbol' || name === 'insert_before' || name === 'insert_after' || name === 'delete_file' || name === 'rename_file'; }
+  private isMutation(name: ToolName): boolean { return name === 'write_file' || name === 'create_file' || name === 'create_folder' || name === 'replace_range' || name === 'replace_text' || name === 'replace_symbol' || name === 'insert_before' || name === 'insert_after' || name === 'delete_file' || name === 'rename_file'; }
   private async beginJournal(approvalId: string, projectId: string, toolCall: AIToolCall, diffPlan: DiffPlan): Promise<void> { if (!this.journalStorage) return; if (!this.journal.has(approvalId)) { this.journal.set(approvalId, { approvalId, projectId, toolCall, diffPlan, status: 'executing' }); await this.persistJournal(); } }
   private async finishJournal(approvalId: string): Promise<void> { if (!this.journalStorage) return; this.journal.delete(approvalId); await this.persistJournal(); }
   private async getCompletedJournalResult(approval: ApprovalRequest): Promise<AIToolResult | undefined> {
@@ -471,7 +494,37 @@ export class ToolRuntime {
       case 'insert_before':
       case 'insert_after': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const before = await this.workspace.readFile(projectId, path); const after = applyIncrementalEdit(name as IncrementalEditToolName, input, before); if (after === before) throw new Error('A edição incremental não produziria nenhuma alteração.'); await this.workspace.writeFile(projectId, path, after); const persisted = await this.workspace.readFile(projectId, path); return { output: 'Trecho do arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] }; }
       case 'replace_symbol': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const before = await this.workspace.readFile(projectId, path); const symbol = this.stringValue(input, 'symbol'); const kind = this.stringValue(input, 'kind') as StructuralSymbolKind; const content = input.content; if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido."); const result = await this.structuralEdits.replaceSymbol(path, before, { name: symbol, kind }, content); await this.workspace.writeFile(projectId, path, result.after); const persisted = await this.workspace.readFile(projectId, path); return { output: 'Símbolo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] }; }
-      case 'create_file': { const path = this.stringValue(input, 'path'); const content = String(input.content ?? ''); await this.workspace.createFile(projectId, path, content); const after = await this.workspace.readFile(projectId, path); return { output: 'Arquivo criado.', changes: [this.diffs.create(path, 'created', '', after)] }; }
+      case 'create_file': {
+        const path = this.stringValue(input, 'path');
+        const content = String(input.content ?? '');
+        if (this.incrementalWorkspace && context.runId && context.toolCallId) {
+          const result = await this.incrementalWorkspace.createFile({
+            runId: context.runId,
+            toolCallId: context.toolCallId,
+            projectId,
+          }, path, content);
+          return {
+            output: JSON.stringify({ type: 'workspace_file_created', path: result.path, operationId: result.operationId, hash: result.hash, bytes: result.bytes, createdDirectories: result.createdDirectories }),
+            changes: [this.diffs.create(result.path, 'created', '', content)],
+          };
+        }
+        await this.workspace.createFile(projectId, path, content);
+        const after = await this.workspace.readFile(projectId, path);
+        return { output: 'Arquivo criado.', changes: [this.diffs.create(path, 'created', '', after)] };
+      }
+      case 'create_folder': {
+        const path = this.stringValue(input, 'path');
+        if (this.incrementalWorkspace && context.runId && context.toolCallId) {
+          const result = await this.incrementalWorkspace.createFolder({
+            runId: context.runId,
+            toolCallId: context.toolCallId,
+            projectId,
+          }, path);
+          return { output: JSON.stringify({ type: 'workspace_folder_created', ...result }) };
+        }
+        const created = await this.workspace.createFolder(projectId, path);
+        return { output: JSON.stringify({ type: 'workspace_folder_created', path, created, createdDirectories: created ? [path] : [] }) };
+      }
       case 'delete_file': { const path = this.stringValue(input, 'path'); const before = await this.workspace.readFile(projectId, path); await this.workspace.deleteFile(projectId, path); return { output: 'Arquivo excluído.', changes: [this.diffs.create(path, 'deleted', before, '')] }; }
       case 'rename_file': { const from = this.stringValue(input, 'from'); const to = this.stringValue(input, 'to'); const before = await this.workspace.readFile(projectId, from); await this.workspace.renameFile(projectId, from, to); const after = await this.workspace.readFile(projectId, to); return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] }; }
       case 'search_files': { const matches = await this.workspace.searchFiles(projectId, this.stringValue(input, 'query')); return { output: JSON.stringify(await this.visibleSearchPaths(projectId, matches, context)) }; }

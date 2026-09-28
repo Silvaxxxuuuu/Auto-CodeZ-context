@@ -43,14 +43,27 @@ export class IncrementalWorkspaceMutationRuntime {
     private readonly journal: DurableOperationJournal,
   ) {}
 
+  async inspectCreateFolder(projectId: string, requestedPath: string): Promise<{ path: string; exists: boolean }> {
+    const target = await this.workspace.canonicalRelativePath(projectId, requestedPath);
+    const existing = await this.workspace.statPath(projectId, target);
+    if (existing.exists && existing.kind !== 'directory') throw new Error('Já existe um arquivo no caminho da pasta.');
+    return { path: target, exists: existing.exists };
+  }
+
+  async inspectCreateFile(projectId: string, requestedPath: string): Promise<string> {
+    const target = await this.workspace.canonicalRelativePath(projectId, requestedPath);
+    const existing = await this.workspace.statPath(projectId, target);
+    if (existing.exists) throw new Error('O arquivo já existe. Use write_file para substituí-lo.');
+    return target;
+  }
+
   async createFolder(
     context: IncrementalMutationContext,
     requestedPath: string,
   ): Promise<IncrementalCreateFolderResult> {
-    const target = await this.workspace.canonicalRelativePath(context.projectId, requestedPath);
-    const existing = await this.workspace.statPath(context.projectId, target);
-    if (existing.exists) {
-      if (existing.kind !== 'directory') throw new Error('Já existe um arquivo no caminho da pasta.');
+    const inspected = await this.inspectCreateFolder(context.projectId, requestedPath);
+    const target = inspected.path;
+    if (inspected.exists) {
       return { path: target, created: false, createdDirectories: [] };
     }
 
@@ -84,9 +97,7 @@ export class IncrementalWorkspaceMutationRuntime {
     requestedPath: string,
     content: string,
   ): Promise<IncrementalCreateFileResult> {
-    const target = await this.workspace.canonicalRelativePath(context.projectId, requestedPath);
-    const existing = await this.workspace.statPath(context.projectId, target);
-    if (existing.exists) throw new Error('O arquivo já existe. Use write_file para substituí-lo.');
+    const target = await this.inspectCreateFile(context.projectId, requestedPath);
 
     const parent = normalizedRelativePath(path.dirname(target));
     const directoryResources = parent === '.'

@@ -2,6 +2,9 @@ import { app, dialog, ipcMain, Menu, shell, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalStorage } from './core/storage';
+import { OperationJournalRuntime } from './agent-core/operation-journal';
+import { DurableOperationJournal, OperationJournalStore } from './agent-core/operation-journal-store';
+import { IncrementalWorkspaceMutationRuntime } from './agent-core/incremental-workspace-runtime';
 import { ProviderManager } from './ai/provider-manager';
 import { ChatManager } from './ai/chat-manager';
 import { ProjectManager } from './project/project-manager';
@@ -247,6 +250,10 @@ const providerManager = new ProviderManager(storage);
 const chatManager = new ChatManager(storage);
 const projectManager = new ProjectManager(storage);
 const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
+const agentCoreOperationJournalRuntime = new OperationJournalRuntime();
+const agentCoreOperationJournalStore = new OperationJournalStore(storage);
+const durableAgentCoreOperationJournal = new DurableOperationJournal(agentCoreOperationJournalRuntime, agentCoreOperationJournalStore);
+const incrementalWorkspaceMutationRuntime = new IncrementalWorkspaceMutationRuntime(workspaceRuntime, durableAgentCoreOperationJournal);
 const executionShadowWorkspaceRuntime = new ExecutionShadowWorkspaceRuntime(workspaceRuntime);
 const shadowAwareWorkspaceRuntime = new ShadowAwareWorkspaceRuntime(workspaceRuntime, executionShadowWorkspaceRuntime);
 const permissionRuntime = new PermissionRuntime();
@@ -260,6 +267,7 @@ const terminalService = new TerminalService(storage, () => projectManager.list()
 const computerContextRuntime = new ComputerContextRuntime();
 const toolRuntime = new ShadowAwareToolRuntime(shadowAwareWorkspaceRuntime, permissionRuntime, activityRuntime, approvalRuntime, commandRuntime, diffRuntime, storage);
 toolRuntime.configureShadowWorkspace(executionShadowWorkspaceRuntime);
+toolRuntime.configureIncrementalWorkspaceRuntime(incrementalWorkspaceMutationRuntime);
 toolRuntime.configureGitRuntime(gitRuntime);
 const providerRequestJournal = new ProviderRequestJournal(storage);
 const chatRuntime = new ChatRuntime(
@@ -1871,6 +1879,7 @@ app.whenReady().then(async () => {
     }
   }
   await storage.init();
+  await durableAgentCoreOperationJournal.init();
   await mcpGatewayBindingStore.clear();
   await mcpConnectionRegistry.init();
   const initialAccountState = await accountSessionRuntime.hydrate();
@@ -2045,6 +2054,7 @@ app.on('before-quit', (event) => {
     await mcpGatewayBindingBroker?.stop().catch((): undefined => undefined);
     await stopManagedMcpGateway().catch((): undefined => undefined);
     await attachmentIndexer.stop().catch((): undefined => undefined);
+    await durableAgentCoreOperationJournal.flush().catch((): undefined => undefined);
     app.quit();
   })();
 });

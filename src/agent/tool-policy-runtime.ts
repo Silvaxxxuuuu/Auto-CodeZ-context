@@ -26,6 +26,7 @@ const systemFileTools = new Set<AIToolCall['name']>([
   'read_file',
   'write_file',
   'create_file',
+  'create_folder',
   'replace_range',
   'replace_text',
   'replace_symbol',
@@ -52,6 +53,7 @@ export function extractToolPolicyPaths(call: AIToolCall): string[] {
     || call.name === 'read_symbol'
     || call.name === 'write_file'
     || call.name === 'create_file'
+    || call.name === 'create_folder'
     || call.name === 'replace_range'
     || call.name === 'replace_text'
     || call.name === 'replace_symbol'
