@@ -48,7 +48,7 @@ type OnboardingStep = 'activation' | 'clients' | 'instructions' | 'operational';
 type McpClientId = 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other';
 type McpAutoConfigClientId = 'cursor' | 'codex' | 'claude-code' | 'claude-desktop';
 type McpStoredConnection = { clientId: McpClientId; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string; autoReconnect?: boolean } };
-type McpClientConfigStatus = { clientId: McpAutoConfigClientId; state: 'not-configured' | 'prepared' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string };
+type McpClientConfigStatus = { clientId: McpAutoConfigClientId; state: 'not-configured' | 'prepared' | 'configured' | 'conflict' | 'unsupported'; configPath: string; bundlePath?: string; unpackedPath?: string; detail: string };
 
 const MAX_RENDERED_EVENTS = 250;
 const OPENAI_ICON_URL = new URL('./assets/mcp-clients/openai.svg', import.meta.url).href;
@@ -397,7 +397,7 @@ function renderClientInstructions(client: McpClientId): string {
       ${status?.state === 'configured'
         ? '<p>A extensão Auto CodeZ está registrada no Claude Desktop.</p><div class="mcp-guide-note">A conexão local foi detectada no registro real de extensões do Claude.</div>'
         : status?.state === 'prepared'
-          ? `<p>A extensão local está pronta. No Claude Desktop, abra <b>Configurações → Extensões → Configurações avançadas → Desenvolvedor de Extensão → Instalar extensão descompactada</b> e selecione esta pasta:</p><code>${escapeHtml(status.configPath)}</code><button class="mcp-text-action" type="button" data-mcp-copy-text="${escapeHtml(status.configPath)}">Copiar pasta da extensão</button><div class="mcp-guide-note">Depois da instalação, volte aqui e atualize o status. O Auto CodeZ só marcará a conexão como configurada quando o Claude realmente registrá-la.</div>`
+          ? `<p>O bundle MCPB oficial está pronto. Abra-o no Claude Desktop e confirme a instalação.</p><code>${escapeHtml(status.bundlePath || status.configPath)}</code><div class="mcp-chatgpt-actions"><button class="mcp-primary-action compact" type="button" data-mcp-open-client-artifact="bundle">Instalar .mcpb no Claude</button><button class="mcp-text-action" type="button" data-mcp-open-client-artifact="unpacked">Mostrar pasta fallback</button></div><div class="mcp-guide-note">Se o instalador .mcpb fechar sem concluir no Windows, use Configurações → Extensões → Configurações avançadas → Desenvolvedor de Extensão → Instalar extensão descompactada e selecione: ${escapeHtml(status.unpackedPath || '')}</div>`
           : status?.state === 'unsupported'
             ? '<p>A Desktop Extension do Claude ainda não está disponível neste sistema.</p>'
             : `<p>O Claude Desktop atual usa Desktop Extensions para servidores MCP locais. O Auto CodeZ prepara a extensão sem salvar tokens ou editar o JSON legado do Claude.</p><button class="mcp-primary-action compact" type="button" data-mcp-install-client-config="claude-desktop" ${clientConfigBusy ? 'disabled' : ''}>${clientConfigBusy === 'claude-desktop' ? 'Preparando…' : 'Preparar extensão'}</button>`}
@@ -566,7 +566,7 @@ function renderConnectionSetup(client: McpClientId, state: { label: string; tone
       return `<section class="mcp-setup-callout configured"><span>CONFIGURADO</span><strong>Extensão Auto CodeZ instalada no Claude Desktop</strong><p>${escapeHtml(status.detail)}</p></section>`;
     }
     if (status?.state === 'prepared') {
-      return `<section class="mcp-setup-callout attention"><span>EXTENSÃO PRONTA</span><strong>Concluir uma vez no Claude Desktop</strong><p>Abra <b>Configurações → Extensões → Configurações avançadas → Desenvolvedor de Extensão → Instalar extensão descompactada</b> e selecione a pasta abaixo.</p><code>${escapeHtml(status.configPath)}</code><div class="mcp-chatgpt-actions"><button class="mcp-text-action" type="button" data-mcp-copy-text="${escapeHtml(status.configPath)}">Copiar pasta da extensão</button><button class="mcp-primary-action compact" type="button" data-mcp-refresh>Já instalei · verificar</button></div>${error ? `<div class="mcp-client-config-error">${escapeHtml(error)}</div>` : ''}</section>`;
+      return `<section class="mcp-setup-callout attention"><span>EXTENSÃO PRONTA</span><strong>Concluir uma vez no Claude Desktop</strong><p>Use o bundle MCPB oficial. O Auto CodeZ só marcará a conexão como configurada quando o Claude realmente registrá-la.</p><code>${escapeHtml(status.bundlePath || status.configPath)}</code><div class="mcp-chatgpt-actions"><button class="mcp-primary-action compact" type="button" data-mcp-open-client-artifact="bundle">Instalar .mcpb no Claude</button><button class="mcp-text-action" type="button" data-mcp-open-client-artifact="unpacked">Mostrar pasta fallback</button><button class="mcp-text-action" type="button" data-mcp-refresh>Já instalei · verificar</button></div><div class="mcp-guide-note">Se o preview do .mcpb fechar sem instalar no Windows, use o modo de desenvolvedor do Claude para instalar a extensão descompactada em: ${escapeHtml(status.unpackedPath || '')}</div>${error ? `<div class="mcp-client-config-error">${escapeHtml(error)}</div>` : ''}</section>`;
     }
     if (status?.state === 'unsupported') {
       return `<section class="mcp-setup-callout"><span>PRÓXIMO PASSO</span><strong>Claude Desktop não suportado</strong><p>${escapeHtml(status.detail)}</p></section>`;
@@ -1077,6 +1077,11 @@ function install(): void {
     }
     const openUrl = target.closest<HTMLElement>('[data-mcp-open-url]')?.dataset.mcpOpenUrl;
     if (openUrl) { await window.autoCodez.openExternal(openUrl); return; }
+    const clientArtifact = target.closest<HTMLElement>('[data-mcp-open-client-artifact]')?.dataset.mcpOpenClientArtifact;
+    if (clientArtifact === 'bundle' || clientArtifact === 'unpacked') {
+      await window.autoCodez.openMcpClientConfigArtifact('claude-desktop', clientArtifact);
+      return;
+    }
     const copyText = target.closest<HTMLElement>('[data-mcp-copy-text]')?.dataset.mcpCopyText;
     if (copyText) { await navigator.clipboard.writeText(copyText).catch((): undefined => undefined); return; }
     const scope = target.closest<HTMLElement>('[data-mcp-scope]');

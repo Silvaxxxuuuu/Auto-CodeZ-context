@@ -467,6 +467,13 @@ async function runTest() {
   if (!claudeManifest.tools_generated) throw new Error('Desktop Extension do Claude não declarou tools dinâmicas.');
   if (!claudeExtensionServer.includes('claude-desktop') || !claudeExtensionServer.includes('auto-codez')) throw new Error('Bridge Node da Desktop Extension não contém identidade MCP esperada.');
   if (claudeExtensionServer.includes('Bearer ') || /bearerToken\\s*[:=]\\s*['"][^'"]+/.test(claudeExtensionServer)) throw new Error('Desktop Extension do Claude persistiu Bearer MCP.');
+  const claudeBundlePath = claudeDesktopConfigStatus.bundlePath || claudeDesktopConfigStatus.configPath;
+  const claudeBundle = await fs.readFile(claudeBundlePath);
+  if (claudeBundle.readUInt32LE(0) !== 0x04034b50 || !claudeBundle.includes(Buffer.from('manifest.json')) || !claudeBundle.includes(Buffer.from('server/index.cjs'))) {
+    throw new Error('Bundle MCPB do Claude não possui estrutura ZIP esperada.');
+  }
+  await mcpMode.getByRole('button', { name: 'Instalar .mcpb no Claude' }).waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByRole('button', { name: 'Mostrar pasta fallback' }).waitFor({ state: 'visible', timeout: 10000 });
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-claude-desktop-extensao-pronta.png'), animations: 'disabled' });
   await mcpMode.getByRole('button', { name: 'Voltar para MCP Mode' }).click();
 

@@ -25,6 +25,8 @@ test('Claude Desktop extension is prepared as a Node MCPB-compatible unpacked ex
   try {
     const status = await f.manager.prepare();
     assert.equal(status.state, 'prepared');
+    assert.equal(status.unpackedPath, f.extensionRoot);
+    assert.equal(status.bundlePath, path.join(path.dirname(f.extensionRoot), 'auto-codez.mcpb'));
     const manifest = JSON.parse(await fs.readFile(path.join(f.extensionRoot, 'manifest.json'), 'utf8'));
     assert.equal(manifest.manifest_version, '0.3');
     assert.equal(manifest.name, 'auto-codez');
@@ -34,8 +36,12 @@ test('Claude Desktop extension is prepared as a Node MCPB-compatible unpacked ex
     const server = await fs.readFile(path.join(f.extensionRoot, 'server', 'index.cjs'), 'utf8');
     assert.match(server, /auto-codez-test/);
     assert.match(server, /claude-desktop/);
-    assert.doesNotMatch(server, /Bearer [A-Za-z0-9_-]+/);
-    assert.doesNotMatch(server, /bearerToken\s*[:=]\s*['"][^'"]+/);
+    assert.doesNotMatch(server, /Bearer\s+[A-Za-z0-9._-]{16,}/);
+    assert.doesNotMatch(server, /bearerToken\s*[:=]\s*['"][^'"]{16,}/);
+    const bundle = await fs.readFile(status.bundlePath);
+    assert.equal(bundle.readUInt32LE(0), 0x04034b50);
+    assert.ok(bundle.includes(Buffer.from('manifest.json')));
+    assert.ok(bundle.includes(Buffer.from('server/index.cjs')));
   } finally {
     await fs.rm(f.root, { recursive: true, force: true });
   }

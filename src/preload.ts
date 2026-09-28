@@ -160,6 +160,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
   removeMcpConnection: (clientId: string) => invoke('mcp-connections:remove', requireIdentifier(clientId, 'Cliente MCP')),
   mcpClientConfigStatus: (clientId: string) => invoke('mcp-client-config:status', requireIdentifier(clientId, 'Cliente MCP')),
   installMcpClientConfig: (clientId: string) => invoke('mcp-client-config:install', requireIdentifier(clientId, 'Cliente MCP')),
+  openMcpClientConfigArtifact: (clientId: string, kind: 'bundle' | 'unpacked') => invoke('mcp-client-config:open-artifact', requireIdentifier(clientId, 'Cliente MCP'), kind),
   removeMcpClientConfig: (clientId: string) => invoke('mcp-client-config:remove', requireIdentifier(clientId, 'Cliente MCP')),
   mcpRuntimeStatus: () => invoke('mcp-runtime:status'),
   prepareMcpRuntime: () => invoke('mcp-runtime:prepare'),

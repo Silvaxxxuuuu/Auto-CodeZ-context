@@ -1358,6 +1358,23 @@ ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknow
   });
   return status;
 });
+ipcMain.handle('mcp-client-config:open-artifact', async (_event, clientIdInput: unknown, kindInput: unknown) => {
+  const clientId = requireAutoConfigClient(clientIdInput);
+  if (clientId !== 'claude-desktop') throw new Error('Este cliente não possui artefato de extensão.');
+  const kind = requireIdentifier(kindInput, 'Artefato MCP');
+  if (kind !== 'bundle' && kind !== 'unpacked') throw new Error('Artefato MCP inválido.');
+  const manager = await localClaudeDesktopExtensionManager();
+  const status = await manager.status();
+  if (status.state !== 'prepared' && status.state !== 'configured') throw new Error('Prepare a extensão do Claude Desktop antes de abri-la.');
+  if (kind === 'bundle') {
+    const error = await shell.openPath(manager.artifactPath('bundle'));
+    if (error) throw new Error(`Não foi possível abrir o bundle MCPB: ${error}`);
+  } else {
+    shell.showItemInFolder(path.join(manager.artifactPath('unpacked'), 'manifest.json'));
+  }
+  return { opened: true };
+});
+
 ipcMain.handle('mcp-client-config:remove', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
   const status = clientId === 'claude-desktop'

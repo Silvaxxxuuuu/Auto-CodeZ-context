@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { deflateRawSync } from 'node:zlib';
 
 export type ClaudeDesktopExtensionState = 'not-configured' | 'prepared' | 'configured' | 'unsupported';
 
@@ -7,6 +8,8 @@ export type ClaudeDesktopExtensionStatus = {
   clientId: 'claude-desktop';
   state: ClaudeDesktopExtensionState;
   configPath: string;
+  bundlePath: string;
+  unpackedPath: string;
   detail: string;
 };
 
@@ -40,6 +43,87 @@ async function readJson(filePath: string): Promise<unknown | undefined> {
   }
 }
 
+function crc32(data: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function dosTimestamp(now = new Date()): { time: number; date: number } {
+  const year = Math.max(1980, now.getFullYear());
+  return {
+    time: (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2),
+    date: ((year - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate(),
+  };
+}
+
+function createMcpbArchive(entries: Array<{ name: string; data: Buffer }>): Buffer {
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let localOffset = 0;
+  const stamp = dosTimestamp();
+
+  for (const entry of entries) {
+    const fileName = Buffer.from(entry.name.replace(/\\/g, '/'), 'utf8');
+    const compressed = deflateRawSync(entry.data, { level: 9 });
+    const checksum = crc32(entry.data);
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(8, 8);
+    localHeader.writeUInt16LE(stamp.time, 10);
+    localHeader.writeUInt16LE(stamp.date, 12);
+    localHeader.writeUInt32LE(checksum, 14);
+    localHeader.writeUInt32LE(compressed.length, 18);
+    localHeader.writeUInt32LE(entry.data.length, 22);
+    localHeader.writeUInt16LE(fileName.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+    localParts.push(localHeader, fileName, compressed);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(8, 10);
+    centralHeader.writeUInt16LE(stamp.time, 12);
+    centralHeader.writeUInt16LE(stamp.date, 14);
+    centralHeader.writeUInt32LE(checksum, 16);
+    centralHeader.writeUInt32LE(compressed.length, 20);
+    centralHeader.writeUInt32LE(entry.data.length, 24);
+    centralHeader.writeUInt16LE(fileName.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(localOffset, 42);
+    centralParts.push(centralHeader, fileName);
+
+    localOffset += localHeader.length + fileName.length + compressed.length;
+  }
+
+  const centralDirectory = Buffer.concat(centralParts);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralDirectory.length, 12);
+  end.writeUInt32LE(localOffset, 16);
+  end.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localParts, centralDirectory, end]);
+}
+
 export class ClaudeDesktopExtensionManager {
   constructor(private readonly options: ClaudeDesktopExtensionManagerOptions) {}
 
@@ -53,6 +137,14 @@ export class ClaudeDesktopExtensionManager {
 
   private get installationsPath(): string {
     return path.join(this.options.claudeUserDataPath, 'extensions-installations.json');
+  }
+
+  private get bundlePath(): string {
+    return path.join(path.dirname(this.options.extensionRoot), 'auto-codez.mcpb');
+  }
+
+  artifactPath(kind: 'bundle' | 'unpacked'): string {
+    return kind === 'bundle' ? this.bundlePath : this.options.extensionRoot;
   }
 
   private manifest(): Record<string, unknown> {
@@ -233,6 +325,7 @@ main().catch((error) => {
       const [manifestText, serverText] = await Promise.all([
         fs.readFile(this.manifestPath, 'utf8'),
         fs.readFile(this.serverPath, 'utf8'),
+        fs.access(this.bundlePath),
       ]);
       return manifestText === JSON.stringify(this.manifest(), null, 2) + '\n'
         && serverText === this.serverSource();
@@ -241,51 +334,52 @@ main().catch((error) => {
     }
   }
 
-  async status(): Promise<ClaudeDesktopExtensionStatus> {
-    if ((this.options.platform ?? process.platform) !== 'win32') {
-      return {
-        clientId: 'claude-desktop',
-        state: 'unsupported',
-        configPath: this.options.extensionRoot,
-        detail: 'A extensão local do Claude Desktop está disponível no Windows nesta versão.',
-      };
-    }
-    if (await this.installedInClaude()) {
-      return {
-        clientId: 'claude-desktop',
-        state: 'configured',
-        configPath: this.options.extensionRoot,
-        detail: 'Extensão Auto CodeZ detectada no registro real do Claude Desktop.',
-      };
-    }
-    if (await this.preparedAndCurrent()) {
-      return {
-        clientId: 'claude-desktop',
-        state: 'prepared',
-        configPath: this.options.extensionRoot,
-        detail: 'Extensão local pronta. Falta instalá-la uma vez no Claude Desktop.',
-      };
-    }
+  private statusPayload(state: ClaudeDesktopExtensionState, detail: string): ClaudeDesktopExtensionStatus {
     return {
       clientId: 'claude-desktop',
-      state: 'not-configured',
-      configPath: this.options.extensionRoot,
-      detail: 'A extensão local do Auto CodeZ ainda não foi preparada.',
+      state,
+      configPath: this.bundlePath,
+      bundlePath: this.bundlePath,
+      unpackedPath: this.options.extensionRoot,
+      detail,
     };
+  }
+
+  async status(): Promise<ClaudeDesktopExtensionStatus> {
+    if ((this.options.platform ?? process.platform) !== 'win32') {
+      return this.statusPayload('unsupported', 'A extensão local do Claude Desktop está disponível no Windows nesta versão.');
+    }
+    if (await this.installedInClaude()) {
+      return this.statusPayload('configured', 'Extensão Auto CodeZ detectada no registro real do Claude Desktop.');
+    }
+    if (await this.preparedAndCurrent()) {
+      return this.statusPayload('prepared', 'Bundle MCPB oficial e fallback descompactado estão prontos para instalação no Claude Desktop.');
+    }
+    return this.statusPayload('not-configured', 'A extensão local do Auto CodeZ ainda não foi preparada.');
   }
 
   async prepare(): Promise<ClaudeDesktopExtensionStatus> {
     if ((this.options.platform ?? process.platform) !== 'win32') return this.status();
     await fs.mkdir(path.dirname(this.serverPath), { recursive: true });
+    const manifestText = JSON.stringify(this.manifest(), null, 2) + '\n';
+    const serverText = this.serverSource();
     await Promise.all([
-      fs.writeFile(this.manifestPath, JSON.stringify(this.manifest(), null, 2) + '\n', 'utf8'),
-      fs.writeFile(this.serverPath, this.serverSource(), 'utf8'),
+      fs.writeFile(this.manifestPath, manifestText, 'utf8'),
+      fs.writeFile(this.serverPath, serverText, 'utf8'),
     ]);
+    const archive = createMcpbArchive([
+      { name: 'manifest.json', data: Buffer.from(manifestText, 'utf8') },
+      { name: 'server/index.cjs', data: Buffer.from(serverText, 'utf8') },
+    ]);
+    await fs.writeFile(this.bundlePath, archive);
     return this.status();
   }
 
   async removePrepared(): Promise<ClaudeDesktopExtensionStatus> {
-    await fs.rm(this.options.extensionRoot, { recursive: true, force: true });
+    await Promise.all([
+      fs.rm(this.options.extensionRoot, { recursive: true, force: true }),
+      fs.rm(this.bundlePath, { force: true }),
+    ]);
     return this.status();
   }
 }
