@@ -93,6 +93,7 @@ declare global {
       };
       createProject: (input: { name: string; rootPath: string }) => Promise<Project>;
       openFolder: () => Promise<string | null>;
+      openExternal: (url: string) => Promise<void>;
     };
   }
 }
