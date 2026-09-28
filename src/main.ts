@@ -71,6 +71,7 @@ import { McpGatewayBindingStore } from './mcp-gateway/binding-store';
 import { McpGatewayBindingBroker, mcpBindingBrokerAddress } from './mcp-gateway/binding-broker';
 import { McpClientConfigurator } from './mcp-gateway/client-configurator';
 import { resolveMcpBridgeLaunchConfig } from './mcp-gateway/bridge-resource';
+import { resolveClaudeDesktopConfigPath } from './mcp-gateway/claude-desktop-config-path';
 import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
 import { LocalProtectedCredentialStore } from './account/protected-credential-store';
 import { DeviceIdentityStore } from './account/device-identity';
@@ -1265,17 +1266,22 @@ ipcMain.handle('mcp-connections:list', async () => mcpConnectionRegistry.list())
 ipcMain.handle('mcp-connections:add', async (_event, clientIdInput: unknown) => mcpConnectionRegistry.add(requireIdentifier(clientIdInput, 'Cliente MCP')));
 ipcMain.handle('mcp-connections:remove', async (_event, clientIdInput: unknown) => ({ removed: await mcpConnectionRegistry.remove(requireIdentifier(clientIdInput, 'Cliente MCP')) }));
 
-function localMcpClientConfigurator(): McpClientConfigurator {
+async function localMcpClientConfigurator(): Promise<McpClientConfigurator> {
   const bridge = resolveMcpBridgeLaunchConfig({
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     appRoot: app.getAppPath(),
   });
+  const claudeDesktopConfigPath = await resolveClaudeDesktopConfigPath({
+    appDataRoot: app.getPath('appData'),
+    localAppDataRoot: process.env.LOCALAPPDATA,
+    platform: process.platform,
+  });
   return new McpClientConfigurator({
     cursorConfigPath: path.join(app.getPath('home'), '.cursor', 'mcp.json'),
     codexConfigPath: path.join(app.getPath('home'), '.codex', 'config.toml'),
     claudeCodeConfigPath: path.join(app.getPath('home'), '.claude.json'),
-    claudeDesktopConfigPath: path.join(app.getPath('appData'), 'Claude', 'claude_desktop_config.json'),
+    claudeDesktopConfigPath,
     bridgeScriptPath: bridge.bridgeScriptPath,
     brokerAddress: mcpBindingBrokerAddress(app.getPath('appData')),
     appPath: process.execPath,
@@ -1293,7 +1299,7 @@ function requireAutoConfigClient(value: unknown): 'cursor' | 'codex' | 'claude-c
 
 ipcMain.handle('mcp-client-config:status', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
-  const status = await localMcpClientConfigurator().status(clientId);
+  const status = await (await localMcpClientConfigurator()).status(clientId);
   const existing = mcpConnectionRegistry.get(clientId);
   if (existing) {
     if (status.state === 'configured' && existing.setupState !== 'configured') {
@@ -1306,7 +1312,7 @@ ipcMain.handle('mcp-client-config:status', async (_event, clientIdInput: unknown
 });
 ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
-  const status = await localMcpClientConfigurator().install(clientId);
+  const status = await (await localMcpClientConfigurator()).install(clientId);
   await mcpConnectionRegistry.markConfigured(clientId);
   const clientName = clientId === 'cursor' ? 'Cursor' : clientId === 'codex' ? 'Codex' : clientId === 'claude-code' ? 'Claude Code' : 'Claude Desktop';
   operationalLedger.record({
@@ -1321,7 +1327,7 @@ ipcMain.handle('mcp-client-config:install', async (_event, clientIdInput: unknow
 });
 ipcMain.handle('mcp-client-config:remove', async (_event, clientIdInput: unknown) => {
   const clientId = requireAutoConfigClient(clientIdInput);
-  const status = await localMcpClientConfigurator().remove(clientId);
+  const status = await (await localMcpClientConfigurator()).remove(clientId);
   await mcpConnectionRegistry.markAdded(clientId);
   const clientName = clientId === 'cursor' ? 'Cursor' : clientId === 'codex' ? 'Codex' : clientId === 'claude-code' ? 'Claude Code' : 'Claude Desktop';
   operationalLedger.record({

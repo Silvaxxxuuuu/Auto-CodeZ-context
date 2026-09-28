@@ -480,15 +480,16 @@ async function runTest() {
   await mcpMode.locator('[data-mcp-connection-detail="chatgpt"]').waitFor({ state: 'visible' });
   await mcpMode.getByText('Concluir no ChatGPT', { exact: true }).waitFor({ state: 'visible' });
   await mcpMode.getByText('O Secure MCP Tunnel é o caminho oficial para ligar um servidor MCP local ao ChatGPT durante desenvolvimento. Ele exige uma conta OpenAI Platform com acesso a Tunnels. Este não é o fluxo planejado para o usuário final do Auto CodeZ.', { exact: true }).waitFor({ state: 'visible' });
-  await mcpMode.getByRole('button', { name: '1. Abrir Tunnels da OpenAI' }).waitFor({ state: 'visible' });
+  await mcpMode.getByRole('button', { name: '1. Criar ou abrir Tunnel' }).waitFor({ state: 'visible' });
   await mcpMode.getByRole('button', { name: '2. Criar Runtime API key' }).waitFor({ state: 'visible' });
-  await mcpMode.getByRole('button', { name: '3. Abrir Plugins do ChatGPT' }).waitFor({ state: 'visible' });
+  if (await mcpMode.getByRole('button', { name: 'Abrir Plugins do ChatGPT' }).count()) throw new Error('ChatGPT foi oferecido antes de o Secure MCP Tunnel ficar pronto.');
   const visualTunnelId = 'tunnel_0123456789abcdef0123456789abcdef';
   await mcpMode.locator('[data-mcp-tunnel-id]').fill(visualTunnelId);
   const visualTunnelKey = mcpMode.locator('[data-mcp-tunnel-key]');
   if (await visualTunnelKey.count()) await visualTunnelKey.fill('sk-visual-tunnel-connection-key-1234567890');
   await mcpMode.getByRole('button', { name: 'Validar e conectar' }).click();
-  await mcpMode.getByText('ChatGPT conectado ao Auto CodeZ', { exact: true }).waitFor({ state: 'visible', timeout: 20000 });
+  await mcpMode.getByText('Agora conclua no ChatGPT', { exact: true }).waitFor({ state: 'visible', timeout: 20000 });
+  await mcpMode.getByRole('button', { name: 'Abrir Plugins do ChatGPT' }).waitFor({ state: 'visible', timeout: 10000 });
   const tunnelReadyStatus = await page.evaluate(() => window.autoCodez.mcpTunnelStatus());
   if (!tunnelReadyStatus.running || !tunnelReadyStatus.ready || tunnelReadyStatus.tunnelId !== visualTunnelId) {
     throw new Error('Secure MCP Tunnel não ficou pronto pelo fluxo principal: ' + JSON.stringify(tunnelReadyStatus));
