@@ -241,3 +241,18 @@ test('statPath distinguishes files, directories and missing paths', async () => 
     await workspace.cleanup();
   }
 });
+
+
+test('writeFile replaces existing content atomically and leaves no temporary siblings', async () => {
+  const workspace = await createWorkspace();
+  try {
+    await workspace.runtime.createFile('project-test', 'atomic-write.txt', 'before');
+    const content = 'after'.repeat(10000);
+    await workspace.runtime.writeFile('project-test', 'atomic-write.txt', content);
+    assert.equal(await workspace.runtime.readFile('project-test', 'atomic-write.txt'), content);
+    const entries = await fs.readdir(workspace.root);
+    assert.deepEqual(entries.sort(), ['atomic-write.txt']);
+  } finally {
+    await workspace.cleanup();
+  }
+});

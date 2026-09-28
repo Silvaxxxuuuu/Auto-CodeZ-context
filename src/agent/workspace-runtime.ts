@@ -153,8 +153,24 @@ export class WorkspaceRuntime {
       await this.assertRegularFile(filePath);
       await this.assertTextFileSize(filePath);
     }
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, content, 'utf8');
+    const directory = path.dirname(filePath);
+    await fs.mkdir(directory, { recursive: true });
+    const temporary = path.join(directory, `.${path.basename(filePath)}.${crypto.randomUUID()}.autocodez-tmp`);
+    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+    try {
+      handle = await fs.open(temporary, 'wx');
+      await handle.writeFile(content, 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await fs.rename(temporary, filePath);
+    } finally {
+      if (handle) await handle.close().catch((): undefined => undefined);
+      await fs.rm(temporary, { force: true }).catch((): undefined => undefined);
+    }
+    await this.assertRegularFile(filePath);
+    const persisted = await fs.readFile(filePath, 'utf8');
+    if (persisted !== content) throw new Error('A verificação pós-escrita do arquivo falhou.');
   }
 
   async createFile(projectId: string, requestedPath: string, content: string): Promise<void> {

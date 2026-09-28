@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { OperationAfterSnapshot, PrepareOperationInput } from './operation-journal';
 import type { OperationSnapshot } from './contracts';
 import type { DurableOperationJournal } from './operation-journal-store';
+import type { RollbackBlobStore } from './rollback-blob-store';
 import type { WorkspacePathStat } from '../agent/workspace-runtime';
 import { WorkspaceRuntime } from '../agent/workspace-runtime';
 
@@ -27,6 +28,23 @@ export type IncrementalCreateFolderResult = {
   createdDirectories: string[];
 };
 
+export type IncrementalWriteFileInspection = {
+  path: string;
+  content: string;
+  snapshot: OperationSnapshot;
+};
+
+export type IncrementalWriteFileResult = {
+  operationId: string;
+  path: string;
+  before: string;
+  after: string;
+  beforeHash: string;
+  afterHash: string;
+  bytes: number;
+  rollbackRef: string;
+};
+
 function normalizedRelativePath(value: string): string {
   return value.split(path.sep).join('/').replace(/^\.\//, '');
 }
@@ -41,6 +59,7 @@ export class IncrementalWorkspaceMutationRuntime {
   constructor(
     private readonly workspace: WorkspaceRuntime,
     private readonly journal: DurableOperationJournal,
+    private readonly rollbackBlobs?: Pick<RollbackBlobStore, 'putText' | 'getText'>,
   ) {}
 
   async inspectCreateFolder(projectId: string, requestedPath: string): Promise<{ path: string; exists: boolean }> {
@@ -55,6 +74,25 @@ export class IncrementalWorkspaceMutationRuntime {
     const existing = await this.workspace.statPath(projectId, target);
     if (existing.exists) throw new Error('O arquivo já existe. Use write_file para substituí-lo.');
     return target;
+  }
+
+  async inspectWriteFile(projectId: string, requestedPath: string): Promise<IncrementalWriteFileInspection> {
+    const target = await this.workspace.canonicalRelativePath(projectId, requestedPath);
+    const stat = await this.workspace.statPath(projectId, target);
+    if (!stat.exists) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.');
+    if (stat.kind !== 'file') throw new Error('write_file exige um arquivo regular.');
+    const content = await this.workspace.readFile(projectId, target);
+    return {
+      path: target,
+      content,
+      snapshot: {
+        exists: true,
+        kind: 'file',
+        hash: crypto.createHash('sha256').update(content, 'utf8').digest('hex'),
+        size: Buffer.byteLength(content, 'utf8'),
+        modifiedAt: stat.modifiedAt,
+      },
+    };
   }
 
   async createFolder(
@@ -137,6 +175,55 @@ export class IncrementalWorkspaceMutationRuntime {
       };
     } catch (error) {
       await this.recordFailure(prepared.operationId, context.projectId, resources.map((resource) => resource.target), error);
+      throw error;
+    }
+  }
+
+  async writeFile(
+    context: IncrementalMutationContext,
+    requestedPath: string,
+    content: string,
+  ): Promise<IncrementalWriteFileResult> {
+    if (!this.rollbackBlobs) throw new Error('RollbackBlobStore não foi configurado para write_file incremental.');
+    const inspected = await this.inspectWriteFile(context.projectId, requestedPath);
+    const rollbackRef = await this.rollbackBlobs.putText(inspected.content);
+    const beforeSnapshot: OperationSnapshot = {
+      ...inspected.snapshot,
+      contentRef: rollbackRef,
+    };
+
+    const prepared = await this.journal.prepare({
+      ...context,
+      capabilityId: 'workspace.write_file',
+      target: inspected.path,
+      resources: [{
+        target: inspected.path,
+        before: beforeSnapshot,
+        rollbackRef,
+      }],
+    });
+    await this.journal.start(prepared.operationId);
+
+    try {
+      await this.workspace.writeFile(context.projectId, inspected.path, content);
+      const after = await this.afterSnapshots(context.projectId, [inspected.path]);
+      const fileAfter = after[0]?.after;
+      if (!fileAfter?.exists || fileAfter.kind !== 'file' || !fileAfter.hash) {
+        throw new Error('A verificação do arquivo atualizado não produziu hash válido.');
+      }
+      const verified = await this.journal.verify(prepared.operationId, after);
+      return {
+        operationId: verified.operationId,
+        path: inspected.path,
+        before: inspected.content,
+        after: content,
+        beforeHash: inspected.snapshot.hash ?? '',
+        afterHash: fileAfter.hash,
+        bytes: fileAfter.size ?? Buffer.byteLength(content, 'utf8'),
+        rollbackRef,
+      };
+    } catch (error) {
+      await this.recordFailure(prepared.operationId, context.projectId, [inspected.path], error);
       throw error;
     }
   }

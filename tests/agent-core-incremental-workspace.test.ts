@@ -114,3 +114,55 @@ test('incremental create_file refuses existing destination before opening a jour
     await f.cleanup();
   }
 });
+
+
+test('incremental write_file snapshots previous content before replacing the real file', async () => {
+  const f = await fixture();
+  try {
+    await f.workspace.createFile('project-a', 'src/app.ts', 'const value = 1;');
+    const blobs = new Map<string, string>();
+    const rollbackBlobs = {
+      putText: async (content: string) => {
+        const ref = `blob:test:${Buffer.from(content, 'utf8').toString('base64')}`;
+        blobs.set(ref, content);
+        return ref;
+      },
+      getText: async (ref: string) => {
+        const content = blobs.get(ref);
+        if (content === undefined) throw new Error('missing blob');
+        return content;
+      },
+    };
+    const incremental = new IncrementalWorkspaceMutationRuntime(f.workspace, f.journal, rollbackBlobs);
+    const result = await incremental.writeFile(context, 'src/app.ts', 'const value = 2;');
+
+    assert.equal(await f.workspace.readFile('project-a', 'src/app.ts'), 'const value = 2;');
+    assert.equal(result.before, 'const value = 1;');
+    assert.equal(result.after, 'const value = 2;');
+    assert.equal(await rollbackBlobs.getText(result.rollbackRef), 'const value = 1;');
+
+    const record = f.journal.get(result.operationId);
+    assert.equal(record?.status, 'verified');
+    assert.equal(record?.capabilityId, 'workspace.write_file');
+    assert.equal(record?.resources[0].before.contentRef, result.rollbackRef);
+    assert.equal(record?.resources[0].rollbackRef, result.rollbackRef);
+    assert.equal(record?.resources[0].after?.hash, result.afterHash);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('incremental write_file requires rollback storage before touching the workspace', async () => {
+  const f = await fixture();
+  try {
+    await f.workspace.createFile('project-a', 'protected.txt', 'before');
+    await assert.rejects(
+      f.incremental.writeFile(context, 'protected.txt', 'after'),
+      /RollbackBlobStore não foi configurado/,
+    );
+    assert.equal(await f.workspace.readFile('project-a', 'protected.txt'), 'before');
+    assert.equal(f.journal.list().length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});

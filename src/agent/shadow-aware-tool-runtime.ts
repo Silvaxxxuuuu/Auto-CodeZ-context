@@ -416,6 +416,24 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
       };
     }
 
+    if (call.name === 'write_file') {
+      const requested = typeof call.input.path === 'string'
+        ? call.input.path.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase()
+        : '';
+      const overlaps = requested && shadow.changes.some((change) => {
+        const changed = change.path.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase();
+        const renamedFrom = change.renamedFrom?.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase();
+        return changed === requested || renamedFrom === requested;
+      });
+      if (overlaps) {
+        return {
+          toolCallId: call.id,
+          ok: false,
+          error: `O arquivo '${call.input.path}' possui alterações em uma execução legada isolada. Conclua ou descarte essa execução antes de atualizá-lo incrementalmente.`,
+        };
+      }
+    }
+
     if (call.name === 'create_file') {
       const requested = typeof call.input.path === 'string'
         ? call.input.path.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase()

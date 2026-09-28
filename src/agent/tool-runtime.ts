@@ -236,7 +236,7 @@ export class ToolRuntime {
     try {
       const policy = await this.evaluateToolPolicy(approval.projectId, approval.permissionLevel, approval.toolCall, { chatId: approval.chatId, runId: approval.runId });
       if (policy.decision === 'deny') throw new Error(this.policyDeniedMessage(policy));
-      await this.assertPrecondition(approval.projectId, approval.diffPlan);
+      await this.assertPrecondition(approval.projectId, approval.toolCall.name, approval.diffPlan);
       this.assertChangeBudget(approval.chatId, approval.runId, approval.toolCall, approval.diffPlan);
       const result = await this.executeNow(approval.projectId, approval.toolCall, approvalId, approval.diffPlan, { chatId: approval.chatId, runId: approval.runId });
       this.approvals.resolve(approvalId);
@@ -271,9 +271,13 @@ export class ToolRuntime {
   private async preview(projectId: string, call: AIToolCall): Promise<DiffPlan | undefined> {
     switch (call.name) {
       case 'write_file': {
-        const path = this.stringValue(call.input, 'path');
-        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.');
-        const before = await this.workspace.readFile(projectId, path);
+        const requestedPath = this.stringValue(call.input, 'path');
+        const inspected = this.incrementalWorkspace
+          ? await this.incrementalWorkspace.inspectWriteFile(projectId, requestedPath)
+          : undefined;
+        const path = inspected?.path ?? requestedPath;
+        if (!inspected && !(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.');
+        const before = inspected?.content ?? await this.workspace.readFile(projectId, path);
         const content = call.input.content;
         if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido.");
         return this.diffs.createPlan([this.diffs.create(path, 'modified', before, content)]);
@@ -333,7 +337,7 @@ export class ToolRuntime {
     }
   }
 
-  private async assertPrecondition(projectId: string, plan?: DiffPlan): Promise<void> {
+  private async assertPrecondition(projectId: string, toolName: ToolName, plan?: DiffPlan): Promise<void> {
     if (!plan) return;
     for (const change of plan.changes) {
       if (change.type === 'created') {
@@ -352,6 +356,13 @@ export class ToolRuntime {
         if (!from || !(await this.workspace.exists(projectId, from)) || await this.workspace.exists(projectId, change.path)) throw new Error(`A renomeação de '${from || '?'}' para '${change.path}' não corresponde mais ao estado aprovado.`);
         const current = await this.workspace.readFile(projectId, from);
         if (current !== change.before) throw new Error(`O arquivo '${from}' mudou desde a aprovação.`);
+        continue;
+      }
+      if (toolName === 'write_file' && this.incrementalWorkspace) {
+        const inspected = await this.incrementalWorkspace.inspectWriteFile(projectId, change.path).catch(() => {
+          throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
+        });
+        if (inspected.content !== change.before) throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
         continue;
       }
       if (!(await this.workspace.exists(projectId, change.path))) throw new Error(`O arquivo '${change.path}' mudou desde a aprovação.`);
@@ -488,7 +499,27 @@ export class ToolRuntime {
       }
       case 'read_file': return { output: await this.workspace.readFile(projectId, this.stringValue(input, 'path')) };
       case 'read_symbol': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const source = await this.workspace.readFile(projectId, path); const symbol = this.stringValue(input, 'symbol'); const kind = this.stringValue(input, 'kind') as StructuralSymbolKind; const result = await this.structuralEdits.readSymbol(path, source, { name: symbol, kind }); return { output: result.content }; }
-      case 'write_file': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.'); const before = await this.workspace.readFile(projectId, path); const content = input.content; if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido."); await this.workspace.writeFile(projectId, path, content); const after = await this.workspace.readFile(projectId, path); return { output: 'Arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, after)] }; }
+      case 'write_file': {
+        const path = this.stringValue(input, 'path');
+        const content = input.content;
+        if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido.");
+        if (this.incrementalWorkspace && context.runId && context.toolCallId) {
+          const result = await this.incrementalWorkspace.writeFile({
+            runId: context.runId,
+            toolCallId: context.toolCallId,
+            projectId,
+          }, path, content);
+          return {
+            output: JSON.stringify({ type: 'workspace_file_updated', path: result.path, operationId: result.operationId, beforeHash: result.beforeHash, afterHash: result.afterHash, bytes: result.bytes, rollbackRef: result.rollbackRef }),
+            changes: [this.diffs.create(result.path, 'modified', result.before, result.after)],
+          };
+        }
+        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe. Use create_file para criar um arquivo novo.');
+        const before = await this.workspace.readFile(projectId, path);
+        await this.workspace.writeFile(projectId, path, content);
+        const after = await this.workspace.readFile(projectId, path);
+        return { output: 'Arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, after)] };
+      }
       case 'replace_range':
       case 'replace_text':
       case 'insert_before':
