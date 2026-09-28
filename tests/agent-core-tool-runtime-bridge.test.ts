@@ -96,7 +96,7 @@ test('create_file preview refuses a path that only exists in a legacy shadow ove
     await durable.init();
     runtime.configureIncrementalWorkspaceRuntime(new IncrementalWorkspaceMutationRuntime(base, durable));
 
-    const result = await runtime.execute('chat-a', 'project-a', 'ask', call('create', 'create_file', { path: 'legacy.txt', content: 'real' }), 'run-a');
+    const result = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('create', 'create_file', { path: 'legacy.txt', content: 'real' }), 'run-a');
     assert.equal(result.ok, false);
     assert.match(result.error ?? '', /execução legada isolada/i);
     assert.equal(await base.exists('project-a', 'legacy.txt'), false);
