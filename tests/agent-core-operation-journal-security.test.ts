@@ -27,9 +27,12 @@ const sensitiveRecord = {
   projectId: 'project-sensitive',
   target: 'src/private-module.ts',
   status: 'verified' as const,
-  before: { exists: true, hash: 'before-secret-hash', contentRef: 'blob:private-before' },
-  after: { exists: true, hash: 'after-secret-hash', contentRef: 'blob:private-after' },
-  rollbackRef: 'blob:private-before',
+  resources: [{
+    target: 'src/private-module.ts',
+    before: { exists: true, kind: 'file' as const, hash: 'before-secret-hash', contentRef: 'blob:private-before' },
+    after: { exists: true, kind: 'file' as const, hash: 'after-secret-hash', contentRef: 'blob:private-after' },
+    rollbackRef: 'blob:private-before',
+  }],
   createdAt: 1000,
   updatedAt: 1100,
   verifiedAt: 1100,
@@ -50,7 +53,7 @@ test('Agent Core Operation Journal is encrypted at rest', async () => {
 
     const restored = await store.load();
     assert.equal(restored[0].target, 'src/private-module.ts');
-    assert.equal(restored[0].before.hash, 'before-secret-hash');
+    assert.equal(restored[0].resources[0].before.hash, 'before-secret-hash');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

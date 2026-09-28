@@ -1,5 +1,10 @@
 import crypto from 'node:crypto';
-import type { OperationJournalRecord, OperationJournalStatus, OperationSnapshot } from './contracts';
+import type {
+  OperationJournalRecord,
+  OperationJournalResource,
+  OperationJournalStatus,
+  OperationSnapshot,
+} from './contracts';
 
 export type OperationJournalListener = (records: OperationJournalRecord[]) => void;
 
@@ -10,8 +15,16 @@ export type PrepareOperationInput = {
   capabilityId: string;
   projectId: string;
   target: string;
-  before: OperationSnapshot;
-  rollbackRef?: string;
+  resources: Array<{
+    target: string;
+    before: OperationSnapshot;
+    rollbackRef?: string;
+  }>;
+};
+
+export type OperationAfterSnapshot = {
+  target: string;
+  after: OperationSnapshot;
 };
 
 type RuntimeOptions = {
@@ -30,12 +43,62 @@ function cloneSnapshot(snapshot: OperationSnapshot): OperationSnapshot {
   return { ...snapshot };
 }
 
+function cloneResource(resource: OperationJournalResource): OperationJournalResource {
+  return {
+    ...resource,
+    before: cloneSnapshot(resource.before),
+    ...(resource.after ? { after: cloneSnapshot(resource.after) } : {}),
+  };
+}
+
 function cloneRecord(record: OperationJournalRecord): OperationJournalRecord {
   return {
     ...record,
-    before: cloneSnapshot(record.before),
-    ...(record.after ? { after: cloneSnapshot(record.after) } : {}),
+    resources: record.resources.map(cloneResource),
   };
+}
+
+function normalizedResources(input: PrepareOperationInput['resources'], primaryTarget: string): OperationJournalResource[] {
+  if (!Array.isArray(input) || input.length === 0) throw new Error('Operation Journal precisa registrar pelo menos um recurso.');
+  const seen = new Set<string>();
+  const resources = input.map((resource): OperationJournalResource => {
+    const target = requireText(resource.target, 'Target do recurso');
+    const key = target.toLowerCase();
+    if (seen.has(key)) throw new Error(`Recurso duplicado no Operation Journal: ${target}.`);
+    seen.add(key);
+    return {
+      target,
+      before: cloneSnapshot(resource.before),
+      ...(resource.rollbackRef?.trim() ? { rollbackRef: resource.rollbackRef.trim() } : {}),
+    };
+  });
+  if (!resources.some((resource) => resource.target.toLowerCase() === primaryTarget.toLowerCase())) {
+    throw new Error('O target principal precisa constar nos recursos do Operation Journal.');
+  }
+  return resources;
+}
+
+function applyAfterSnapshots(
+  record: OperationJournalRecord,
+  snapshots: OperationAfterSnapshot[],
+  requireAll: boolean,
+): void {
+  if (!Array.isArray(snapshots)) throw new Error('Snapshots posteriores inválidos.');
+  const byTarget = new Map<string, OperationSnapshot>();
+  for (const item of snapshots) {
+    const target = requireText(item.target, 'Target posterior');
+    const key = target.toLowerCase();
+    if (byTarget.has(key)) throw new Error(`Snapshot posterior duplicado: ${target}.`);
+    byTarget.set(key, cloneSnapshot(item.after));
+  }
+  if (requireAll && byTarget.size !== record.resources.length) {
+    throw new Error('A verificação precisa informar o estado posterior de todos os recursos.');
+  }
+  for (const resource of record.resources) {
+    const after = byTarget.get(resource.target.toLowerCase());
+    if (after) resource.after = after;
+    else if (requireAll) throw new Error(`Snapshot posterior ausente para ${resource.target}.`);
+  }
 }
 
 export class OperationJournalRuntime {
@@ -57,6 +120,7 @@ export class OperationJournalRuntime {
   prepare(input: PrepareOperationInput): OperationJournalRecord {
     const operationId = requireText(input.operationId ?? this.createId(), 'Operation id');
     if (this.records.has(operationId)) throw new Error(`Operation Journal duplicado: ${operationId}.`);
+    const target = requireText(input.target, 'Target');
     const createdAt = this.now();
     const record: OperationJournalRecord = {
       contractVersion: 1,
@@ -65,10 +129,9 @@ export class OperationJournalRuntime {
       toolCallId: requireText(input.toolCallId, 'Tool call id'),
       capabilityId: requireText(input.capabilityId, 'Capability id'),
       projectId: requireText(input.projectId, 'Project id'),
-      target: requireText(input.target, 'Target'),
+      target,
+      resources: normalizedResources(input.resources, target),
       status: 'prepared',
-      before: cloneSnapshot(input.before),
-      ...(input.rollbackRef?.trim() ? { rollbackRef: input.rollbackRef.trim() } : {}),
       createdAt,
       updatedAt: createdAt,
     };
@@ -86,12 +149,12 @@ export class OperationJournalRuntime {
     return cloneRecord(record);
   }
 
-  verify(operationId: string, after: OperationSnapshot): OperationJournalRecord {
+  verify(operationId: string, after: OperationAfterSnapshot[]): OperationJournalRecord {
     const record = this.require(operationId);
     this.assertStatus(record, ['executing']);
+    applyAfterSnapshots(record, after, true);
     const timestamp = this.nextTimestamp(record.updatedAt);
     record.status = 'verified';
-    record.after = cloneSnapshot(after);
     record.updatedAt = timestamp;
     record.verifiedAt = timestamp;
     delete record.error;
@@ -99,35 +162,37 @@ export class OperationJournalRuntime {
     return cloneRecord(record);
   }
 
-  fail(operationId: string, error: string, after?: OperationSnapshot): OperationJournalRecord {
+  fail(operationId: string, error: string, after: OperationAfterSnapshot[] = []): OperationJournalRecord {
     const record = this.require(operationId);
     this.assertStatus(record, ['prepared', 'executing']);
+    applyAfterSnapshots(record, after, false);
     record.status = 'failed';
     record.error = requireText(error, 'Erro');
-    if (after) record.after = cloneSnapshot(after);
     record.updatedAt = this.nextTimestamp(record.updatedAt);
     this.emit();
     return cloneRecord(record);
   }
 
-  markRolledBack(operationId: string, after: OperationSnapshot): OperationJournalRecord {
+  markRolledBack(operationId: string, after: OperationAfterSnapshot[]): OperationJournalRecord {
     const record = this.require(operationId);
     this.assertStatus(record, ['verified', 'failed']);
-    if (!record.rollbackRef) throw new Error(`Operação ${record.operationId} não possui rollbackRef.`);
+    if (record.resources.some((resource) => !resource.rollbackRef)) {
+      throw new Error(`Operação ${record.operationId} possui recurso sem rollbackRef.`);
+    }
+    applyAfterSnapshots(record, after, true);
     record.status = 'rolled_back';
-    record.after = cloneSnapshot(after);
     record.updatedAt = this.nextTimestamp(record.updatedAt);
     delete record.error;
     this.emit();
     return cloneRecord(record);
   }
 
-  markRollbackConflict(operationId: string, error: string, after?: OperationSnapshot): OperationJournalRecord {
+  markRollbackConflict(operationId: string, error: string, after: OperationAfterSnapshot[] = []): OperationJournalRecord {
     const record = this.require(operationId);
     this.assertStatus(record, ['verified', 'failed']);
+    applyAfterSnapshots(record, after, false);
     record.status = 'rollback_conflict';
     record.error = requireText(error, 'Conflito de rollback');
-    if (after) record.after = cloneSnapshot(after);
     record.updatedAt = this.nextTimestamp(record.updatedAt);
     this.emit();
     return cloneRecord(record);

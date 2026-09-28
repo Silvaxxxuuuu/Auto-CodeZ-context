@@ -95,10 +95,18 @@ export type OperationJournalStatus =
 
 export type OperationSnapshot = {
   exists: boolean;
+  kind?: 'file' | 'directory';
   hash?: string;
   size?: number;
   modifiedAt?: number;
   contentRef?: string;
+};
+
+export type OperationJournalResource = {
+  target: string;
+  before: OperationSnapshot;
+  after?: OperationSnapshot;
+  rollbackRef?: string;
 };
 
 export type OperationJournalRecord = {
@@ -109,10 +117,8 @@ export type OperationJournalRecord = {
   capabilityId: string;
   projectId: string;
   target: string;
+  resources: OperationJournalResource[];
   status: OperationJournalStatus;
-  before: OperationSnapshot;
-  after?: OperationSnapshot;
-  rollbackRef?: string;
   createdAt: number;
   updatedAt: number;
   verifiedAt?: number;
