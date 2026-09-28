@@ -194,3 +194,50 @@ test('searchFiles rejects an empty query', async () => {
     await workspace.cleanup();
   }
 });
+
+
+test('createFolder materializes nested directories idempotently and rejects file conflicts', async () => {
+  const workspace = await createWorkspace();
+  try {
+    assert.equal(await workspace.runtime.createFolder('project-test', 'assets/uploads'), true);
+    assert.equal(await workspace.runtime.createFolder('project-test', 'assets/uploads'), false);
+    assert.equal((await workspace.runtime.statPath('project-test', 'assets/uploads')).exists, true);
+
+    await workspace.runtime.createFile('project-test', 'assets/file.txt', 'content');
+    await assert.rejects(
+      workspace.runtime.createFolder('project-test', 'assets/file.txt'),
+      /Já existe um arquivo/,
+    );
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test('createFile materializes complete content atomically without temporary siblings', async () => {
+  const workspace = await createWorkspace();
+  try {
+    const content = 'Auto CodeZ'.repeat(10000);
+    await workspace.runtime.createFile('project-test', 'nested/atomic.txt', content);
+    assert.equal(await workspace.runtime.readFile('project-test', 'nested/atomic.txt'), content);
+    const entries = await fs.readdir(path.join(workspace.root, 'nested'));
+    assert.deepEqual(entries, ['atomic.txt']);
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test('statPath distinguishes files, directories and missing paths', async () => {
+  const workspace = await createWorkspace();
+  try {
+    assert.deepEqual(await workspace.runtime.statPath('project-test', 'missing'), { exists: false });
+    await workspace.runtime.createFolder('project-test', 'folder');
+    await workspace.runtime.createFile('project-test', 'folder/file.txt', 'abc');
+    const directory = await workspace.runtime.statPath('project-test', 'folder');
+    const file = await workspace.runtime.statPath('project-test', 'folder/file.txt');
+    assert.equal(directory.exists && directory.kind, 'directory');
+    assert.equal(file.exists && file.kind, 'file');
+    assert.equal(file.exists && file.size, 3);
+  } finally {
+    await workspace.cleanup();
+  }
+});

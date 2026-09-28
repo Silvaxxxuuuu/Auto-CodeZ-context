@@ -1,9 +1,14 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectRecord } from '../ai/types';
 import { SYSTEM_WORKSPACE_ID, getSystemWorkspaceRoot } from './system-workspace';
 
 const MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
+
+export type WorkspacePathStat =
+  | { exists: false }
+  | { exists: true; kind: 'file' | 'directory'; size: number; modifiedAt: number };
 
 function isMissingPath(error: unknown): boolean {
   return error instanceof Error
@@ -90,6 +95,35 @@ export class WorkspaceRuntime {
     }
   }
 
+  async statPath(projectId: string, requestedPath: string): Promise<WorkspacePathStat> {
+    const filePath = await this.resolve(projectId, requestedPath);
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.isFile()) return { exists: true, kind: 'file', size: stat.size, modifiedAt: stat.mtimeMs };
+      if (stat.isDirectory()) return { exists: true, kind: 'directory', size: stat.size, modifiedAt: stat.mtimeMs };
+      throw new Error('A operação exige um arquivo ou diretório regular.');
+    } catch (error) {
+      if (isMissingPath(error)) return { exists: false };
+      throw error;
+    }
+  }
+
+  async createFolder(projectId: string, requestedPath: string): Promise<boolean> {
+    const filePath = await this.resolve(projectId, requestedPath);
+    const current = await this.statPath(projectId, requestedPath);
+    if (current.exists) {
+      if (current.kind !== 'directory') throw new Error('Já existe um arquivo no caminho da pasta.');
+      return false;
+    }
+    await fs.mkdir(filePath, { recursive: true });
+    const real = await fs.realpath(filePath);
+    const root = await this.root(projectId);
+    this.assertInside(root, real);
+    const stat = await fs.stat(real);
+    if (!stat.isDirectory()) throw new Error('A pasta não foi materializada corretamente.');
+    return true;
+  }
+
   private async assertRegularFile(filePath: string): Promise<void> {
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) throw new Error('A operação exige um arquivo regular.');
@@ -126,8 +160,30 @@ export class WorkspaceRuntime {
   async createFile(projectId: string, requestedPath: string, content: string): Promise<void> {
     if (Buffer.byteLength(content, 'utf8') > MAX_TEXT_FILE_BYTES) throw new Error(`Conteúdo excede o limite de ${MAX_TEXT_FILE_BYTES} bytes.`);
     const filePath = await this.resolve(projectId, requestedPath);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, content, { encoding: 'utf8', flag: 'wx' });
+    const directory = path.dirname(filePath);
+    await fs.mkdir(directory, { recursive: true });
+
+    const temporary = path.join(directory, `.${path.basename(filePath)}.${crypto.randomUUID()}.autocodez-tmp`);
+    let materialized = false;
+    try {
+      const handle = await fs.open(temporary, 'wx');
+      try {
+        await handle.writeFile(content, 'utf8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+
+      await fs.link(temporary, filePath);
+      materialized = true;
+    } finally {
+      await fs.rm(temporary, { force: true }).catch((): undefined => undefined);
+    }
+
+    if (!materialized) throw new Error('O arquivo não pôde ser materializado atomicamente.');
+    await this.assertRegularFile(filePath);
+    const persisted = await fs.readFile(filePath, 'utf8');
+    if (persisted !== content) throw new Error('A verificação pós-criação do arquivo falhou.');
   }
 
   async deleteFile(projectId: string, requestedPath: string): Promise<void> {
