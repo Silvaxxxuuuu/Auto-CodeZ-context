@@ -304,7 +304,7 @@ async function selectModel() {
 
 function hitsFor(answer) {
   const text = answer.toLowerCase();
-  return ['electron', 'wikipedia', 'framework', 'javascript', 'chromium', 'node.js', 'node', 'desktop', 'github', 'cross-platform']
+  return ['electron', 'wikipedia', 'framework', 'javascript', 'chromium', 'node.js', 'node', 'desktop', 'github', 'cross-platform', 'openjs']
     .filter((term) => text.includes(term));
 }
 
