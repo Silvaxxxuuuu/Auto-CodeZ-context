@@ -278,6 +278,12 @@ async function runTest() {
   const cursorExternalConfig = JSON.parse(await fs.readFile(cursorConfigStatus.configPath, 'utf8'));
   delete cursorExternalConfig.mcpServers?.['auto-codez'];
   await fs.writeFile(cursorConfigStatus.configPath, JSON.stringify(cursorExternalConfig, null, 2) + '\n', 'utf8');
+
+  await mcpMode.getByRole('button', { name: 'Voltar para MCP Mode' }).click();
+  await mcpMode.locator('[data-mcp-open-connection="cursor"]').click();
+  await mcpMode.locator('[data-mcp-connection-detail="cursor"]').waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByText('Conectar ao Cursor', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+
   const cursorStatusAfterExternalRemoval = await page.evaluate(() => window.autoCodez.mcpClientConfigStatus('cursor'));
   if (cursorStatusAfterExternalRemoval.state !== 'not-configured') {
     throw new Error('Status do Cursor não detectou remoção externa: ' + JSON.stringify(cursorStatusAfterExternalRemoval));
