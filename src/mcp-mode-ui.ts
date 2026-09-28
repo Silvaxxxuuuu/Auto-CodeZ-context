@@ -395,7 +395,7 @@ function renderClientInstructions(client: McpClientId): string {
     const error = clientConfigErrors['claude-desktop'];
     return `<article class="mcp-guide-card"><div class="mcp-guide-head">${renderClientIcon('claude-desktop', 'mcp-client-mark')}<div><strong>Claude Desktop</strong><small>Aplicativo desktop · MCP local</small></div></div>
       ${status?.state === 'configured'
-        ? '<p>O Auto CodeZ já está configurado no Claude Desktop. Reinicie o Claude Desktop se ele já estava aberto.</p><div class="mcp-guide-note">Configuração concluída automaticamente.</div>'
+        ? '<p>O Auto CodeZ já está configurado no Claude Desktop. Feche completamente e abra o Claude Desktop novamente para carregar o servidor MCP local.</p><div class="mcp-guide-note">Não procure Auto CodeZ no diretório de Conectores: essa área é para conectores remotos. Depois do restart, o MCP local fica disponível automaticamente nas conversas.</div>'
         : status?.state === 'conflict'
           ? `<p>${escapeHtml(status.detail)}</p><div class="mcp-guide-note">O Auto CodeZ não sobrescreve conexões MCP que não criou.</div>`
           : status?.state === 'unsupported'
@@ -536,7 +536,13 @@ function renderConnectionSetup(client: McpClientId, state: { label: string; tone
       return `<section class="mcp-setup-callout configured mcp-chatgpt-setup"><span>CONECTADO</span><strong>ChatGPT conectado ao Auto CodeZ</strong><p>Secure MCP Tunnel pronto${tunnelStatus.tunnelId ? ` · ${escapeHtml(tunnelStatus.tunnelId)}` : ''}. As ferramentas continuam seguindo as aprovações locais do Auto CodeZ.</p><button class="mcp-text-action" type="button" data-mcp-tunnel-stop ${chatgptConnectBusy ? 'disabled' : ''}>Desconectar ChatGPT</button></section>`;
     }
     const needsCredential = !tunnelStatus.credentialAvailable;
-    return `<section class="mcp-setup-callout mcp-chatgpt-setup"><span>PRÓXIMO PASSO</span><strong>Concluir no ChatGPT</strong><p>Para o Secure MCP Tunnel você precisa de dois valores da OpenAI Platform: o Tunnel ID e uma Runtime API key restrita com permissões Tunnels Read + Use. No ChatGPT, crie a conexão Auto CodeZ e escolha Túnel. A chave serve somente ao transporte desta conexão e não é salva pelo Auto CodeZ.</p>
+    return `<section class="mcp-setup-callout mcp-chatgpt-setup"><span>DESENVOLVIMENTO / TESTE</span><strong>Concluir no ChatGPT</strong><p>O Secure MCP Tunnel é o caminho oficial para ligar um servidor MCP local ao ChatGPT durante desenvolvimento. Ele exige uma conta OpenAI Platform com acesso a Tunnels. Este não é o fluxo planejado para o usuário final do Auto CodeZ.</p>
+      <div class="mcp-chatgpt-actions">
+        <button class="mcp-text-action" type="button" data-mcp-open-url="https://platform.openai.com/settings/organization/tunnels">1. Abrir Tunnels da OpenAI</button>
+        <button class="mcp-text-action" type="button" data-mcp-open-url="https://platform.openai.com/settings/organization/api-keys">2. Criar Runtime API key</button>
+        <button class="mcp-text-action" type="button" data-mcp-open-url="https://chatgpt.com/plugins">3. Abrir Plugins do ChatGPT</button>
+      </div>
+      <p>Crie ou selecione um Tunnel na primeira página e copie o <b>tunnel_…</b>. Na segunda, crie uma chave restrita com <b>Tunnels Read + Use</b>. No ChatGPT, crie o Auto CodeZ usando a conexão <b>Túnel</b>. A chave é usada somente pelo transporte desta sessão e não é salva pelo Auto CodeZ.</p>
       <div class="mcp-chatgpt-fields">
         <label><span>Tunnel ID</span><input type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="tunnel_…" value="${escapeHtml(tunnelIdDraft)}" data-mcp-tunnel-id aria-label="Tunnel ID"></label>
         ${needsCredential ? '<label><span>Runtime API key da OpenAI Platform</span><input type="password" maxlength="8192" autocomplete="new-password" placeholder="Cole somente para esta conexão" data-mcp-tunnel-key aria-label="Runtime API key da OpenAI Platform"></label>' : '<div class="mcp-chatgpt-credential-ready"><i>✓</i><span>Credencial segura detectada no ambiente</span></div>'}
@@ -561,7 +567,7 @@ function renderConnectionSetup(client: McpClientId, state: { label: string; tone
       ? ' App, CLI e extensão do Codex compartilham esta configuração.'
       : client === 'claude-code'
         ? ' O Claude Code usa esta conexão no escopo de usuário.'
-        : ' Reinicie o Claude Desktop se ele já estava aberto.';
+        : ' Feche completamente e abra o Claude Desktop novamente. Esta é uma conexão MCP local: não procure Auto CodeZ no diretório de Conectores.';
   if (status?.state === 'configured') {
     return `<section class="mcp-setup-callout configured"><span>CONFIGURADO</span><strong>Auto CodeZ adicionado ao ${escapeHtml(definition.name)}</strong><p>${escapeHtml(status.detail)}${escapeHtml(configuredExtra)}</p><button class="mcp-text-action" type="button" data-mcp-remove-client-config="${client}" ${clientConfigBusy ? 'disabled' : ''}>Remover configuração</button></section>`;
   }
@@ -724,6 +730,11 @@ function render(): void {
       </section>
 
       ${available.length ? `<section class="mcp-hub-section"><div class="mcp-section-heading"><div><span>DISPONÍVEIS</span><h2>Adicionar outra conexão</h2></div><small>Somente clientes com fluxo conhecido aparecem aqui.</small></div><div class="mcp-connection-grid available">${available.slice(0, 3).map((client) => renderConnectionCard(client, false)).join('')}</div></section>` : ''}
+
+      ${showAdvanced ? `<section class="mcp-hub-section mcp-hub-advanced">
+        <div class="mcp-section-heading"><div><span>AVANÇADO</span><h2>Configuração avançada</h2></div><button class="mcp-text-action" type="button" data-mcp-advanced>Ocultar configuração avançada</button></div>
+        ${renderTechnicalPanels()}
+      </section>` : ''}
 
       <section class="mcp-activity-section">
         <div class="mcp-section-heading"><div><span>ATIVIDADE</span><h2>Atividade recente</h2></div><small>${recent.length ? 'Ações MCP mais recentes' : 'Nenhuma sessão externa usou ferramentas ainda'}</small></div>
@@ -1041,7 +1052,18 @@ function install(): void {
       return;
     }
     if (target.closest('[data-mcp-clients]')) { onboardingStep = 'clients'; showAdvanced = false; render(); return; }
-    if (target.closest('[data-mcp-advanced]')) { showAdvanced = !showAdvanced; render(); return; }
+    if (target.closest('[data-mcp-advanced]')) {
+      if (target.closest('.mcp-connect-panel')) {
+        connectPanelOpen = false;
+        showAdvanced = true;
+      } else {
+        showAdvanced = !showAdvanced;
+      }
+      render();
+      return;
+    }
+    const openUrl = target.closest<HTMLElement>('[data-mcp-open-url]')?.dataset.mcpOpenUrl;
+    if (openUrl) { await window.autoCodez.openExternal(openUrl); return; }
     const copyText = target.closest<HTMLElement>('[data-mcp-copy-text]')?.dataset.mcpCopyText;
     if (copyText) { await navigator.clipboard.writeText(copyText).catch((): undefined => undefined); return; }
     const scope = target.closest<HTMLElement>('[data-mcp-scope]');

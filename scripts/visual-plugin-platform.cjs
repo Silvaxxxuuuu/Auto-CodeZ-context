@@ -340,6 +340,14 @@ async function runTest() {
   const connectPanelActions = await mcpMode.locator('.mcp-connect-option em').allTextContents();
   if (!connectPanelActions.length || connectPanelActions.some((label) => label.trim() !== 'Adicionar')) throw new Error('Painel Conectar ferramenta ainda sugere conexão imediata antes da configuração: ' + JSON.stringify(connectPanelActions));
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-conectar-ferramenta.png'), animations: 'disabled' });
+  await mcpMode.getByRole('dialog', { name: 'Conectar ferramenta' }).getByRole('button', { name: 'Usar configuração avançada' }).click();
+  await mcpMode.getByRole('dialog', { name: 'Conectar ferramenta' }).waitFor({ state: 'detached', timeout: 10000 });
+  await mcpMode.getByText('Configuração avançada', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByText('Gateway local', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await mcpMode.getByRole('button', { name: 'Ocultar configuração avançada' }).click();
+  await mcpMode.getByText('Configuração avançada', { exact: true }).waitFor({ state: 'detached', timeout: 10000 });
+  await mcpMode.getByRole('button', { name: 'Conectar ferramenta' }).click();
+  await mcpMode.getByRole('dialog', { name: 'Conectar ferramenta' }).waitFor({ state: 'visible', timeout: 10000 });
   await mcpMode.getByRole('dialog', { name: 'Conectar ferramenta' }).locator('[data-mcp-connect-client="cursor"]').click();
   await mcpMode.locator('[data-mcp-connection-detail="cursor"]').waitFor({ state: 'visible', timeout: 10000 });
   await mcpMode.getByText('Conectar ao Cursor', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
@@ -471,7 +479,10 @@ async function runTest() {
   await mcpMode.locator('[data-mcp-open-connection="chatgpt"]').click();
   await mcpMode.locator('[data-mcp-connection-detail="chatgpt"]').waitFor({ state: 'visible' });
   await mcpMode.getByText('Concluir no ChatGPT', { exact: true }).waitFor({ state: 'visible' });
-  await mcpMode.getByText('Para o Secure MCP Tunnel você precisa de dois valores da OpenAI Platform: o Tunnel ID e uma Runtime API key restrita com permissões Tunnels Read + Use. No ChatGPT, crie a conexão Auto CodeZ e escolha Túnel. A chave serve somente ao transporte desta conexão e não é salva pelo Auto CodeZ.', { exact: true }).waitFor({ state: 'visible' });
+  await mcpMode.getByText('O Secure MCP Tunnel é o caminho oficial para ligar um servidor MCP local ao ChatGPT durante desenvolvimento. Ele exige uma conta OpenAI Platform com acesso a Tunnels. Este não é o fluxo planejado para o usuário final do Auto CodeZ.', { exact: true }).waitFor({ state: 'visible' });
+  await mcpMode.getByRole('button', { name: '1. Abrir Tunnels da OpenAI' }).waitFor({ state: 'visible' });
+  await mcpMode.getByRole('button', { name: '2. Criar Runtime API key' }).waitFor({ state: 'visible' });
+  await mcpMode.getByRole('button', { name: '3. Abrir Plugins do ChatGPT' }).waitFor({ state: 'visible' });
   const visualTunnelId = 'tunnel_0123456789abcdef0123456789abcdef';
   await mcpMode.locator('[data-mcp-tunnel-id]').fill(visualTunnelId);
   const visualTunnelKey = mcpMode.locator('[data-mcp-tunnel-key]');
