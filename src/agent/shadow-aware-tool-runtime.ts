@@ -405,11 +405,51 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
   }
 
   private blockedByActiveShadow(chatId: string, runId: string, call: AIToolCall): AIToolResult | undefined {
-    if (!gitMutationTools.has(call.name) || !this.shadowWorkspaces?.get(chatId, runId)) return undefined;
-    return {
-      toolCallId: call.id,
-      ok: false,
-      error: 'Operação Git mutável bloqueada enquanto existem alterações isoladas no Shadow Workspace. Leituras Git usam uma visão isolada; staging, checkout, branches novas e commits permanecem bloqueados até existir publicação Git transacional segura.',
-    };
+    const shadow = this.shadowWorkspaces?.get(chatId, runId);
+    if (!shadow) return undefined;
+
+    if (gitMutationTools.has(call.name)) {
+      return {
+        toolCallId: call.id,
+        ok: false,
+        error: 'Operação Git mutável bloqueada enquanto existem alterações isoladas no Shadow Workspace. Leituras Git usam uma visão isolada; staging, checkout, branches novas e commits permanecem bloqueados até existir publicação Git transacional segura.',
+      };
+    }
+
+    if (call.name === 'create_file') {
+      const requested = typeof call.input.path === 'string'
+        ? call.input.path.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase()
+        : '';
+      const overlaps = requested && shadow.changes.some((change) => {
+        const changed = change.path.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase();
+        return changed === requested;
+      });
+      if (overlaps) {
+        return {
+          toolCallId: call.id,
+          ok: false,
+          error: `O caminho '${call.input.path}' já existe em uma execução legada isolada. Conclua ou descarte essa execução antes de criar o arquivo incrementalmente.`,
+        };
+      }
+    }
+
+    if (call.name === 'create_folder') {
+      const requested = typeof call.input.path === 'string'
+        ? call.input.path.trim().replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '').toLowerCase()
+        : '';
+      const overlaps = requested && shadow.changes.some((change) => {
+        const changed = change.path.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase();
+        return changed === requested || changed.startsWith(`${requested}/`);
+      });
+      if (overlaps) {
+        return {
+          toolCallId: call.id,
+          ok: false,
+          error: `A pasta '${call.input.path}' sobrepõe alterações de uma execução legada isolada. Conclua ou descarte essa execução antes de materializá-la incrementalmente.`,
+        };
+      }
+    }
+
+    return undefined;
   }
 }
