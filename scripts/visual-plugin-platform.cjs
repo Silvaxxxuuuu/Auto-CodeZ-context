@@ -74,16 +74,30 @@ public static class TunnelClientFixture {
 }`; await fs.writeFile(sourcePath, source, 'utf8'); const csc = path.join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'); const compiled = spawnSync(csc, ['/nologo', '/target:exe', `/out:${executablePath}`, sourcePath], { windowsHide: true, encoding: 'utf8' }); if (compiled.status !== 0) throw new Error(`Não foi possível compilar tunnel-client.exe fixture: ${compiled.stderr || compiled.stdout || compiled.error || 'erro desconhecido'}`); const roaming = path.join(stateRoot, 'AppData', 'Roaming'); const local = path.join(stateRoot, 'AppData', 'Local'); await Promise.all([fs.mkdir(roaming, { recursive: true }), fs.mkdir(local, { recursive: true })]); await Promise.all([createPluginPackage(path.join(roaming, 'Auto CodeZ')), createPluginPackage(path.join(roaming, 'auto-codez'))]); } else { const script = '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "tunnel-client v0.0.14"; exit 0; fi\nif [ "$1" = "doctor" ]; then echo "synthetic tunnel doctor ready"; exit 0; fi\necho "unsupported synthetic tunnel command" >&2\nexit 2\n'; const executable = path.join(tunnelFixtureBin, 'tunnel-client'); await fs.writeFile(executable, script, { encoding: 'utf8', mode: 0o755 }); const config = path.join(stateRoot, '.config'); const cache = path.join(stateRoot, '.cache'); await Promise.all([fs.mkdir(config, { recursive: true }), fs.mkdir(cache, { recursive: true })]); await Promise.all([createPluginPackage(path.join(config, 'Auto CodeZ')), createPluginPackage(path.join(config, 'auto-codez'))]); } }
 function environment() { const env = { ...process.env, AUTO_CODEZ_VISUAL_TEST: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true', CONTROL_PLANE_API_KEY: 'sk-visual-tunnel-connection-key-1234567890', HOME: stateRoot, PATH: [tunnelFixtureBin, process.env.PATH || process.env.Path || ''].filter(Boolean).join(path.delimiter) }; if (process.platform === 'win32') { env.USERPROFILE = stateRoot; env.APPDATA = path.join(stateRoot, 'AppData', 'Roaming'); env.LOCALAPPDATA = path.join(stateRoot, 'AppData', 'Local'); } else { env.XDG_CONFIG_HOME = path.join(stateRoot, '.config'); env.XDG_CACHE_HOME = path.join(stateRoot, '.cache'); } return env; }
 async function startElectron() { if (!electronExecutable) throw new Error('AUTO_CODEZ_ELECTRON_EXECUTABLE não foi definido.'); const port = await reservePort(); appProcess = spawn(electronExecutable, [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--no-first-run'], { cwd: root, env: environment(), windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] }); appProcess.stderr?.setEncoding('utf8'); appProcess.stderr?.on('data', (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-256 * 1024); }); appProcess.once('exit', (code, signal) => { exitState = { code, signal }; }); const endpoint = `http://127.0.0.1:${port}`; const deadline = Date.now() + 60000; while (Date.now() < deadline) { if (exitState) throw new Error(`Electron encerrou antes do CDP: ${JSON.stringify(exitState)}\n${stderr}`); try { browser = await chromium.connectOverCDP(endpoint, { timeout: 2500 }); const context = browser.contexts()[0]; if (!context) throw new Error('Contexto Chromium indisponível.'); page = context.pages().find((candidate) => !candidate.url().startsWith('devtools://')) || await context.waitForEvent('page', { timeout: 5000 }); return; } catch { if (browser) await browser.close().catch(() => {}); browser = undefined; await new Promise((resolve) => setTimeout(resolve, 350)); } } throw new Error('CDP não ficou disponível.'); }
-async function restartElectron() {
-  if (page && !page.isClosed()) await page.close().catch(() => {});
-  if (browser) await browser.close().catch(() => {});
-  if (appProcess?.pid && !exitState) {
-    if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(appProcess.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-    else appProcess.kill('SIGKILL');
+function forceStopElectronTree() {
+  if (!appProcess?.pid || exitState) return;
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(appProcess.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore', timeout: 10000 });
+  } else {
+    appProcess.kill('SIGKILL');
   }
-  appProcess = undefined;
+}
+
+async function discardCdpHandles() {
+  const currentBrowser = browser;
   browser = undefined;
   page = undefined;
+  if (!currentBrowser) return;
+  await Promise.race([
+    currentBrowser.close().catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 2000)),
+  ]);
+}
+
+async function restartElectron() {
+  forceStopElectronTree();
+  await discardCdpHandles();
+  appProcess = undefined;
   exitState = undefined;
   stderr = '';
   await startElectron();
@@ -437,5 +451,5 @@ async function runTest() {
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-chatgpt-desconectado.png'), animations: 'disabled' });
   if (pageErrors.length || consoleErrors.length) throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
 }
-async function cleanup() { if (page && !page.isClosed()) await page.close().catch(() => {}); if (browser) await browser.close().catch(() => {}); if (appProcess?.pid && !exitState) { if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(appProcess.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); else appProcess.kill('SIGKILL'); } if (bridgeServer) await new Promise((resolve) => bridgeServer.close(resolve)).catch(() => {}); if (stateRoot) await fs.rm(stateRoot, { recursive: true, force: true }).catch(() => {}); }
+async function cleanup() { forceStopElectronTree(); await discardCdpHandles(); appProcess = undefined; if (bridgeServer) await Promise.race([new Promise((resolve) => bridgeServer.close(resolve)), new Promise((resolve) => setTimeout(resolve, 2000))]).catch(() => {}); if (stateRoot) await fs.rm(stateRoot, { recursive: true, force: true }).catch(() => {}); }
 (async () => { try { await fs.mkdir(outputDir, { recursive: true }); await startBridgeServer(); await prepareStateRoot(); await startElectron(); await runTest(); await updateManifest({ name: testName, status: 'passed' }); } catch (error) { const message = errorText(error); if (page && !page.isClosed()) await page.screenshot({ path: path.join(outputDir, `falha-${testName}.png`), animations: 'disabled', fullPage: true }).catch(() => {}); await fs.writeFile(path.join(outputDir, 'plugin-platform-error.txt'), `${message}\n${stderr}\n`, 'utf8').catch(() => {}); await updateManifest({ name: testName, status: 'failed', error: message }).catch(() => {}); console.error(error); process.exitCode = 1; } finally { await cleanup(); } })();
