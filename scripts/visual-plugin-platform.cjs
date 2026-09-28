@@ -437,7 +437,9 @@ async function runTest() {
   if (!gatewayStatus.running) throw new Error('Gateway MCP não permaneceu ativo após restart.');
   await verifyPackagedMcpStdioBridge();
   const gatewayText = await restartedMcpMode.locator('.mcp-gateway-card').innerText();
-  if (!gatewayText.includes('127.0.0.1') || !gatewayText.includes('Bearer ')) throw new Error('Configuração avançada não preservou endpoint/token efêmero do gateway.');
+  if (!gatewayText.includes('127.0.0.1')) throw new Error('Configuração avançada não exibiu o endpoint loopback restaurado do gateway.');
+  if (gatewayText.includes('Bearer ')) throw new Error('Configuração avançada reexpôs Bearer efêmero após restart.');
+  if (!gatewayText.includes('O token é temporário e não é persistido.')) throw new Error('Configuração avançada não explicou que o Bearer restaurado internamente não é persistido nem reexposto.');
   if (await restartedMcpMode.locator('textarea,#prompt,.composer').count()) throw new Error('MCP Mode expôs composer próprio.');
 
   await restartedMcpMode.getByRole('button', { name: 'Desconectar ChatGPT' }).click();
