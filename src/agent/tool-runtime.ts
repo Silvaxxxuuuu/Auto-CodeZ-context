@@ -21,6 +21,7 @@ const realWorkspaceTextMutationTools = new Set<ToolName>([
   'write_file',
   'replace_range',
   'replace_text',
+  'replace_symbol',
   'insert_before',
   'insert_after',
 ]);
@@ -310,9 +311,13 @@ export class ToolRuntime {
         return this.diffs.createPlan([this.diffs.create(path, 'modified', before, after)]);
       }
       case 'replace_symbol': {
-        const path = this.stringValue(call.input, 'path');
-        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.');
-        const before = await this.workspace.readFile(projectId, path);
+        const requestedPath = this.stringValue(call.input, 'path');
+        const inspected = this.incrementalWorkspace
+          ? await this.incrementalWorkspace.inspectWriteFile(projectId, requestedPath)
+          : undefined;
+        const path = inspected?.path ?? requestedPath;
+        if (!inspected && !(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.');
+        const before = inspected?.content ?? await this.workspace.readFile(projectId, path);
         const symbol = this.stringValue(call.input, 'symbol');
         const kind = this.stringValue(call.input, 'kind') as StructuralSymbolKind;
         const content = call.input.content;
@@ -563,7 +568,32 @@ export class ToolRuntime {
         const persisted = await this.workspace.readFile(projectId, path);
         return { output: 'Trecho do arquivo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] };
       }
-      case 'replace_symbol': { const path = this.stringValue(input, 'path'); if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.'); const before = await this.workspace.readFile(projectId, path); const symbol = this.stringValue(input, 'symbol'); const kind = this.stringValue(input, 'kind') as StructuralSymbolKind; const content = input.content; if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido."); const result = await this.structuralEdits.replaceSymbol(path, before, { name: symbol, kind }, content); await this.workspace.writeFile(projectId, path, result.after); const persisted = await this.workspace.readFile(projectId, path); return { output: 'Símbolo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] }; }
+      case 'replace_symbol': {
+        const path = this.stringValue(input, 'path');
+        const symbol = this.stringValue(input, 'symbol');
+        const kind = this.stringValue(input, 'kind') as StructuralSymbolKind;
+        const content = input.content;
+        if (typeof content !== 'string') throw new Error("Parâmetro 'content' inválido.");
+        if (this.incrementalWorkspace && context.runId && context.toolCallId) {
+          const inspected = await this.incrementalWorkspace.inspectWriteFile(projectId, path);
+          const structural = await this.structuralEdits.replaceSymbol(inspected.path, inspected.content, { name: symbol, kind }, content);
+          const result = await this.incrementalWorkspace.writeFile({
+            runId: context.runId,
+            toolCallId: context.toolCallId,
+            projectId,
+          }, inspected.path, structural.after, inspected.content);
+          return {
+            output: JSON.stringify({ type: 'workspace_symbol_updated', symbol, kind, path: result.path, operationId: result.operationId, beforeHash: result.beforeHash, afterHash: result.afterHash, bytes: result.bytes, rollbackRef: result.rollbackRef }),
+            changes: [this.diffs.create(result.path, 'modified', result.before, result.after)],
+          };
+        }
+        if (!(await this.workspace.exists(projectId, path))) throw new Error('O arquivo não existe.');
+        const before = await this.workspace.readFile(projectId, path);
+        const structural = await this.structuralEdits.replaceSymbol(path, before, { name: symbol, kind }, content);
+        await this.workspace.writeFile(projectId, path, structural.after);
+        const persisted = await this.workspace.readFile(projectId, path);
+        return { output: 'Símbolo atualizado.', changes: [this.diffs.create(path, 'modified', before, persisted)] };
+      }
       case 'create_file': {
         const path = this.stringValue(input, 'path');
         const content = String(input.content ?? '');

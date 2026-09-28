@@ -206,3 +206,89 @@ test('replace_range and insert tools materialize directly through the incrementa
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test('replace_symbol materializes AST-validated changes through the incremental write pipeline', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'autocodez-agent-core-symbol-'));
+  try {
+    const before = 'class Service {\n  run() { return 1; }\n}\n';
+    await fs.writeFile(path.join(root, 'service.ts'), before, 'utf8');
+    const base = new WorkspaceRuntime(async () => [{
+      id: 'project-a',
+      name: 'Project A',
+      rootPath: root,
+      createdAt: 1,
+      updatedAt: 1,
+    }]);
+    const shadows = new ExecutionShadowWorkspaceRuntime(base);
+    const runtime = new ShadowAwareToolRuntime(new ShadowAwareWorkspaceRuntime(base, shadows));
+    runtime.configureShadowWorkspace(shadows);
+
+    const storage = new MemoryStorage();
+    const durable = new DurableOperationJournal(new OperationJournalRuntime(), new OperationJournalStore(storage as unknown as LocalStorage));
+    await durable.init();
+    const rollbackBlobs = {
+      putText: async (content: string) => `blob:test:${Buffer.from(content, 'utf8').toString('base64')}`,
+      getText: async (ref: string) => Buffer.from(ref.slice('blob:test:'.length), 'base64').toString('utf8'),
+    };
+    runtime.configureIncrementalWorkspaceRuntime(new IncrementalWorkspaceMutationRuntime(base, durable, rollbackBlobs));
+
+    const result = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('symbol', 'replace_symbol', {
+      path: 'service.ts',
+      symbol: 'run',
+      kind: 'method',
+      content: 'run() { return 2; }',
+    }), 'run-a');
+
+    assert.equal(result.ok, true);
+    assert.equal(await base.readFile('project-a', 'service.ts'), 'class Service {\n  run() { return 2; }\n}\n');
+    assert.equal(shadows.get('chat-a', 'run-a'), undefined);
+    const operations = durable.list({ runId: 'run-a' });
+    assert.equal(operations.length, 1);
+    assert.equal(operations[0].capabilityId, 'workspace.write_file');
+    assert.equal(operations[0].status, 'verified');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('replace_symbol is blocked when its file has legacy Shadow Workspace changes', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'autocodez-agent-core-symbol-shadow-'));
+  try {
+    await fs.writeFile(path.join(root, 'service.ts'), 'function run() { return 1; }\n', 'utf8');
+    const base = new WorkspaceRuntime(async () => [{
+      id: 'project-a',
+      name: 'Project A',
+      rootPath: root,
+      createdAt: 1,
+      updatedAt: 1,
+    }]);
+    const shadows = new ExecutionShadowWorkspaceRuntime(base);
+    const runtime = new ShadowAwareToolRuntime(new ShadowAwareWorkspaceRuntime(base, shadows));
+    runtime.configureShadowWorkspace(shadows);
+    await shadows.workspace('chat-a', 'run-a', 'project-a').writeFile('project-a', 'service.ts', 'function run() { return 99; }\n');
+
+    const storage = new MemoryStorage();
+    const durable = new DurableOperationJournal(new OperationJournalRuntime(), new OperationJournalStore(storage as unknown as LocalStorage));
+    await durable.init();
+    const rollbackBlobs = {
+      putText: async (content: string) => `blob:test:${content}`,
+      getText: async (ref: string) => ref.slice('blob:test:'.length),
+    };
+    runtime.configureIncrementalWorkspaceRuntime(new IncrementalWorkspaceMutationRuntime(base, durable, rollbackBlobs));
+
+    const result = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('symbol', 'replace_symbol', {
+      path: 'service.ts',
+      symbol: 'run',
+      kind: 'function',
+      content: 'function run() { return 2; }',
+    }), 'run-a');
+
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? '', /execução legada isolada/i);
+    assert.equal(await base.readFile('project-a', 'service.ts'), 'function run() { return 1; }\n');
+    assert.equal(durable.list().length, 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
