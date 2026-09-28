@@ -77,7 +77,7 @@ test('Agent Core V2 bridge materializes create_file/create_folder/write_file imm
     assert.equal(await base.readFile('project-a', 'existing.txt'), 'real-write');
     assert.equal(shadows.get('chat-a', 'run-a'), undefined);
 
-    const legacyEdit = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('edit', 'replace_text', { path: 'existing.txt', search: 'real-write', replace: 'shadow-edit', expectedReplacements: 1 }), 'run-a');
+    const legacyEdit = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('edit', 'replace_text', { path: 'existing.txt', oldText: 'real-write', newText: 'shadow-edit' }), 'run-a');
     assert.equal(legacyEdit.ok, true);
     assert.equal(await base.readFile('project-a', 'existing.txt'), 'real-write');
     assert.equal(shadows.get('chat-a', 'run-a')?.changes[0].after, 'shadow-edit');
