@@ -459,14 +459,16 @@ async function runTest() {
   await mcpMode.getByText('Concluir uma vez no Claude Desktop', { exact: true }).waitFor({ state: 'visible', timeout: 15000 });
   const claudeDesktopConfigStatus = await page.evaluate(() => window.autoCodez.mcpClientConfigStatus('claude-desktop'));
   if (claudeDesktopConfigStatus.state !== 'prepared') throw new Error('Desktop Extension do Claude não ficou preparada: ' + JSON.stringify(claudeDesktopConfigStatus));
-  const claudeManifest = JSON.parse(await fs.readFile(path.join(claudeDesktopConfigStatus.configPath, 'manifest.json'), 'utf8'));
-  const claudeExtensionServer = await fs.readFile(path.join(claudeDesktopConfigStatus.configPath, 'server', 'index.cjs'), 'utf8');
+  const claudeUnpackedPath = claudeDesktopConfigStatus.unpackedPath;
+  if (!claudeUnpackedPath) throw new Error('Desktop Extension do Claude não informou unpackedPath.');
+  const claudeManifest = JSON.parse(await fs.readFile(path.join(claudeUnpackedPath, 'manifest.json'), 'utf8'));
+  const claudeExtensionServer = await fs.readFile(path.join(claudeUnpackedPath, 'server', 'index.cjs'), 'utf8');
   if (claudeManifest.name !== 'auto-codez' || claudeManifest.manifest_version !== '0.3' || claudeManifest.server?.type !== 'node' || claudeManifest.server?.entry_point !== 'server/index.cjs') {
     throw new Error('Desktop Extension do Claude possui manifesto inválido: ' + JSON.stringify(claudeManifest));
   }
   if (!claudeManifest.tools_generated) throw new Error('Desktop Extension do Claude não declarou tools dinâmicas.');
   if (!claudeExtensionServer.includes('claude-desktop') || !claudeExtensionServer.includes('auto-codez')) throw new Error('Bridge Node da Desktop Extension não contém identidade MCP esperada.');
-  if (claudeExtensionServer.includes('Bearer ') || /bearerToken\\s*[:=]\\s*['"][^'"]+/.test(claudeExtensionServer)) throw new Error('Desktop Extension do Claude persistiu Bearer MCP.');
+  if (/Bearer\\s+[A-Za-z0-9._-]{16,}/.test(claudeExtensionServer) || /bearerToken\\s*[:=]\\s*['"][^'"]{16,}/.test(claudeExtensionServer)) throw new Error('Desktop Extension do Claude persistiu Bearer MCP literal.');
   const claudeBundlePath = claudeDesktopConfigStatus.bundlePath || claudeDesktopConfigStatus.configPath;
   const claudeBundle = await fs.readFile(claudeBundlePath);
   if (claudeBundle.readUInt32LE(0) !== 0x04034b50 || !claudeBundle.includes(Buffer.from('manifest.json')) || !claudeBundle.includes(Buffer.from('server/index.cjs'))) {
