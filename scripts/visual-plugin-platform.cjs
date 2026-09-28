@@ -11,7 +11,7 @@ const outputDir = path.resolve(root, process.env.AUTO_CODEZ_VISUAL_DIR || 'artif
 const electronExecutable = process.env.AUTO_CODEZ_ELECTRON_EXECUTABLE?.trim();
 const manifestPath = path.join(outputDir, 'manifest.json');
 const testName = 'funcional-plugin-platform';
-let stateRoot, tunnelFixtureBin, bridgeServer, bridgePort, appProcess, browser, page, exitState;
+let stateRoot, tunnelFixtureBin, bridgeServer, bridgePort, appProcess, browser, page;
 let stderr = '';
 function errorText(error) { return error instanceof Error ? `${error.name}: ${error.message}` : String(error); }
 async function withTimeout(promise, timeoutMs, label) {
@@ -86,13 +86,86 @@ public static class TunnelClientFixture {
   }
 }`; await fs.writeFile(sourcePath, source, 'utf8'); const csc = path.join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'); const compiled = spawnSync(csc, ['/nologo', '/target:exe', `/out:${executablePath}`, sourcePath], { windowsHide: true, encoding: 'utf8', timeout: 30000 }); if (compiled.status !== 0) throw new Error(`Não foi possível compilar tunnel-client.exe fixture: ${compiled.stderr || compiled.stdout || compiled.error || 'erro desconhecido'}`); const roaming = path.join(stateRoot, 'AppData', 'Roaming'); const local = path.join(stateRoot, 'AppData', 'Local'); await Promise.all([fs.mkdir(roaming, { recursive: true }), fs.mkdir(local, { recursive: true })]); await Promise.all([createPluginPackage(path.join(roaming, 'Auto CodeZ')), createPluginPackage(path.join(roaming, 'auto-codez'))]); } else { const script = '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "tunnel-client v0.0.14"; exit 0; fi\nif [ "$1" = "doctor" ]; then echo "synthetic tunnel doctor ready"; exit 0; fi\necho "unsupported synthetic tunnel command" >&2\nexit 2\n'; const executable = path.join(tunnelFixtureBin, 'tunnel-client'); await fs.writeFile(executable, script, { encoding: 'utf8', mode: 0o755 }); const config = path.join(stateRoot, '.config'); const cache = path.join(stateRoot, '.cache'); await Promise.all([fs.mkdir(config, { recursive: true }), fs.mkdir(cache, { recursive: true })]); await Promise.all([createPluginPackage(path.join(config, 'Auto CodeZ')), createPluginPackage(path.join(config, 'auto-codez'))]); } }
 function environment() { const env = { ...process.env, AUTO_CODEZ_VISUAL_TEST: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true', CONTROL_PLANE_API_KEY: 'sk-visual-tunnel-connection-key-1234567890', HOME: stateRoot, PATH: [tunnelFixtureBin, process.env.PATH || process.env.Path || ''].filter(Boolean).join(path.delimiter) }; if (process.platform === 'win32') { env.USERPROFILE = stateRoot; env.APPDATA = path.join(stateRoot, 'AppData', 'Roaming'); env.LOCALAPPDATA = path.join(stateRoot, 'AppData', 'Local'); } else { env.XDG_CONFIG_HOME = path.join(stateRoot, '.config'); env.XDG_CACHE_HOME = path.join(stateRoot, '.cache'); } return env; }
-async function startElectron() { if (!electronExecutable) throw new Error('AUTO_CODEZ_ELECTRON_EXECUTABLE não foi definido.'); const port = await reservePort(); appProcess = spawn(electronExecutable, [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--no-first-run'], { cwd: root, env: environment(), windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] }); appProcess.stderr?.setEncoding('utf8'); appProcess.stderr?.on('data', (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-256 * 1024); }); appProcess.once('exit', (code, signal) => { exitState = { code, signal }; }); const endpoint = `http://127.0.0.1:${port}`; const deadline = Date.now() + 60000; while (Date.now() < deadline) { if (exitState) throw new Error(`Electron encerrou antes do CDP: ${JSON.stringify(exitState)}\n${stderr}`); try { browser = await chromium.connectOverCDP(endpoint, { timeout: 2500 }); const context = browser.contexts()[0]; if (!context) throw new Error('Contexto Chromium indisponível.'); page = context.pages().find((candidate) => !candidate.url().startsWith('devtools://')) || await context.waitForEvent('page', { timeout: 5000 }); return; } catch { if (browser) await Promise.race([browser.close().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 2000))]); browser = undefined; await new Promise((resolve) => setTimeout(resolve, 350)); } } throw new Error('CDP não ficou disponível.'); }
-function forceStopElectronTree() {
-  if (!appProcess?.pid || exitState) return;
+function electronExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+async function waitForElectronExit(child, timeoutMs) {
+  if (electronExited(child)) return true;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (exited) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('exit', onExit);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(electronExited(child)), timeoutMs);
+    child.once('exit', onExit);
+  });
+}
+
+async function startElectron() {
+  if (!electronExecutable) throw new Error('AUTO_CODEZ_ELECTRON_EXECUTABLE não foi definido.');
+  const port = await reservePort();
+  const child = spawn(electronExecutable, [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--no-first-run'], {
+    cwd: root,
+    env: environment(),
+    windowsHide: true,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  appProcess = child;
+  let processExitState;
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', (chunk) => {
+    stderr = `${stderr}${String(chunk)}`.slice(-256 * 1024);
+  });
+  child.once('exit', (code, signal) => {
+    processExitState = { code, signal };
+  });
+  const endpoint = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    if (processExitState) {
+      throw new Error(`Electron PID ${child.pid ?? 'desconhecido'} encerrou antes do CDP: ${JSON.stringify(processExitState)}\n${stderr}`);
+    }
+    try {
+      browser = await chromium.connectOverCDP(endpoint, { timeout: 2500 });
+      const context = browser.contexts()[0];
+      if (!context) throw new Error('Contexto Chromium indisponível.');
+      page = context.pages().find((candidate) => !candidate.url().startsWith('devtools://')) || await context.waitForEvent('page', { timeout: 5000 });
+      return;
+    } catch {
+      if (browser) {
+        await Promise.race([
+          browser.close().catch(() => {}),
+          new Promise((resolve) => setTimeout(resolve, 2000)),
+        ]);
+      }
+      browser = undefined;
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+  }
+  throw new Error('CDP não ficou disponível.');
+}
+
+async function forceStopElectronTree() {
+  const child = appProcess;
+  if (!child?.pid || electronExited(child)) return;
+  const exited = waitForElectronExit(child, 10000);
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/pid', String(appProcess.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore', timeout: 10000 });
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+      timeout: 10000,
+    });
   } else {
-    appProcess.kill('SIGKILL');
+    child.kill('SIGKILL');
+  }
+  if (!(await exited) && !electronExited(child)) {
+    throw new Error(`Electron PID ${child.pid} não encerrou após finalização forçada.`);
   }
 }
 
@@ -108,10 +181,9 @@ async function discardCdpHandles() {
 }
 
 async function restartElectron() {
-  forceStopElectronTree();
+  await forceStopElectronTree();
   await discardCdpHandles();
   appProcess = undefined;
-  exitState = undefined;
   stderr = '';
   await startElectron();
 }
@@ -466,7 +538,7 @@ async function runTest() {
   await page.screenshot({ path: path.join(outputDir, 'funcional-mcp-chatgpt-desconectado.png'), animations: 'disabled' });
   if (pageErrors.length || consoleErrors.length) throw new Error(`Erros no renderer: page=${JSON.stringify(pageErrors)} console=${JSON.stringify(consoleErrors)}`);
 }
-async function cleanup() { forceStopElectronTree(); await discardCdpHandles(); appProcess = undefined; if (bridgeServer) { try { bridgeServer.closeAllConnections?.(); } catch {} await Promise.race([new Promise((resolve) => bridgeServer.close(resolve)), new Promise((resolve) => setTimeout(resolve, 2000))]).catch(() => {}); bridgeServer.unref(); bridgeServer = undefined; } if (stateRoot) await fs.rm(stateRoot, { recursive: true, force: true, maxRetries: 4, retryDelay: 100 }).catch(() => {}); }
+async function cleanup() { await forceStopElectronTree().catch(() => {}); await discardCdpHandles(); appProcess = undefined; if (bridgeServer) { try { bridgeServer.closeAllConnections?.(); } catch {} await Promise.race([new Promise((resolve) => bridgeServer.close(resolve)), new Promise((resolve) => setTimeout(resolve, 2000))]).catch(() => {}); bridgeServer.unref(); bridgeServer = undefined; } if (stateRoot) await fs.rm(stateRoot, { recursive: true, force: true, maxRetries: 4, retryDelay: 100 }).catch(() => {}); }
 (async () => {
   try {
     await fs.mkdir(outputDir, { recursive: true });
