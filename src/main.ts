@@ -1428,9 +1428,10 @@ ipcMain.handle('mcp-tunnel:start', async (_event, tunnelIdInput: unknown, contro
 });
 ipcMain.handle('mcp-tunnel:stop', async () => {
   const previous = mcpTunnelRuntime.status();
+  const registered = mcpConnectionRegistry.get('chatgpt');
   const stopped = await mcpTunnelRuntime.stop();
+  if (registered) await mcpConnectionRegistry.markDisconnected('chatgpt');
   if (stopped) {
-    await mcpConnectionRegistry.markDisconnected('chatgpt');
     operationalLedger.record({
       actor: 'runtime',
       category: 'system',
