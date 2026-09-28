@@ -339,7 +339,7 @@ async function restorePersistedChatGptTunnel(): Promise<void> {
       localBearerToken: binding.bearerToken,
       executable: runtime.executable,
     });
-    await mcpConnectionRegistry.markConnected('chatgpt', { tunnelId: status.tunnelId ?? tunnelId });
+    await mcpConnectionRegistry.markRestoredConnected('chatgpt', { tunnelId: status.tunnelId ?? tunnelId });
     operationalLedger.record({
       actor: 'runtime',
       category: 'system',
