@@ -791,17 +791,17 @@ async function refresh(): Promise<void> {
     if (nextCodexConfigStatus) clientConfigStatuses.codex = nextCodexConfigStatus;
     if (nextClaudeCodeConfigStatus) clientConfigStatuses['claude-code'] = nextClaudeCodeConfigStatus;
     if (nextClaudeDesktopConfigStatus) clientConfigStatuses['claude-desktop'] = nextClaudeDesktopConfigStatus;
-    if (onboardingStep === 'operational') {
-      const persistedClients = nextConnections
-        .map((connection) => connection.clientId)
-        .filter((clientId): clientId is McpClientId => MCP_CLIENTS.some((client) => client.id === clientId));
-      if (persistedClients.length) {
-        selectedClients.clear();
-        for (const clientId of persistedClients) selectedClients.add(clientId);
-        persistClientSelection();
-      } else if (selectedClients.size) {
-        await Promise.all([...selectedClients].map((clientId) => window.autoCodez.addMcpConnection(clientId)));
-      }
+
+    const persistedClients = nextConnections
+      .map((connection) => connection.clientId)
+      .filter((clientId): clientId is McpClientId => MCP_CLIENTS.some((client) => client.id === clientId));
+    if (persistedClients.length) {
+      selectedClients.clear();
+      for (const clientId of persistedClients) selectedClients.add(clientId);
+      onboardingStep = 'operational';
+      persistOnboardingComplete();
+    } else if (onboardingStep === 'operational' && selectedClients.size) {
+      await Promise.all([...selectedClients].map((clientId) => window.autoCodez.addMcpConnection(clientId)));
     }
     if (!gatewayStatus.running) {
       gatewayToken = '';
