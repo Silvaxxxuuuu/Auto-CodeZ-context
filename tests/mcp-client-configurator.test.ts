@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { McpClientConfigurator } from '../src/mcp-gateway/client-configurator';
 
-async function fixture() {
+async function fixture(options: { appArgument?: string } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'autocodez-cursor-mcp-'));
   const configPath = path.join(root, '.cursor', 'mcp.json');
   const codexConfigPath = path.join(root, '.codex', 'config.toml');
@@ -21,6 +21,7 @@ async function fixture() {
     bridgeScriptPath,
     brokerAddress: '\\\\.\\pipe\\auto-codez-mcp-test',
     appPath: 'C:\\Program Files\\Auto CodeZ\\Auto CodeZ.exe',
+    appArgument: options.appArgument,
     platform: 'win32',
   });
   return { root, configPath, codexConfigPath, claudeCodeConfigPath, claudeDesktopConfigPath, runtime, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
@@ -280,6 +281,23 @@ test('Claude Desktop adapter refuses a conflicting auto-codez server', async () 
     assert.equal((await f.runtime.status('claude-desktop')).state, 'conflict');
     await assert.rejects(() => f.runtime.install('claude-desktop'), /não vai sobrescrever/);
     await assert.rejects(() => f.runtime.remove('claude-desktop'), /não pertence/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+
+test('local client adapter preserves the development app argument in managed stdio configuration', async () => {
+  const appRoot = 'C:\\Users\\User\\Desktop\\Auto CodeZ';
+  const f = await fixture({ appArgument: appRoot });
+  try {
+    const status = await f.runtime.install('claude-desktop');
+    assert.equal(status.state, 'configured');
+    const config = JSON.parse(await fs.readFile(f.claudeDesktopConfigPath, 'utf8'));
+    const args = config.mcpServers['auto-codez'].args;
+    const appArgumentIndex = args.indexOf('-AppArgument');
+    assert.ok(appArgumentIndex >= 0);
+    assert.equal(args[appArgumentIndex + 1], appRoot);
   } finally {
     await f.cleanup();
   }

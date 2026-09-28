@@ -70,6 +70,7 @@ import { McpConnectionRegistry } from './mcp-gateway/connection-registry';
 import { McpGatewayBindingStore } from './mcp-gateway/binding-store';
 import { McpGatewayBindingBroker, mcpBindingBrokerAddress } from './mcp-gateway/binding-broker';
 import { McpClientConfigurator } from './mcp-gateway/client-configurator';
+import { resolveMcpBridgeLaunchConfig } from './mcp-gateway/bridge-resource';
 import { pluginToolCatalog } from './plugins/plugin-tool-catalog';
 import { LocalProtectedCredentialStore } from './account/protected-credential-store';
 import { DeviceIdentityStore } from './account/device-identity';
@@ -1265,14 +1266,20 @@ ipcMain.handle('mcp-connections:add', async (_event, clientIdInput: unknown) => 
 ipcMain.handle('mcp-connections:remove', async (_event, clientIdInput: unknown) => ({ removed: await mcpConnectionRegistry.remove(requireIdentifier(clientIdInput, 'Cliente MCP')) }));
 
 function localMcpClientConfigurator(): McpClientConfigurator {
+  const bridge = resolveMcpBridgeLaunchConfig({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appRoot: app.getAppPath(),
+  });
   return new McpClientConfigurator({
     cursorConfigPath: path.join(app.getPath('home'), '.cursor', 'mcp.json'),
     codexConfigPath: path.join(app.getPath('home'), '.codex', 'config.toml'),
     claudeCodeConfigPath: path.join(app.getPath('home'), '.claude.json'),
     claudeDesktopConfigPath: path.join(app.getPath('appData'), 'Claude', 'claude_desktop_config.json'),
-    bridgeScriptPath: path.join(process.resourcesPath, 'mcp-bridge.ps1'),
+    bridgeScriptPath: bridge.bridgeScriptPath,
     brokerAddress: mcpBindingBrokerAddress(app.getPath('appData')),
     appPath: process.execPath,
+    appArgument: bridge.appArgument,
   });
 }
 

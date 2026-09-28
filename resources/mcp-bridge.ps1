@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$BrokerAddress,
   [Parameter(Mandatory = $true)][string]$AppPath,
+  [string]$AppArgument,
   [Parameter(Mandatory = $true)][string]$ClientId
 )
 
@@ -41,7 +42,13 @@ function Resolve-Binding {
   try { $binding = Read-Binding } catch { $binding = $null }
   if ($binding) { return $binding }
 
-  Start-Process -FilePath $AppPath -WindowStyle Hidden | Out-Null
+  if ([string]::IsNullOrWhiteSpace($AppArgument)) {
+    Start-Process -FilePath $AppPath -WindowStyle Hidden | Out-Null
+  } else {
+    if ($AppArgument.Contains('"')) { throw 'Argumento de inicialização do Auto CodeZ inválido.' }
+    $quotedAppArgument = '"' + $AppArgument + '"'
+    Start-Process -FilePath $AppPath -ArgumentList $quotedAppArgument -WindowStyle Hidden | Out-Null
+  }
   $deadline = [DateTime]::UtcNow.AddSeconds(15)
   while ([DateTime]::UtcNow -lt $deadline) {
     Start-Sleep -Milliseconds 150

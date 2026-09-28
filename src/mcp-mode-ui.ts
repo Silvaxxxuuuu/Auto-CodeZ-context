@@ -370,7 +370,7 @@ function renderClientInstructions(client: McpClientId): string {
       <ol>
         <li>No ChatGPT, ative o <b>Modo de desenvolvedor</b> e abra <b>Plugins</b>.</li>
         <li>Crie a conexão <b>Auto CodeZ</b> e escolha <b>Túnel</b>.</li>
-        <li>Finalize este onboarding e abra a conexão <b>ChatGPT</b> no MCP Mode. O Auto CodeZ pedirá somente o Tunnel ID e, se necessário, a credencial da sua conta.</li>
+        <li>Finalize este onboarding e abra a conexão <b>ChatGPT</b> no MCP Mode. Informe o Tunnel ID e, se necessário, uma Runtime API key da OpenAI Platform com Tunnels Read + Use.</li>
       </ol>
       <div class="mcp-guide-note">Servidor local, runtime, preflight, autenticação local e aprovações ficam por conta do Auto CodeZ. Você não precisa abrir a configuração avançada.</div>
     </article>`;
@@ -536,10 +536,10 @@ function renderConnectionSetup(client: McpClientId, state: { label: string; tone
       return `<section class="mcp-setup-callout configured mcp-chatgpt-setup"><span>CONECTADO</span><strong>ChatGPT conectado ao Auto CodeZ</strong><p>Secure MCP Tunnel pronto${tunnelStatus.tunnelId ? ` · ${escapeHtml(tunnelStatus.tunnelId)}` : ''}. As ferramentas continuam seguindo as aprovações locais do Auto CodeZ.</p><button class="mcp-text-action" type="button" data-mcp-tunnel-stop ${chatgptConnectBusy ? 'disabled' : ''}>Desconectar ChatGPT</button></section>`;
     }
     const needsCredential = !tunnelStatus.credentialAvailable;
-    return `<section class="mcp-setup-callout mcp-chatgpt-setup"><span>PRÓXIMO PASSO</span><strong>Concluir no ChatGPT</strong><p>No ChatGPT, crie a conexão Auto CodeZ, escolha Túnel e cole abaixo o Tunnel ID mostrado pela sua conta. O Auto CodeZ prepara e valida todo o restante.</p>
+    return `<section class="mcp-setup-callout mcp-chatgpt-setup"><span>PRÓXIMO PASSO</span><strong>Concluir no ChatGPT</strong><p>Para o Secure MCP Tunnel você precisa de dois valores da OpenAI Platform: o Tunnel ID e uma Runtime API key restrita com permissões Tunnels Read + Use. No ChatGPT, crie a conexão Auto CodeZ e escolha Túnel. A chave serve somente ao transporte desta conexão e não é salva pelo Auto CodeZ.</p>
       <div class="mcp-chatgpt-fields">
         <label><span>Tunnel ID</span><input type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="tunnel_…" value="${escapeHtml(tunnelIdDraft)}" data-mcp-tunnel-id aria-label="Tunnel ID"></label>
-        ${needsCredential ? '<label><span>Credencial da conexão</span><input type="password" maxlength="8192" autocomplete="new-password" placeholder="Cole somente para esta conexão" data-mcp-tunnel-key aria-label="Credencial da conexão"></label>' : '<div class="mcp-chatgpt-credential-ready"><i>✓</i><span>Credencial segura detectada no ambiente</span></div>'}
+        ${needsCredential ? '<label><span>Runtime API key da OpenAI Platform</span><input type="password" maxlength="8192" autocomplete="new-password" placeholder="Cole somente para esta conexão" data-mcp-tunnel-key aria-label="Runtime API key da OpenAI Platform"></label>' : '<div class="mcp-chatgpt-credential-ready"><i>✓</i><span>Credencial segura detectada no ambiente</span></div>'}
       </div>
       <div class="mcp-chatgpt-actions"><button class="mcp-primary-action compact" type="button" data-mcp-chatgpt-connect ${chatgptConnectBusy ? 'disabled' : ''}>${chatgptConnectBusy ? 'Conectando…' : 'Validar e conectar'}</button></div>
       ${tunnelStatus.running && !tunnelStatus.ready ? '<div class="mcp-chatgpt-progress">Inicializando Secure MCP Tunnel…</div>' : ''}

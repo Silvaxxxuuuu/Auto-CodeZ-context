@@ -33,6 +33,7 @@ export type McpClientConfiguratorOptions = {
   bridgeScriptPath: string;
   brokerAddress: string;
   appPath: string;
+  appArgument?: string;
   platform?: NodeJS.Platform;
 };
 
@@ -62,6 +63,7 @@ function expectedServer(options: McpClientConfiguratorOptions, clientId: McpLoca
       options.brokerAddress,
       '-AppPath',
       options.appPath,
+      ...(options.appArgument ? ['-AppArgument', options.appArgument] : []),
       '-ClientId',
       clientId,
     ],

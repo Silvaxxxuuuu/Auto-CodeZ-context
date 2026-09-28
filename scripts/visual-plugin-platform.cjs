@@ -471,7 +471,7 @@ async function runTest() {
   await mcpMode.locator('[data-mcp-open-connection="chatgpt"]').click();
   await mcpMode.locator('[data-mcp-connection-detail="chatgpt"]').waitFor({ state: 'visible' });
   await mcpMode.getByText('Concluir no ChatGPT', { exact: true }).waitFor({ state: 'visible' });
-  await mcpMode.getByText('No ChatGPT, crie a conexão Auto CodeZ, escolha Túnel e cole abaixo o Tunnel ID mostrado pela sua conta. O Auto CodeZ prepara e valida todo o restante.', { exact: true }).waitFor({ state: 'visible' });
+  await mcpMode.getByText('Para o Secure MCP Tunnel você precisa de dois valores da OpenAI Platform: o Tunnel ID e uma Runtime API key restrita com permissões Tunnels Read + Use. No ChatGPT, crie a conexão Auto CodeZ e escolha Túnel. A chave serve somente ao transporte desta conexão e não é salva pelo Auto CodeZ.', { exact: true }).waitFor({ state: 'visible' });
   const visualTunnelId = 'tunnel_0123456789abcdef0123456789abcdef';
   await mcpMode.locator('[data-mcp-tunnel-id]').fill(visualTunnelId);
   const visualTunnelKey = mcpMode.locator('[data-mcp-tunnel-key]');
