@@ -10175,3 +10175,1331 @@ NÃO FAZER NO PRÓXIMO BLOCO:
 - não armazenar chave em renderer/localStorage/plain JSON;
 - não fazer merge do PR #9 sem autorização explícita.
 
+
+
+------------------------------------------------------------
+24.61. MUDANÇA CANÔNICA DE FOCO — AGENT CORE V2 / AUTO CODEZ COMO PLATAFORMA DE AUTOMAÇÃO
+------------------------------------------------------------
+
+DATA DO CHECKPOINT:
+- 28/09/2026.
+
+HEAD DO BRANCH NO MOMENTO DA DECISÃO:
+- 7292728148de65c210815fd29d17fe3c33abf72b
+- commit: test(mcp): validate Claude bundle paths correctly
+
+PR #9:
+- OPEN;
+- DRAFT;
+- mergeable=true;
+- merged=false;
+- NÃO fazer merge sem autorização explícita.
+
+MUDANÇA DE POSICIONAMENTO DO PRODUTO:
+- o Auto CodeZ não deve mais ser pensado apenas como "um app de IA para editar arquivos no computador";
+- direção aprovada:
+  - software de automação avançado alimentado por IA;
+  - local-first;
+  - imersivo;
+  - simples na superfície;
+  - rigoroso no núcleo;
+  - com capacidades reais de workspace, processos, instâncias, plugins, integrações, MCP, Web e recuperação;
+- o chat é uma das superfícies do produto, não o produto inteiro;
+- o Agent Core deve ser a camada central que também poderá servir MCP, plugins, futuras CLIs e outras superfícies.
+
+MOTIVO DA REABERTURA DO NÚCLEO:
+- teste manual pesado com Kimi pediu criação de um site completo de carros com frontend/backend;
+- problemas observados:
+  - execução lenta demais;
+  - tarefa grande atingiu limite fixo de ciclos;
+  - erro real:
+    "O agente atingiu o limite de ciclos de ferramentas.";
+  - approval posterior tentou retomar o run e caiu no mesmo limite;
+  - modo "Irrestrito" ainda exibiu aprovação em situações onde o usuário esperava execução direta;
+  - chat ficou em estado estranho após erros;
+  - alterações podem permanecer escondidas em Shadow Workspace durante uma execução em vez de aparecerem imediatamente no disco;
+  - Activity UI ainda tem aparência de protótipo e mensagens genéricas;
+  - "Pensando..." + indicador visual produz sensação de reticências duplicadas / estado deslocado;
+  - agente não produz de forma confiável um resumo final pequeno do que realmente fez.
+- conclusão:
+  - isso é núcleo de produto, não polimento;
+  - Agent Core V2 passa à frente de Integrações V1.
+
+ACHADOS EXATOS NO CÓDIGO ATUAL:
+- AgentRuntime possui limite fixo de 12 tool rounds;
+- esse limite é insuficiente para tarefas legítimas grandes;
+- PermissionRuntime retorna allow para writes/sensitive operations em unrestricted;
+- porém ToolPolicyRuntime combina permission + pathPolicy + commandPolicy + systemWorkspace + executionScope;
+- uma policy secundária pode elevar decisão para ask mesmo no unrestricted;
+- existe ExecutionShadowWorkspaceRuntime;
+- durante execução ativa, create/write/delete/rename podem ser desviados para Shadow Workspace;
+- commit() posterior materializa as mudanças;
+- isso confirma a arquitetura "preparar primeiro / aplicar depois" que será substituída;
+- create_file atual já cria parent directories automaticamente;
+- run_command atual é tratado como sandbox de comando e não como runtime persistente de processos;
+- ActivityRuntime trabalha principalmente com strings;
+- ToolActivityBridge gera mensagens genéricas como "Operação concluída";
+- o sistema atual não possui um modelo estrutural suficientemente rico para narrar qualquer capability futura.
+
+NOVA ORDEM CANÔNICA:
+1. Account Core / Device Registry: V1 fechada no código, reabrir apenas por bug real.
+2. Anexos / Visão / Visual Grounding: V1 fechada e verde.
+3. MCP Core:
+   - Codex local confirmado manualmente de ponta a ponta;
+   - Claude Desktop e ChatGPT web permanecem como acceptance pendente/bug externo/cliente;
+   - não gastar o próximo grande bloco em MCP.
+4. PRÓXIMO MILESTONE PRINCIPAL: AGENT CORE V2.
+5. Dentro de Agent Core V2:
+   - contratos/invariantes;
+   - execução incremental real;
+   - Recovery Journal;
+   - Policy Engine V2;
+   - long-running agent;
+   - Capability Registry;
+   - Process Runtime;
+   - Instance Runtime;
+   - Context Compiler / Agent Handbook;
+   - Activity Engine V2;
+   - Run Summary;
+   - ações no fim das mensagens da IA;
+   - testes pesados/E2E.
+6. Após estabilização do Agent Core V2:
+   - retomar acceptance Claude Desktop / ChatGPT MCP;
+   - Integrações V1;
+   - Google Vision BYOK;
+   - Images V1;
+   - demais expansões.
+
+------------------------------------------------------------
+24.62. AGENT CORE V2 — ARQUITETURA CANÔNICA
+------------------------------------------------------------
+
+OBJETIVO:
+- transformar o agente em uma plataforma de execução longa, previsível e recuperável;
+- separar decisão, contexto, política, execução, recuperação, evidência, atividade e apresentação;
+- nenhuma camada deve depender de comportamento implícito ou texto improvisado do modelo para garantir segurança/correção.
+
+HIERARQUIA APROVADA:
+
+AgentKernel
+|
++-- ContextCompiler
+|   +-- ProductManifest
+|   +-- RuntimeManifest
+|   +-- AgentHandbook
+|   +-- UserPersonalization
+|   +-- AccountMemory
+|   +-- ProjectMemory
+|   +-- TaskContext
+|
++-- RunCoordinator
+|   +-- Planner
+|   +-- ProgressWatchdog
+|   +-- ContextCompactor
+|   +-- ResultSynthesizer
+|   +-- RunLifecycle
+|
++-- CapabilityRegistry
+|   +-- Workspace
+|   +-- Process
+|   +-- Instance
+|   +-- Git
+|   +-- Web
+|   +-- Integrations
+|   +-- Plugins
+|   +-- MCP bridge/export
+|
++-- PolicyEngine
+|   +-- PermissionPolicy
+|   +-- ScopePolicy
+|   +-- SecurityPolicy
+|   +-- ToolGuardrails
+|
++-- ExecutionEngine
+|   +-- WorkspaceRuntime
+|   +-- ProcessRuntime
+|   +-- InstanceRuntime
+|   +-- AtomicOperations
+|
++-- RecoveryEngine
+|   +-- OperationJournal
+|   +-- Snapshots
+|   +-- Rollback
+|   +-- RestorePoints
+|
++-- EvidenceGraph
+|
++-- ActivityEngine
+|   +-- EventNormalizer
+|   +-- ActivityNarrator
+|   +-- RenderMetadata
+|
++-- OperationalTrace
+    +-- timings
+    +-- provider turns
+    +-- tool calls
+    +-- policies
+    +-- retries
+    +-- context
+    +-- checkpoints
+
+PRINCÍPIO CENTRAL:
+- o AgentKernel coordena;
+- ele não deve conter diretamente lógica de filesystem, shell, UI ou provider específico;
+- providers traduzem suas respostas para um formato comum;
+- capabilities executam ações;
+- policies autorizam/bloqueiam;
+- journal registra;
+- evidence prova;
+- activity comunica;
+- summary sintetiza.
+
+------------------------------------------------------------
+24.63. EXECUÇÃO INCREMENTAL REAL — SUBSTITUIR SHADOW WORKSPACE COMO UNIDADE DA TAREFA
+------------------------------------------------------------
+
+DECISÃO:
+- abandonar o modelo onde toda a tarefa pode ficar escondida em Shadow Workspace até commit final;
+- arquivos/pastas devem aparecer no workspace real assim que a operação individual for concluída;
+- se a IA cria Desktop/Carros/index.html, o usuário deve ver esse arquivo imediatamente;
+- se cria src/components, a pasta deve existir imediatamente;
+- se edita CSS, a alteração deve estar no arquivo real assim que a tool retorna sucesso.
+
+NOVA UNIDADE TRANSACIONAL:
+- cada OPERAÇÃO, não o run inteiro.
+
+PIPELINE DE UMA OPERAÇÃO DE WRITE:
+1. normalizar input;
+2. resolver path canônico;
+3. validar workspace/scope;
+4. avaliar policies;
+5. snapshot/journal do estado anterior;
+6. executar atomicamente;
+7. verificar resultado;
+8. registrar hash/metadata pós-operação;
+9. emitir evidence;
+10. emitir activity estruturada;
+11. retornar tool result ao modelo.
+
+ATOMICIDADE:
+- escrita deve usar arquivo temporário no mesmo volume quando aplicável;
+- flush/close antes da troca;
+- rename/replace atômico quando o SO permitir;
+- nunca deixar arquivo final parcialmente escrito;
+- parent folders podem ser criados antes da troca final;
+- create_file deve falhar se houver conflito não esperado, em vez de sobrescrever silenciosamente;
+- write_file deve operar em arquivo existente salvo regra explícita diferente.
+
+FALHA PARCIAL:
+- trabalho correto anterior permanece;
+- se operação 18 falha, operações 1–17 continuam reais e registradas;
+- o run pode reparar/continuar;
+- rollback é explícito e baseado no journal;
+- não apagar trabalho bom só porque uma etapa posterior falhou.
+
+SHADOW WORKSPACE:
+- não usar como unidade default do Agent Core V2;
+- preservar temporariamente apenas enquanto migração estiver em andamento;
+- qualquer uso futuro deve ser especializado/explicitamente justificado, não o caminho padrão de mutação.
+
+------------------------------------------------------------
+24.64. RECOVERY JOURNAL / ROLLBACK / RESTORE
+------------------------------------------------------------
+
+TODO write/mutation deve gerar registro estruturado.
+
+EXEMPLO CONCEITUAL:
+operationId
+runId
+toolCallId
+timestamp
+capability
+target
+before
+after
+rollback
+status
+verification
+
+PARA CREATE:
+before:
+- existed=false
+
+after:
+- existed=true
+- sha256
+- size
+- metadata
+
+rollback:
+- delete criado, somente se ainda corresponder ao estado esperado
+
+PARA EDIT:
+before:
+- hash
+- snapshotRef/contentRef
+- metadata
+
+after:
+- hash
+- metadata
+
+rollback:
+- restaurar snapshot anterior com conflito detection
+
+PARA DELETE:
+- snapshot do conteúdo/metadata antes da remoção;
+- rollback capaz de restaurar.
+
+PARA MOVE/RENAME:
+- origem/destino;
+- hashes;
+- conflito detection.
+
+ARMAZENAMENTO:
+- preferir blobs content-addressed para conteúdo grande/repetido;
+- evitar duplicação desnecessária;
+- journal é operacional;
+- Restore Points podem ser construídos em cima desse motor.
+
+INVARIANTES:
+- journal não pode conter secrets desnecessários;
+- rollback nunca sobrescreve mudança externa silenciosamente;
+- detectar divergência por hash/mtime/canonical path;
+- restore deve poder ser parcial;
+- antes de restore amplo, criar checkpoint do estado atual.
+
+------------------------------------------------------------
+24.65. CAPABILITY REGISTRY V2
+------------------------------------------------------------
+
+DECISÃO:
+- tool não deve ser apenas name + description + JSON schema;
+- cada capability deve possuir contrato rico e versionado.
+
+CAMPOS CONCEITUAIS:
+id
+name
+title
+category
+description
+whenToUse
+whenNotToUse
+inputSchema
+outputSchema
+examples
+failureModes
+sideEffects
+readOnly
+destructive
+idempotent
+openWorld
+requiresWorkspace
+supportsRollback
+supportsParallel
+resourceLocks
+permissionClass
+activityMetadata
+resultRenderer
+version
+
+OBJETIVOS:
+- reduzir alucinação;
+- melhorar escolha de tool;
+- permitir policy granular;
+- permitir retry seguro;
+- permitir Activity Engine genérico;
+- permitir export MCP consistente;
+- permitir plugins/integrations declararem capacidades sem hardcode da UI;
+- permitir tool discovery futuro.
+
+PRINCÍPIO:
+- capabilities representam capacidades reais do computador/produto;
+- NÃO criar tools por tipo de projeto como make_html, make_react, make_backend etc.;
+- NÃO criar mega-tool genérica computer_action(action,args);
+- preferir primitivas tipadas, composáveis e semanticamente claras.
+
+ANNOTATIONS INSPIRADAS EM MCP:
+- readOnly;
+- destructive;
+- idempotent;
+- openWorld;
+- são hints/metadados;
+- segurança real continua determinística no PolicyEngine.
+
+------------------------------------------------------------
+24.66. CATÁLOGO CORE DE CAPABILITIES — DIREÇÃO APROVADA
+------------------------------------------------------------
+
+WORKSPACE / LEITURA:
+- read_file
+- read_symbol
+- list_directory
+- search_files
+- search_text
+- stat_path
+
+WORKSPACE / MUTAÇÃO:
+- create_file
+- create_folder
+- write_file
+- replace_text
+- replace_range
+- replace_symbol
+- insert_before
+- insert_after
+- copy_path
+- move_path
+- delete_path
+
+DECISÕES:
+- create_file continua;
+- create_file cria parent directories automaticamente;
+- create_folder existe quando a pasta em si faz parte do resultado ou precisa existir vazia;
+- não obrigar shell/mkdir para criar diretório;
+- futuramente rename_file pode ser absorvido por move_path;
+- delete_path pode operar em file/folder com guardrails diferentes;
+- toda mutation deve passar pelo mesmo journal/policy/evidence.
+
+COMMAND:
+- run_command permanece para comandos finitos;
+- exemplos:
+  - npm install;
+  - npm test;
+  - build;
+  - scripts;
+  - CLI;
+  - inspeções;
+- não usar shell para mutação de arquivo quando capability específica existir;
+- no V2, efeitos legítimos do shell dentro do workspace não devem desaparecer em sandbox descartável;
+- workspace real + journal/guardrails devem ser a fonte de verdade.
+
+PROCESS RUNTIME:
+- start_process
+- read_process_output
+- wait_process
+- stop_process
+- list_processes
+- wait_for_port (ou capability equivalente)
+
+MOTIVO:
+- npm run dev / servidor persistente não deve ser tratado como run_command comum;
+- retornar processId/pid/status;
+- permitir logs incrementais;
+- permitir lifecycle explícito;
+- permitir cleanup por run/app shutdown;
+- permitir testes posteriores contra processo real.
+
+INSTANCE RUNTIME:
+- open_instance
+- instance_status
+- focus_instance
+- close_instance
+- futuro:
+  - capture_instance
+  - inspect_instance
+  - interact_instance
+
+TIPOS DE open_instance:
+- application
+- url
+- file
+- folder
+- preview
+
+OBJETIVO:
+- abrir navegador/app/preview para teste;
+- manter instanceId;
+- evitar launch-and-forget sem estado;
+- permitir futuramente:
+  start_process -> wait_for_port -> open_instance -> capture -> analisar -> corrigir -> recapturar.
+
+GIT:
+- preservar operations tipadas;
+- avaliar simplificação futura em torno de capabilities semanticamente consistentes;
+- policy/journal/evidence devem envolver Git também.
+
+WEB:
+- web_search/web_fetch permanecem capabilities openWorld;
+- conteúdo externo continua untrusted;
+- não misturar segredos/contexto privado em query.
+
+PLUGINS:
+- plugin capabilities entram no mesmo CapabilityRegistry;
+- plugin metadata deve fornecer risk/activity/schema;
+- plugin não bypassa policy/journal.
+
+MCP:
+- MCP deve se tornar uma ponte/export do CapabilityRegistry;
+- clientes externos não devem receber um runtime paralelo diferente;
+- mesmas policies/evidence/security aplicáveis.
+
+------------------------------------------------------------
+24.67. POLICY ENGINE V2 — PERMISSÃO ≠ SEGURANÇA
+------------------------------------------------------------
+
+PROBLEMA ATUAL:
+- PermissionRuntime pode retornar allow em unrestricted;
+- ToolPolicyRuntime combina outras policies e pode retornar ask;
+- isso faz a UI "Irrestrito" não corresponder ao comportamento real.
+
+DECISÃO:
+separar:
+- PermissionPolicy
+- ScopePolicy
+- SecurityPolicy
+- ToolGuardrails
+
+SEMÂNTICA:
+read-only:
+- apenas leitura/inspeção permitida.
+
+safe:
+- writes normais no workspace autorizado podem executar;
+- operações realmente sensíveis podem pedir confirmação conforme contrato.
+
+ask:
+- mutations configuradas para confirmação pedem approval.
+
+unrestricted:
+- PermissionPolicy = allow para capabilities suportadas dentro do escopo concedido;
+- NÃO pedir approval repetitivo para create/write/run_command legítimos dentro do escopo;
+- segurança continua ativa;
+- ScopePolicy continua ativa;
+- SecurityPolicy continua ativa.
+
+REGRA IMPORTANTE:
+- violação real de segurança não deve virar popup infinito de "permitir?";
+- ou a capability está dentro do escopo concedido e executa;
+- ou está fora/bloqueada e retorna motivo concreto;
+- acesso a NOVO root externo pode exigir concessão explícita de escopo;
+- depois de concedido, não pedir novamente a cada tool.
+
+EXEMPLOS DE HARD DENY:
+- destructive system path;
+- format disk;
+- apagar root do SO;
+- escapar allowed paths via symlink/junction;
+- exfiltrar secret;
+- bypassar protected credential boundary;
+- command explicitamente proibido pela SecurityPolicy.
+
+------------------------------------------------------------
+24.68. LONG-RUNNING AGENT / PROGRESS WATCHDOG
+------------------------------------------------------------
+
+DECISÃO:
+- remover dependência de MAX_TOOL_ROUNDS=12;
+- não substituir simplesmente por 100/200;
+- limite fixo pode existir apenas como fuse extremo, nunca como controle normal.
+
+PROGRESS WATCHDOG:
+medir sinais como:
+- novo arquivo;
+- hash de arquivo alterado;
+- novo diretório;
+- novo processo/estado;
+- novo resultado de teste;
+- novo build;
+- novo erro/informação;
+- passo de plano avançou;
+- nova evidence;
+- nova fonte externa relevante.
+
+DETECÇÃO DE LOOP:
+- fingerprint de tool + input normalizado + resultado;
+- repetição sem nova evidence aumenta loop score;
+- leituras repetidas do mesmo arquivo sem motivo;
+- mesmo comando falhando com mesmo erro repetidamente;
+- alternância A/B sem progresso;
+- tool calls vazias/redundantes.
+
+RECOVERY:
+- ao detectar ausência de progresso:
+  1. interromper repetição;
+  2. emitir signal estruturado ao agente;
+  3. exigir replan;
+  4. permitir nova estratégia;
+- só finalizar como loop failure após tentativas reais de replanejamento.
+
+TAREFAS GRANDES:
+- 50, 100 ou mais tool calls podem ser legítimas;
+- enquanto houver progresso mensurável, continuar;
+- context compaction/checkpoint deve permitir duração longa sem perder plano/estado.
+
+------------------------------------------------------------
+24.69. RUN COORDINATOR / LIFECYCLE / CONCURRENCY
+------------------------------------------------------------
+
+RunCoordinator deve possuir:
+- runId
+- objective
+- original user request
+- project/workspace
+- permission/scope snapshot
+- plan
+- current step
+- provider/model
+- operations
+- processes
+- instances
+- evidence
+- retries
+- errors
+- timings
+- context checkpoints
+- final status
+
+STATUS CONCEITUAIS:
+- queued
+- planning
+- running
+- waiting_approval
+- waiting_external
+- paused
+- recovering
+- completed
+- failed
+- cancelled
+
+FINALIZAÇÃO:
+- objetivo concluído;
+- cancelado;
+- security block real;
+- erro irrecuperável;
+- watchdog esgotou replans;
+- não por contador arbitrário baixo.
+
+CONCURRENCY:
+- reads independentes podem executar em paralelo;
+- writes em paths distintos podem ser paralelas se capability declarar segurança;
+- operações no mesmo recurso devem ser serializadas por resource lock;
+- npm install + npm build precisam respeitar dependência;
+- cada capability declara supportsParallel/resourceLocks;
+- nunca depender da ordem acidental em que promises resolvem.
+
+------------------------------------------------------------
+24.70. CONTEXT COMPILER / PRODUCT MANIFEST / AGENT HANDBOOK
+------------------------------------------------------------
+
+OBJETIVO:
+- ensinar cada IA detalhadamente sobre Auto CodeZ;
+- não depender de prompt raso;
+- não enviar um mega-prompt fixo gigantesco em todos os turns.
+
+CAMADAS:
+
+LAYER 1 — CORE CONTRACT:
+- o que é Auto CodeZ;
+- ferramentas são reais;
+- não fingir execução;
+- evidência obrigatória;
+- permission/scope;
+- completion semantics;
+- erros;
+- retries;
+- segurança;
+- linguagem do usuário.
+
+LAYER 2 — RUNTIME MANIFEST:
+gerado dinamicamente:
+- SO;
+- workspace;
+- roots permitidos;
+- permission level;
+- shell;
+- provider/model;
+- integrations conectadas;
+- plugins;
+- processos ativos;
+- instâncias;
+- capabilities disponíveis;
+- estado de network/offline quando relevante.
+
+LAYER 3 — CAPABILITY DOCUMENTATION:
+- somente capabilities realmente disponíveis;
+- descrições detalhadas;
+- whenToUse;
+- whenNotToUse;
+- examples;
+- failure modes;
+- side effects;
+- constraints.
+
+LAYER 4 — PRODUCT/UI KNOWLEDGE:
+- Chats;
+- Projects;
+- Settings;
+- Profile;
+- Personalization;
+- Integrations;
+- Plugins;
+- MCP Mode;
+- Terminal;
+- composer;
+- Activity timeline;
+- approvals;
+- message actions;
+- navigation;
+- estados visuais importantes.
+
+LAYER 5 — TASK SKILLS:
+- Workspace Skill;
+- Process Skill;
+- Instance Skill;
+- Git Skill;
+- Web Skill;
+- Plugin Skill;
+- Integration Skill;
+- outros futuros;
+- só carregar quando relevantes.
+
+LAYER 6 — USER PERSONALIZATION / MEMORY:
+- personalização de estilo;
+- memórias globais;
+- memórias do projeto;
+- contexto da conversa;
+- não confundir as categorias.
+
+AGENT HANDBOOK VERSIONADO:
+agent-handbook/
+- core
+- workspace
+- command-runtime
+- processes
+- instances
+- git
+- web
+- plugins
+- mcp
+- approvals
+- recovery
+- ui
+- memory
+- personalization
+
+REGRA:
+- handbook é fonte de conhecimento;
+- ContextCompiler compila partes relevantes;
+- não espalhar instruções contraditórias em vários prompts independentes.
+
+------------------------------------------------------------
+24.71. ACTIVITY ENGINE V2 — EVENTOS ESTRUTURADOS / TIMELINE NARRATIVA
+------------------------------------------------------------
+
+PROBLEMA ATUAL:
+- ActivityRuntime usa essencialmente strings;
+- ToolActivityBridge possui mapping limitado;
+- mensagens como "Operação concluída" parecem protótipo;
+- novas capabilities/plugins podem não ter frase hardcoded;
+- fluxo atual pode duplicar atividades vindas do provider + runtime.
+
+DECISÃO:
+- atividade não é string;
+- atividade é evento estruturado.
+
+EXEMPLO:
+{
+  kind: "workspace.file.create",
+  phase: "completed",
+  subject: { path: "src/App.tsx" },
+  runId,
+  toolCallId,
+  durationMs
+}
+
+OUTROS KINDS:
+- workspace.file.read
+- workspace.file.edit
+- workspace.folder.create
+- process.start
+- process.output
+- process.complete
+- instance.open
+- instance.capture
+- test.run
+- build.run
+- web.search
+- git.commit
+- plugin.action
+- integration.action
+- policy.block
+- recovery.rollback
+- etc.
+
+PHASES:
+- queued
+- running
+- waiting
+- completed
+- failed
+- cancelled
+
+ACTIVITY NARRATOR:
+- agrupa eventos por intenção/etapa;
+- exemplos:
+  "Montando a estrutura do site"
+    - Criou package.json
+    - Criou src/App.tsx
+    - Criou src/styles.css
+
+  "Preparando o ambiente"
+    - Instalou dependências
+    - Iniciou servidor na porta 5173
+
+  "Validando a interface"
+    - Abriu preview
+    - Capturou página
+    - Detectou desalinhamento
+    - Corrigiu styles.css
+
+CAPABILITY-DRIVEN ACTIVITY:
+- cada capability pode declarar templates/metadados running/success/failed;
+- plugins também;
+- UI não precisa conhecer todos os plugins futuros;
+- fallback usa title/category/subject;
+- não gerar frase estranha por falta de hardcode.
+
+TRACE ≠ ACTIVITY:
+- OperationalTrace guarda tudo;
+- Activity UI mostra somente narrativa útil;
+- usuário não deve receber spam de baixo nível.
+
+------------------------------------------------------------
+24.72. THINKING / ESTADO VISUAL DO TURNO
+------------------------------------------------------------
+
+PROBLEMA:
+- texto pode aparecer como "Pensando...";
+- UI também possui indicador de três dots;
+- resultado visual parece "Pensando... ...";
+- alinhamento atual parece deslocado.
+
+DECISÃO:
+- texto base: "Pensando" sem reticências;
+- dots são animação, não parte do texto;
+- alinhamento exatamente com coluna de resposta/atividade;
+- thinking aparece somente enquanto não existe atividade mais específica;
+- quando primeira atividade real surge, thinking deve transicionar/desaparecer;
+- não mostrar dois loaders concorrentes;
+- quando run completa, thinking/activity running somem e barra de ações da resposta aparece.
+
+------------------------------------------------------------
+24.73. RUN SUMMARY / EVIDENCE GRAPH
+------------------------------------------------------------
+
+PROBLEMA:
+- agente não gera resumo final pequeno e confiável de forma consistente.
+
+DECISÃO:
+- não depender apenas da memória do LLM;
+- Auto CodeZ deve construir evidence estruturada durante o run.
+
+EVIDENCE GRAPH CONCEITUAL:
+PlanStep
+- ToolCall
+  - Operation
+  - Changes
+  - Evidence
+- Validation
+
+TIPOS DE EVIDENCE:
+- file
+- command
+- process
+- test
+- build
+- web/source
+- plugin
+- integration
+- result
+
+RUN SUMMARY BUILDER:
+- computa fatos reais:
+  - arquivos criados;
+  - arquivos alterados;
+  - arquivos removidos;
+  - comandos;
+  - processos;
+  - testes;
+  - build;
+  - URLs/previews;
+  - erros pendentes;
+  - validações.
+
+RESPOSTA FINAL:
+- curta;
+- em linguagem do usuário;
+- baseada em evidence;
+- exemplo:
+  "Site concluído. Estruturei frontend e backend, instalei as dependências e validei o build. O projeto está em Desktop/Carros."
+- se parcial:
+  "Frontend concluído. O backend parou porque a porta 5432 já estava ocupada."
+- não despejar 40 operações;
+- detalhes ficam em "Ver trabalho realizado".
+
+PLANO:
+- avaliar reduzir dependência de o modelo chamar complete_plan_step manualmente;
+- planner/runtime podem associar evidence e sugerir avanço automático;
+- não marcar passo concluído sem evidence real.
+
+------------------------------------------------------------
+24.74. ERROR MODEL / RECOVERY
+------------------------------------------------------------
+
+CLASSIFICAÇÃO PROPOSTA:
+- ToolInputError
+- PolicyError
+- ScopeError
+- FilesystemConflict
+- ProcessFailure
+- ProviderFailure
+- ContextLimit
+- TransientFailure
+- AgentLoopDetected
+- VerificationFailure
+- UserCancellation
+- ExternalDependencyFailure
+
+RECOVERY POR CLASSE:
+- ToolInputError -> devolver schema/erro ao agente e corrigir input;
+- Policy/Scope -> não repetir igual; explicar bloqueio/concessão necessária;
+- FilesystemConflict -> re-read/reconcile;
+- ProcessFailure -> exitCode + stderr sanitizado + retry/replan;
+- Provider 429/transient -> backoff/retry;
+- ContextLimit -> checkpoint + compact + continue;
+- LoopDetected -> force replan;
+- VerificationFailure -> reparar/validar novamente;
+- cancelamento -> preservar trabalho já materializado + journal.
+
+CHAT NÃO DEVE "BUGAR" POR ERRO:
+- executionState deve terminar em estado coerente;
+- approval stale não pode ressuscitar run morto;
+- retry deve gerar run novo ou resume explícito com lifecycle válido;
+- UI deve sempre saber se run está completed/failed/cancelled/waiting.
+
+------------------------------------------------------------
+24.75. PROVIDER ADAPTER NORMALIZADO
+------------------------------------------------------------
+
+OBJETIVO:
+- peculiaridades de OpenAI, Anthropic, Google, Kimi etc. não devem contaminar AgentKernel.
+
+FORMATO COMUM:
+AgentTurn
+- text
+- toolCalls[]
+- stopReason
+- usage
+- reasoningMetadata
+- providerMetadata sanitizada
+
+RESPONSABILIDADE DO ADAPTER:
+- traduz request;
+- traduz stream;
+- tool call encoding;
+- stop reasons;
+- errors;
+- usage;
+- provider-specific context quirks.
+
+Agent Core trabalha somente com contrato normalizado.
+
+------------------------------------------------------------
+24.76. OPERATIONAL TRACE / RUN INSPECTOR
+------------------------------------------------------------
+
+TRACE INTERNO DEVE REGISTRAR:
+- provider latency;
+- generation latency;
+- tool latency;
+- policy decision;
+- input/output hashes;
+- retries;
+- context size;
+- compaction;
+- process lifecycle;
+- filesystem journal;
+- evidence;
+- errors;
+- activity transformations.
+
+OBJETIVO:
+- transformar "Kimi demorou demais" em diagnóstico:
+  - 18s provider;
+  - 31ms create_file;
+  - 4.2s npm install;
+  - 22s provider;
+  - etc.
+
+FUTURO RUN INSPECTOR:
+- Plan
+- Turns
+- Tool calls
+- Policies
+- Timings
+- Files
+- Processes
+- Instances
+- Context
+- Provider usage
+- Retries
+- Errors
+- Journal
+- Evidence
+
+Pode ser superfície de desenvolvedor inicialmente.
+
+------------------------------------------------------------
+24.77. AÇÕES NO FINAL DE CADA MENSAGEM DA IA
+------------------------------------------------------------
+
+OBJETIVO UX:
+- comunicar visualmente que o turno terminou;
+- evitar sensação de "ficou pensando infinitamente";
+- barra aparece SOMENTE quando lifecycle do turno está oficialmente completed/failed com resposta final estável;
+- não mostrar enquanto ainda há execução ativa.
+
+ESTILO:
+- ícones pequenos Lucide;
+- sem fundo;
+- baixo contraste;
+- alinhados à esquerda logo abaixo da resposta;
+- hover/focus claro;
+- visual semelhante à referência enviada pelo usuário;
+- poucas ações permanentes;
+- demais no menu "...".
+
+AÇÕES PRINCIPAIS APROVADAS:
+
+1. COPIAR
+- copia resposta completa;
+- seleção normal de texto continua funcionando.
+
+2. TENTAR NOVAMENTE / RETRY
+- não apagar resposta antiga;
+- gerar nova variante a partir do mesmo ponto da conversa;
+- preservar variantes:
+  - 1/2
+  - 2/2
+  - navegação com setas;
+- retry cria novo run;
+- não repetir cegamente side effects antigos;
+- considerar workspace real atual + journal;
+- tools destrutivas/idempotência devem ser reavaliadas.
+
+3. ADICIONAR À MEMÓRIA
+- memória pertence ao Auto CodeZ/conta, não ao provider;
+- qualquer IA pode receber essas memórias via ContextCompiler;
+- não salvar automaticamente resposta inteira;
+- abrir popover:
+  "Adicionar à memória"
+  "O que deve ser lembrado?"
+- Auto CodeZ sugere versão curta/condensada;
+- usuário pode editar antes de salvar;
+- se houver trecho selecionado, usar seleção como base.
+
+ESCOPOS DE MEMÓRIA:
+- Global
+- Projeto atual
+- Conversa
+
+EXEMPLOS:
+- Global: "Prefiro respostas em português."
+- Projeto: "Este projeto usa PostgreSQL."
+- Conversa: referência temporária contextual.
+
+4. RAMIFICAR DAQUI
+- criar novo chat a partir do histórico até aquela resposta;
+- preservar chat original;
+- útil para explorar outra direção sem destruir contexto atual.
+
+5. CONTINUAR
+- contextual;
+- aparece somente quando run está parcial/interrompido e existe trabalho restante recuperável;
+- inicia continuação real, não apenas envia palavra "continue".
+
+6. VER TRABALHO REALIZADO
+- contextual para runs com tools;
+- resumo factual:
+  - arquivos criados;
+  - alterados;
+  - removidos;
+  - comandos;
+  - testes;
+  - build;
+  - duração;
+  - status;
+- pode abrir Run Inspector no futuro.
+
+7. VER ALTERAÇÕES
+- aparece quando houve file changes;
+- abre diff do run/turn.
+
+8. FONTES
+- aparece quando resposta usou Web/sources;
+- abre proveniência/fontes.
+
+MENU "...":
+- opções menos frequentes;
+- "Salvar como nota";
+- reportar problema nesta resposta;
+- possíveis ações futuras.
+
+NOTA ≠ MEMÓRIA:
+- memória influencia contexto futuro das IAs;
+- nota é conteúdo salvo para o usuário;
+- não misturar.
+
+FEEDBACK 👍/👎:
+- não priorizar agora;
+- sem backend/evaluation real seria decorativo;
+- futuro "Reportar problema" é mais útil e pode anexar provider/model/runId/timings/errors sanitizados.
+
+BARRA ADAPTATIVA:
+texto puro:
+- Copiar
+- Retry
+- Memória
+- Ramificar
+- ...
+
+run com alterações:
+- Copiar
+- Retry
+- Memória
+- Ver alterações
+- ...
+
+run parcial:
+- Copiar
+- Continuar
+- Memória
+- Ver trabalho
+- ...
+
+web:
+- Copiar
+- Retry
+- Memória
+- Fontes
+- ...
+
+LIFECYCLE VISUAL:
+running:
+- Pensando + dots ou Activity timeline;
+completed:
+- resposta final;
+- barra de ações aparece;
+- isso é o sinal visual de "turno terminou".
+
+------------------------------------------------------------
+24.78. MEMORY ACCOUNT — BLUEPRINT
+------------------------------------------------------------
+
+PRINCÍPIO:
+- memória pertence à conta do Auto CodeZ;
+- não depende de OpenAI/Claude/Gemini/Kimi;
+- qualquer provider pode receber memória através do ContextCompiler;
+- memória deve ser estruturada e compacta.
+
+MODELO CONCEITUAL:
+memoryId
+scope
+projectId? / chatId?
+text
+source
+createdAt
+updatedAt
+enabled
+metadata sanitizada
+
+FONTES:
+- adicionada manualmente;
+- criada a partir de mensagem via botão;
+- futura sugestão de preferência, somente com confirmação do usuário.
+
+UI FUTURA:
+Configurações / Memória:
+- listar memórias;
+- busca;
+- filtro Global/Projeto/Conversa;
+- editar;
+- ativar/desativar;
+- remover;
+- adicionar manualmente.
+
+REGRAS:
+- não salvar automaticamente conteúdo sensível;
+- não salvar bloco enorme sem condensação;
+- não usar memória antiga irrelevante em todos os turns;
+- ContextCompiler seleciona memórias relevantes;
+- permitir ao usuário saber o que está salvo.
+
+------------------------------------------------------------
+24.79. PERFIL > PERSONALIZAÇÃO — BLUEPRINT
+------------------------------------------------------------
+
+LOCAL:
+- Perfil > Personalização.
+
+CAMPO:
+- "Como as IAs devem responder para você?"
+- até 1000 caracteres.
+
+EXEMPLOS:
+- "Seja mais direto."
+- "Use linguagem técnica."
+- "Seja mais carismático."
+- "Evite explicações básicas."
+- usuário também pode escrever instruções de tom mais duro/frio se desejar.
+
+UI:
+- textarea;
+- contador N / 1000;
+- explicação curta;
+- salvar;
+- reset;
+- persistência na conta;
+- comportamento consistente entre providers.
+
+CONTEXT COMPILER:
+- UserPersonalization é camada própria;
+- não misturar com Memory;
+- Personalização = COMO responder;
+- Memória = O QUE lembrar.
+
+SEGURANÇA/PRIORIDADE:
+- personalização não pode sobrescrever regras de segurança;
+- não deve quebrar tool contracts;
+- é estilo/preferência do usuário.
+
+FUTURO — PREFERÊNCIAS SUGERIDAS:
+- Auto CodeZ pode perceber padrão;
+- NÃO salvar silenciosamente;
+- sugerir:
+  "Você costuma preferir arquivos completos. Adicionar às preferências?"
+- usuário confirma/rejeita.
+
+------------------------------------------------------------
+24.80. CLAUDE DESKTOP / CHATGPT MCP — ACCEPTANCE REAL ATUAL
+------------------------------------------------------------
+
+CODEX:
+- configuração automática funcionou no PC real;
+- teste manual:
+  "Olá, conecte-se ao MCP do Auto CodeZ";
+- Codex confirmou conexão;
+- listou tools:
+  - session_summary
+  - session_recent_events
+  - session_changes
+  - session_artifacts
+  - session_errors
+  - session_sources
+  - operation_status
+- isso prova local gateway/broker/bridge/protocolo no cliente Codex.
+
+CLAUDE DESKTOP:
+- caminho JSON automático inicialmente não apareceu no runtime do Claude;
+- tentativa MSIX path também não resolveu acceptance;
+- migração implementada para Desktop Extension/MCPB;
+- bundle .mcpb gerado;
+- fallback unpacked gerado;
+- E2E estrutural verde;
+- NO PC REAL:
+  - clicar "Instalar .mcpb no Claude" abriu Bloco de Notas;
+  - associação de .mcpb com Claude não está funcionando nessa instalação;
+- portanto Claude Desktop NÃO está aceito manualmente ainda;
+- não chamar de resolvido.
+
+CHATGPT WEB:
+- Tunnel criado aparece no seletor;
+- criação do connector retorna banner genérico "Erro ao criar connector";
+- Auto CodeZ também mostrou em PowerShell:
+  "Chave do control plane do Secure MCP Tunnel ausente."
+  quando start foi acionado sem runtime/control-plane key disponível;
+- há bug/limitação upstream possível no Secure MCP Tunnel/ChatGPT web;
+- não mascarar com alterações aleatórias;
+- acceptance permanece pendente;
+- retomar depois do Agent Core V2.
+
+MCP PRIORIDADE:
+- congelar correções adicionais de Claude/ChatGPT por enquanto;
+- Codex prova núcleo local;
+- Agent Core V2 é mais importante para o valor central do produto.
+
+------------------------------------------------------------
+24.81. INVARIANTES DO AGENT CORE V2 — NÃO NEGOCIÁVEIS
+------------------------------------------------------------
+
+1. Nunca afirmar sucesso sem evidence real.
+2. Toda mutation persistente possui journal.
+3. Workspace real é atualizado operação por operação.
+4. Nenhuma operação parcialmente escrita deve aparecer como sucesso.
+5. Unrestricted não pede approvals rotineiros dentro do escopo já concedido.
+6. Segurança real continua ativa mesmo em unrestricted.
+7. Nenhum limite pequeno e fixo encerra tarefa que continua progredindo.
+8. Loop detection usa progresso/evidence, não só contador.
+9. Erro de uma operação não apaga trabalho correto anterior.
+10. Retry de resposta não repete side effects cegamente.
+11. Processos persistentes têm lifecycle/ID próprios.
+12. Instâncias abertas têm lifecycle/ID próprios.
+13. Capability contract é fonte de descrição/policy/activity.
+14. Activity UI recebe eventos estruturados, não frases soltas como modelo primário.
+15. Trace interno completo fica separado da narrativa do usuário.
+16. Resumo final é derivado de evidence.
+17. Provider quirks ficam nos adapters.
+18. ContextCompiler é fonte central de instruções do agente.
+19. Memory e Personalization são provider-independent.
+20. MCP/Plugins/Chat interno convergem para o mesmo CapabilityRegistry/Policy/Execution.
+21. Nenhuma camada nova pode bypassar allowed paths/canonicalização/symlink protections.
+22. Cancelamento sempre deixa lifecycle consistente.
+23. Restart/recovery não pode duplicar side effects já confirmados.
+24. UI deve conseguir distinguir running/waiting/completed/failed/cancelled sem inferência textual.
+25. PR #9 continua sem merge até autorização explícita.
+
+------------------------------------------------------------
+24.82. PRÓXIMO PASSO DE IMPLEMENTAÇÃO APROVADO
+------------------------------------------------------------
+
+ANTES DE REMOVER SHADOW WORKSPACE:
+1. escrever contrato formal do Agent Core V2;
+2. mapear dependências atuais:
+   - AgentRuntime
+   - ToolRuntime
+   - ShadowAwareToolRuntime
+   - ShadowAwareWorkspaceRuntime
+   - ExecutionShadowWorkspaceRuntime
+   - CommandRuntime
+   - approvals
+   - execution planner
+   - execution scope
+   - execution checkpoints
+   - operational ledger
+   - renderer/activity
+   - MCP bridge
+   - plugins;
+3. definir interfaces novas sem migrar comportamento ainda;
+4. adicionar testes de invariantes;
+5. criar OperationJournal;
+6. introduzir capability metadata;
+7. migrar create_file/create_folder primeiro;
+8. depois demais file writes;
+9. depois commands/processes;
+10. remover Shadow Workspace default somente quando paridade/rollback estiverem comprovados.
+
+TESTE DE ACEITAÇÃO ALVO:
+- pedir ao Kimi para criar projeto grande completo;
+- observar arquivos/pastas surgindo um por um no disco;
+- sem approval no unrestricted dentro do scope;
+- >12 tool calls sem falha arbitrária;
+- servidor persistente gerenciado;
+- erros reparáveis;
+- cancelamento consistente;
+- retry seguro;
+- activity narrativa;
+- resumo final factual;
+- diff/trabalho acessível na barra da resposta;
+- nenhum arquivo corrompido;
+- rollback possível.
