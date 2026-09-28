@@ -11,6 +11,7 @@ export interface SecureStorageAdapter {
 const SENSITIVE_JSON_FILES = new Set([
   'agent-runs.json',
   'tool-execution-journal.json',
+  'agent-core-operation-journal.json',
   'provider-requests.json',
   'execution-state.json',
   'execution-plans.json',
