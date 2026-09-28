@@ -901,6 +901,10 @@ function install(): void {
         await window.autoCodez.addMcpConnection(connectClient);
         selectedClients.add(connectClient);
         persistClientSelection();
+        if (isAutoConfigClient(connectClient)) {
+          delete clientConfigErrors[connectClient];
+          clientConfigStatuses[connectClient] = await window.autoCodez.mcpClientConfigStatus(connectClient) as McpClientConfigStatus;
+        }
         connectPanelOpen = false;
         selectedConnectionId = connectClient;
         showAdvanced = false;
@@ -913,6 +917,14 @@ function install(): void {
     }
     const openConnection = target.closest<HTMLElement>('[data-mcp-open-connection]')?.dataset.mcpOpenConnection as McpClientId | undefined;
     if (openConnection) {
+      if (isAutoConfigClient(openConnection)) {
+        delete clientConfigErrors[openConnection];
+        try {
+          clientConfigStatuses[openConnection] = await window.autoCodez.mcpClientConfigStatus(openConnection) as McpClientConfigStatus;
+        } catch (error) {
+          clientConfigErrors[openConnection] = error instanceof Error ? error.message : String(error);
+        }
+      }
       selectedConnectionId = openConnection;
       connectPanelOpen = false;
       showAdvanced = false;
