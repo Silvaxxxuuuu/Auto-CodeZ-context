@@ -1,5 +1,5 @@
 AUTO CODEZ — DOCUMENTO DE CONTEXTO PERMANENTE
-Última atualização: 26/09/2026
+Última atualização: 28/09/2026
 
 ============================================================
 1. PRODUTO
@@ -10013,4 +10013,165 @@ PR #9:
 - OPEN;
 - DRAFT;
 - não fazer merge sem autorização explícita.
+
+------------------------------------------------------------
+24.60. MCP FULL — FECHADO E VALIDADO / PRÓXIMO BLOCO: INTEGRAÇÕES V1
+------------------------------------------------------------
+
+CHECKPOINT FINAL DO MCP FULL EM 28/09/2026
+
+HEAD FUNCIONAL VALIDADO:
+03949071383164ea97427660b458c95810f61978
+test(mcp): isolate Electron restart lifecycle state
+
+PR #9:
+- OPEN;
+- DRAFT;
+- mergeable=true;
+- merged=false;
+- NÃO fazer merge sem autorização explícita.
+
+WORKFLOWS EXATOS DO HEAD:
+- Validate Auto CodeZ #5232 / run 36418778309: SUCCESS;
+- Validate Account API #598 / run 36418778003: SUCCESS;
+- Real Vision Integration #211 / run 36418778208: SUCCESS;
+- Real Local Attachment Chat #177 / run 36418778389: SUCCESS;
+- Visual Auto CodeZ #1426 / run 36418778301: SUCCESS.
+
+STATUS DO MCP FULL
+
+A etapa MCP Full está fechada no código e validada em CI/E2E.
+
+Preservado e validado:
+- registry persistente de conexões MCP;
+- gateway MCP local;
+- binding broker;
+- bridge stdio universal no Windows;
+- configuração automática do Cursor;
+- configuração automática do ChatGPT Codex;
+- configuração automática do Claude Code;
+- configuração automática do Claude Desktop;
+- ChatGPT via Secure MCP Tunnel;
+- fluxo principal do ChatGPT sem depender de Configuração avançada;
+- Tunnel ID persistido;
+- restart/reconnect real;
+- autoReconnect;
+- desconexão manual persistente;
+- reconciliação de drift externo dos arquivos/configs dos clientes;
+- proteção para não reexpor Bearer efêmero após restart;
+- hardening do binding broker;
+- named pipe Windows com permissões explícitas;
+- validação estrita de endpoint loopback;
+- testes unitários e E2E correspondentes;
+- MCP Mode sem composer próprio;
+- approvals locais continuam autoritativos;
+- nenhuma write externa bypassa AgentRuntime/policies/PluginToolCatalog.
+
+CHATGPT TUNNEL / RESTART
+
+O Visual E2E prova restart REAL do Electron depois da conexão do ChatGPT Tunnel.
+
+Falha final encontrada antes do fechamento:
+- o harness visual usava um exitState global compartilhado entre instâncias do Electron;
+- restartElectron() podia zerar esse estado e iniciar a segunda instância antes de o evento exit atrasado da primeira chegar;
+- o evento antigo então marcava falsamente a nova instância como encerrada;
+- o log mostrava a nova instância emitindo "DevTools listening" mesmo depois da falha do harness;
+- o mesmo estado stale fazia o cleanup ignorar o Electron novo e prendia teardown por quase 14 minutos.
+
+Correção final:
+- estado de exit passou a ser por ChildProcess;
+- o PID anterior precisa confirmar exit antes da próxima instância iniciar;
+- forceStopElectronTree opera sobre o processo específico;
+- restart aguarda shutdown real;
+- cleanup não confunde saída velha com processo atual.
+
+Resultado do Visual #1426:
+- Capture plugin and MCP platform: SUCCESS;
+- restart real: SUCCESS;
+- reconexão ao CDP: SUCCESS;
+- ChatGPT Tunnel restaurado automaticamente: SUCCESS;
+- registry preservou autoReconnect + Tunnel ID: SUCCESS;
+- fluxo pós-restart continuou até o fim: SUCCESS;
+- cleanup iniciou 12:02:11.137 e terminou 12:02:11.254, cerca de 116 ms;
+- o hang de teardown desapareceu.
+
+COMMIT IMEDIATAMENTE ANTERIOR RELEVANTE:
+6acbedc8f5c8c8bc97e8e1c33189f825bcf777ec
+test(mcp): bound tunnel fixture compilation
+
+Nenhum teste foi enfraquecido.
+O restart real não foi removido.
+A arquitetura MCP não foi redesenhada para mascarar o problema.
+
+ORDEM CANÔNICA ATUALIZADA
+
+Com Account Core/Device Registry V1 fechado, Anexos/Visão V1 fechado e MCP Full fechado:
+
+1. Account Core / Device Registry: FECHADO para V1 no código.
+2. Anexos / Visão / Visual Grounding: FECHADO e verde.
+3. MCP Full: FECHADO e verde.
+4. PRÓXIMO BLOCO PRINCIPAL: INTEGRAÇÕES V1.
+5. Primeira integração funcional de produção: Google Cloud Vision BYOK.
+6. Depois: Images V1.
+7. Depois: expansões de integrações/plugins/mídia e Restore Points/Backups conforme roadmap.
+
+INTEGRAÇÕES V1 — CONTRATO QUE DEVE SER PRESERVADO
+
+Integração:
+- conecta o Auto CodeZ a um serviço externo existente;
+- NÃO é plugin;
+- NÃO é MCP;
+- linguagem de UX: Conectar, Desconectar, Credenciais, Conta, Status;
+- fica em Configurações;
+- superfície inicial em cards/blocos de discover, não lista seca;
+- Google Cloud Vision aparece primeiro na hierarquia inicial.
+
+Plugin:
+- instala/adiciona capacidade executável ao Auto CodeZ;
+- possui manifesto, versão, permissions, jobs, settings, sandbox e lifecycle;
+- linguagem de UX: Instalar, Desinstalar, Ativar, Desativar, Atualizar;
+- plugin pode consumir uma integração;
+- integração não depende de plugin.
+
+MCP:
+- conexão/protocolo de tools em runtime;
+- permanece superfície própria do produto;
+- não misturar MCP com credencial externa simples ou pacote instalado.
+
+GOOGLE CLOUD VISION BYOK — PRIMEIRO ALVO
+
+Regras já aprovadas:
+- API key pertence ao usuário;
+- armazenar no processo Main usando armazenamento protegido;
+- NUNCA localStorage;
+- NUNCA JSON plaintext;
+- renderer recebe somente estado/configured e metadata sanitizada;
+- qualquer provider/modelo do Auto CodeZ pode aproveitar Google Vision através do VisualGroundingCoordinator;
+- integração é provider-independent;
+- AUTO_CODEZ_GOOGLE_VISION_API_KEY permanece somente como caminho de desenvolvimento/CI;
+- imagem só sai do PC para Google Vision quando a integração/política permitir;
+- não criar dependência de plugin para usar a integração.
+
+DIREÇÃO DE IMPLEMENTAÇÃO DO PRÓXIMO BLOCO
+
+Antes de desenhar UI:
+1. reauditar Settings atual;
+2. definir Integration Registry/contract;
+3. definir protected credential boundary;
+4. definir status/configuração sanitizados para renderer;
+5. integrar GoogleVisionWebProvider ao registry sem quebrar env var de CI;
+6. adicionar testes de não vazamento de secret;
+7. adicionar UI Settings > Integrações em cards;
+8. adicionar conexão/gerenciamento do Google Cloud Vision;
+9. validar Visual real da nova superfície;
+10. manter PR #9 OPEN/DRAFT/sem merge.
+
+NÃO FAZER NO PRÓXIMO BLOCO:
+- não iniciar Images V1 antes de Integrações V1;
+- não reabrir MCP Full sem bug real;
+- não reabrir Account Core sem bug real;
+- não transformar integração em plugin;
+- não mover Google Vision para Plugin Platform;
+- não armazenar chave em renderer/localStorage/plain JSON;
+- não fazer merge do PR #9 sem autorização explícita.
 
