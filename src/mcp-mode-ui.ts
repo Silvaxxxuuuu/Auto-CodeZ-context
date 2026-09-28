@@ -47,7 +47,7 @@ type McpRuntimeStatus = { platform: string; arch: string; supported: boolean; re
 type OnboardingStep = 'activation' | 'clients' | 'instructions' | 'operational';
 type McpClientId = 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other';
 type McpAutoConfigClientId = 'cursor' | 'codex' | 'claude-code' | 'claude-desktop';
-type McpStoredConnection = { clientId: McpClientId; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string } };
+type McpStoredConnection = { clientId: McpClientId; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string; autoReconnect?: boolean } };
 type McpClientConfigStatus = { clientId: McpAutoConfigClientId; state: 'not-configured' | 'configured' | 'conflict' | 'unsupported'; configPath: string; detail: string };
 
 const MAX_RENDERED_EVENTS = 250;
