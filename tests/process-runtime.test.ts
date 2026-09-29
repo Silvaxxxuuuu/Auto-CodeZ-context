@@ -29,6 +29,22 @@ async function fixture(parentEnvironment: NodeJS.ProcessEnv = process.env) {
 
 const nodeCommand = (expression: string) => `node -e "${expression}"`;
 
+async function waitForOutput(
+  runtime: ProcessRuntime,
+  processId: string,
+  predicate: (text: string) => boolean,
+  timeoutMs = 1500,
+) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const output = runtime.readOutput(processId);
+    const text = output.events.map((event) => event.text).join('');
+    if (predicate(text)) return output;
+    if (Date.now() >= deadline) throw new Error(`Output esperado não chegou em ${timeoutMs}ms. Recebido: ${JSON.stringify(text)}`);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+  }
+}
+
 test('ProcessRuntime starts a persistent process and exposes it through list/get', async () => {
   const f = await fixture();
   try {
@@ -56,8 +72,11 @@ test('ProcessRuntime streams stdout/stderr into a cursor-based incremental buffe
       nodeCommand("process.stdout.write('one'); process.stderr.write('err'); setTimeout(() => process.stdout.write('two'), 40); setTimeout(() => process.exit(0), 90)"),
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    const first = f.runtime.readOutput(started.id);
+    const first = await waitForOutput(
+      f.runtime,
+      started.id,
+      (text) => text.includes('one') && text.includes('err'),
+    );
     assert.ok(first.events.some((event) => event.stream === 'stdout' && event.text.includes('one')));
     assert.ok(first.events.some((event) => event.stream === 'stderr' && event.text.includes('err')));
 
