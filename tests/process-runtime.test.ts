@@ -21,7 +21,7 @@ async function fixture(parentEnvironment: NodeJS.ProcessEnv = process.env) {
     root,
     runtime,
     cleanup: async () => {
-      await runtime.stopAll().catch(() => []);
+      await runtime.stopAll().catch((): never[] => []);
       await fs.rm(root, { recursive: true, force: true });
     },
   };
