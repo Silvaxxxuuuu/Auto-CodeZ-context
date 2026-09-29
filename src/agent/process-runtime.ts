@@ -121,7 +121,6 @@ export class ProcessRuntime {
       record.earliestSequence = removed.sequence + 1;
     }
 
-    this.notify(record);
   }
 
   async start(projectId: string, command: string, _options: StartProcessOptions = {}): Promise<ManagedProcessSnapshot> {

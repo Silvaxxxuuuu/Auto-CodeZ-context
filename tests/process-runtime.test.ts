@@ -161,3 +161,24 @@ test('ProcessRuntime rejects invalid commands, project ids, cursors and duplicat
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test('ProcessRuntime wait ignores output activity and resolves only on exit or timeout', async () => {
+  const f = await fixture();
+  try {
+    const started = await f.runtime.start(
+      'project-a',
+      nodeCommand("process.stdout.write('early'); setTimeout(() => process.exit(0), 220)"),
+    );
+
+    const before = Date.now();
+    const finished = await f.runtime.wait(started.id, 2000);
+    const elapsed = Date.now() - before;
+
+    assert.equal(finished.status, 'exited');
+    assert.ok(elapsed >= 120);
+    assert.match(f.runtime.readOutput(started.id).events.map((event) => event.text).join(''), /early/);
+  } finally {
+    await f.cleanup();
+  }
+});
