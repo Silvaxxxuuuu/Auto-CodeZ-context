@@ -15,6 +15,7 @@ const readTools = new Set<ToolName>([
   'git_branches',
   'read_process_output',
   'wait_process',
+  'wait_for_port',
   'list_processes',
 ]);
 const safeWriteTools = new Set<ToolName>(['write_file', 'create_file', 'create_folder', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after']);

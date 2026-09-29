@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
+import net from 'node:net';
 import type { ProjectRecord } from '../ai/types';
 import { normalizeUnicodeText } from '../core/unicode-normalization';
 import {
@@ -42,6 +43,15 @@ export type ManagedProcessOutput = {
   truncated: boolean;
 };
 
+export type WaitForPortResult = {
+  processId: string;
+  host: '127.0.0.1' | '::1';
+  port: number;
+  ready: true;
+  waitedMs: number;
+  process: ManagedProcessSnapshot;
+};
+
 export type StartProcessOptions = {
   label?: string;
 };
@@ -65,6 +75,35 @@ function cloneSnapshot(snapshot: ManagedProcessSnapshot): ManagedProcessSnapshot
 
 function commandFailure(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeLoopbackHost(host: string | undefined): '127.0.0.1' | '::1' {
+  const value = (host ?? '127.0.0.1').trim().toLowerCase();
+  if (!value || value === 'localhost' || value === '127.0.0.1') return '127.0.0.1';
+  if (value === '::1' || value === '[::1]') return '::1';
+  throw new Error('wait_for_port aceita apenas hosts loopback locais: localhost, 127.0.0.1 ou ::1.');
+}
+
+function assertTcpPort(port: number): number {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Porta TCP deve ser um inteiro entre 1 e 65535.');
+  return port;
+}
+
+async function probePort(host: '127.0.0.1' | '::1', port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const socket = net.createConnection({ host, port });
+    let settled = false;
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(ready);
+    };
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+    socket.setTimeout(Math.max(1, timeoutMs), () => finish(false));
+  });
 }
 
 export class ProcessRuntime {
@@ -242,6 +281,48 @@ export class ProcessRuntime {
     });
 
     return cloneSnapshot(record.snapshot);
+  }
+
+  async waitForPort(input: {
+    projectId: string;
+    processId: string;
+    port: number;
+    timeoutMs: number;
+    host?: string;
+  }): Promise<WaitForPortResult> {
+    const port = assertTcpPort(input.port);
+    if (!Number.isFinite(input.timeoutMs) || input.timeoutMs < 0) throw new Error('timeoutMs deve ser um número >= 0.');
+    const host = normalizeLoopbackHost(input.host);
+    const process = this.get(input.processId);
+    if (process.projectId !== input.projectId) throw new Error('O processo persistente pertence a outro projeto.');
+
+    const startedAt = Date.now();
+    const deadline = startedAt + input.timeoutMs;
+    for (;;) {
+      const current = this.get(input.processId);
+      if (current.status !== 'running') {
+        throw new Error(`O processo ${input.processId} terminou com status '${current.status}' antes de abrir ${host}:${port}.`);
+      }
+
+      const remaining = Math.max(0, deadline - Date.now());
+      const attemptTimeout = input.timeoutMs === 0 ? 1 : Math.min(250, Math.max(1, remaining));
+      if (await probePort(host, port, attemptTimeout)) {
+        return {
+          processId: input.processId,
+          host,
+          port,
+          ready: true,
+          waitedMs: Date.now() - startedAt,
+          process: this.get(input.processId),
+        };
+      }
+
+      if (Date.now() >= deadline) {
+        throw new Error(`Timeout aguardando ${host}:${port} ficar disponível após ${input.timeoutMs}ms.`);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
+    }
   }
 
   async stop(processId: string): Promise<ManagedProcessSnapshot> {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 import test from 'node:test';
 import type { AIToolCall, ProjectRecord } from '../src/ai/types';
 import { ProcessRuntime } from '../src/agent/process-runtime';
@@ -129,6 +130,41 @@ test('start_process in ask mode requires approval and starts only after approval
     assert.equal(approved.ok, true);
     assert.equal(f.processes.list('project-a').length, 1);
   } finally {
+    await f.cleanup();
+  }
+});
+
+
+test('wait_for_port tool reports readiness only for loopback port associated with the active project', async () => {
+  const f = await fixture();
+  const server = net.createServer();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+
+    const started = await f.tools.execute('chat-a', 'project-a', 'unrestricted', call('start-port', 'start_process', {
+      command: nodeCommand("setTimeout(() => {}, 30000)"),
+    }), 'run-a');
+    const processId = JSON.parse(started.output ?? '{}').processId as string;
+
+    const ready = await f.tools.execute('chat-a', 'project-a', 'unrestricted', call('wait-port', 'wait_for_port', {
+      processId,
+      port: address.port,
+      timeoutMs: 1000,
+      host: 'localhost',
+    }), 'run-a');
+    assert.equal(ready.ok, true);
+    const payload = JSON.parse(ready.output ?? '{}');
+    assert.equal(payload.ready, true);
+    assert.equal(payload.host, '127.0.0.1');
+    assert.equal(payload.port, address.port);
+    assert.equal(f.tools.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve())).catch((): undefined => undefined);
     await f.cleanup();
   }
 });

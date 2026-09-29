@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import net from 'node:net';
 import type { ProjectRecord } from '../src/ai/types';
 import { ProcessRuntime } from '../src/agent/process-runtime';
 
@@ -197,6 +198,73 @@ test('ProcessRuntime wait ignores output activity and resolves only on exit or t
     assert.equal(finished.status, 'exited');
     assert.ok(elapsed >= 120);
     assert.match(f.runtime.readOutput(started.id).events.map((event) => event.text).join(''), /early/);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+
+test('ProcessRuntime waitForPort detects loopback readiness for its managed process', async () => {
+  const f = await fixture();
+  const server = net.createServer();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+
+    const started = await f.runtime.start('project-a', nodeCommand("setTimeout(() => {}, 30000)"));
+    const ready = await f.runtime.waitForPort({
+      projectId: 'project-a',
+      processId: started.id,
+      port: address.port,
+      timeoutMs: 1000,
+      host: 'localhost',
+    });
+
+    assert.equal(ready.ready, true);
+    assert.equal(ready.host, '127.0.0.1');
+    assert.equal(ready.port, address.port);
+    assert.equal(ready.processId, started.id);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve())).catch((): undefined => undefined);
+    await f.cleanup();
+  }
+});
+
+test('ProcessRuntime waitForPort rejects remote hosts, invalid ports and cross-project process access', async () => {
+  const f = await fixture();
+  try {
+    const started = await f.runtime.start('project-a', nodeCommand("setTimeout(() => {}, 30000)"));
+    await assert.rejects(
+      f.runtime.waitForPort({ projectId: 'project-a', processId: started.id, port: 5173, timeoutMs: 50, host: 'example.com' }),
+      /apenas hosts loopback/i,
+    );
+    await assert.rejects(
+      f.runtime.waitForPort({ projectId: 'project-a', processId: started.id, port: 0, timeoutMs: 50 }),
+      /entre 1 e 65535/i,
+    );
+    await assert.rejects(
+      f.runtime.waitForPort({ projectId: 'project-b', processId: started.id, port: 5173, timeoutMs: 50 }),
+      /outro projeto/i,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('ProcessRuntime waitForPort fails early when managed process exits before readiness', async () => {
+  const f = await fixture();
+  try {
+    const started = await f.runtime.start('project-a', nodeCommand("setTimeout(() => process.exit(0), 60)"));
+    const before = Date.now();
+    await assert.rejects(
+      f.runtime.waitForPort({ projectId: 'project-a', processId: started.id, port: 65534, timeoutMs: 2000 }),
+      /terminou.*antes de abrir/i,
+    );
+    assert.ok(Date.now() - before < 1500);
   } finally {
     await f.cleanup();
   }
