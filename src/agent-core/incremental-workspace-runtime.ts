@@ -53,6 +53,21 @@ export type IncrementalDeleteFileResult = {
   rollbackRef: string;
 };
 
+export type IncrementalRenameFileInspection = {
+  from: IncrementalWriteFileInspection;
+  to: string;
+};
+
+export type IncrementalRenameFileResult = {
+  operationId: string;
+  from: string;
+  to: string;
+  content: string;
+  hash: string;
+  rollbackRef: string;
+  createdDirectories: string[];
+};
+
 function normalizedRelativePath(value: string): string {
   return value.split(path.sep).join('/').replace(/^\.\//, '');
 }
@@ -101,6 +116,15 @@ export class IncrementalWorkspaceMutationRuntime {
         modifiedAt: stat.modifiedAt,
       },
     };
+  }
+
+  async inspectRenameFile(projectId: string, requestedFrom: string, requestedTo: string): Promise<IncrementalRenameFileInspection> {
+    const from = await this.inspectWriteFile(projectId, requestedFrom);
+    const to = await this.workspace.canonicalRelativePath(projectId, requestedTo);
+    if (from.path.toLowerCase() === to.toLowerCase()) throw new Error('A origem e o destino da renomeação são equivalentes.');
+    const destination = await this.workspace.statPath(projectId, to);
+    if (destination.exists) throw new Error('O destino da renomeação já existe.');
+    return { from, to };
   }
 
   async createFolder(
@@ -327,6 +351,143 @@ export class IncrementalWorkspaceMutationRuntime {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const state = await this.afterSnapshots(record.projectId, [record.target]).catch((): OperationAfterSnapshot[] => []);
+      await this.journal.markRollbackConflict(operationId, message, state).catch((): undefined => undefined);
+      throw error;
+    }
+  }
+
+  async renameFile(
+    context: IncrementalMutationContext,
+    requestedFrom: string,
+    requestedTo: string,
+    expectedBefore?: string,
+  ): Promise<IncrementalRenameFileResult> {
+    if (!this.rollbackBlobs) throw new Error('RollbackBlobStore não foi configurado para rename_file incremental.');
+    const inspected = await this.inspectRenameFile(context.projectId, requestedFrom, requestedTo);
+    if (expectedBefore !== undefined && inspected.from.content !== expectedBefore) {
+      throw new Error(`O arquivo '${inspected.from.path}' mudou antes da renomeação incremental.`);
+    }
+
+    const rollbackRef = await this.rollbackBlobs.putText(inspected.from.content);
+    const destinationParent = normalizedRelativePath(path.dirname(inspected.to));
+    const directoryResources = destinationParent === '.'
+      ? []
+      : await this.missingDirectoryResources(context.projectId, destinationParent);
+    const resources: PrepareOperationInput['resources'] = [
+      ...directoryResources,
+      {
+        target: inspected.from.path,
+        before: { ...inspected.from.snapshot, contentRef: rollbackRef },
+        rollbackRef: `restore-renamed-source:${inspected.from.path}`,
+      },
+      {
+        target: inspected.to,
+        before: { exists: false, kind: 'file' },
+        rollbackRef: `remove-renamed-destination:${inspected.to}`,
+      },
+    ];
+
+    const prepared = await this.journal.prepare({
+      ...context,
+      capabilityId: 'workspace.rename_file',
+      target: inspected.to,
+      resources,
+    });
+    await this.journal.start(prepared.operationId);
+
+    try {
+      await this.workspace.renameFile(context.projectId, inspected.from.path, inspected.to);
+      const after = await this.afterSnapshots(context.projectId, resources.map((resource) => resource.target));
+      const sourceAfter = after.find((item) => item.target.toLowerCase() === inspected.from.path.toLowerCase())?.after;
+      const destinationAfter = after.find((item) => item.target.toLowerCase() === inspected.to.toLowerCase())?.after;
+      if (sourceAfter?.exists !== false) throw new Error('A origem ainda existe após a renomeação.');
+      if (!destinationAfter?.exists || destinationAfter.kind !== 'file' || destinationAfter.hash !== inspected.from.snapshot.hash) {
+        throw new Error('O destino da renomeação não corresponde ao arquivo de origem.');
+      }
+      const verified = await this.journal.verify(prepared.operationId, after);
+      return {
+        operationId: verified.operationId,
+        from: inspected.from.path,
+        to: inspected.to,
+        content: inspected.from.content,
+        hash: inspected.from.snapshot.hash ?? '',
+        rollbackRef,
+        createdDirectories: directoryResources.map((resource) => resource.target),
+      };
+    } catch (error) {
+      await this.recordFailure(prepared.operationId, context.projectId, resources.map((resource) => resource.target), error);
+      throw error;
+    }
+  }
+
+  async restoreRenamedFile(operationId: string): Promise<void> {
+    if (!this.rollbackBlobs) throw new Error('RollbackBlobStore não foi configurado para restauração.');
+    const record = this.journal.get(operationId);
+    if (!record) throw new Error(`Operação de renomeação não encontrada: ${operationId}.`);
+    if (record.capabilityId !== 'workspace.rename_file') throw new Error('A operação não representa rename_file.');
+    if (record.status !== 'verified') throw new Error(`A operação ${operationId} não está pronta para rollback.`);
+
+    const destination = record.resources.find((resource) => resource.target.toLowerCase() === record.target.toLowerCase());
+    const source = record.resources.find((resource) => (
+      resource.before.exists === true
+      && resource.before.kind === 'file'
+      && resource.target.toLowerCase() !== record.target.toLowerCase()
+    ));
+    const createdDirectories = record.resources.filter((resource) => resource.before.exists === false && resource.before.kind === 'directory');
+    if (!source?.rollbackRef || !source.before.hash || !source.before.contentRef || !destination || destination.before.exists !== false) {
+      throw new Error('Metadados de rollback da renomeação estão incompletos.');
+    }
+
+    const sourceNow = await this.workspace.statPath(record.projectId, source.target);
+    if (sourceNow.exists) {
+      await this.journal.markRollbackConflict(operationId, 'A origem foi recriada externamente após a renomeação.', await this.afterSnapshots(record.projectId, record.resources.map((item) => item.target)));
+      throw new Error(`A origem '${source.target}' foi recriada; rollback bloqueado.`);
+    }
+
+    const destinationNow = await this.snapshot(record.projectId, destination.target);
+    if (!destinationNow.exists || destinationNow.kind !== 'file' || destinationNow.hash !== source.before.hash) {
+      await this.journal.markRollbackConflict(operationId, 'O destino foi alterado ou removido após a renomeação.', await this.afterSnapshots(record.projectId, record.resources.map((item) => item.target)));
+      throw new Error(`O destino '${destination.target}' mudou; rollback bloqueado.`);
+    }
+
+    const backup = await this.rollbackBlobs.getText(source.before.contentRef);
+    const backupHash = crypto.createHash('sha256').update(backup, 'utf8').digest('hex');
+    if (backupHash !== source.before.hash) {
+      await this.journal.markRollbackConflict(operationId, 'O snapshot criptografado da origem não corresponde ao hash anterior.');
+      throw new Error('O snapshot criptografado da renomeação falhou na verificação; rollback bloqueado.');
+    }
+
+    for (const directory of createdDirectories) {
+      const names = await this.workspace.listDirectoryNames(record.projectId, directory.target);
+      const prefix = `${directory.target.replace(/\/$/, '')}/`;
+      const expectedNames = new Set<string>();
+      for (const resource of record.resources) {
+        if (!resource.target.startsWith(prefix)) continue;
+        const remainder = resource.target.slice(prefix.length);
+        const first = remainder.split('/')[0];
+        if (first) expectedNames.add(first);
+      }
+      if (names.length !== expectedNames.size || names.some((name) => !expectedNames.has(name))) {
+        await this.journal.markRollbackConflict(operationId, `A pasta '${directory.target}' recebeu conteúdo externo após a renomeação.`, await this.afterSnapshots(record.projectId, record.resources.map((item) => item.target)));
+        throw new Error(`A pasta '${directory.target}' mudou; rollback bloqueado.`);
+      }
+    }
+
+    try {
+      await this.workspace.renameFile(record.projectId, destination.target, source.target);
+      for (const directory of [...createdDirectories].sort((left, right) => right.target.length - left.target.length)) {
+        await this.workspace.removeEmptyFolder(record.projectId, directory.target);
+      }
+      const after = await this.afterSnapshots(record.projectId, record.resources.map((item) => item.target));
+      const restoredSource = after.find((item) => item.target.toLowerCase() === source.target.toLowerCase())?.after;
+      const removedDestination = after.find((item) => item.target.toLowerCase() === destination.target.toLowerCase())?.after;
+      if (!restoredSource?.exists || restoredSource.kind !== 'file' || restoredSource.hash !== source.before.hash || removedDestination?.exists !== false) {
+        throw new Error('O rollback da renomeação não restaurou o estado anterior.');
+      }
+      await this.journal.markRolledBack(operationId, after);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const state = await this.afterSnapshots(record.projectId, record.resources.map((item) => item.target)).catch((): OperationAfterSnapshot[] => []);
       await this.journal.markRollbackConflict(operationId, message, state).catch((): undefined => undefined);
       throw error;
     }

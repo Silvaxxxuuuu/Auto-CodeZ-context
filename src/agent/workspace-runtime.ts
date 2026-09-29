@@ -124,6 +124,27 @@ export class WorkspaceRuntime {
     return true;
   }
 
+  async listDirectoryNames(projectId: string, requestedPath: string): Promise<string[]> {
+    const directory = await this.resolve(projectId, requestedPath);
+    const stat = await fs.stat(directory);
+    if (!stat.isDirectory()) throw new Error('A operação exige um diretório regular.');
+    const real = await fs.realpath(directory);
+    const root = await this.root(projectId);
+    this.assertInside(root, real);
+    return (await fs.readdir(real)).sort((left, right) => left.localeCompare(right));
+  }
+
+  async removeEmptyFolder(projectId: string, requestedPath: string): Promise<boolean> {
+    const current = await this.statPath(projectId, requestedPath);
+    if (!current.exists) return false;
+    if (current.kind !== 'directory') throw new Error('A operação exige um diretório regular.');
+    const names = await this.listDirectoryNames(projectId, requestedPath);
+    if (names.length > 0) throw new Error(`A pasta '${requestedPath}' não está vazia.`);
+    const directory = await this.resolve(projectId, requestedPath);
+    await fs.rmdir(directory);
+    return true;
+  }
+
   private async assertRegularFile(filePath: string): Promise<void> {
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) throw new Error('A operação exige um arquivo regular.');

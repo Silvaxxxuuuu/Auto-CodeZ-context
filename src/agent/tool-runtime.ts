@@ -353,11 +353,15 @@ export class ToolRuntime {
         return this.diffs.createPlan([this.diffs.create(path, 'deleted', before, '')]);
       }
       case 'rename_file': {
-        const from = this.stringValue(call.input, 'from');
-        const to = this.stringValue(call.input, 'to');
-        const before = await this.workspace.readFile(projectId, from);
-        if (await this.workspace.exists(projectId, to)) throw new Error('O destino da renomeação já existe.');
-        return this.diffs.createPlan([this.diffs.create(to, 'renamed', before, before, from)]);
+        const requestedFrom = this.stringValue(call.input, 'from');
+        const requestedTo = this.stringValue(call.input, 'to');
+        if (this.incrementalWorkspace) {
+          const inspected = await this.incrementalWorkspace.inspectRenameFile(projectId, requestedFrom, requestedTo);
+          return this.diffs.createPlan([this.diffs.create(inspected.to, 'renamed', inspected.from.content, inspected.from.content, inspected.from.path)]);
+        }
+        const before = await this.workspace.readFile(projectId, requestedFrom);
+        if (await this.workspace.exists(projectId, requestedTo)) throw new Error('O destino da renomeação já existe.');
+        return this.diffs.createPlan([this.diffs.create(requestedTo, 'renamed', before, before, requestedFrom)]);
       }
       default: return undefined;
     }
@@ -379,7 +383,15 @@ export class ToolRuntime {
       }
       if (change.type === 'renamed') {
         const from = change.renamedFrom;
-        if (!from || !(await this.workspace.exists(projectId, from)) || await this.workspace.exists(projectId, change.path)) throw new Error(`A renomeação de '${from || '?'}' para '${change.path}' não corresponde mais ao estado aprovado.`);
+        if (!from) throw new Error(`A renomeação para '${change.path}' não possui origem válida.`);
+        if (toolName === 'rename_file' && this.incrementalWorkspace) {
+          const inspected = await this.incrementalWorkspace.inspectRenameFile(projectId, from, change.path).catch(() => {
+            throw new Error(`A renomeação de '${from}' para '${change.path}' não corresponde mais ao estado aprovado.`);
+          });
+          if (inspected.from.content !== change.before) throw new Error(`O arquivo '${from}' mudou desde a aprovação.`);
+          continue;
+        }
+        if (!(await this.workspace.exists(projectId, from)) || await this.workspace.exists(projectId, change.path)) throw new Error(`A renomeação de '${from}' para '${change.path}' não corresponde mais ao estado aprovado.`);
         const current = await this.workspace.readFile(projectId, from);
         if (current !== change.before) throw new Error(`O arquivo '${from}' mudou desde a aprovação.`);
         continue;
@@ -648,7 +660,26 @@ export class ToolRuntime {
         await this.workspace.deleteFile(projectId, path);
         return { output: 'Arquivo excluído.', changes: [this.diffs.create(path, 'deleted', before, '')] };
       }
-      case 'rename_file': { const from = this.stringValue(input, 'from'); const to = this.stringValue(input, 'to'); const before = await this.workspace.readFile(projectId, from); await this.workspace.renameFile(projectId, from, to); const after = await this.workspace.readFile(projectId, to); return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] }; }
+      case 'rename_file': {
+        const from = this.stringValue(input, 'from');
+        const to = this.stringValue(input, 'to');
+        if (this.incrementalWorkspace && context.runId && context.toolCallId) {
+          const inspected = await this.incrementalWorkspace.inspectRenameFile(projectId, from, to);
+          const result = await this.incrementalWorkspace.renameFile({
+            runId: context.runId,
+            toolCallId: context.toolCallId,
+            projectId,
+          }, inspected.from.path, inspected.to, inspected.from.content);
+          return {
+            output: JSON.stringify({ type: 'workspace_file_renamed', from: result.from, to: result.to, operationId: result.operationId, hash: result.hash, rollbackRef: result.rollbackRef, createdDirectories: result.createdDirectories }),
+            changes: [this.diffs.create(result.to, 'renamed', result.content, result.content, result.from)],
+          };
+        }
+        const before = await this.workspace.readFile(projectId, from);
+        await this.workspace.renameFile(projectId, from, to);
+        const after = await this.workspace.readFile(projectId, to);
+        return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] };
+      }
       case 'search_files': { const matches = await this.workspace.searchFiles(projectId, this.stringValue(input, 'query')); return { output: JSON.stringify(await this.visibleSearchPaths(projectId, matches, context)) }; }
       case 'run_command': { const result = await this.commands.run(projectId, this.stringValue(input, 'command')); return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result }; }
       case 'git_status': return this.gitExecution(projectId, await this.requireGit().status(projectId));

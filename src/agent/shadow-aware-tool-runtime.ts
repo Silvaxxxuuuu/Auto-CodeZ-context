@@ -444,6 +444,27 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
       }
     }
 
+    if (call.name === 'rename_file') {
+      const from = typeof call.input.from === 'string'
+        ? call.input.from.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase()
+        : '';
+      const to = typeof call.input.to === 'string'
+        ? call.input.to.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase()
+        : '';
+      const overlaps = Boolean(from && to) && shadow.changes.some((change) => {
+        const changed = change.path.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase();
+        const renamedFrom = change.renamedFrom?.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase();
+        return changed === from || changed === to || renamedFrom === from || renamedFrom === to;
+      });
+      if (overlaps) {
+        return {
+          toolCallId: call.id,
+          ok: false,
+          error: `A renomeação '${call.input.from}' → '${call.input.to}' sobrepõe alterações de uma execução legada isolada. Conclua ou descarte essa execução antes de renomear incrementalmente.`,
+        };
+      }
+    }
+
     if (call.name === 'create_file') {
       const requested = typeof call.input.path === 'string'
         ? call.input.path.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase()

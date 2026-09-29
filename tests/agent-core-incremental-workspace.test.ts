@@ -264,3 +264,77 @@ test('delete rollback fails closed when the deleted path was recreated externall
     await f.cleanup();
   }
 });
+
+
+test('incremental rename_file journals source, destination and created parents then rolls back exactly', async () => {
+  const f = await fixture();
+  try {
+    await f.workspace.createFile('project-a', 'source.txt', 'rename-state');
+    const rollbackBlobs = {
+      putText: async (content: string) => `blob:test:${Buffer.from(content, 'utf8').toString('base64')}`,
+      getText: async (ref: string) => Buffer.from(ref.slice('blob:test:'.length), 'base64').toString('utf8'),
+    };
+    const incremental = new IncrementalWorkspaceMutationRuntime(f.workspace, f.journal, rollbackBlobs);
+    const result = await incremental.renameFile(context, 'source.txt', 'nested/deeper/destination.txt', 'rename-state');
+
+    assert.deepEqual(await f.workspace.statPath('project-a', 'source.txt'), { exists: false });
+    assert.equal(await f.workspace.readFile('project-a', 'nested/deeper/destination.txt'), 'rename-state');
+    assert.deepEqual(result.createdDirectories, ['nested', 'nested/deeper']);
+
+    const record = f.journal.get(result.operationId);
+    assert.equal(record?.status, 'verified');
+    assert.equal(record?.capabilityId, 'workspace.rename_file');
+    assert.deepEqual(record?.resources.map((resource) => resource.target), ['nested', 'nested/deeper', 'source.txt', 'nested/deeper/destination.txt']);
+
+    await incremental.restoreRenamedFile(result.operationId);
+    assert.equal(await f.workspace.readFile('project-a', 'source.txt'), 'rename-state');
+    assert.deepEqual(await f.workspace.statPath('project-a', 'nested/deeper/destination.txt'), { exists: false });
+    assert.deepEqual(await f.workspace.statPath('project-a', 'nested'), { exists: false });
+    assert.equal(f.journal.get(result.operationId)?.status, 'rolled_back');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('rename rollback fails closed when destination content changed externally', async () => {
+  const f = await fixture();
+  try {
+    await f.workspace.createFile('project-a', 'source.txt', 'before');
+    const rollbackBlobs = {
+      putText: async (content: string) => `blob:test:${Buffer.from(content, 'utf8').toString('base64')}`,
+      getText: async (ref: string) => Buffer.from(ref.slice('blob:test:'.length), 'base64').toString('utf8'),
+    };
+    const incremental = new IncrementalWorkspaceMutationRuntime(f.workspace, f.journal, rollbackBlobs);
+    const result = await incremental.renameFile(context, 'source.txt', 'destination.txt', 'before');
+    await f.workspace.writeFile('project-a', 'destination.txt', 'external');
+
+    await assert.rejects(() => incremental.restoreRenamedFile(result.operationId), /destino.*mudou.*rollback bloqueado/i);
+    assert.deepEqual(await f.workspace.statPath('project-a', 'source.txt'), { exists: false });
+    assert.equal(await f.workspace.readFile('project-a', 'destination.txt'), 'external');
+    assert.equal(f.journal.get(result.operationId)?.status, 'rollback_conflict');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('rename rollback refuses destination directories containing external entries before moving anything back', async () => {
+  const f = await fixture();
+  try {
+    await f.workspace.createFile('project-a', 'source.txt', 'before');
+    const rollbackBlobs = {
+      putText: async (content: string) => `blob:test:${Buffer.from(content, 'utf8').toString('base64')}`,
+      getText: async (ref: string) => Buffer.from(ref.slice('blob:test:'.length), 'base64').toString('utf8'),
+    };
+    const incremental = new IncrementalWorkspaceMutationRuntime(f.workspace, f.journal, rollbackBlobs);
+    const result = await incremental.renameFile(context, 'source.txt', 'created/destination.txt', 'before');
+    await f.workspace.createFile('project-a', 'created/external.txt', 'external');
+
+    await assert.rejects(() => incremental.restoreRenamedFile(result.operationId), /pasta 'created'.*mudou.*rollback bloqueado/i);
+    assert.deepEqual(await f.workspace.statPath('project-a', 'source.txt'), { exists: false });
+    assert.equal(await f.workspace.readFile('project-a', 'created/destination.txt'), 'before');
+    assert.equal(await f.workspace.readFile('project-a', 'created/external.txt'), 'external');
+    assert.equal(f.journal.get(result.operationId)?.status, 'rollback_conflict');
+  } finally {
+    await f.cleanup();
+  }
+});

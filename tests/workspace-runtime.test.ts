@@ -256,3 +256,22 @@ test('writeFile replaces existing content atomically and leaves no temporary sib
     await workspace.cleanup();
   }
 });
+
+
+test('Recovery helpers list direct directory names and only remove empty folders', async () => {
+  const workspace = await createWorkspace();
+  try {
+    await workspace.runtime.createFolder('project-test', 'recovery/nested');
+    await workspace.runtime.createFile('project-test', 'recovery/nested/file.txt', 'x');
+    assert.deepEqual(await workspace.runtime.listDirectoryNames('project-test', 'recovery'), ['nested']);
+    await assert.rejects(
+      workspace.runtime.removeEmptyFolder('project-test', 'recovery/nested'),
+      /não está vazia/i,
+    );
+    await workspace.runtime.deleteFile('project-test', 'recovery/nested/file.txt');
+    assert.equal(await workspace.runtime.removeEmptyFolder('project-test', 'recovery/nested'), true);
+    assert.equal(await workspace.runtime.removeEmptyFolder('project-test', 'recovery/nested'), false);
+  } finally {
+    await workspace.cleanup();
+  }
+});
