@@ -326,7 +326,7 @@ export class IncrementalWorkspaceMutationRuntime {
       await this.journal.markRolledBack(operationId, [{ target: record.target, after: restored }]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const state = await this.afterSnapshots(record.projectId, [record.target]).catch(() => []);
+      const state = await this.afterSnapshots(record.projectId, [record.target]).catch((): OperationAfterSnapshot[] => []);
       await this.journal.markRollbackConflict(operationId, message, state).catch((): undefined => undefined);
       throw error;
     }
