@@ -646,7 +646,6 @@ export class AgentRuntime {
       const approvalCalls: Record<string, AIToolCall> = {};
       const pendingApprovalSignatures = new Map<string, string>();
       const roundResults: AIToolResult[] = [];
-      const roundResults: AIToolResult[] = [];
       for (const call of response.toolCalls) {
         signal?.throwIfAborted();
         const signature = toolCallSignature(call);
@@ -667,10 +666,15 @@ export class AgentRuntime {
       }
 
       if (pendingApprovalIds.length) {
-        const completedResults = roundResults.filter((result) => !result.pendingApproval);
-        if (completedResults.length && completedResults.some((result, index) => progressSignalsFor(response.toolCalls![index] ?? response.toolCalls![0], result).length > 0)) {
-          const completedCalls = response.toolCalls.filter((_, index) => !roundResults[index]?.pendingApproval);
-          const decision = this.observeProgress(run, completedCalls, completedResults);
+        const completedPairs = response.toolCalls
+          .map((call, index) => ({ call, result: roundResults[index] }))
+          .filter((pair): pair is { call: AIToolCall; result: AIToolResult } => Boolean(pair.result && !pair.result.pendingApproval));
+        if (completedPairs.some(({ call, result }) => progressSignalsFor(call, result).length > 0)) {
+          const decision = this.observeProgress(
+            run,
+            completedPairs.map(({ call }) => call),
+            completedPairs.map(({ result }) => result),
+          );
           await this.enforceWatchdogDecision(run, decision);
         }
         run.pendingApprovalIds = pendingApprovalIds;
@@ -763,6 +767,7 @@ export class AgentRuntime {
       const pendingApprovalIds: string[] = [];
       const approvalCalls: Record<string, AIToolCall> = {};
       const pendingApprovalSignatures = new Map<string, string>();
+      const roundResults: AIToolResult[] = [];
       for (const call of response.toolCalls) {
         signal?.throwIfAborted();
         const signature = toolCallSignature(call);
@@ -783,10 +788,16 @@ export class AgentRuntime {
       }
 
       if (pendingApprovalIds.length) {
-        const completedResults = roundResults.filter((result) => !result.pendingApproval);
-        if (completedResults.length && completedResults.some((result, index) => progressSignalsFor(response.toolCalls![index] ?? response.toolCalls![0], result).length > 0)) {
-          const completedCalls = response.toolCalls.filter((_, index) => !roundResults[index]?.pendingApproval);
-          const decision = this.observeProgress(run, completedCalls, completedResults, emit);
+        const completedPairs = response.toolCalls
+          .map((call, index) => ({ call, result: roundResults[index] }))
+          .filter((pair): pair is { call: AIToolCall; result: AIToolResult } => Boolean(pair.result && !pair.result.pendingApproval));
+        if (completedPairs.some(({ call, result }) => progressSignalsFor(call, result).length > 0)) {
+          const decision = this.observeProgress(
+            run,
+            completedPairs.map(({ call }) => call),
+            completedPairs.map(({ result }) => result),
+            emit,
+          );
           await this.enforceWatchdogDecision(run, decision, emit);
         }
         run.pendingApprovalIds = pendingApprovalIds;
