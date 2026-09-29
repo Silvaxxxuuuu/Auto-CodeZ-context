@@ -612,7 +612,7 @@ export class AgentRuntime {
   }
 
   private async runLoop(run: PendingRun, signal?: AbortSignal): Promise<AgentRunResult> {
-    while (true) {
+    for (;;) {
       signal?.throwIfAborted();
       let response: AIResponse;
       try {
@@ -697,7 +697,7 @@ export class AgentRuntime {
     const emit = run.streamEmitter;
     if (!emit) throw new Error('Emitter de streaming não configurado.');
 
-    while (true) {
+    for (;;) {
       signal?.throwIfAborted();
       let response: AIResponse | undefined;
       let streamError: string | undefined;
