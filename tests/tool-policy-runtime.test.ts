@@ -31,16 +31,17 @@ test('normal read remains allowed in unrestricted mode', () => {
   });
 });
 
-test('sensitive read requires approval even in unrestricted mode', () => {
+test('sensitive read is allowed directly in unrestricted mode while retaining classification telemetry', () => {
   const result = runtime.evaluate({
     permissionLevel: 'unrestricted',
     projectId: 'project-a',
     call: call('read_file', { path: '.env.production' }),
   });
 
-  assert.equal(result.decision, 'ask');
+  assert.equal(result.decision, 'allow');
   assert.equal(result.blockedBy, null);
   assert.equal(result.classification, 'sensitive');
+  assert.equal(result.sources.path, 'ask');
   assert.match(result.reasons.join(' '), /variáveis de ambiente/i);
 });
 
@@ -107,25 +108,25 @@ test('harmless version probe is allowed in unrestricted mode', () => {
   assert.equal(result.sources.executionScope, 'allow');
 });
 
-test('ordinary shell command still requires approval in unrestricted mode', () => {
+test('ordinary shell command executes without approval in unrestricted mode', () => {
   const result = runtime.evaluate({
     permissionLevel: 'unrestricted',
     projectId: 'project-a',
     call: call('run_command', { command: 'npm test' }),
   });
 
-  assert.equal(result.decision, 'ask');
+  assert.equal(result.decision, 'allow');
   assert.equal(result.sources.command, 'ask');
 });
 
-test('direct Git mutation through the shell still requires approval in unrestricted mode', () => {
+test('direct Git mutation through the shell does not prompt in unrestricted mode unless security denies it', () => {
   const result = runtime.evaluate({
     permissionLevel: 'unrestricted',
     projectId: 'project-a',
     call: call('run_command', { command: 'git reset --hard HEAD' }),
   });
 
-  assert.equal(result.decision, 'ask');
+  assert.equal(result.decision, 'allow');
   assert.equal(result.sources.command, 'ask');
   assert.match(result.reasons.join(' '), /mutação Git direta/i);
 });
@@ -216,4 +217,38 @@ test('active execution scope keeps shell approval in unrestricted mode', () => {
   assert.equal(result.sources.command, 'ask');
   assert.equal(result.sources.executionScope, 'ask');
   assert.match(result.reasons.join(' '), /shell/i);
+});
+
+
+test('unrestricted relaxes contextual asks but never relaxes execution-scope or security denies', () => {
+  const unscoped = new ToolPolicyRuntime();
+  const shell = unscoped.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('run_command', { command: 'npm test' }),
+  });
+  const secretMutation = unscoped.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('write_file', { path: '.env', content: 'TOKEN=x' }),
+  });
+
+  const scopes = new ExecutionPathScopeRuntime(() => 1000);
+  scopes.configure({ chatId: 'chat-a', runId: 'run-a', projectId: 'project-a', allowedPaths: ['src'] });
+  const scoped = new ToolPolicyRuntime();
+  scoped.configureExecutionPathScope(scopes);
+  const scopedShell = scoped.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    chatId: 'chat-a',
+    runId: 'run-a',
+    call: call('run_command', { command: 'npm test' }),
+  });
+
+  assert.equal(shell.decision, 'allow');
+  assert.equal(shell.sources.command, 'ask');
+  assert.equal(secretMutation.decision, 'deny');
+  assert.equal(secretMutation.blockedBy, 'security');
+  assert.equal(scopedShell.decision, 'ask');
+  assert.equal(scopedShell.sources.executionScope, 'ask');
 });

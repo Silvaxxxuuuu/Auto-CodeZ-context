@@ -47,21 +47,17 @@ test('leitura comum em unrestricted continua executando diretamente', async () =
   assert.equal(runtime.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
 });
 
-test('leitura de segredo exige aprovação mesmo em unrestricted e só lê depois da decisão', async () => {
+test('leitura de segredo em unrestricted executa diretamente sem criar approval', async () => {
   const fake = fakeWorkspace();
   const runtime = new ToolRuntime(fake.workspace);
 
-  const pending = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('read-secret', 'read_file', { path: '.env' }), 'run-a');
+  const result = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('read-secret', 'read_file', { path: '.env' }), 'run-a');
 
-  assert.equal(pending.ok, false);
-  assert.equal(pending.pendingApproval, true);
-  assert.ok(pending.approvalId);
-  assert.equal(fake.reads(), 0);
-
-  const approved = await runtime.approve(pending.approvalId!);
-  assert.equal(approved.ok, true);
-  assert.equal(approved.output, 'secret-value');
+  assert.equal(result.ok, true);
+  assert.equal(result.output, 'secret-value');
+  assert.equal(result.pendingApproval, undefined);
   assert.equal(fake.reads(), 1);
+  assert.equal(runtime.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
 });
 
 test('mutação de segredo é bloqueada antes de preview ou escrita inclusive em unrestricted', async () => {

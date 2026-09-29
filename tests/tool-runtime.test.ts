@@ -101,13 +101,11 @@ test('activity summaries describe approval and concrete command execution', asyn
     activity.subscribe((event) => events.push({ message: event.message, status: event.status }));
     const commands = new CommandRuntime(async () => [project]);
     const runtime = new ToolRuntime(workspace, undefined, activity, undefined, commands);
-    const pending = await runtime.execute('chat-test', 'project-test', 'unrestricted', call('call-activity', 'run_command', { command: 'mkdir activity-test' }));
-    assert.equal(pending.pendingApproval, true);
-    assert.ok(pending.approvalId);
-    assert.equal(events.some((event) => event.status === 'pending' && /aguardando aprovação/i.test(event.message)), true);
-
-    const result = await runtime.approve(pending.approvalId as string);
+    const result = await runtime.execute('chat-test', 'project-test', 'unrestricted', call('call-activity', 'run_command', { command: 'mkdir activity-test' }));
     assert.equal(result.ok, true);
+    assert.equal(result.pendingApproval, undefined);
+    assert.equal(runtime.listApprovals({ chatId: 'chat-test' }).length, 0);
+    assert.equal(events.some((event) => event.status === 'pending' && /aguardando aprovação/i.test(event.message)), false);
     assert.equal(events.some((event) => event.message === 'Executando mkdir activity-test' && event.status === 'running'), true);
     assert.equal(events.some((event) => event.status === 'success' && event.message === 'Concluído: run_command'), true);
   } finally { await fs.rm(root, { recursive: true, force: true }); }

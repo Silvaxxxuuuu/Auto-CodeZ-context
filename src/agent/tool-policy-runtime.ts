@@ -116,9 +116,13 @@ export class ToolPolicyRuntime {
       paths,
     }) ?? { configured: false, decision: 'allow' as const, reasons: [], allowedPaths: [], requestedPaths: [] };
 
-    let decision = stronger(permissionDecision, pathPolicy.decision);
-    decision = stronger(decision, commandPolicy.decision);
-    decision = stronger(decision, systemWorkspaceDecision);
+    const relaxContextualApproval = (decision: PermissionDecision): PermissionDecision => (
+      input.permissionLevel === 'unrestricted' && decision === 'ask' ? 'allow' : decision
+    );
+
+    let decision = stronger(permissionDecision, relaxContextualApproval(pathPolicy.decision));
+    decision = stronger(decision, relaxContextualApproval(commandPolicy.decision));
+    decision = stronger(decision, relaxContextualApproval(systemWorkspaceDecision));
     decision = stronger(decision, executionScopePolicy.decision);
 
     const reasons = [...new Set([
