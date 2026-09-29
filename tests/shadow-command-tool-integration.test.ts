@@ -41,7 +41,7 @@ function call(id: string, name: AIToolCall['name'], input: Record<string, unknow
 
 const readCommand = 'node -e "console.log(require(\'fs\').readFileSync(\'a.txt\',\'utf8\'))"';
 
-test('run_command em unrestricted exige aprovação e valida o conteúdo do shadow sem publicar a alteração', async () => {
+test('run_command em unrestricted executa direto e valida o conteúdo do shadow sem publicar a alteração', async () => {
   const fx = await fixture();
   try {
     const write = await fx.tools.execute(
@@ -53,7 +53,7 @@ test('run_command em unrestricted exige aprovação e valida o conteúdo do shad
     );
     assert.equal(write.ok, true);
 
-    const pending = await fx.tools.execute(
+    const command = await fx.tools.execute(
       'chat-a',
       'project-a',
       'unrestricted',
@@ -61,12 +61,9 @@ test('run_command em unrestricted exige aprovação e valida o conteúdo do shad
       'run-a',
     );
 
-    assert.equal(pending.ok, false);
-    assert.equal(pending.pendingApproval, true);
-    assert.ok(pending.approvalId);
-
-    const command = await fx.tools.approve(pending.approvalId as string);
     assert.equal(command.ok, true);
+    assert.equal(command.pendingApproval, undefined);
+    assert.equal(fx.tools.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
     assert.match(command.output ?? '', /shadow-value/);
     assert.equal(await fx.base.readFile('project-a', 'a.txt'), 'base');
     assert.equal(fx.shadows.get('chat-a', 'run-a')?.changes[0].after, 'shadow-value');

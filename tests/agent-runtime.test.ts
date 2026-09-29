@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AgentRuntime } from '../src/agent/agent-runtime';
+import { CommandRuntime } from '../src/agent/command-runtime';
 import { ToolRuntime } from '../src/agent/tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 import { ChatRuntime } from '../src/ai/chat-runtime';
@@ -35,18 +36,20 @@ class MemoryStorage {
   async write<T>(name: string, value: T): Promise<void> { this.values.set(name, value); }
 }
 
-async function fixture(responses: AIResponse[], streamResponses?: AIStreamEvent[][], storage?: MemoryStorage): Promise<{ root: string; agent: AgentRuntime; requests: AIRequest[]; cleanup: () => Promise<void> }> {
+async function fixture(responses: AIResponse[], streamResponses?: AIStreamEvent[][], storage?: MemoryStorage): Promise<{ root: string; agent: AgentRuntime; tools: ToolRuntime; requests: AIRequest[]; cleanup: () => Promise<void> }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-agent-test-'));
   await fs.mkdir(path.join(root, 'src'), { recursive: true });
   await fs.writeFile(path.join(root, 'src', 'index.ts'), 'export const value = 42;');
   const project: ProjectRecord = { id: 'project-test', name: 'Agent Test Project', rootPath: root, createdAt: Date.now(), updatedAt: Date.now() };
-  const workspace = new WorkspaceRuntime(async () => [project]);
-  const tools = new ToolRuntime(workspace);
+  const projects = async (): Promise<ProjectRecord[]> => [project];
+  const workspace = new WorkspaceRuntime(projects);
+  const commands = new CommandRuntime(projects);
+  const tools = new ToolRuntime(workspace, undefined, undefined, undefined, commands);
   const registry = new ProviderRegistry();
   const requests: AIRequest[] = [];
   registry.register(adapter(responses, streamResponses, requests));
   const chatRuntime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, tools.listDefinitions());
-  return { root, agent: new AgentRuntime(chatRuntime, tools, undefined, storage), requests, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
+  return { root, agent: new AgentRuntime(chatRuntime, tools, undefined, storage), tools, requests, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
 }
 
 test('run returns a normal response without tools', async () => {
@@ -330,6 +333,82 @@ test('identical approval-dependent calls in one provider round require only one 
     assert.equal(resumed.response.content, 'Finished.');
     assert.equal(await fs.readFile(path.join(fixtureData.root, 'src', 'index.ts'), 'utf8'), 'export const value = 99;');
     assert.equal(fixtureData.agent.listExternalApprovals({ chatId: 'chat-test' }).length, 0);
+  } finally {
+    await fixtureData.cleanup();
+  }
+});
+
+
+test('unrestricted AgentRuntime completes a multi-step workspace task with zero approvals', async () => {
+  const responses: AIResponse[] = [
+    {
+      content: '',
+      model: 'test-model',
+      providerId: config.id,
+      toolCalls: [{
+        id: 'e2e-create',
+        name: 'create_file',
+        input: { path: 'src/e2e.ts', content: 'export const value = 1;\n' },
+      }],
+    },
+    {
+      content: '',
+      model: 'test-model',
+      providerId: config.id,
+      toolCalls: [{
+        id: 'e2e-command',
+        name: 'run_command',
+        input: { command: 'node -e "process.stdout.write(\'agent-e2e-ok\')"' },
+      }],
+    },
+    {
+      content: '',
+      model: 'test-model',
+      providerId: config.id,
+      toolCalls: [{
+        id: 'e2e-edit',
+        name: 'replace_text',
+        input: { path: 'src/e2e.ts', search: 'value = 1', replacement: 'value = 2', replaceAll: false },
+      }],
+    },
+    {
+      content: '',
+      model: 'test-model',
+      providerId: config.id,
+      toolCalls: [{
+        id: 'e2e-rename',
+        name: 'rename_file',
+        input: { from: 'src/e2e.ts', to: 'src/e2e-renamed.ts' },
+      }],
+    },
+    {
+      content: '',
+      model: 'test-model',
+      providerId: config.id,
+      toolCalls: [{
+        id: 'e2e-delete',
+        name: 'delete_file',
+        input: { path: 'src/e2e-renamed.ts' },
+      }],
+    },
+    { content: 'Task complete.', model: 'test-model', providerId: config.id },
+  ];
+  const fixtureData = await fixture(responses);
+  try {
+    const result = await fixtureData.agent.run(config, chat('unrestricted'), undefined, 'unrestricted');
+
+    assert.equal(result.response.content, 'Task complete.');
+    assert.equal(result.toolRounds, 5);
+    assert.deepEqual(result.pendingApprovalIds, []);
+    assert.equal(fixtureData.tools.listApprovals({ chatId: 'chat-test' }).length, 0);
+    assert.equal(await fs.stat(path.join(fixtureData.root, 'src')).then(() => true), true);
+    await assert.rejects(fs.stat(path.join(fixtureData.root, 'src', 'e2e.ts')), /ENOENT/);
+    await assert.rejects(fs.stat(path.join(fixtureData.root, 'src', 'e2e-renamed.ts')), /ENOENT/);
+
+    const toolMessages = result.messages.filter((message) => message.role === 'tool');
+    assert.equal(toolMessages.length, 5);
+    assert.equal(toolMessages.some((message) => /aprovação/i.test(message.content)), false);
+    assert.equal(toolMessages.some((message) => /agent-e2e-ok/i.test(message.content)), true);
   } finally {
     await fixtureData.cleanup();
   }

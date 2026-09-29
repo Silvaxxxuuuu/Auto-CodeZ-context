@@ -41,38 +41,29 @@ function fakeCommands() {
   return { runtime, executed };
 }
 
-test('comando comum em unrestricted exige aprovação antes de executar', async () => {
+test('comando comum em unrestricted executa diretamente sem approval', async () => {
   const commands = fakeCommands();
   const runtime = new ToolRuntime(fakeWorkspace(), undefined, undefined, undefined, commands.runtime);
 
-  const pending = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-normal', 'npm test'), 'run-a');
+  const result = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-normal', 'npm test'), 'run-a');
 
-  assert.equal(pending.ok, false);
-  assert.equal(pending.pendingApproval, true);
-  assert.ok(pending.approvalId);
-  assert.deepEqual(commands.executed, []);
-
-  const approved = await runtime.approve(pending.approvalId as string);
-  assert.equal(approved.ok, true);
-  assert.equal(approved.output, 'ok');
+  assert.equal(result.ok, true);
+  assert.equal(result.pendingApproval, undefined);
+  assert.equal(result.output, 'ok');
   assert.deepEqual(commands.executed, ['npm test']);
   assert.equal(runtime.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
 });
 
-test('leitura explícita de segredo via shell exige aprovação mesmo em unrestricted', async () => {
+test('leitura explícita de segredo via shell em unrestricted executa sem approval', async () => {
   const commands = fakeCommands();
   const runtime = new ToolRuntime(fakeWorkspace(), undefined, undefined, undefined, commands.runtime);
 
-  const pending = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-secret-read', 'type .env'), 'run-a');
+  const result = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-secret-read', 'type .env'), 'run-a');
 
-  assert.equal(pending.ok, false);
-  assert.equal(pending.pendingApproval, true);
-  assert.ok(pending.approvalId);
-  assert.deepEqual(commands.executed, []);
-
-  const approved = await runtime.approve(pending.approvalId as string);
-  assert.equal(approved.ok, true);
+  assert.equal(result.ok, true);
+  assert.equal(result.pendingApproval, undefined);
   assert.deepEqual(commands.executed, ['type .env']);
+  assert.equal(runtime.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
 });
 
 test('mutação direta de segredo via shell é bloqueada antes da execução', async () => {
@@ -100,38 +91,29 @@ test('mutação direta de metadados Git via shell é bloqueada', async () => {
   assert.deepEqual(commands.executed, []);
 });
 
-test('mutação Git crua exige aprovação em unrestricted e executa somente após aprovação', async () => {
+test('mutação Git crua em unrestricted não cria approval quando não há deny de segurança', async () => {
   const commands = fakeCommands();
   const runtime = new ToolRuntime(fakeWorkspace(), undefined, undefined, undefined, commands.runtime);
 
-  const pending = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-git-add', 'git add src/main.ts'), 'run-a');
+  const result = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-git-add', 'git add src/main.ts'), 'run-a');
 
-  assert.equal(pending.ok, false);
-  assert.equal(pending.pendingApproval, true);
-  assert.ok(pending.approvalId);
-  assert.deepEqual(commands.executed, []);
-
-  const approved = await runtime.approve(pending.approvalId as string);
-  assert.equal(approved.ok, true);
+  assert.equal(result.ok, true);
+  assert.equal(result.pendingApproval, undefined);
   assert.deepEqual(commands.executed, ['git add src/main.ts']);
+  assert.equal(runtime.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
 });
 
-test('Git somente leitura e template de env exigem aprovação base sem classificar o template como segredo', async () => {
+test('Git somente leitura e template de env executam direto em unrestricted sem classificar template como segredo', async () => {
   const commands = fakeCommands();
   const runtime = new ToolRuntime(fakeWorkspace(), undefined, undefined, undefined, commands.runtime);
 
-  const statusPending = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-git-status', 'git status'), 'run-a');
-  assert.equal(statusPending.pendingApproval, true);
-  assert.ok(statusPending.approvalId);
-  assert.deepEqual(commands.executed, []);
-  const status = await runtime.approve(statusPending.approvalId as string);
+  const status = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-git-status', 'git status'), 'run-a');
   assert.equal(status.ok, true);
+  assert.equal(status.pendingApproval, undefined);
 
-  const templatePending = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-env-template', 'echo TOKEN= > .env.example'), 'run-a');
-  assert.equal(templatePending.pendingApproval, true);
-  assert.ok(templatePending.approvalId);
-  assert.deepEqual(commands.executed, ['git status']);
-  const template = await runtime.approve(templatePending.approvalId as string);
+  const template = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-env-template', 'echo TOKEN= > .env.example'), 'run-a');
   assert.equal(template.ok, true);
+  assert.equal(template.pendingApproval, undefined);
   assert.deepEqual(commands.executed, ['git status', 'echo TOKEN= > .env.example']);
+  assert.equal(runtime.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
 });
