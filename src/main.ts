@@ -13,6 +13,8 @@ import { ShadowAwareToolRuntime } from './agent/shadow-aware-tool-runtime';
 import { ShadowAwareWorkspaceRuntime } from './agent/shadow-aware-workspace-runtime';
 import { ShadowAwareCommandRuntime } from './agent/shadow-aware-command-runtime';
 import { ProcessRuntime } from './agent/process-runtime';
+import { InstanceRuntime, type InstancePlatformHandle } from './agent/instance-runtime';
+import { ElectronInstancePlatformAdapter } from './agent/electron-instance-platform';
 import { ShadowAwareGitRuntime } from './agent/shadow-aware-git-runtime';
 import { AgentRuntime } from './agent/agent-runtime';
 import { ChatRuntime } from './ai/chat-runtime';
@@ -264,6 +266,16 @@ const activityRuntime = new ActivityRuntime();
 const approvalRuntime = new ApprovalRuntime();
 const commandRuntime = new ShadowAwareCommandRuntime(() => projectManager.list(), executionShadowWorkspaceRuntime);
 const processRuntime = new ProcessRuntime(() => projectManager.list());
+const instancePlatformAdapter = new ElectronInstancePlatformAdapter(
+  () => projectManager.list(),
+  {
+    openExternal: (url) => shell.openExternal(url),
+    openPath: (targetPath) => shell.openPath(targetPath),
+    openPreview: openManagedPreviewWindow,
+  },
+);
+const instanceRuntime = new InstanceRuntime(instancePlatformAdapter);
+void instanceRuntime;
 const diffRuntime = new DiffRuntime();
 const gitRuntime = new ShadowAwareGitRuntime(() => projectManager.list(), executionShadowWorkspaceRuntime);
 const gitService = new GitService(gitRuntime);
@@ -711,6 +723,65 @@ async function waitForExecutionRetry(delayMs: number, signal: AbortSignal): Prom
     signal.addEventListener('abort', onAbort, { once: true });
   });
   signal.throwIfAborted();
+}
+
+async function openManagedPreviewWindow(input: {
+  instanceId: string;
+  projectId: string;
+  target: string;
+}): Promise<InstancePlatformHandle> {
+  const allowedOrigin = new URL(input.target).origin;
+  const previewWindow = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    minWidth: 720,
+    minHeight: 480,
+    autoHideMenuBar: true,
+    title: 'Auto CodeZ Preview',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      partition: `autocodez-preview-${input.instanceId}`,
+    },
+  });
+
+  previewWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  previewWindow.webContents.session.setPermissionCheckHandler(() => false);
+  previewWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  previewWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    try {
+      if (new URL(targetUrl).origin !== allowedOrigin) event.preventDefault();
+    } catch {
+      event.preventDefault();
+    }
+  });
+
+  try {
+    await previewWindow.loadURL(input.target);
+  } catch (error) {
+    if (!previewWindow.isDestroyed()) previewWindow.destroy();
+    throw error;
+  }
+
+  return {
+    canFocus: true,
+    canClose: true,
+    focus: () => {
+      if (previewWindow.isDestroyed()) throw new Error('A janela de preview já foi fechada.');
+      if (previewWindow.isMinimized()) previewWindow.restore();
+      previewWindow.show();
+      previewWindow.focus();
+    },
+    close: () => {
+      if (!previewWindow.isDestroyed()) previewWindow.close();
+    },
+    isOpen: () => !previewWindow.isDestroyed(),
+    onClosed: (listener) => {
+      previewWindow.on('closed', listener);
+      return () => previewWindow.removeListener('closed', listener);
+    },
+  };
 }
 
 function createWindow(): void {
@@ -2044,7 +2115,7 @@ app.whenReady().then(async () => {
     pendingAccountAuthCallback = undefined;
     queueAccountAuthCallback(callback);
   }
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); });
 });
 
 let shutdownCleanupStarted = false;
