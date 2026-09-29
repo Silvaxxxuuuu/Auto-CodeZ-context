@@ -426,6 +426,8 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
       };
     }
 
+    if (!this.hasIncrementalWorkspaceRuntime()) return undefined;
+
     if (realWorkspaceTextMutationTools.has(call.name)) {
       const requested = typeof call.input.path === 'string'
         ? call.input.path.trim().replaceAll('\\', '/').replace(/^\.\//, '').toLowerCase()

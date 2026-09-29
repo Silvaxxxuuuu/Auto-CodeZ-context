@@ -153,6 +153,7 @@ export class ToolRuntime {
   configureExecutionPathScope(runtime: ExecutionPathScopeRuntime): void { this.executionPathScope = runtime; this.toolPolicy.configureExecutionPathScope(runtime); }
   configureExecutionCheckpointRecorder(recorder: ExecutionCheckpointRecorder): void { this.executionCheckpointRecorder = recorder; }
   configureIncrementalWorkspaceRuntime(runtime: IncrementalWorkspaceMutationRuntime): void { this.incrementalWorkspace = runtime; }
+  protected hasIncrementalWorkspaceRuntime(): boolean { return Boolean(this.incrementalWorkspace); }
   configureChangeBudget(chatId: string, runId: string, budget: ExecutionChangeBudget): ExecutionChangeBudget {
     if (!this.executionChangeBudget) throw new Error('O runtime de Change Budget não foi configurado.');
     return this.executionChangeBudget.configure(chatId, runId, budget);
