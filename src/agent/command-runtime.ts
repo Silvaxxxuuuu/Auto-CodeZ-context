@@ -79,7 +79,7 @@ const blockedEnvironmentNames = new Set([
 const blockedEnvironmentPrefixes = ['GIT_CONFIG_KEY_', 'GIT_CONFIG_VALUE_'];
 const sensitiveEnvironmentNamePattern = /(?:^|[_-])(?:token|auth[_-]?token|authtoken|secret|password|passwd|passphrase|credentials?|api[_-]?key|access[_-]?key|private[_-]?key)(?:$|[_-])/i;
 
-function createCommandEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function createCommandEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(source)) {
     if (value === undefined) continue;
@@ -142,7 +142,7 @@ async function runWindowsTaskkill(pid: number): Promise<void> {
   });
 }
 
-async function terminateProcessTree(child: ChildProcess): Promise<void> {
+export async function terminateProcessTree(child: ChildProcess): Promise<void> {
   if (childHasExited(child)) return;
 
   if (process.platform === 'win32' && child.pid) {
@@ -173,7 +173,7 @@ async function terminateProcessTree(child: ChildProcess): Promise<void> {
   await waitForChildClose(child, 500);
 }
 
-function commandForPlatform(command: string, environment: NodeJS.ProcessEnv): { executable: string; args: string[] } {
+export function commandForPlatform(command: string, environment: NodeJS.ProcessEnv): { executable: string; args: string[] } {
   if (process.platform === 'win32') {
     const comspec = environment.ComSpec ?? environment.COMSPEC ?? 'cmd.exe';
     return { executable: comspec, args: ['/d', '/s', '/c', `chcp 65001>nul & ${command}`] };
