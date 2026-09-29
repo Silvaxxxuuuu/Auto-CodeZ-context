@@ -28,6 +28,9 @@ test('listDefinitions returns independent definition objects', async () => {
     assert.notEqual(first[0], second[0]);
     assert.equal(first.some((definition) => definition.name === 'read_file'), true);
     assert.equal(first.some((definition) => definition.name === 'run_command'), true);
+    for (const name of ['start_process', 'read_process_output', 'wait_process', 'stop_process', 'list_processes']) {
+      assert.equal(first.some((definition) => definition.name === name), true, `missing process tool: ${name}`);
+    }
   } finally { await fixture.cleanup(); }
 });
 

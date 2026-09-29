@@ -17,12 +17,11 @@ test('Agent Core V2 baseline contracts are structurally valid and uniquely ident
   }
 });
 
-test('baseline already reserves create_file, create_folder, start_process and open_instance semantics', () => {
+test('baseline reserves workspace, persistent process lifecycle and instance semantics', () => {
   const names = new Set(AGENT_CORE_V2_BASELINE_CAPABILITIES.map((capability) => capability.name));
-  assert.equal(names.has('create_file'), true);
-  assert.equal(names.has('create_folder'), true);
-  assert.equal(names.has('start_process'), true);
-  assert.equal(names.has('open_instance'), true);
+  for (const name of ['create_file', 'create_folder', 'start_process', 'read_process_output', 'wait_process', 'stop_process', 'list_processes', 'open_instance']) {
+    assert.equal(names.has(name), true, `missing capability: ${name}`);
+  }
 });
 
 test('create_file and create_folder are distinct but rollback-capable workspace mutations', () => {

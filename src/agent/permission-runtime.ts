@@ -13,12 +13,17 @@ const readTools = new Set<ToolName>([
   'git_diff',
   'git_log',
   'git_branches',
+  'read_process_output',
+  'wait_process',
+  'list_processes',
 ]);
 const safeWriteTools = new Set<ToolName>(['write_file', 'create_file', 'create_folder', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after']);
 const sensitiveWriteTools = new Set<ToolName>([
   'delete_file',
   'rename_file',
   'run_command',
+  'start_process',
+  'stop_process',
   'git_create_branch',
   'git_checkout',
   'git_stage',

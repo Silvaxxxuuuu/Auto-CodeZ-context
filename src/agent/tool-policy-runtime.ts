@@ -100,7 +100,7 @@ export class ToolPolicyRuntime {
     const paths = input.paths ?? extractToolPolicyPaths(input.call);
     const permissionDecision = this.permissions.decide(input.permissionLevel, input.call.name);
     const pathPolicy = this.workspacePaths.evaluate(input.call.name, paths);
-    const commandPolicy = input.call.name === 'run_command'
+    const commandPolicy = input.call.name === 'run_command' || input.call.name === 'start_process'
       ? this.commands.evaluate(typeof input.call.input.command === 'string' ? input.call.input.command : '')
       : { decision: 'allow' as const, reasons: [] as string[], matchedPaths: [] as string[] };
     const systemWorkspaceDecision: PermissionDecision = input.projectId === SYSTEM_WORKSPACE_ID

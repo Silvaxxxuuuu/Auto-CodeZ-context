@@ -7,6 +7,7 @@ import { CommandSafetyPolicy } from './command-safety-policy';
 import { extractToolPolicyPaths, ToolPolicyRuntime, type ToolPolicyResult } from './tool-policy-runtime';
 import { WorkspaceRuntime } from './workspace-runtime';
 import { CommandRuntime } from './command-runtime';
+import { ProcessRuntime } from './process-runtime';
 import { DiffRuntime } from './diff-runtime';
 import { GitRuntime } from './git-runtime';
 import { applyIncrementalEdit, type IncrementalEditToolName } from './incremental-file-edit';
@@ -47,6 +48,11 @@ const definitions: AIToolDefinition[] = [
   { name: 'delete_file', description: 'Delete a file inside the active workspace. Prefer this tool over shell commands for workspace file deletion so Auto CodeZ can preview and review the exact change.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Workspace-relative file path.' } }, required: ['path'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'rename_file', description: 'Rename or move a file inside the active workspace. Prefer this tool over shell commands for workspace file renames so Auto CodeZ can preview and review the exact change.', parameters: { type: 'object', properties: { from: { type: 'string', description: 'Current workspace-relative path.' }, to: { type: 'string', description: 'Destination workspace-relative path.' } }, required: ['from', 'to'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
   { name: 'search_files', description: 'Search workspace file names for a text query.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'Text to search for in workspace file names.' } }, required: ['query'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'start_process', description: 'Start a persistent local process from the active workspace and return a processId for later lifecycle operations. Use this for dev servers, watchers and long-running jobs. Prefer run_command for finite commands. The command passes through the same command safety policy as run_command.', parameters: { type: 'object', properties: { command: { type: 'string', description: 'Exact local shell command to start from the workspace root.' } }, required: ['command'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'read_process_output', description: 'Read buffered stdout/stderr from a managed persistent process. Pass afterSequence=0 for the available buffer or the previous nextSequence to receive only newer events.', parameters: { type: 'object', properties: { processId: { type: 'string', description: 'Managed process identifier returned by start_process.' }, afterSequence: { type: 'number', description: 'Last consumed output sequence. Use 0 for the available buffer.' } }, required: ['processId', 'afterSequence'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'wait_process', description: 'Wait for a managed persistent process to reach a terminal state, or return its current state when timeoutMs elapses. This does not kill the process on timeout.', parameters: { type: 'object', properties: { processId: { type: 'string', description: 'Managed process identifier.' }, timeoutMs: { type: 'number', description: 'Maximum milliseconds to wait. Use 0 to poll immediately.' } }, required: ['processId', 'timeoutMs'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'stop_process', description: 'Stop a managed persistent process and its child process tree. Use this to cleanly end dev servers, watchers and other processes previously started by start_process.', parameters: { type: 'object', properties: { processId: { type: 'string', description: 'Managed process identifier.' } }, required: ['processId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'list_processes', description: 'List managed persistent processes belonging to the active workspace, including lifecycle state, PID, command and timestamps.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'run_command', description: 'Execute a local shell command from the active workspace. Use it for tests, builds, inspections, scripts, CLIs and operations that genuinely require a shell. Do not use it to create, edit, delete or rename workspace files when create_file, write_file, delete_file or rename_file can represent the requested result, because those file tools provide diff review and stale-file protection. Do not create workspace directories with shell commands when the requested folder will contain files. create_file automatically creates missing parent directories, so create the first file directly under the desired folder instead of running mkdir. Shell filesystem side effects execute inside an isolated command sandbox and are not a substitute for persistent Auto CodeZ file tools. In read-only mode run_command is blocked. In every other permission mode it requires explicit user approval before the process starts. Sensitive direct mutations may be blocked entirely by the command safety policy.', parameters: { type: 'object', properties: { command: { type: 'string', description: 'Exact local shell command to execute.' } }, required: ['command'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'git_status', description: 'Read the current Git branch and working tree status.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_diff', description: 'Read the current unstaged Git diff.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -110,6 +116,11 @@ function executionActivityMessage(call: AIToolCall): string {
     case 'plan_execution': return 'Criando plano de execução.';
     case 'complete_plan_step': return 'Concluindo passo do plano.';
     case 'run_command': return value('command') ? `Executando ${value('command')}` : 'Executando comando.';
+    case 'start_process': return value('command') ? `Iniciando processo: ${value('command')}` : 'Iniciando processo persistente.';
+    case 'read_process_output': return value('processId') ? `Lendo saída do processo ${value('processId')}` : 'Lendo saída do processo.';
+    case 'wait_process': return value('processId') ? `Aguardando processo ${value('processId')}` : 'Aguardando processo.';
+    case 'stop_process': return value('processId') ? `Encerrando processo ${value('processId')}` : 'Encerrando processo.';
+    case 'list_processes': return 'Listando processos persistentes.';
     case 'read_file': return value('path') ? `Lendo ${value('path')}` : 'Lendo arquivo.';
     case 'read_symbol': return value('path') && value('symbol') ? `Lendo símbolo ${value('symbol')} em ${value('path')}` : 'Lendo símbolo do arquivo.';
     case 'write_file': return value('path') ? `Editando ${value('path')}` : 'Editando arquivo.';
@@ -144,6 +155,7 @@ export class ToolRuntime {
   private executionPathScope?: ExecutionPathScopeRuntime;
   private executionCheckpointRecorder?: ExecutionCheckpointRecorder;
   private incrementalWorkspace?: IncrementalWorkspaceMutationRuntime;
+  private processRuntime?: ProcessRuntime;
 
   constructor(private readonly workspace: WorkspaceRuntime, permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()]), workspacePathPolicy = new WorkspacePathPolicy(), commandSafetyPolicy = new CommandSafetyPolicy(workspacePathPolicy), private readonly toolPolicy = new ToolPolicyRuntime(permissions, workspacePathPolicy, commandSafetyPolicy)) {}
 
@@ -153,7 +165,9 @@ export class ToolRuntime {
   configureExecutionPathScope(runtime: ExecutionPathScopeRuntime): void { this.executionPathScope = runtime; this.toolPolicy.configureExecutionPathScope(runtime); }
   configureExecutionCheckpointRecorder(recorder: ExecutionCheckpointRecorder): void { this.executionCheckpointRecorder = recorder; }
   configureIncrementalWorkspaceRuntime(runtime: IncrementalWorkspaceMutationRuntime): void { this.incrementalWorkspace = runtime; }
+  configureProcessRuntime(runtime: ProcessRuntime): void { this.processRuntime = runtime; }
   protected hasIncrementalWorkspaceRuntime(): boolean { return Boolean(this.incrementalWorkspace); }
+  protected hasProcessRuntime(): boolean { return Boolean(this.processRuntime); }
   configureChangeBudget(chatId: string, runId: string, budget: ExecutionChangeBudget): ExecutionChangeBudget {
     if (!this.executionChangeBudget) throw new Error('O runtime de Change Budget não foi configurado.');
     return this.executionChangeBudget.configure(chatId, runId, budget);
@@ -437,7 +451,7 @@ export class ToolRuntime {
   }
 
   private async executeNow(projectId: string, call: AIToolCall, approvalId?: string, diffPlan?: DiffPlan, context: ActivityContext = {}): Promise<AIToolResult> {
-    const activityType = call.name === 'run_command' ? 'action' : 'tool';
+    const activityType = call.name === 'run_command' || call.name === 'start_process' || call.name === 'stop_process' ? 'action' : 'tool';
     this.activity.emit({ type: activityType, message: executionActivityMessage(call), status: 'running', toolCallId: call.id, toolName: call.name, ...context });
     try {
       this.assertChangeBudget(context.chatId, context.runId, call, diffPlan);
@@ -682,6 +696,37 @@ export class ToolRuntime {
         return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] };
       }
       case 'search_files': { const matches = await this.workspace.searchFiles(projectId, this.stringValue(input, 'query')); return { output: JSON.stringify(await this.visibleSearchPaths(projectId, matches, context)) }; }
+      case 'start_process': {
+        const runtime = this.requireProcessRuntime();
+        const started = await runtime.start(projectId, this.stringValue(input, 'command'));
+        return { output: JSON.stringify({ type: 'process_started', processId: started.id, pid: started.pid, command: started.command, status: started.status, startedAt: started.startedAt }) };
+      }
+      case 'read_process_output': {
+        const runtime = this.requireProcessRuntime();
+        const processId = this.stringValue(input, 'processId');
+        this.assertProcessProject(runtime, processId, projectId);
+        const afterSequence = Number(input.afterSequence);
+        if (!Number.isInteger(afterSequence) || afterSequence < 0) throw new Error("Parâmetro 'afterSequence' deve ser um inteiro >= 0.");
+        return { output: JSON.stringify(runtime.readOutput(processId, afterSequence)) };
+      }
+      case 'wait_process': {
+        const runtime = this.requireProcessRuntime();
+        const processId = this.stringValue(input, 'processId');
+        this.assertProcessProject(runtime, processId, projectId);
+        const timeoutMs = Number(input.timeoutMs);
+        if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new Error("Parâmetro 'timeoutMs' deve ser um número >= 0.");
+        return { output: JSON.stringify(await runtime.wait(processId, timeoutMs)) };
+      }
+      case 'stop_process': {
+        const runtime = this.requireProcessRuntime();
+        const processId = this.stringValue(input, 'processId');
+        this.assertProcessProject(runtime, processId, projectId);
+        return { output: JSON.stringify(await runtime.stop(processId)) };
+      }
+      case 'list_processes': {
+        const runtime = this.requireProcessRuntime();
+        return { output: JSON.stringify(runtime.list(projectId)) };
+      }
       case 'run_command': { const result = await this.commands.run(projectId, this.stringValue(input, 'command')); return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result }; }
       case 'git_status': return this.gitExecution(projectId, await this.requireGit().status(projectId));
       case 'git_diff': return this.gitExecution(projectId, await this.requireGit().diff(projectId));
@@ -693,6 +738,11 @@ export class ToolRuntime {
       case 'git_stage_all': return this.gitExecution(projectId, await this.requireGit().stageAll(projectId));
       case 'git_commit': return this.gitExecution(projectId, await this.requireGit().commit(projectId, this.stringValue(input, 'message')));
     }
+  }
+  private requireProcessRuntime(): ProcessRuntime { if (!this.processRuntime) throw new Error('O runtime de processos persistentes não foi configurado para esta instância.'); return this.processRuntime; }
+  private assertProcessProject(runtime: ProcessRuntime, processId: string, projectId: string): void {
+    const process = runtime.get(processId);
+    if (process.projectId !== projectId) throw new Error('O processo persistente pertence a outro projeto.');
   }
   private requireGit(): GitRuntime { if (!this.gitRuntime) throw new Error('O runtime Git não foi configurado para esta instância.'); return this.gitRuntime; }
   private gitExecution(_projectId: string, value: unknown): ToolExecution { return { output: typeof value === 'string' ? value : JSON.stringify(value) }; }

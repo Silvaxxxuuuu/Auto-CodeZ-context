@@ -418,6 +418,14 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
     const shadow = this.shadowWorkspaces?.get(chatId, runId);
     if (!shadow) return undefined;
 
+    if (call.name === 'start_process' && this.hasProcessRuntime()) {
+      return {
+        toolCallId: call.id,
+        ok: false,
+        error: 'Processo persistente bloqueado enquanto esta execução ainda usa Shadow Workspace legado. Conclua ou descarte a execução isolada antes de iniciar um processo contra o workspace real.',
+      };
+    }
+
     if (gitMutationTools.has(call.name)) {
       return {
         toolCallId: call.id,

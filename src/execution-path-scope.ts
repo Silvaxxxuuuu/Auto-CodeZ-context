@@ -165,7 +165,7 @@ export class ExecutionPathScopeRuntime {
       };
     }
 
-    if (input.toolName === 'run_command') {
+    if (input.toolName === 'run_command' || input.toolName === 'start_process') {
       return {
         configured: true,
         decision: 'ask',
