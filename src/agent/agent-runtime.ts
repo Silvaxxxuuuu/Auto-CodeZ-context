@@ -5,9 +5,22 @@ import { ToolRuntime } from './tool-runtime';
 import { SYSTEM_PROJECT_ID } from './command-runtime';
 import { ChatRuntime } from '../ai/chat-runtime';
 import { createToolActivitySnapshot, toActivityInput } from './tool-activity-bridge';
+import {
+  ProgressWatchdog,
+  type ProgressSignal,
+  type ProgressWatchdogDecision,
+  type ProgressWatchdogSnapshot,
+} from '../agent-core/progress-watchdog';
 
-const MAX_TOOL_ROUNDS = 12;
 const STATE_FILE = 'agent-runs.json';
+const WATCHDOG_REPLAN_CONTEXT = `
+Auto CodeZ internal recovery directive:
+The progress watchdog detected a repeated or stagnant tool strategy. Replan before making another tool call.
+- Do not repeat the same tool/input sequence merely because it failed or returned the same information.
+- Re-read the actual evidence already present in tool results and choose a materially different next step.
+- Preserve completed work. Do not restart the task from scratch.
+- If the objective is already complete, finish instead of issuing more tools.
+`.trim();
 
 type StreamEmitter = (event: AIStreamEvent) => void;
 
@@ -22,6 +35,88 @@ function stableToolValue(value: unknown): string {
 
 function toolCallSignature(call: AIToolCall): string {
   return `${call.name}:${stableToolValue(call.input)}`;
+}
+
+function progressHash(value: string): string {
+  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function progressSignalsFor(call: AIToolCall, result: AIToolResult): ProgressSignal[] {
+  if (result.pendingApproval) return [];
+  const signals: ProgressSignal[] = [];
+
+  for (const change of result.changes ?? []) {
+    signals.push({
+      kind: 'file',
+      key: [
+        change.type,
+        change.renamedFrom ?? '',
+        change.path,
+        progressHash(change.after),
+      ].join(':'),
+    });
+  }
+
+  if (result.commandResult) {
+    signals.push({
+      kind: 'command',
+      key: [
+        result.commandResult.command,
+        result.commandResult.exitCode,
+        result.commandResult.timedOut ? 'timeout' : 'completed',
+        progressHash(result.commandResult.stdout),
+        progressHash(result.commandResult.stderr),
+      ].join(':'),
+    });
+  }
+
+  if (result.gitResult) {
+    signals.push({
+      kind: 'result',
+      key: [
+        'git',
+        result.gitResult.operation,
+        result.gitResult.branch,
+        progressHash(result.gitResult.output),
+      ].join(':'),
+    });
+  }
+
+  for (const source of result.sources ?? []) {
+    signals.push({ kind: 'source', key: source.url });
+  }
+
+  if (result.error) {
+    signals.push({ kind: 'error', key: `${call.name}:${result.error}` });
+  }
+
+  if (
+    result.ok
+    && result.output
+    && !result.changes?.length
+    && !result.commandResult
+    && !result.gitResult
+    && !result.sources?.length
+  ) {
+    signals.push({ kind: 'result', key: `${call.name}:${progressHash(result.output)}` });
+  }
+
+  return signals;
+}
+
+function freshWatchdogSnapshot(): ProgressWatchdogSnapshot {
+  return new ProgressWatchdog().snapshot();
+}
+
+function normalizeWatchdogSnapshot(snapshot: ProgressWatchdogSnapshot | undefined): ProgressWatchdogSnapshot | undefined {
+  if (!snapshot) return freshWatchdogSnapshot();
+  try {
+    const watchdog = new ProgressWatchdog();
+    watchdog.restore(snapshot);
+    return watchdog.snapshot();
+  } catch {
+    return undefined;
+  }
 }
 
 function duplicatePendingApprovalResult(call: AIToolCall, approvalId: string): AIToolResult {
@@ -42,6 +137,8 @@ type PendingRun = {
   pendingApprovalIds: string[];
   approvalCalls: Record<string, AIToolCall>;
   toolRounds: number;
+  progressWatchdog: ProgressWatchdogSnapshot;
+  replanPending?: boolean;
   lastError?: string;
   streamEmitter?: StreamEmitter;
 };
@@ -56,11 +153,13 @@ interface PersistedPendingRun {
   pendingApprovalIds: string[];
   approvalCalls: Record<string, AIToolCall>;
   toolRounds: number;
+  progressWatchdog?: ProgressWatchdogSnapshot;
+  replanPending?: boolean;
   lastError?: string;
 }
 
 interface PersistedAgentState {
-  version: 2;
+  version: 3;
   runs: PersistedPendingRun[];
   approvals: ApprovalRequest[];
 }
@@ -99,9 +198,9 @@ export class AgentRuntime {
 
   async init(): Promise<void> {
     if (!this.storage) return;
-    const stored = await this.storage.read<PersistedAgentState | { version: 1; runs: PersistedPendingRun[]; approvals: ApprovalRequest[] }>(
+    const stored = await this.storage.read<PersistedAgentState | { version: 1 | 2; runs: PersistedPendingRun[]; approvals: ApprovalRequest[] }>(
       STATE_FILE,
-      { version: 2, runs: [], approvals: [] },
+      { version: 3, runs: [], approvals: [] },
     );
     if (!stored || !Array.isArray(stored.runs) || !Array.isArray(stored.approvals)) return;
 
@@ -110,7 +209,16 @@ export class AgentRuntime {
 
     const normalizedRuns = stored.runs
       .filter((run) => run?.chat?.id && Array.isArray(run.pendingApprovalIds) && Array.isArray(run.workingChat?.messages))
-      .map((run) => ({ ...run, runId: run.runId || crypto.randomUUID() }));
+      .flatMap((run): PendingRun[] => {
+        const progressWatchdog = normalizeWatchdogSnapshot(run.progressWatchdog);
+        if (!progressWatchdog) return [];
+        return [{
+          ...run,
+          runId: run.runId || crypto.randomUUID(),
+          progressWatchdog,
+          replanPending: Boolean(run.replanPending),
+        }];
+      });
 
     const owners = new Map<string, { chatId: string; runId: string; call: AIToolCall }>();
     for (const run of normalizedRuns) {
@@ -211,7 +319,7 @@ export class AgentRuntime {
     runId: string = crypto.randomUUID(),
   ): Promise<AgentRunResult> {
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
-    const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0 };
+    const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0, progressWatchdog: freshWatchdogSnapshot() };
     this.recoverableRuns.set(run.runId, run);
     await this.persist();
     return this.runLoop(run);
@@ -228,7 +336,7 @@ export class AgentRuntime {
   ): Promise<AgentRunResult> {
     signal?.throwIfAborted();
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
-    const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0, streamEmitter: emit };
+    const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0, progressWatchdog: freshWatchdogSnapshot(), streamEmitter: emit };
     this.recoverableRuns.set(run.runId, run);
     await this.persist();
     return this.runStreamLoop(run, signal);
@@ -286,6 +394,8 @@ export class AgentRuntime {
       createdAt: Date.now(),
     });
 
+    this.recordExternalDecision(pending, call, `approval:${approvalId}:${result.ok ? 'approved' : 'failed'}`);
+
     if (pending.streamEmitter) {
       pending.streamEmitter({
         type: 'activity',
@@ -320,6 +430,7 @@ export class AgentRuntime {
     if (!approval) throw new Error('Aprovação não pertence à execução atual.');
 
     this.tools.deny(approvalId);
+    this.recordExternalDecision(pending, call, `approval:${approvalId}:denied`);
     pending.workingChat.messages.push({ role: 'tool', content: 'Operação recusada pelo usuário.', toolCallId: call.id, toolName: call.name, createdAt: Date.now() });
     if (pending.streamEmitter) {
       pending.streamEmitter({
@@ -389,7 +500,7 @@ export class AgentRuntime {
     for (const run of this.recoverableRuns.values()) uniqueRuns.set(run.runId, run);
     for (const run of this.pendingRuns.values()) uniqueRuns.set(run.runId, run);
     const state: PersistedAgentState = {
-      version: 2,
+      version: 3,
       runs: [...uniqueRuns.values()].map((run) => ({
         runId: run.runId,
         config: run.config,
@@ -400,6 +511,8 @@ export class AgentRuntime {
         pendingApprovalIds: [...run.pendingApprovalIds],
         approvalCalls: { ...run.approvalCalls },
         toolRounds: run.toolRounds,
+        progressWatchdog: run.progressWatchdog,
+        replanPending: run.replanPending,
         lastError: run.lastError,
       })),
       approvals: this.tools.listApprovals(),
@@ -407,6 +520,71 @@ export class AgentRuntime {
     const write = this.persistenceWrite.then(() => this.storage!.write(STATE_FILE, state));
     this.persistenceWrite = write.catch(() => {});
     await write;
+  }
+
+  private effectiveProjectContext(run: PendingRun): string | undefined {
+    if (!run.replanPending) return run.projectContext;
+    return [run.projectContext?.trim(), WATCHDOG_REPLAN_CONTEXT].filter(Boolean).join('\n\n') || WATCHDOG_REPLAN_CONTEXT;
+  }
+
+  private consumeReplanDirective(run: PendingRun): void {
+    if (run.replanPending) run.replanPending = false;
+  }
+
+  private observeProgress(
+    run: PendingRun,
+    calls: AIToolCall[],
+    results: AIToolResult[],
+    emit?: StreamEmitter,
+  ): ProgressWatchdogDecision {
+    const watchdog = new ProgressWatchdog();
+    watchdog.restore(run.progressWatchdog);
+    const signals = results.flatMap((result, index) => progressSignalsFor(calls[index] ?? {
+      id: result.toolCallId,
+      name: 'read_file',
+      input: {},
+    }, result));
+    const decision = watchdog.observe({
+      calls: calls.map((call) => ({ name: call.name, input: call.input })),
+      signals,
+    });
+    run.progressWatchdog = watchdog.snapshot();
+
+    if (decision.action === 'replan') {
+      run.replanPending = true;
+      const message = 'O agente detectou estagnação e vai replanejar a estratégia.';
+      const activity = { runId: run.runId, chatId: run.chat.id, type: 'thought' as const, message, status: 'running' as const };
+      this.activity.emit(activity);
+      if (emit) emit({ type: 'activity', chatId: run.chat.id, runId: run.runId, activity });
+    }
+
+    return decision;
+  }
+
+  private recordExternalDecision(run: PendingRun, call: AIToolCall, key: string): void {
+    const watchdog = new ProgressWatchdog();
+    watchdog.restore(run.progressWatchdog);
+    watchdog.observe({
+      calls: [{ name: call.name, input: call.input }],
+      signals: [{ kind: 'result', key }],
+    });
+    run.progressWatchdog = watchdog.snapshot();
+  }
+
+  private async enforceWatchdogDecision(
+    run: PendingRun,
+    decision: ProgressWatchdogDecision,
+    emit?: StreamEmitter,
+  ): Promise<void> {
+    if (decision.action !== 'stop_loop') return;
+    const message = 'O agente entrou em um ciclo sem progresso mesmo após replanejamento.';
+    run.lastError = message;
+    const activity = { runId: run.runId, chatId: run.chat.id, type: 'error' as const, message, status: 'failed' as const, error: message };
+    this.activity.emit(activity);
+    if (emit) emit({ type: 'activity', chatId: run.chat.id, runId: run.runId, activity });
+    this.recoverableRuns.delete(run.runId);
+    await this.persist();
+    throw new Error(message);
   }
 
   private appendToolResult(chat: ChatRecord, call: AIToolCall, result: Awaited<ReturnType<ToolRuntime['execute']>>): void {
@@ -434,11 +612,12 @@ export class AgentRuntime {
   }
 
   private async runLoop(run: PendingRun, signal?: AbortSignal): Promise<AgentRunResult> {
-    while (run.toolRounds < MAX_TOOL_ROUNDS) {
+    while (true) {
       signal?.throwIfAborted();
       let response: AIResponse;
       try {
-        response = await this.chatRuntime.send(run.config, run.workingChat, run.projectContext, signal);
+        response = await this.chatRuntime.send(run.config, run.workingChat, this.effectiveProjectContext(run), signal);
+        this.consumeReplanDirective(run);
         run.lastError = undefined;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -466,6 +645,8 @@ export class AgentRuntime {
       const pendingApprovalIds: string[] = [];
       const approvalCalls: Record<string, AIToolCall> = {};
       const pendingApprovalSignatures = new Map<string, string>();
+      const roundResults: AIToolResult[] = [];
+      const roundResults: AIToolResult[] = [];
       for (const call of response.toolCalls) {
         signal?.throwIfAborted();
         const signature = toolCallSignature(call);
@@ -476,6 +657,7 @@ export class AgentRuntime {
         signal?.throwIfAborted();
         this.appendToolResult(run.workingChat, call, result);
         this.emitToolActivity(run.runId, run.chat.id, call, result);
+        roundResults.push(result);
         if (result.pendingApproval && result.approvalId) {
           pendingApprovalIds.push(result.approvalId);
           approvalCalls[result.approvalId] = call;
@@ -485,6 +667,12 @@ export class AgentRuntime {
       }
 
       if (pendingApprovalIds.length) {
+        const completedResults = roundResults.filter((result) => !result.pendingApproval);
+        if (completedResults.length && completedResults.some((result, index) => progressSignalsFor(response.toolCalls![index] ?? response.toolCalls![0], result).length > 0)) {
+          const completedCalls = response.toolCalls.filter((_, index) => !roundResults[index]?.pendingApproval);
+          const decision = this.observeProgress(run, completedCalls, completedResults);
+          await this.enforceWatchdogDecision(run, decision);
+        }
         run.pendingApprovalIds = pendingApprovalIds;
         run.approvalCalls = approvalCalls;
         this.recoverableRuns.delete(run.runId);
@@ -494,25 +682,23 @@ export class AgentRuntime {
         return this.pendingResult(run);
       }
 
+      const watchdogDecision = this.observeProgress(run, response.toolCalls, roundResults);
+      await this.enforceWatchdogDecision(run, watchdogDecision);
       this.activity.emit({ runId: run.runId, chatId: run.chat.id, type: 'complete', message: `Ciclo de ferramentas ${run.toolRounds} concluído.`, status: 'success' });
       await this.persist();
     }
-
-    this.recoverableRuns.delete(run.runId);
-    await this.persist();
-    throw new Error('O agente atingiu o limite de ciclos de ferramentas.');
   }
 
   private async runStreamLoop(run: PendingRun, signal?: AbortSignal): Promise<AgentRunResult> {
     const emit = run.streamEmitter;
     if (!emit) throw new Error('Emitter de streaming não configurado.');
 
-    while (run.toolRounds < MAX_TOOL_ROUNDS) {
+    while (true) {
       signal?.throwIfAborted();
       let response: AIResponse | undefined;
       let streamError: string | undefined;
 
-      for await (const event of this.chatRuntime.stream(run.config, run.workingChat, run.projectContext, signal)) {
+      for await (const event of this.chatRuntime.stream(run.config, run.workingChat, this.effectiveProjectContext(run), signal)) {
         signal?.throwIfAborted();
         const contextualEvent: AIStreamEvent = {
           ...event,
@@ -544,6 +730,7 @@ export class AgentRuntime {
         throw new Error(run.lastError);
       }
 
+      this.consumeReplanDirective(run);
       run.lastError = undefined;
       if (!response.toolCalls?.length) {
         run.workingChat.messages.push({ role: 'assistant', content: response.content, sources: response.sources, createdAt: Date.now() });
@@ -586,6 +773,7 @@ export class AgentRuntime {
         signal?.throwIfAborted();
         this.appendToolResult(run.workingChat, call, result);
         this.emitToolActivity(run.runId, run.chat.id, call, result, emit);
+        roundResults.push(result);
         if (result.pendingApproval && result.approvalId) {
           pendingApprovalIds.push(result.approvalId);
           approvalCalls[result.approvalId] = call;
@@ -595,6 +783,12 @@ export class AgentRuntime {
       }
 
       if (pendingApprovalIds.length) {
+        const completedResults = roundResults.filter((result) => !result.pendingApproval);
+        if (completedResults.length && completedResults.some((result, index) => progressSignalsFor(response.toolCalls![index] ?? response.toolCalls![0], result).length > 0)) {
+          const completedCalls = response.toolCalls.filter((_, index) => !roundResults[index]?.pendingApproval);
+          const decision = this.observeProgress(run, completedCalls, completedResults, emit);
+          await this.enforceWatchdogDecision(run, decision, emit);
+        }
         run.pendingApprovalIds = pendingApprovalIds;
         run.approvalCalls = approvalCalls;
         this.recoverableRuns.delete(run.runId);
@@ -612,12 +806,10 @@ export class AgentRuntime {
         return this.pendingResult(run);
       }
 
+      const watchdogDecision = this.observeProgress(run, response.toolCalls, roundResults, emit);
+      await this.enforceWatchdogDecision(run, watchdogDecision, emit);
       this.activity.emit({ runId: run.runId, chatId: run.chat.id, type: 'complete', message: `Ciclo de ferramentas ${run.toolRounds} concluído.`, status: 'success' });
       await this.persist();
     }
-
-    this.recoverableRuns.delete(run.runId);
-    await this.persist();
-    throw new Error('O agente atingiu o limite de ciclos de ferramentas.');
   }
 }

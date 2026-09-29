@@ -8,7 +8,7 @@ import { ToolRuntime } from '../src/agent/tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 import { ChatRuntime } from '../src/ai/chat-runtime';
 import { ProviderRegistry } from '../src/ai/provider-registry';
-import type { AIProviderAdapter, AIProviderConfig, AIResponse, AIStreamEvent, AIToolCall, ChatRecord, ProjectRecord } from '../src/ai/types';
+import type { AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, AIStreamEvent, AIToolCall, ChatRecord, ProjectRecord } from '../src/ai/types';
 
 const config: AIProviderConfig = { id: 'test-provider', displayName: 'Test Provider', apiKey: 'test-key', enabled: true };
 
@@ -18,14 +18,14 @@ function chat(permissionLevel: ChatRecord['permissionLevel'] = 'ask'): ChatRecor
 
 function toolCall(id: string, value = 43): AIToolCall { return { id, name: 'write_file', input: { path: `src/${id}.ts`, content: `export const value = ${value};` } }; }
 
-function adapter(responses: AIResponse[], streamResponses?: AIStreamEvent[][]): AIProviderAdapter {
+function adapter(responses: AIResponse[], streamResponses?: AIStreamEvent[][], observedRequests?: AIRequest[]): AIProviderAdapter {
   let index = 0;
   return {
     id: config.id,
     displayName: config.displayName,
     async listModels() { return [{ id: 'test-model', name: 'Test Model', providerId: config.id, capabilities: ['text', 'tools'] }]; },
-    async send() { const response = responses[Math.min(index, responses.length - 1)]; index += 1; return response; },
-    ...(streamResponses ? { async *stream() { const events = streamResponses[Math.min(index, streamResponses.length - 1)] ?? []; index += 1; for (const event of events) yield event; } } : {}),
+    async send(_config, request) { observedRequests?.push(structuredClone(request)); const response = responses[Math.min(index, responses.length - 1)]; index += 1; return response; },
+    ...(streamResponses ? { async *stream(_config: AIProviderConfig, request: AIRequest) { observedRequests?.push(structuredClone(request)); const events = streamResponses[Math.min(index, streamResponses.length - 1)] ?? []; index += 1; for (const event of events) yield event; } } : {}),
   };
 }
 
@@ -35,7 +35,7 @@ class MemoryStorage {
   async write<T>(name: string, value: T): Promise<void> { this.values.set(name, value); }
 }
 
-async function fixture(responses: AIResponse[], streamResponses?: AIStreamEvent[][]): Promise<{ root: string; agent: AgentRuntime; cleanup: () => Promise<void> }> {
+async function fixture(responses: AIResponse[], streamResponses?: AIStreamEvent[][], storage?: MemoryStorage): Promise<{ root: string; agent: AgentRuntime; requests: AIRequest[]; cleanup: () => Promise<void> }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-codez-agent-test-'));
   await fs.mkdir(path.join(root, 'src'), { recursive: true });
   await fs.writeFile(path.join(root, 'src', 'index.ts'), 'export const value = 42;');
@@ -43,9 +43,10 @@ async function fixture(responses: AIResponse[], streamResponses?: AIStreamEvent[
   const workspace = new WorkspaceRuntime(async () => [project]);
   const tools = new ToolRuntime(workspace);
   const registry = new ProviderRegistry();
-  registry.register(adapter(responses, streamResponses));
+  const requests: AIRequest[] = [];
+  registry.register(adapter(responses, streamResponses, requests));
   const chatRuntime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, tools.listDefinitions());
-  return { root, agent: new AgentRuntime(chatRuntime, tools), cleanup: () => fs.rm(root, { recursive: true, force: true }) };
+  return { root, agent: new AgentRuntime(chatRuntime, tools, undefined, storage), requests, cleanup: () => fs.rm(root, { recursive: true, force: true }) };
 }
 
 test('run returns a normal response without tools', async () => {
@@ -144,11 +145,113 @@ test('streaming preserves approval state and emits complete only after the full 
   } finally { await fixtureData.cleanup(); }
 });
 
-test('agent stops after the global twelve-round tool limit', async () => {
-  const responses = Array.from({ length: 12 }, (_, index) => ({ content: '', model: 'test-model', providerId: config.id, toolCalls: [toolCall(`call-${index + 1}`)] }));
+test('agent can exceed twelve tool rounds when each round makes real progress', async () => {
+  const createCall = (index: number): AIToolCall => ({
+    id: `create-${index}`,
+    name: 'create_file',
+    input: { path: `src/progress-${index}.ts`, content: `export const value = ${index};` },
+  });
+  const responses: AIResponse[] = [
+    ...Array.from({ length: 20 }, (_, index) => ({
+      content: '',
+      model: 'test-model',
+      providerId: config.id,
+      toolCalls: [createCall(index)],
+    })),
+    { content: 'Finished after long work.', model: 'test-model', providerId: config.id },
+  ];
   const fixtureData = await fixture(responses);
-  try { await assert.rejects(fixtureData.agent.run(config, chat('unrestricted'), undefined, 'unrestricted'), /limite de ciclos de ferramentas/); }
-  finally { await fixtureData.cleanup(); }
+  try {
+    const result = await fixtureData.agent.run(config, chat('unrestricted'), undefined, 'unrestricted');
+    assert.equal(result.toolRounds, 20);
+    assert.equal(result.response.content, 'Finished after long work.');
+    assert.equal(await fs.readFile(path.join(fixtureData.root, 'src', 'progress-19.ts'), 'utf8'), 'export const value = 19;');
+  } finally {
+    await fixtureData.cleanup();
+  }
+});
+
+test('agent replans repeated tool loops and stops only when the replanned strategy also stagnates', async () => {
+  const repeated = (index: number): AIResponse => ({
+    content: '',
+    model: 'test-model',
+    providerId: config.id,
+    toolCalls: [{ id: `read-${index}`, name: 'read_file', input: { path: 'src/index.ts' } }],
+  });
+  const fixtureData = await fixture(Array.from({ length: 5 }, (_, index) => repeated(index)));
+  try {
+    await assert.rejects(
+      fixtureData.agent.run(config, chat('unrestricted'), undefined, 'unrestricted'),
+      /ciclo sem progresso.*replanejamento/i,
+    );
+    assert.equal(fixtureData.requests.length, 5);
+    assert.match(fixtureData.requests[3].projectContext ?? '', /internal recovery directive/i);
+    assert.equal(fixtureData.requests.slice(0, 3).some((request) => /internal recovery directive/i.test(request.projectContext ?? '')), false);
+  } finally {
+    await fixtureData.cleanup();
+  }
+});
+
+test('streaming can exceed twelve productive tool rounds without a global round ceiling', async () => {
+  const toolResponses = Array.from({ length: 14 }, (_, index): AIResponse => ({
+    content: '',
+    model: 'test-model',
+    providerId: config.id,
+    toolCalls: [{
+      id: `stream-create-${index}`,
+      name: 'create_file',
+      input: { path: `src/stream-progress-${index}.ts`, content: `export const streamValue = ${index};` },
+    }],
+  }));
+  const finalResponse: AIResponse = { content: 'Streaming finished.', model: 'test-model', providerId: config.id };
+  const streamResponses: AIStreamEvent[][] = [
+    ...toolResponses.map((response) => [{ type: 'complete', response } as AIStreamEvent]),
+    [{ type: 'complete', response: finalResponse } as AIStreamEvent],
+  ];
+  const fixtureData = await fixture([...toolResponses, finalResponse], streamResponses);
+  try {
+    const result = await fixtureData.agent.runStreaming(config, chat('unrestricted'), undefined, 'unrestricted', () => {});
+    assert.equal(result.toolRounds, 14);
+    assert.equal(result.response.content, 'Streaming finished.');
+  } finally {
+    await fixtureData.cleanup();
+  }
+});
+
+test('watchdog snapshot is persisted with a pending run without raw tool inputs or outputs', async () => {
+  const storage = new MemoryStorage();
+  const responses: AIResponse[] = [
+    {
+      content: '',
+      model: 'test-model',
+      providerId: config.id,
+      toolCalls: [{ id: 'read-progress', name: 'read_file', input: { path: 'src/index.ts' } }],
+    },
+    {
+      content: '',
+      model: 'test-model',
+      providerId: config.id,
+      toolCalls: [{
+        id: 'approval-after-progress',
+        name: 'write_file',
+        input: { path: 'src/index.ts', content: 'export const value = 100;' },
+      }],
+    },
+  ];
+  const fixtureData = await fixture(responses, undefined, storage);
+  try {
+    const pending = await fixtureData.agent.run(config, chat('ask'), undefined, 'ask');
+    assert.equal(pending.pendingApprovalIds.length, 1);
+    const persisted = await storage.read<any>('agent-runs.json', null);
+    assert.equal(persisted.version, 3);
+    assert.equal(persisted.runs.length, 1);
+    assert.equal(persisted.runs[0].progressWatchdog.seenSignalHashes.length > 0, true);
+    const snapshotText = JSON.stringify(persisted.runs[0].progressWatchdog);
+    assert.equal(snapshotText.includes('src/index.ts'), false);
+    assert.equal(snapshotText.includes('export const value'), false);
+  } finally {
+    await fixtureData.cleanup();
+  }
 });
 
 test('persists a recoverable cycle after a provider failure and never re-executes the completed tool', async () => {
