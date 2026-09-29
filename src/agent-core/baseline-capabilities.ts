@@ -292,7 +292,7 @@ export const AGENT_CORE_V2_BASELINE_CAPABILITIES: readonly CapabilityContract[] 
     sideEffects: ['Abre uma instância local visível ou navegável.'],
     annotations: { readOnly: false, destructive: false, idempotent: false, openWorld: true },
     requiresWorkspace: false,
-    supportsRollback: true,
+    supportsRollback: false,
     supportsParallel: true,
     resourceLocks: [],
     permissionClass: 'external',

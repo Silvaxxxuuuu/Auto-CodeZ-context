@@ -24,6 +24,12 @@ test('baseline reserves workspace, persistent process lifecycle and instance sem
   }
 });
 
+test('open_instance does not claim rollback for externally launched instance kinds', () => {
+  const openInstance = AGENT_CORE_V2_BASELINE_CAPABILITIES.find((capability) => capability.name === 'open_instance');
+  assert.ok(openInstance);
+  assert.equal(openInstance.supportsRollback, false);
+});
+
 test('create_file and create_folder are distinct but rollback-capable workspace mutations', () => {
   const createFile = AGENT_CORE_V2_BASELINE_CAPABILITIES.find((capability) => capability.name === 'create_file');
   const createFolder = AGENT_CORE_V2_BASELINE_CAPABILITIES.find((capability) => capability.name === 'create_folder');
