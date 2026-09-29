@@ -45,6 +45,14 @@ export type IncrementalWriteFileResult = {
   rollbackRef: string;
 };
 
+export type IncrementalDeleteFileResult = {
+  operationId: string;
+  path: string;
+  before: string;
+  beforeHash: string;
+  rollbackRef: string;
+};
+
 function normalizedRelativePath(value: string): string {
   return value.split(path.sep).join('/').replace(/^\.\//, '');
 }
@@ -228,6 +236,98 @@ export class IncrementalWorkspaceMutationRuntime {
       };
     } catch (error) {
       await this.recordFailure(prepared.operationId, context.projectId, [inspected.path], error);
+      throw error;
+    }
+  }
+
+  async deleteFile(
+    context: IncrementalMutationContext,
+    requestedPath: string,
+    expectedBefore?: string,
+  ): Promise<IncrementalDeleteFileResult> {
+    if (!this.rollbackBlobs) throw new Error('RollbackBlobStore não foi configurado para delete_file incremental.');
+    const inspected = await this.inspectWriteFile(context.projectId, requestedPath);
+    if (expectedBefore !== undefined && inspected.content !== expectedBefore) {
+      throw new Error(`O arquivo '${inspected.path}' mudou antes da exclusão incremental.`);
+    }
+
+    const rollbackRef = await this.rollbackBlobs.putText(inspected.content);
+    const beforeSnapshot: OperationSnapshot = {
+      ...inspected.snapshot,
+      contentRef: rollbackRef,
+    };
+    const prepared = await this.journal.prepare({
+      ...context,
+      capabilityId: 'workspace.delete_file',
+      target: inspected.path,
+      resources: [{
+        target: inspected.path,
+        before: beforeSnapshot,
+        rollbackRef,
+      }],
+    });
+    await this.journal.start(prepared.operationId);
+
+    try {
+      await this.workspace.deleteFile(context.projectId, inspected.path);
+      const after = await this.afterSnapshots(context.projectId, [inspected.path]);
+      if (after[0]?.after.exists !== false) throw new Error('A verificação pós-exclusão encontrou o arquivo ainda presente.');
+      const verified = await this.journal.verify(prepared.operationId, after);
+      return {
+        operationId: verified.operationId,
+        path: inspected.path,
+        before: inspected.content,
+        beforeHash: inspected.snapshot.hash ?? '',
+        rollbackRef,
+      };
+    } catch (error) {
+      await this.recordFailure(prepared.operationId, context.projectId, [inspected.path], error);
+      throw error;
+    }
+  }
+
+  async restoreDeletedFile(operationId: string): Promise<void> {
+    if (!this.rollbackBlobs) throw new Error('RollbackBlobStore não foi configurado para restauração.');
+    const record = this.journal.get(operationId);
+    if (!record) throw new Error(`Operação de exclusão não encontrada: ${operationId}.`);
+    if (record.capabilityId !== 'workspace.delete_file') throw new Error('A operação não representa delete_file.');
+    if (record.status !== 'verified') throw new Error(`A operação ${operationId} não está pronta para rollback.`);
+
+    const resource = record.resources.find((item) => item.target.toLowerCase() === record.target.toLowerCase());
+    if (!resource?.rollbackRef || resource.before.kind !== 'file' || resource.before.exists !== true) {
+      throw new Error('Metadados de rollback do arquivo excluído estão incompletos.');
+    }
+
+    const current = await this.workspace.statPath(record.projectId, record.target);
+    if (current.exists) {
+      await this.journal.markRollbackConflict(operationId, 'O caminho foi recriado externamente após a exclusão.', [{
+        target: record.target,
+        after: await this.snapshot(record.projectId, record.target),
+      }]);
+      throw new Error(`O arquivo '${record.target}' foi recriado após a exclusão; rollback bloqueado.`);
+    }
+
+    const parent = normalizedRelativePath(path.dirname(record.target));
+    if (parent !== '.') {
+      const parentState = await this.workspace.statPath(record.projectId, parent);
+      if (!parentState.exists || parentState.kind !== 'directory') {
+        await this.journal.markRollbackConflict(operationId, 'O diretório pai não existe mais para restauração segura.');
+        throw new Error(`O diretório pai de '${record.target}' não existe mais; rollback bloqueado.`);
+      }
+    }
+
+    const content = await this.rollbackBlobs.getText(resource.rollbackRef);
+    try {
+      await this.workspace.createFile(record.projectId, record.target, content);
+      const restored = await this.snapshot(record.projectId, record.target);
+      if (!restored.exists || restored.kind !== 'file' || restored.hash !== resource.before.hash) {
+        throw new Error('O arquivo restaurado não corresponde ao snapshot anterior.');
+      }
+      await this.journal.markRolledBack(operationId, [{ target: record.target, after: restored }]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const state = await this.afterSnapshots(record.projectId, [record.target]).catch(() => []);
+      await this.journal.markRollbackConflict(operationId, message, state).catch((): undefined => undefined);
       throw error;
     }
   }

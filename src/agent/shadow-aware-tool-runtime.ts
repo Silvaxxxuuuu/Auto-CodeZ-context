@@ -23,6 +23,7 @@ const realWorkspaceTextMutationTools = new Set<ToolName>([
   'replace_range',
   'replace_text',
   'replace_symbol',
+  'delete_file',
   'insert_before',
   'insert_after',
 ]);

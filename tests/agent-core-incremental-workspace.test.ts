@@ -187,3 +187,80 @@ test('incremental write_file refuses stale expected content before journaling or
     await f.cleanup();
   }
 });
+
+
+test('incremental delete_file snapshots content, removes the real file and can restore it exactly', async () => {
+  const f = await fixture();
+  try {
+    await f.workspace.createFile('project-a', 'remove-me.txt', 'important before state');
+    const blobs = new Map<string, string>();
+    const rollbackBlobs = {
+      putText: async (content: string) => {
+        const ref = `blob:test:${Buffer.from(content, 'utf8').toString('base64')}`;
+        blobs.set(ref, content);
+        return ref;
+      },
+      getText: async (ref: string) => {
+        const content = blobs.get(ref);
+        if (content === undefined) throw new Error('missing blob');
+        return content;
+      },
+    };
+    const incremental = new IncrementalWorkspaceMutationRuntime(f.workspace, f.journal, rollbackBlobs);
+    const result = await incremental.deleteFile(context, 'remove-me.txt', 'important before state');
+
+    assert.deepEqual(await f.workspace.statPath('project-a', 'remove-me.txt'), { exists: false });
+    const deleted = f.journal.get(result.operationId);
+    assert.equal(deleted?.status, 'verified');
+    assert.equal(deleted?.capabilityId, 'workspace.delete_file');
+    assert.equal(deleted?.resources[0].before.contentRef, result.rollbackRef);
+    assert.equal(deleted?.resources[0].after?.exists, false);
+    assert.equal(await rollbackBlobs.getText(result.rollbackRef), 'important before state');
+
+    await incremental.restoreDeletedFile(result.operationId);
+    assert.equal(await f.workspace.readFile('project-a', 'remove-me.txt'), 'important before state');
+    assert.equal(f.journal.get(result.operationId)?.status, 'rolled_back');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('incremental delete_file rejects stale content before journaling or deleting', async () => {
+  const f = await fixture();
+  try {
+    await f.workspace.createFile('project-a', 'stale-delete.txt', 'current');
+    const rollbackBlobs = {
+      putText: async (content: string) => `blob:test:${content}`,
+      getText: async (ref: string) => ref.slice('blob:test:'.length),
+    };
+    const incremental = new IncrementalWorkspaceMutationRuntime(f.workspace, f.journal, rollbackBlobs);
+    await assert.rejects(
+      incremental.deleteFile(context, 'stale-delete.txt', 'older'),
+      /mudou antes da exclusão incremental/i,
+    );
+    assert.equal(await f.workspace.readFile('project-a', 'stale-delete.txt'), 'current');
+    assert.equal(f.journal.list().length, 0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('delete rollback fails closed when the deleted path was recreated externally', async () => {
+  const f = await fixture();
+  try {
+    await f.workspace.createFile('project-a', 'conflict-delete.txt', 'before');
+    const rollbackBlobs = {
+      putText: async (content: string) => `blob:test:${Buffer.from(content, 'utf8').toString('base64')}`,
+      getText: async (ref: string) => Buffer.from(ref.slice('blob:test:'.length), 'base64').toString('utf8'),
+    };
+    const incremental = new IncrementalWorkspaceMutationRuntime(f.workspace, f.journal, rollbackBlobs);
+    const result = await incremental.deleteFile(context, 'conflict-delete.txt', 'before');
+    await f.workspace.createFile('project-a', 'conflict-delete.txt', 'external');
+
+    await assert.rejects(() => incremental.restoreDeletedFile(result.operationId), /recriado.*rollback bloqueado/i);
+    assert.equal(await f.workspace.readFile('project-a', 'conflict-delete.txt'), 'external');
+    assert.equal(f.journal.get(result.operationId)?.status, 'rollback_conflict');
+  } finally {
+    await f.cleanup();
+  }
+});

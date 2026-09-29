@@ -22,6 +22,7 @@ const realWorkspaceTextMutationTools = new Set<ToolName>([
   'replace_range',
   'replace_text',
   'replace_symbol',
+  'delete_file',
   'insert_before',
   'insert_after',
 ]);
@@ -343,8 +344,12 @@ export class ToolRuntime {
         return undefined;
       }
       case 'delete_file': {
-        const path = this.stringValue(call.input, 'path');
-        const before = await this.workspace.readFile(projectId, path);
+        const requestedPath = this.stringValue(call.input, 'path');
+        const inspected = this.incrementalWorkspace
+          ? await this.incrementalWorkspace.inspectWriteFile(projectId, requestedPath)
+          : undefined;
+        const path = inspected?.path ?? requestedPath;
+        const before = inspected?.content ?? await this.workspace.readFile(projectId, path);
         return this.diffs.createPlan([this.diffs.create(path, 'deleted', before, '')]);
       }
       case 'rename_file': {
@@ -625,7 +630,24 @@ export class ToolRuntime {
         const created = await this.workspace.createFolder(projectId, path);
         return { output: JSON.stringify({ type: 'workspace_folder_created', path, created, createdDirectories: created ? [path] : [] }) };
       }
-      case 'delete_file': { const path = this.stringValue(input, 'path'); const before = await this.workspace.readFile(projectId, path); await this.workspace.deleteFile(projectId, path); return { output: 'Arquivo excluído.', changes: [this.diffs.create(path, 'deleted', before, '')] }; }
+      case 'delete_file': {
+        const path = this.stringValue(input, 'path');
+        if (this.incrementalWorkspace && context.runId && context.toolCallId) {
+          const inspected = await this.incrementalWorkspace.inspectWriteFile(projectId, path);
+          const result = await this.incrementalWorkspace.deleteFile({
+            runId: context.runId,
+            toolCallId: context.toolCallId,
+            projectId,
+          }, inspected.path, inspected.content);
+          return {
+            output: JSON.stringify({ type: 'workspace_file_deleted', path: result.path, operationId: result.operationId, beforeHash: result.beforeHash, rollbackRef: result.rollbackRef }),
+            changes: [this.diffs.create(result.path, 'deleted', result.before, '')],
+          };
+        }
+        const before = await this.workspace.readFile(projectId, path);
+        await this.workspace.deleteFile(projectId, path);
+        return { output: 'Arquivo excluído.', changes: [this.diffs.create(path, 'deleted', before, '')] };
+      }
       case 'rename_file': { const from = this.stringValue(input, 'from'); const to = this.stringValue(input, 'to'); const before = await this.workspace.readFile(projectId, from); await this.workspace.renameFile(projectId, from, to); const after = await this.workspace.readFile(projectId, to); return { output: 'Arquivo renomeado.', changes: [this.diffs.create(to, 'renamed', before, after, from)] }; }
       case 'search_files': { const matches = await this.workspace.searchFiles(projectId, this.stringValue(input, 'query')); return { output: JSON.stringify(await this.visibleSearchPaths(projectId, matches, context)) }; }
       case 'run_command': { const result = await this.commands.run(projectId, this.stringValue(input, 'command')); return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result }; }

@@ -83,14 +83,21 @@ test('Agent Core V2 bridge materializes create/write/local incremental edits whi
     assert.equal(await base.readFile('project-a', 'existing.txt'), 'real-edit');
     assert.equal(shadows.get('chat-a', 'run-a'), undefined);
 
-    const legacyDelete = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('delete', 'delete_file', { path: 'legacy-delete.txt' }), 'run-a');
-    assert.equal(legacyDelete.ok, true);
-    assert.equal(await base.readFile('project-a', 'legacy-delete.txt'), 'keep');
-    assert.equal(shadows.get('chat-a', 'run-a')?.changes.some((change) => change.path === 'legacy-delete.txt' && change.type === 'deleted'), true);
+    const deleted = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('delete', 'delete_file', { path: 'legacy-delete.txt' }), 'run-a');
+    assert.equal(deleted.ok, true);
+    assert.deepEqual(await base.statPath('project-a', 'legacy-delete.txt'), { exists: false });
+    assert.equal(shadows.get('chat-a', 'run-a'), undefined);
+
+    await fs.writeFile(path.join(root, 'legacy-rename.txt'), 'rename-me', 'utf8');
+    const legacyRename = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('rename', 'rename_file', { from: 'legacy-rename.txt', to: 'renamed.txt' }), 'run-a');
+    assert.equal(legacyRename.ok, true);
+    assert.equal(await base.readFile('project-a', 'legacy-rename.txt'), 'rename-me');
+    assert.equal(await base.exists('project-a', 'renamed.txt'), false);
+    assert.equal(shadows.get('chat-a', 'run-a')?.changes.some((change) => change.type === 'renamed'), true);
 
     const operations = durable.list({ runId: 'run-a' });
-    assert.equal(operations.length, 4);
-    assert.deepEqual(operations.map((item) => item.capabilityId), ['workspace.create_folder', 'workspace.create_file', 'workspace.write_file', 'workspace.write_file']);
+    assert.equal(operations.length, 5);
+    assert.deepEqual(operations.map((item) => item.capabilityId), ['workspace.create_folder', 'workspace.create_file', 'workspace.write_file', 'workspace.write_file', 'workspace.delete_file']);
     assert.equal(operations.every((item) => item.status === 'verified'), true);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -287,6 +294,42 @@ test('replace_symbol is blocked when its file has legacy Shadow Workspace change
     assert.equal(result.ok, false);
     assert.match(result.error ?? '', /execução legada isolada/i);
     assert.equal(await base.readFile('project-a', 'service.ts'), 'function run() { return 1; }\n');
+    assert.equal(durable.list().length, 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('delete_file is blocked when its path has legacy Shadow Workspace changes', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'autocodez-agent-core-delete-shadow-'));
+  try {
+    await fs.writeFile(path.join(root, 'conflict.txt'), 'base', 'utf8');
+    const base = new WorkspaceRuntime(async () => [{
+      id: 'project-a',
+      name: 'Project A',
+      rootPath: root,
+      createdAt: 1,
+      updatedAt: 1,
+    }]);
+    const shadows = new ExecutionShadowWorkspaceRuntime(base);
+    const runtime = new ShadowAwareToolRuntime(new ShadowAwareWorkspaceRuntime(base, shadows));
+    runtime.configureShadowWorkspace(shadows);
+    await shadows.workspace('chat-a', 'run-a', 'project-a').writeFile('project-a', 'conflict.txt', 'shadow-change');
+
+    const storage = new MemoryStorage();
+    const durable = new DurableOperationJournal(new OperationJournalRuntime(), new OperationJournalStore(storage as unknown as LocalStorage));
+    await durable.init();
+    const rollbackBlobs = {
+      putText: async (content: string) => `blob:test:${content}`,
+      getText: async (ref: string) => ref.slice('blob:test:'.length),
+    };
+    runtime.configureIncrementalWorkspaceRuntime(new IncrementalWorkspaceMutationRuntime(base, durable, rollbackBlobs));
+
+    const result = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('delete', 'delete_file', { path: 'conflict.txt' }), 'run-a');
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? '', /execução legada isolada/i);
+    assert.equal(await base.readFile('project-a', 'conflict.txt'), 'base');
     assert.equal(durable.list().length, 0);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
