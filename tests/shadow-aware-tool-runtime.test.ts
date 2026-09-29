@@ -8,6 +8,7 @@ import { ExecutionShadowWorkspaceRuntime } from '../src/execution-shadow-workspa
 import { ShadowAwareToolRuntime } from '../src/agent/shadow-aware-tool-runtime';
 import { ShadowAwareWorkspaceRuntime } from '../src/agent/shadow-aware-workspace-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
+import { InstanceRuntime } from '../src/agent/instance-runtime';
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'auto-codez-shadow-aware-tools-'));
@@ -23,11 +24,19 @@ async function fixture() {
   const shadows = new ExecutionShadowWorkspaceRuntime(base, () => time++);
   const workspace = new ShadowAwareWorkspaceRuntime(base, shadows);
   const tools = new ShadowAwareToolRuntime(workspace);
+  const openedInstances: string[] = [];
   tools.configureShadowWorkspace(shadows);
+  tools.configureInstanceRuntime(new InstanceRuntime({
+    open: async (input) => {
+      openedInstances.push(input.instanceId);
+      return { canFocus: false, canClose: false };
+    },
+  }));
   return {
     base,
     shadows,
     tools,
+    openedInstances,
     cleanup: async () => rm(root, { recursive: true, force: true }),
   };
 }
@@ -193,6 +202,35 @@ test('tool call sem runId mantém comportamento direto na base', async () => {
     assert.equal(result.ok, true);
     assert.equal(await fx.base.readFile('project-a', 'a.txt'), 'direct');
     assert.equal(fx.shadows.list().length, 0);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+
+test('open_instance ligado ao workspace falha fechado enquanto Shadow legado está ativo', async () => {
+  const fx = await fixture();
+  try {
+    const write = await fx.tools.execute(
+      'chat-a',
+      'project-a',
+      'unrestricted',
+      toolCall('write-shadow-instance', 'write_file', { path: 'a.txt', content: 'shadow' }),
+      'run-a',
+    );
+    assert.equal(write.ok, true);
+
+    const opened = await fx.tools.execute(
+      'chat-a',
+      'project-a',
+      'unrestricted',
+      toolCall('open-shadow-file', 'open_instance', { kind: 'file', target: 'a.txt' }),
+      'run-a',
+    );
+
+    assert.equal(opened.ok, false);
+    assert.match(opened.error ?? '', /Shadow Workspace legado|visão divergente/i);
+    assert.deepEqual(fx.openedInstances, []);
   } finally {
     await fx.cleanup();
   }

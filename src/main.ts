@@ -275,7 +275,6 @@ const instancePlatformAdapter = new ElectronInstancePlatformAdapter(
   },
 );
 const instanceRuntime = new InstanceRuntime(instancePlatformAdapter);
-void instanceRuntime;
 const diffRuntime = new DiffRuntime();
 const gitRuntime = new ShadowAwareGitRuntime(() => projectManager.list(), executionShadowWorkspaceRuntime);
 const gitService = new GitService(gitRuntime);
@@ -285,6 +284,7 @@ const toolRuntime = new ShadowAwareToolRuntime(shadowAwareWorkspaceRuntime, perm
 toolRuntime.configureShadowWorkspace(executionShadowWorkspaceRuntime);
 toolRuntime.configureIncrementalWorkspaceRuntime(incrementalWorkspaceMutationRuntime);
 toolRuntime.configureProcessRuntime(processRuntime);
+toolRuntime.configureInstanceRuntime(instanceRuntime);
 toolRuntime.configureGitRuntime(gitRuntime);
 const providerRequestJournal = new ProviderRequestJournal(storage);
 const chatRuntime = new ChatRuntime(
@@ -2130,6 +2130,7 @@ app.on('before-quit', (event) => {
     await mcpGatewayBindingBroker?.stop().catch((): undefined => undefined);
     await stopManagedMcpGateway().catch((): undefined => undefined);
     await attachmentIndexer.stop().catch((): undefined => undefined);
+    await instanceRuntime.closeAll().catch((): undefined => undefined);
     await processRuntime.stopAll().catch((): undefined => undefined);
     await durableAgentCoreOperationJournal.flush().catch((): undefined => undefined);
     app.quit();

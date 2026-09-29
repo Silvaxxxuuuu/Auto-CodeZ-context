@@ -149,7 +149,7 @@ Important distinction:
 - If no suitable tool is available, explain the limitation precisely and do not invent a capability.
 `.trim();
 
-const SYSTEM_CHAT_TOOL_NAMES = new Set(['plan_execution', 'complete_plan_step', 'read_file', 'read_symbol', 'write_file', 'create_file', 'create_folder', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'web_search', 'web_fetch', 'run_command', 'start_process', 'read_process_output', 'wait_process', 'wait_for_port', 'stop_process', 'list_processes', 'plugin_list_tools', 'plugin_call']);
+const SYSTEM_CHAT_TOOL_NAMES = new Set(['plan_execution', 'complete_plan_step', 'read_file', 'read_symbol', 'write_file', 'create_file', 'create_folder', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'web_search', 'web_fetch', 'run_command', 'start_process', 'read_process_output', 'wait_process', 'wait_for_port', 'stop_process', 'list_processes', 'open_instance', 'instance_status', 'focus_instance', 'close_instance', 'list_instances', 'plugin_list_tools', 'plugin_call']);
 const LIGHTWEIGHT_TURN_PATTERN = /^(?:oi+|ol[aá]+|opa+|e(?:\s|-)a[ií]|hello|hi|hey|bom dia|boa tarde|boa noite|valeu|obrigad[oa]|thanks?|thank you)[!.?\s]*$/i;
 const ACTIONABLE_TOOL_TURN_PATTERN = /\b(?:crie|criar|fa[cç]a|fazer|gere|gerar|altere|alterar|edite|editar|corrija|corrigir|implemente|implementar|execute|executar|rode|rodar|instale|instalar|salve|salvar|escreva|escrever|delete|delete|rename|create|build|install|run|execute|edit|modify|fix|implement|write|save)\b/i;
 

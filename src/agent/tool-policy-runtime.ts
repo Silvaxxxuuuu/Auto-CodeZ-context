@@ -48,6 +48,11 @@ export function extractToolPolicyPaths(call: AIToolCall): string[] {
       ? call.input.paths.filter((item): item is string => typeof item === 'string')
       : [];
   }
+  if (call.name === 'open_instance') {
+    const kind = typeof call.input.kind === 'string' ? call.input.kind : '';
+    if (kind !== 'file' && kind !== 'folder' && kind !== 'application') return [];
+    return typeof call.input.target === 'string' ? [call.input.target] : [];
+  }
   if (
     call.name === 'read_file'
     || call.name === 'read_symbol'

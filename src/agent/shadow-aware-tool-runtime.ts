@@ -418,6 +418,14 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
     const shadow = this.shadowWorkspaces?.get(chatId, runId);
     if (!shadow) return undefined;
 
+    if (call.name === 'open_instance' && this.hasInstanceRuntime() && call.input.kind !== 'url') {
+      return {
+        toolCallId: call.id,
+        ok: false,
+        error: 'Instância ligada ao workspace bloqueada enquanto esta execução ainda usa Shadow Workspace legado. Conclua ou descarte a execução isolada antes de abrir preview, arquivo, pasta ou aplicação para evitar uma visão divergente do workspace real.',
+      };
+    }
+
     if (call.name === 'start_process' && this.hasProcessRuntime()) {
       return {
         toolCallId: call.id,

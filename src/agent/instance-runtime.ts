@@ -190,6 +190,11 @@ export class InstanceRuntime {
     }
   }
 
+  async closeAll(projectId?: string): Promise<ManagedInstanceSnapshot[]> {
+    const controllable = this.list(projectId).filter((snapshot) => snapshot.status === 'open' && snapshot.capabilities.close);
+    return Promise.all(controllable.map((snapshot) => this.close(snapshot.instanceId)));
+  }
+
   remove(instanceId: string): boolean {
     const record = this.record(instanceId);
     this.refresh(record);

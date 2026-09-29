@@ -8,6 +8,8 @@ import { extractToolPolicyPaths, ToolPolicyRuntime, type ToolPolicyResult } from
 import { WorkspaceRuntime } from './workspace-runtime';
 import { CommandRuntime } from './command-runtime';
 import { ProcessRuntime } from './process-runtime';
+import { InstanceRuntime } from './instance-runtime';
+import type { InstanceKind } from '../agent-core/contracts';
 import { DiffRuntime } from './diff-runtime';
 import { GitRuntime } from './git-runtime';
 import { applyIncrementalEdit, type IncrementalEditToolName } from './incremental-file-edit';
@@ -54,6 +56,11 @@ const definitions: AIToolDefinition[] = [
   { name: 'wait_for_port', description: 'Wait until a loopback TCP port accepts connections while a managed local process remains running. The processId must belong to the active workspace. Only localhost/127.0.0.1/::1 are accepted; this tool is not a general network scanner. Fails early if the managed process exits before readiness.', parameters: { type: 'object', properties: { processId: { type: 'string', description: 'Managed process identifier returned by start_process.' }, port: { type: 'number', description: 'Local TCP port from 1 to 65535.' }, timeoutMs: { type: 'number', description: 'Maximum milliseconds to wait for readiness.' }, host: { type: 'string', enum: ['localhost', '127.0.0.1', '::1'], description: 'Explicit loopback host to probe.' } }, required: ['processId', 'port', 'timeoutMs', 'host'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'stop_process', description: 'Stop a managed persistent process and its child process tree. Use this to cleanly end dev servers, watchers and other processes previously started by start_process.', parameters: { type: 'object', properties: { processId: { type: 'string', description: 'Managed process identifier.' } }, required: ['processId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'list_processes', description: 'List managed persistent processes belonging to the active workspace, including lifecycle state, PID, command and timestamps.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'open_instance', description: 'Open and register a managed visual or navigable instance for the active workspace. Supported kinds are preview, url, file, folder and application. Preview windows are controlled by Auto CodeZ; external URL/file/folder/application launches do not claim focus or close control they do not possess.', parameters: { type: 'object', properties: { kind: { type: 'string', enum: ['application', 'url', 'file', 'folder', 'preview'], description: 'Instance kind to open.' }, target: { type: 'string', description: 'HTTP(S) URL for url/preview, or workspace-relative path for file/folder/application.' } }, required: ['kind', 'target'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'instance_status', description: 'Read the current lifecycle status and real control capabilities of one managed instance belonging to the active workspace.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier returned by open_instance.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'focus_instance', description: 'Focus a managed instance only when the platform adapter reports real focus control. Fails explicitly for external launches that Auto CodeZ cannot focus.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'close_instance', description: 'Close a managed instance only when the platform adapter reports real close control. Fails explicitly for external launches that Auto CodeZ cannot close.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'list_instances', description: 'List managed instances belonging only to the active workspace, including lifecycle state and real focus/close capabilities.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'run_command', description: 'Execute a local shell command from the active workspace. Use it for tests, builds, inspections, scripts, CLIs and operations that genuinely require a shell. Do not use it to create, edit, delete or rename workspace files when create_file, write_file, delete_file or rename_file can represent the requested result, because those file tools provide diff review and stale-file protection. Do not create workspace directories with shell commands when the requested folder will contain files. create_file automatically creates missing parent directories, so create the first file directly under the desired folder instead of running mkdir. Shell filesystem side effects execute inside an isolated command sandbox and are not a substitute for persistent Auto CodeZ file tools. In read-only mode run_command is blocked. In every other permission mode it requires explicit user approval before the process starts. Sensitive direct mutations may be blocked entirely by the command safety policy.', parameters: { type: 'object', properties: { command: { type: 'string', description: 'Exact local shell command to execute.' } }, required: ['command'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'git_status', description: 'Read the current Git branch and working tree status.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'git_diff', description: 'Read the current unstaged Git diff.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
@@ -123,6 +130,11 @@ function executionActivityMessage(call: AIToolCall): string {
     case 'wait_for_port': return value('processId') ? `Aguardando porta do processo ${value('processId')}` : 'Aguardando porta local.';
     case 'stop_process': return value('processId') ? `Encerrando processo ${value('processId')}` : 'Encerrando processo.';
     case 'list_processes': return 'Listando processos persistentes.';
+    case 'open_instance': return value('target') ? `Abrindo instância: ${value('target')}` : 'Abrindo instância.';
+    case 'instance_status': return value('instanceId') ? `Consultando instância ${value('instanceId')}` : 'Consultando instância.';
+    case 'focus_instance': return value('instanceId') ? `Focando instância ${value('instanceId')}` : 'Focando instância.';
+    case 'close_instance': return value('instanceId') ? `Fechando instância ${value('instanceId')}` : 'Fechando instância.';
+    case 'list_instances': return 'Listando instâncias gerenciadas.';
     case 'read_file': return value('path') ? `Lendo ${value('path')}` : 'Lendo arquivo.';
     case 'read_symbol': return value('path') && value('symbol') ? `Lendo símbolo ${value('symbol')} em ${value('path')}` : 'Lendo símbolo do arquivo.';
     case 'write_file': return value('path') ? `Editando ${value('path')}` : 'Editando arquivo.';
@@ -158,6 +170,7 @@ export class ToolRuntime {
   private executionCheckpointRecorder?: ExecutionCheckpointRecorder;
   private incrementalWorkspace?: IncrementalWorkspaceMutationRuntime;
   private processRuntime?: ProcessRuntime;
+  private instanceRuntime?: InstanceRuntime;
 
   constructor(private readonly workspace: WorkspaceRuntime, permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()]), workspacePathPolicy = new WorkspacePathPolicy(), commandSafetyPolicy = new CommandSafetyPolicy(workspacePathPolicy), private readonly toolPolicy = new ToolPolicyRuntime(permissions, workspacePathPolicy, commandSafetyPolicy)) {}
 
@@ -168,8 +181,10 @@ export class ToolRuntime {
   configureExecutionCheckpointRecorder(recorder: ExecutionCheckpointRecorder): void { this.executionCheckpointRecorder = recorder; }
   configureIncrementalWorkspaceRuntime(runtime: IncrementalWorkspaceMutationRuntime): void { this.incrementalWorkspace = runtime; }
   configureProcessRuntime(runtime: ProcessRuntime): void { this.processRuntime = runtime; }
+  configureInstanceRuntime(runtime: InstanceRuntime): void { this.instanceRuntime = runtime; }
   protected hasIncrementalWorkspaceRuntime(): boolean { return Boolean(this.incrementalWorkspace); }
   protected hasProcessRuntime(): boolean { return Boolean(this.processRuntime); }
+  protected hasInstanceRuntime(): boolean { return Boolean(this.instanceRuntime); }
   configureChangeBudget(chatId: string, runId: string, budget: ExecutionChangeBudget): ExecutionChangeBudget {
     if (!this.executionChangeBudget) throw new Error('O runtime de Change Budget não foi configurado.');
     return this.executionChangeBudget.configure(chatId, runId, budget);
@@ -738,6 +753,34 @@ export class ToolRuntime {
         const runtime = this.requireProcessRuntime();
         return { output: JSON.stringify(runtime.list(projectId)) };
       }
+      case 'open_instance': {
+        const runtime = this.requireInstanceRuntime();
+        const kind = this.stringValue(input, 'kind') as InstanceKind;
+        const target = this.stringValue(input, 'target');
+        return { output: JSON.stringify(await runtime.open({ projectId, kind, target })) };
+      }
+      case 'instance_status': {
+        const runtime = this.requireInstanceRuntime();
+        const instanceId = this.stringValue(input, 'instanceId');
+        this.assertInstanceProject(runtime, instanceId, projectId);
+        return { output: JSON.stringify(runtime.get(instanceId)) };
+      }
+      case 'focus_instance': {
+        const runtime = this.requireInstanceRuntime();
+        const instanceId = this.stringValue(input, 'instanceId');
+        this.assertInstanceProject(runtime, instanceId, projectId);
+        return { output: JSON.stringify(await runtime.focus(instanceId)) };
+      }
+      case 'close_instance': {
+        const runtime = this.requireInstanceRuntime();
+        const instanceId = this.stringValue(input, 'instanceId');
+        this.assertInstanceProject(runtime, instanceId, projectId);
+        return { output: JSON.stringify(await runtime.close(instanceId)) };
+      }
+      case 'list_instances': {
+        const runtime = this.requireInstanceRuntime();
+        return { output: JSON.stringify(runtime.list(projectId)) };
+      }
       case 'run_command': { const result = await this.commands.run(projectId, this.stringValue(input, 'command')); return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result }; }
       case 'git_status': return this.gitExecution(projectId, await this.requireGit().status(projectId));
       case 'git_diff': return this.gitExecution(projectId, await this.requireGit().diff(projectId));
@@ -754,6 +797,11 @@ export class ToolRuntime {
   private assertProcessProject(runtime: ProcessRuntime, processId: string, projectId: string): void {
     const process = runtime.get(processId);
     if (process.projectId !== projectId) throw new Error('O processo persistente pertence a outro projeto.');
+  }
+  private requireInstanceRuntime(): InstanceRuntime { if (!this.instanceRuntime) throw new Error('O runtime de instâncias não foi configurado para esta instância.'); return this.instanceRuntime; }
+  private assertInstanceProject(runtime: InstanceRuntime, instanceId: string, projectId: string): void {
+    const instance = runtime.get(instanceId);
+    if (instance.projectId !== projectId) throw new Error('A instância pertence a outro projeto.');
   }
   private requireGit(): GitRuntime { if (!this.gitRuntime) throw new Error('O runtime Git não foi configurado para esta instância.'); return this.gitRuntime; }
   private gitExecution(_projectId: string, value: unknown): ToolExecution { return { output: typeof value === 'string' ? value : JSON.stringify(value) }; }

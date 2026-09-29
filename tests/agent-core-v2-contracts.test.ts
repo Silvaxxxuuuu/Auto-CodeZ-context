@@ -19,7 +19,7 @@ test('Agent Core V2 baseline contracts are structurally valid and uniquely ident
 
 test('baseline reserves workspace, persistent process lifecycle and instance semantics', () => {
   const names = new Set(AGENT_CORE_V2_BASELINE_CAPABILITIES.map((capability) => capability.name));
-  for (const name of ['create_file', 'create_folder', 'start_process', 'read_process_output', 'wait_process', 'wait_for_port', 'stop_process', 'list_processes', 'open_instance']) {
+  for (const name of ['create_file', 'create_folder', 'start_process', 'read_process_output', 'wait_process', 'wait_for_port', 'stop_process', 'list_processes', 'open_instance', 'instance_status', 'focus_instance', 'close_instance', 'list_instances']) {
     assert.equal(names.has(name), true, `missing capability: ${name}`);
   }
 });
