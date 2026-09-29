@@ -187,7 +187,7 @@ export const AGENT_CORE_V2_BASELINE_CAPABILITIES: readonly CapabilityContract[] 
     name: 'wait_for_port',
     title: 'Aguardar porta local',
     category: 'process',
-    description: 'Aguarda a porta TCP loopback de um processo persistente aceitar conexões, comprovando readiness antes de abrir preview ou continuar validações dependentes do servidor.',
+    description: 'Aguarda uma porta TCP loopback aceitar conexões enquanto o processo persistente gerenciado continua vivo, comprovando readiness local antes de abrir preview ou continuar validações dependentes do servidor.',
     whenToUse: ['Depois de start_process para servidor dev/local.', 'Antes de abrir preview que depende de uma porta realmente pronta.'],
     whenNotToUse: ['Não usar como scanner de rede.', 'Não usar para hosts remotos ou processos não gerenciados.'],
     inputSchema: schemaObject({
@@ -195,7 +195,7 @@ export const AGENT_CORE_V2_BASELINE_CAPABILITIES: readonly CapabilityContract[] 
       port: { type: 'number' },
       timeoutMs: { type: 'number' },
       host: { type: 'string', enum: ['localhost', '127.0.0.1', '::1'] },
-    }, ['processId', 'port', 'timeoutMs']),
+    }, ['processId', 'port', 'timeoutMs', 'host']),
     outputSchema: schemaObject({
       processId: { type: 'string' },
       host: { type: 'string' },
