@@ -317,6 +317,15 @@ export class ChatRuntime {
       ? { messages: currentUserMessage ? [currentUserMessage] : [], compacted: false }
       : compactToolHistoryForProvider(attachmentMessages);
     const providerHistory = await this.attachLatestToolCaptureForVision(compactedHistory.messages, model.capabilities.includes('vision'), signal);
+    const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
+    if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
+    const scopedTools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => SYSTEM_CHAT_TOOL_NAMES.has(tool.name));
+    const tools = groundedAnswerOnly
+      ? []
+      : webContext
+        ? scopedTools.filter((tool) => tool.name !== 'web_search' && tool.name !== 'web_fetch')
+        : scopedTools;
+    const toolsEnabled = !options?.disableTools && !lightweightTurn && this.capabilities.supports(model, 'tools') && tools.length > 0;
     const systemMessages = this.contextCompiler.compile({
       runtimePlatform: runtimePlatform(),
       runtimeDate: runtimeDate(),
@@ -328,23 +337,16 @@ export class ChatRuntime {
       compactedHistory: compactedHistory.compacted,
       groundedAnswerOnly,
       disableTools: Boolean(options?.disableTools),
+      capabilityToolNames: toolsEnabled ? tools.map((tool) => tool.name) : [],
+      capabilityQuery: currentUserMessage?.content ?? '',
     });
     const messages = [...systemMessages, ...providerHistory];
-    const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
-    if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
     if (groundedAnswerOnly) {
       messages.splice(0, messages.length, ...systemMessages, ...compactedHistory.messages);
     }
-    const scopedTools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => SYSTEM_CHAT_TOOL_NAMES.has(tool.name));
-    const tools = groundedAnswerOnly
-      ? []
-      : webContext
-        ? scopedTools.filter((tool) => tool.name !== 'web_search' && tool.name !== 'web_fetch')
-        : scopedTools;
     if (options?.disableTools) {
       messages.splice(0, messages.length, ...systemMessages, ...providerHistory);
     }
-    const toolsEnabled = !options?.disableTools && !lightweightTurn && this.capabilities.supports(model, 'tools') && tools.length > 0;
     return {
       adapter,
       request: {
