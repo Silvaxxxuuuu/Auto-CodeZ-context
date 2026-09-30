@@ -135,7 +135,8 @@ test('real managed server becomes ready, opens a scoped preview, and supports it
   } finally {
     await instances.closeAll().catch((): void => {});
     await processes.stopAll().catch((): never[] => []);
-    await fs.rm(rootA, { recursive: true, force: true });
-    await fs.rm(rootB, { recursive: true, force: true });
+    const cleanupOptions = { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 50 : 0, retryDelay: 100 };
+    await fs.rm(rootA, cleanupOptions);
+    await fs.rm(rootB, cleanupOptions);
   }
 });
