@@ -79,9 +79,11 @@ export function toStructuredToolActivity(snapshot: ToolActivitySnapshot, created
   const changed = result.changes ?? result.diffPlan?.changes;
   const subject = changed?.length === 1
     ? { path: changed[0].path }
-    : result.commandResult
-      ? { command: result.commandResult.command }
-      : undefined;
+    : result.processId
+      ? { processId: result.processId }
+      : result.commandResult
+        ? { command: result.commandResult.command }
+        : undefined;
   const capability = agentCoreV2CapabilityByName(snapshot.toolName);
   const phase: StructuredActivityEvent['phase'] = result.pendingApproval
     ? 'waiting'
@@ -95,6 +97,7 @@ export function toStructuredToolActivity(snapshot: ToolActivitySnapshot, created
     toolCallId: snapshot.toolCallId,
     toolName: snapshot.toolName,
     ...(capability ? { capabilityId: capability.id } : {}),
+    ...(result.executionId ? { executionId: result.executionId } : {}),
     ...(subject ? { subject } : {}),
     summary: snapshot.message,
     ...(result.commandResult ? { durationMs: result.commandResult.durationMs } : {}),
