@@ -60,6 +60,7 @@ const definitions: AIToolDefinition[] = [
   { name: 'open_instance', description: 'Open and register a managed visual or navigable instance for the active workspace. Supported kinds are preview, url, file, folder and application. Preview windows are controlled by Auto CodeZ; external URL/file/folder/application launches do not claim focus or close control they do not possess.', parameters: { type: 'object', properties: { kind: { type: 'string', enum: ['application', 'url', 'file', 'folder', 'preview'], description: 'Instance kind to open.' }, target: { type: 'string', description: 'HTTP(S) URL for url/preview, or workspace-relative path for file/folder/application.' } }, required: ['kind', 'target'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'capture_instance', description: 'Capture an actual PNG screenshot of a managed preview belonging to the active workspace. The tool stores verified image bytes and returns an artifact reference. Do not claim to have seen or analyzed the image until the selected model receives it through its vision channel; external windows cannot be captured.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed preview instance identifier returned by open_instance.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'inspect_instance', description: 'Read a bounded snapshot of title, URL, visible page text, headings and links from a controlled managed preview. This is structural DOM inspection, not a screenshot or pixel-level vision analysis; does not read form values, cookies or arbitrary OS windows.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed preview instance identifier returned by open_instance.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
+  { name: 'interact_instance', description: 'Click a single visible standalone type=button element in a controlled preview by CSS selector. Cannot submit forms, click links, fill inputs, interact with external windows or run arbitrary JavaScript. Only use after inspecting the target. Clicking a page button may have application side effects and follows explicit approval policy.', parameters: { type: 'object', properties: { instanceId: { type: 'string' }, action: { type: 'string', enum: ['click_button'] }, selector: { type: 'string', description: 'Specific CSS selector for a visible standalone button of type=button, at most 256 characters.' } }, required: ['instanceId', 'action', 'selector'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'instance_status', description: 'Read the current lifecycle status and real control capabilities of one managed instance belonging to the active workspace.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier returned by open_instance.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'focus_instance', description: 'Focus a managed instance only when the platform adapter reports real focus control. Fails explicitly for external launches that Auto CodeZ cannot focus.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'close_instance', description: 'Close a managed instance only when the platform adapter reports real close control. Fails explicitly for external launches that Auto CodeZ cannot close.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
@@ -136,6 +137,7 @@ function executionActivityMessage(call: AIToolCall): string {
     case 'open_instance': return value('target') ? `Abrindo instância: ${value('target')}` : 'Abrindo instância.';
     case 'capture_instance': return value('instanceId') ? `Capturando preview ${value('instanceId')}` : 'Capturando preview.';
     case 'inspect_instance': return value('instanceId') ? `Inspecionando preview ${value('instanceId')}` : 'Inspecionando preview.';
+    case 'interact_instance': return value('instanceId') ? `Interagindo com preview ${value('instanceId')}` : 'Interagindo com preview.';
     case 'instance_status': return value('instanceId') ? `Consultando instância ${value('instanceId')}` : 'Consultando instância.';
     case 'focus_instance': return value('instanceId') ? `Focando instância ${value('instanceId')}` : 'Focando instância.';
     case 'close_instance': return value('instanceId') ? `Fechando instância ${value('instanceId')}` : 'Fechando instância.';
@@ -784,6 +786,15 @@ export class ToolRuntime {
         this.assertInstanceProject(runtime, instanceId, projectId);
         const inspected = await runtime.inspect(instanceId);
         return { output: JSON.stringify({ type: 'preview_inspection', instanceId, ...inspected, visualAnalysis: 'dom_only_not_pixel_vision' }) };
+      }
+      case 'interact_instance': {
+        const instanceId = this.stringValue(input, 'instanceId');
+        const runtime = this.requireInstanceRuntime();
+        this.assertInstanceProject(runtime, instanceId, projectId);
+        if (input.action !== 'click_button') throw new Error('Ação não autorizada para interação de preview.');
+        const selector = this.stringValue(input, 'selector');
+        const result = await runtime.interact(instanceId, { action: 'click_button', selector });
+        return { output: JSON.stringify({ type: 'preview_interaction', instanceId, ...result }) };
       }
       case 'instance_status': {
         const runtime = this.requireInstanceRuntime();
