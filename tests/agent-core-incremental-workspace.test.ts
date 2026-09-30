@@ -350,7 +350,10 @@ test('create_file rollback removes only resources created by the operation and p
     assert.deepEqual(await f.workspace.statPath('project-a', 'existing/generated/deep/file.txt'), { exists: false });
     assert.deepEqual(await f.workspace.statPath('project-a', 'existing/generated/deep'), { exists: false });
     assert.deepEqual(await f.workspace.statPath('project-a', 'existing/generated'), { exists: false });
-    assert.equal((await f.workspace.statPath('project-a', 'existing')).kind, 'directory');
+    const existingParent = await f.workspace.statPath('project-a', 'existing');
+    assert.equal(existingParent.exists, true);
+    if (!existingParent.exists) throw new Error('Existing parent disappeared during rollback.');
+    assert.equal(existingParent.kind, 'directory');
     assert.equal(f.journal.get(result.operationId)?.status, 'rolled_back');
   } finally {
     await f.cleanup();
