@@ -26,12 +26,20 @@ export type ContextCompilerInput = {
   runtimeFactsBudgetChars?: number;
   operationalTrace?: OperationalTraceSnapshot;
   operationalTraceBudgetChars?: number;
+  memoryBudgetChars?: number;
+  providerInstructionsBudgetChars?: number;
+  webBudgetChars?: number;
+  projectBudgetChars?: number;
 };
 
 const DEFAULT_CAPABILITY_CONTEXT_BUDGET = 4_200;
 const MAX_CAPABILITY_CONTEXT_ITEMS = 10;
 const DEFAULT_RUNTIME_FACTS_BUDGET = 2_400;
 const DEFAULT_OPERATIONAL_TRACE_BUDGET = 3_600;
+const DEFAULT_MEMORY_CONTEXT_BUDGET = 12_000;
+const DEFAULT_PROVIDER_INSTRUCTIONS_BUDGET = 16_000;
+const DEFAULT_WEB_CONTEXT_BUDGET = 32_000;
+const DEFAULT_PROJECT_CONTEXT_BUDGET = 128_000;
 
 function normalizeCapabilitySearchText(value: string): string {
   return value
@@ -228,6 +236,45 @@ export function compileOperationalTrace(
   return lines.length > 1 ? lines.join('\n') : undefined;
 }
 
+function normalizedContextBudget(value: number | undefined, fallback: number): number {
+  return value === undefined || !Number.isFinite(value)
+    ? fallback
+    : Math.max(0, Math.floor(value));
+}
+
+export function compactContextClass(
+  value: string | undefined,
+  budgetChars: number,
+  label: string,
+): string | undefined {
+  if (!value) return undefined;
+  const budget = Math.max(0, Math.floor(budgetChars));
+  if (!budget) return undefined;
+  if (value.length <= budget) return value;
+
+  const marker = `\n[... ${label} truncated by Auto CodeZ context budget ...]`;
+  if (marker.length >= budget) return value.slice(0, budget);
+  return `${value.slice(0, budget - marker.length)}${marker}`;
+}
+
+function compileProviderInstructions(
+  instructions: readonly string[],
+  budgetChars: number,
+): string[] {
+  let remaining = Math.max(0, Math.floor(budgetChars));
+  if (!remaining) return [];
+  const compiled: string[] = [];
+  for (const instruction of instructions) {
+    const normalized = instruction.trim();
+    if (!normalized || remaining <= 0) continue;
+    const bounded = compactContextClass(normalized, remaining, 'provider instructions');
+    if (!bounded) continue;
+    compiled.push(bounded);
+    remaining -= bounded.length;
+  }
+  return compiled;
+}
+
 export const AUTOCODEZ_AGENT_HANDBOOK = `
 You are operating inside Auto CodeZ, a local desktop AI development agent. Auto CodeZ is not only a chat interface. When tools are provided, you have controlled access to the user's active local workspace and should use those tools to perform development tasks requested by the user.
 
@@ -321,7 +368,12 @@ export class ContextCompiler {
       : compileOperationalTrace(input.operationalTrace, input.operationalTraceBudgetChars);
     if (operationalTrace) messages.push({ role: 'system', content: operationalTrace });
 
-    if (input.memoryContext) messages.push({ role: 'system', content: input.memoryContext });
+    const memoryContext = compactContextClass(
+      input.memoryContext,
+      normalizedContextBudget(input.memoryBudgetChars, DEFAULT_MEMORY_CONTEXT_BUDGET),
+      'memory context',
+    );
+    if (memoryContext) messages.push({ role: 'system', content: memoryContext });
 
     if (input.lightweightTurn) {
       messages.push({
@@ -330,21 +382,35 @@ export class ContextCompiler {
       });
     }
 
-    for (const instruction of input.providerInstructions ?? []) {
-      const normalized = instruction.trim();
-      if (normalized) messages.push({ role: 'system', content: normalized });
+    for (const instruction of compileProviderInstructions(
+      input.providerInstructions ?? [],
+      normalizedContextBudget(input.providerInstructionsBudgetChars, DEFAULT_PROVIDER_INSTRUCTIONS_BUDGET),
+    )) {
+      messages.push({ role: 'system', content: instruction });
     }
 
-    if (input.webContext) {
-      messages.push({ role: 'system', content: input.webContext });
+    const webContext = compactContextClass(
+      input.webContext,
+      normalizedContextBudget(input.webBudgetChars, DEFAULT_WEB_CONTEXT_BUDGET),
+      'web context',
+    );
+    if (webContext) {
+      messages.push({ role: 'system', content: webContext });
       messages.push({
         role: 'system',
         content: 'O grounding Web deste turno já foi concluído pelo Auto CodeZ. Use as fontes e trechos acima diretamente. Não repita a mesma pesquisa. As ferramentas web_search e web_fetch ficam deliberadamente fora deste request quando o grounding já trouxe fontes suficientes, para reduzir latência e chamadas redundantes.',
       });
     }
 
-    if (input.projectContext && !input.lightweightTurn) {
-      messages.push({ role: 'system', content: `Contexto do workspace atual:\n${input.projectContext}` });
+    const projectContext = input.lightweightTurn
+      ? undefined
+      : compactContextClass(
+          input.projectContext,
+          normalizedContextBudget(input.projectBudgetChars, DEFAULT_PROJECT_CONTEXT_BUDGET),
+          'project context',
+        );
+    if (projectContext) {
+      messages.push({ role: 'system', content: `Contexto do workspace atual:\n${projectContext}` });
     }
 
     if (input.compactedHistory) {
