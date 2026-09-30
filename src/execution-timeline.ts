@@ -1,4 +1,5 @@
 import type { ExecutionChange, ExecutionSnapshot, ExecutionState } from './execution-manager';
+import type { StructuredActivityEvent, StructuredActivityPhase } from './agent-core/contracts';
 
 export type ExecutionApprovalDecision = 'approved' | 'denied';
 
@@ -7,7 +8,7 @@ export type ExecutionTimelineEvent = {
   chatId: string;
   runId: string;
   at: number;
-  type: 'started' | 'recovered' | 'state_changed' | 'tool_changed' | 'approval_decision' | 'error' | 'removed';
+  type: 'started' | 'recovered' | 'state_changed' | 'tool_changed' | 'approval_decision' | 'structured_activity' | 'error' | 'removed';
   state?: ExecutionSnapshot['state'];
   startedAt?: number;
   currentTool?: string;
@@ -16,6 +17,8 @@ export type ExecutionTimelineEvent = {
   toolCallId?: string;
   toolName?: string;
   approvalDecision?: ExecutionApprovalDecision;
+  activityId?: string;
+  activityPhase?: StructuredActivityPhase;
 };
 
 type TimelineCursor = {
@@ -23,9 +26,10 @@ type TimelineCursor = {
   signature: string;
 };
 
-const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'recovered', 'state_changed', 'tool_changed', 'approval_decision', 'error', 'removed']);
+const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'recovered', 'state_changed', 'tool_changed', 'approval_decision', 'structured_activity', 'error', 'removed']);
 const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
 const APPROVAL_DECISIONS = new Set<ExecutionApprovalDecision>(['approved', 'denied']);
+const ACTIVITY_PHASES = new Set<StructuredActivityPhase>(['queued', 'running', 'waiting', 'completed', 'failed', 'cancelled']);
 
 function snapshotSignature(snapshot: ExecutionSnapshot): string {
   return JSON.stringify([
@@ -75,7 +79,9 @@ function isValidEvent(value: unknown): value is ExecutionTimelineEvent {
     && (event.approvalId === undefined || (typeof event.approvalId === 'string' && event.approvalId.length > 0))
     && (event.toolCallId === undefined || (typeof event.toolCallId === 'string' && event.toolCallId.length > 0))
     && (event.toolName === undefined || (typeof event.toolName === 'string' && event.toolName.length > 0))
-    && (event.approvalDecision === undefined || APPROVAL_DECISIONS.has(event.approvalDecision));
+    && (event.approvalDecision === undefined || APPROVAL_DECISIONS.has(event.approvalDecision))
+    && (event.activityId === undefined || (typeof event.activityId === 'string' && event.activityId.length > 0))
+    && (event.activityPhase === undefined || ACTIVITY_PHASES.has(event.activityPhase));
   if (!validBase) return false;
   if (event.type === 'recovered') {
     return event.state !== undefined
@@ -86,6 +92,13 @@ function isValidEvent(value: unknown): value is ExecutionTimelineEvent {
       && event.toolName === undefined
       && event.approvalDecision === undefined;
   }
+  if (event.type === 'structured_activity') {
+    return event.activityId !== undefined && event.activityPhase !== undefined
+      && event.toolCallId !== undefined && event.toolName !== undefined
+      && event.state === undefined && event.startedAt === undefined
+      && event.approvalId === undefined && event.approvalDecision === undefined;
+  }
+  if (event.activityId !== undefined || event.activityPhase !== undefined) return false;
   if (event.type === 'approval_decision') {
     return event.startedAt === undefined
       && event.approvalId !== undefined
@@ -187,6 +200,19 @@ export class ExecutionTimeline {
       toolName,
       approvalDecision: input.decision,
     })];
+  }
+
+  recordStructuredActivity(event: StructuredActivityEvent): ExecutionTimelineEvent[] {
+    const chatId = requireNonEmpty(event.chatId ?? '', 'Chat da atividade');
+    const runId = requireNonEmpty(event.runId, 'Execução da atividade');
+    const toolCallId = requireNonEmpty(event.toolCallId ?? '', 'Tool call da atividade');
+    const toolName = requireNonEmpty(event.capabilityId ?? '', 'Ferramenta da atividade');
+    const activityId = requireNonEmpty(event.id, 'Identificador da atividade');
+    if (!ACTIVITY_PHASES.has(event.phase)) throw new Error('Fase de atividade inválida.');
+    if (!Number.isFinite(event.createdAt) || event.createdAt < 0) throw new Error('Data de atividade inválida.');
+    if (this.events.some((entry) => entry.type === 'structured_activity' && entry.chatId === chatId && entry.runId === runId && entry.activityId === activityId)) return [];
+    return [this.append({ chatId, runId, at: event.createdAt, type: 'structured_activity',
+      toolCallId, toolName, activityId, activityPhase: event.phase })];
   }
 
   list(chatId?: string, runId?: string): ExecutionTimelineEvent[] {
@@ -307,7 +333,7 @@ export class ExecutionTimeline {
         this.cursors.set(event.chatId, { snapshot, signature: snapshotSignature(snapshot) });
         continue;
       }
-      if (event.type === 'approval_decision') continue;
+      if (event.type === 'approval_decision' || event.type === 'structured_activity') continue;
       if (event.type === 'started' || !current || current.snapshot.runId !== event.runId) {
         if (event.type !== 'started' || !event.state) continue;
         const snapshot: ExecutionSnapshot = {
