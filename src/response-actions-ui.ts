@@ -103,6 +103,12 @@ async function hydrateRunEligibility(message: HTMLElement, runId: string): Promi
   const actions = message.querySelector<HTMLElement>(':scope > .ac-response-actions');
   const retry = actions?.querySelector<HTMLButtonElement>('[data-response-action="retry"]');
   if (!retry) return;
+  const finalMessages = [...document.querySelectorAll<HTMLElement>('.message.assistant[data-final-assistant="true"]')];
+  const isLatestFinal = finalMessages.at(-1) === message;
+  if (!isLatestFinal) {
+    retry.hidden = true;
+    return;
+  }
   const report = await reportFor(runId);
   if (!message.isConnected || message.dataset.runId !== runId) return;
   retry.hidden = !report || report.recordedTools.observed !== 0;
