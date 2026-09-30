@@ -28,6 +28,7 @@ const SENSITIVE_JSON_FILES = new Set([
   'mcp-connections.json',
   'mcp-gateway-binding.json',
   'account-session.json',
+  'account-memories.json',
   'chats.json',
 ]);
 
