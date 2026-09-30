@@ -39,7 +39,7 @@ export function summarizeRecordedTools(events: ExecutionTimelineEvent[]): RunToo
   }
   const tools = [...latest.values()]
     .sort((left, right) => left.sequence - right.sequence)
-    .map(({ sequence: _sequence, ...tool }) => tool);
+    .map((tool) => ({ toolCallId: tool.toolCallId, toolName: tool.toolName, phase: tool.phase, updatedAt: tool.updatedAt }));
   return {
     observed: tools.length,
     completed: tools.filter((tool) => tool.phase === 'completed').length,
