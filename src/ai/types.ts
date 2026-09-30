@@ -34,7 +34,7 @@ export interface AIAttachment {
   dataBase64?: string;
 }
 
-export interface AIMessage { role: MessageRole; content: string; createdAt?: number; toolCallId?: string; toolName?: ToolName; toolCalls?: AIToolCall[]; attachments?: AIAttachment[]; changes?: FileDiff[]; diffPlan?: DiffPlan; commandResult?: CommandResultSummary; gitResult?: GitOperationSummary; sources?: AISource[]; }
+export interface AIMessage { role: MessageRole; content: string; createdAt?: number; runId?: string; toolCallId?: string; toolName?: ToolName; toolCalls?: AIToolCall[]; attachments?: AIAttachment[]; changes?: FileDiff[]; diffPlan?: DiffPlan; commandResult?: CommandResultSummary; gitResult?: GitOperationSummary; sources?: AISource[]; }
 export interface AIModel { id: string; name: string; providerId: ProviderId; capabilities: Capability[]; contextWindow?: number; reasoningLevels?: IntelligenceLevel[]; }
 export interface AIProviderConfig { id: ProviderId; displayName: string; apiKey: string; baseUrl?: string; selectedModel?: string; enabled: boolean; }
 export interface AIRequest { providerId: ProviderId; model: string; messages: AIMessage[]; intelligence: IntelligenceLevel; projectContext?: string; toolsEnabled: boolean; tools?: AIToolDefinition[]; }
