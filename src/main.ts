@@ -41,6 +41,7 @@ import { ExecutionPlanPersistence, ExecutionPlanStore } from './execution-plan-s
 import { ExecutionPlanHistory } from './execution-plan-history';
 import { ExecutionPlanHistoryPersistence, ExecutionPlanHistoryStore } from './execution-plan-history-store';
 import { ExecutionReportBuilder } from './execution-report';
+import { prepareSafeResponseRetry } from './response-retry';
 import { ExecutionQualityGateRuntime, type ExecutionQualityGateRequirement } from './execution-quality-gate';
 import { ExecutionQualityGatePersistence, ExecutionQualityGateStore } from './execution-quality-gate-store';
 import { ExecutionTaskCapsuleRuntime } from './execution-task-capsule';
@@ -1269,10 +1270,21 @@ ipcMain.handle('chat-attachments:paste-image', async (_event, input: unknown) =>
 ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   const value = requireObject(input, 'Mensagem');
   const chatId = requireIdentifier(value.chatId, 'Chat');
-  const content = requireNonEmptyString(value.content, 'Mensagem');
-  const attachments = await requireStoredAttachments(value.attachments);
+  let content = requireNonEmptyString(value.content, 'Mensagem');
+  let attachments = await requireStoredAttachments(value.attachments);
   const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
-  const { chat, config } = await getChatContext(chatId);
+  const retryRunId = value.retryRunId === undefined ? undefined : requireIdentifier(value.retryRunId, 'Execução da resposta');
+  const context = await getChatContext(chatId);
+  let chat = context.chat;
+  const config = context.config;
+  if (retryRunId) {
+    const retry = prepareSafeResponseRetry(chat, retryRunId, executionReportBuilder.build(chatId, retryRunId));
+    if (content !== retry.content) throw new Error('A mensagem original não corresponde à execução selecionada para retry.');
+    if (attachments.length) throw new Error('Anexos não devem ser reenviados manualmente durante retry seguro.');
+    chat = await chatManager.update(retry.chat);
+    content = retry.content;
+    attachments = await requireStoredAttachments(retry.attachments);
+  }
   const lastMessage = chat.messages.at(-1);
   const isRetryOfPersistedUserMessage = lastMessage?.role === 'user' && lastMessage.content === content;
   const current = (await chatManager.list()).find((item) => item.id === chat.id);
