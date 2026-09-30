@@ -2,6 +2,7 @@ import type { ExecutionManager, ExecutionSnapshot, ExecutionState } from './exec
 import type { ExecutionPlanHistory, ExecutionPlanHistoryRecord } from './execution-plan-history';
 import type { ExecutionEvidenceType, ExecutionPlan } from './execution-planner';
 import type { ExecutionTimeline, ExecutionTimelineEvent } from './execution-timeline';
+import { summarizeRecordedTools, type RunToolDigest } from './run-tool-digest';
 
 export type ExecutionCompletionProof = 'verified' | 'unplanned' | 'active' | 'failed' | 'interrupted' | 'incomplete' | 'unknown';
 
@@ -31,6 +32,7 @@ export type ExecutionReport = {
   steps: ExecutionStepSummary;
   evidence: ExecutionEvidenceSummary;
   timeline: ExecutionTimelineEvent[];
+  recordedTools: RunToolDigest;
 };
 
 const EMPTY_STEPS: ExecutionStepSummary = {
@@ -153,6 +155,7 @@ export class ExecutionReportBuilder {
       steps: summarizeSteps(plan),
       evidence: summarizeEvidence(plan),
       timeline,
+      recordedTools: summarizeRecordedTools(timeline),
     };
   }
 
