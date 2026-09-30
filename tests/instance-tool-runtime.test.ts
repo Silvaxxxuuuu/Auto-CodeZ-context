@@ -111,7 +111,7 @@ test('instance lifecycle tools cannot cross project boundaries and list stays wo
     assert.deepEqual(JSON.parse(listed.output ?? '[]'), []);
     assert.equal(f.instances.get(instanceId).status, 'open');
   } finally {
-    await f.instances.closeAll().catch(() => undefined);
+    await f.instances.closeAll().catch((): void => {});
     await f.cleanup();
   }
 });
