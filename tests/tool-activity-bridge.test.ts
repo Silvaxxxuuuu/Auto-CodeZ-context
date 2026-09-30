@@ -105,6 +105,6 @@ test('V2 activity adapter differentiates pending approvals, failures and verifie
   }), 2002);
   assert.equal(changed.phase, 'completed');
   assert.deepEqual(changed.subject, { path: 'src/a.ts' });
-  assert.match(changed.summary ?? '', /src\\/a\\.ts/);
+  assert.equal(changed.summary?.includes('src/a.ts'), true);
   assert.equal(changed.id, `tool:${runId}:file-1:completed`);
 });
