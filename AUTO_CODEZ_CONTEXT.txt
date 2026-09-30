@@ -11603,3 +11603,62 @@ REGRA:
 - Não regredir para IDs de capability inventados/ad-hoc.
 - Não declarar rollback para side effects open-world que o Auto CodeZ não consegue reverter.
 - Não remover guardas de segurança para satisfazer o modo unrestricted.
+------------------------------------------------------------
+24.84. CHECKPOINT REAL — ROLLBACK UNIFICADO / 2026-09-30
+------------------------------------------------------------
+
+ESTADO DE REFERÊNCIA:
+- HEAD de runtime/testes antes deste update documental: da0e185076fd3c4047e3bcd8cfd1fc7e4e7e2e0a
+- PR #9: OPEN + DRAFT; NÃO mergeada.
+- Validate Auto CodeZ nesse HEAD: SUCCESS completo.
+- Validate Account API: SUCCESS.
+- Real Vision Integration: SUCCESS.
+- Visual Auto CodeZ e Real Local Attachment Chat ainda estavam executando, sem falhas registradas, quando este contexto foi atualizado.
+
+ROLLBACK V2 UNIFICADO — IMPLEMENTADO:
+1. Novo OperationRollbackRuntime em src/agent-core/operation-rollback-runtime.ts.
+2. Dispatch único por operationId e capabilityId canônico:
+   - workspace.create_file -> rollbackCreatedFile
+   - workspace.create_folder -> rollbackCreatedFolder
+   - workspace.write_file -> restoreWrittenFile
+   - workspace.delete_file -> restoreDeletedFile
+   - workspace.rename_file -> restoreRenamedFile
+3. Estados fail-closed:
+   - rolled_back é idempotente;
+   - rollback_conflict bloqueia nova tentativa automática;
+   - prepared/executing/failed não são tratados como operações verificadas;
+   - capability sem rollback explícito é recusada.
+4. run_command NÃO entra nesse dispatcher e continua sem promessa falsa de rollback para shell open-world.
+
+CHECKPOINT / RESTORE POINT:
+1. ExecutionCheckpoint agora aceita operationId opcional.
+2. Checkpoints antigos sem operationId continuam compatíveis e usam o rollback legado por FileDiff.
+3. Checkpoint novo com operationId:
+   - NÃO pode fazer downgrade silencioso para rollback legado;
+   - precisa do OperationRollbackRuntime;
+   - só é marcado restored depois de rollback V2 confirmado.
+4. operationId é validado e persistido no ExecutionCheckpointStore.
+5. ToolRuntime propaga operationId internamente, sem parsear JSON de output.
+6. No wiring real do app, ExecutionCheckpointRecorder registra checkpoint direto apenas quando existe operationId.
+   - isso evita criar restore point prematuro para mutação que exista somente no Shadow Workspace.
+7. main.ts instancia um único OperationRollbackRuntime e o injeta no ExecutionCheckpointController.
+
+VALIDAÇÃO:
+- teste unitário do dispatcher cobre todas as capabilities reversíveis e estados fail-closed;
+- teste do controller prova que checkpoint V2 usa operationId e não toca no workspace legado;
+- teste prova que ausência do dispatcher bloqueia checkpoint V2;
+- teste de store prova round-trip e validação de operationId;
+- teste ToolRuntime prova que checkpoint incremental recebe o mesmo operationId do Operation Journal;
+- teste de integração ponta a ponta prova:
+  create_file real -> Operation Journal verified -> checkpoint com operationId -> restore controller -> dispatcher V2 -> arquivo/diretórios removidos -> Operation Journal rolled_back -> checkpoint restored.
+- Core tests do Validate Auto CodeZ passaram com essa cadeia completa.
+
+REGRA DE RECOVERY:
+- recovery automático NÃO deve fazer rollback de trabalho parcial.
+- invariant partial-work-survives continua obrigatório.
+- rollback V2 entra em restore explícito/recovery dirigido, não em falha transitória automática.
+
+PRÓXIMO GAP DO AGENT CORE V2:
+1. Continuar identidade/lifecycle V2 de commands/processes sem colocar shell arbitrário no journal reversível.
+2. Consolidar ContextCompiler / Agent Handbook / Operational Trace sobre capabilityId/toolName já canônicos.
+3. Manter Shadow Workspace até o teste de aceitação real provar paridade/publicação/rollback completos.
