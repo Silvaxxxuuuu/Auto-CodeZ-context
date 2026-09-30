@@ -28,6 +28,9 @@ function installStyle(): void {
     .execution-graph-node[data-kind='started'] .execution-graph-dot{background:#7b9bd1}
     .execution-graph-node[data-kind='recovered'] .execution-graph-dot{background:#b39a6c}
     .execution-graph-node[data-kind='tool'] .execution-graph-dot{background:#8b8fd0}
+    .execution-graph-node[data-phase='completed'] .execution-graph-dot{background:#6fa783}
+    .execution-graph-node[data-phase='failed'] .execution-graph-dot{background:#ca7379}
+    .execution-graph-node[data-phase='waiting'] .execution-graph-dot{background:#b39a6c}
     .execution-graph-node[data-kind='approval'][data-decision='approved'] .execution-graph-dot{background:#6fa783}
     .execution-graph-node[data-kind='approval'][data-decision='denied'] .execution-graph-dot{background:#ca7379}
     .execution-graph-node[data-kind='evidence'] .execution-graph-dot{background:#6fa783}
@@ -54,7 +57,7 @@ function selectedChatId(): string {
 }
 
 function nodeMeta(node: ExecutionGraphNode): string {
-  if (node.kind === 'tool') return 'Ferramenta observada';
+  if (node.kind === 'tool') return node.activityPhase ? 'Resultado registrado pela Activity Engine V2' : 'Ferramenta observada';
   if (node.kind === 'approval') return node.approvalDecision === 'approved' ? 'Aprovação confirmada pelo usuário' : 'Operação recusada pelo usuário';
   if (node.kind === 'evidence') {
     const parts = [node.evidenceType, node.stepTitle, node.reference].filter((value): value is string => Boolean(value));
@@ -76,8 +79,9 @@ function formatTime(value: number): string {
 
 function nodeMarkup(node: ExecutionGraphNode): string {
   const state = node.state ? ` data-state="${escapeHtml(node.state)}"` : '';
+  const phase = node.activityPhase ? ` data-phase="${escapeHtml(node.activityPhase)}"` : '';
   const decision = node.approvalDecision ? ` data-decision="${escapeHtml(node.approvalDecision)}"` : '';
-  return `<div class="execution-graph-node" data-kind="${escapeHtml(node.kind)}"${state}${decision}><span class="execution-graph-dot"></span><div class="execution-graph-copy"><div class="execution-graph-label" title="${escapeHtml(node.label)}">${escapeHtml(node.label)}</div><div class="execution-graph-meta" title="${escapeHtml(nodeMeta(node))}">${escapeHtml(nodeMeta(node))}</div></div><span class="execution-graph-time">${escapeHtml(formatTime(node.at))}</span></div>`;
+  return `<div class="execution-graph-node" data-kind="${escapeHtml(node.kind)}"${state}${phase}${decision}><span class="execution-graph-dot"></span><div class="execution-graph-copy"><div class="execution-graph-label" title="${escapeHtml(node.label)}">${escapeHtml(node.label)}</div><div class="execution-graph-meta" title="${escapeHtml(nodeMeta(node))}">${escapeHtml(nodeMeta(node))}</div></div><span class="execution-graph-time">${escapeHtml(formatTime(node.at))}</span></div>`;
 }
 
 function renderGraphContainer(container: HTMLElement, report: ExecutionReport): boolean {
@@ -88,7 +92,7 @@ function renderGraphContainer(container: HTMLElement, report: ExecutionReport): 
   }
   const visible = graph.nodes.slice(-MAX_VISIBLE_NODES);
   const hiddenCount = graph.nodes.length - visible.length;
-  container.innerHTML = `<div class="execution-graph-head"><span class="execution-graph-title">Execution Graph</span><span class="execution-graph-count">${graph.nodes.length} fatos</span></div><div class="execution-graph-list">${hiddenCount > 0 ? `<div class="execution-graph-more">+${hiddenCount} fatos anteriores</div>` : ''}${visible.map(nodeMarkup).join('')}</div>`;
+  container.innerHTML = `<div class="execution-graph-head"><span class="execution-graph-title">Trabalho realizado</span><span class="execution-graph-count">${graph.nodes.length} fatos</span></div><div class="execution-graph-list">${hiddenCount > 0 ? `<div class="execution-graph-more">+${hiddenCount} fatos anteriores</div>` : ''}${visible.map(nodeMarkup).join('')}</div>`;
   return true;
 }
 
