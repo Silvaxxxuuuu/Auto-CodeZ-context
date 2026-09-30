@@ -8,6 +8,7 @@ import { DurableOperationJournal, OperationJournalStore } from './agent-core/ope
 import { IncrementalWorkspaceMutationRuntime } from './agent-core/incremental-workspace-runtime';
 import { RollbackBlobStore } from './agent-core/rollback-blob-store';
 import { OperationRollbackRuntime } from './agent-core/operation-rollback-runtime';
+import { OperationalTraceRuntime } from './agent-core/operational-trace';
 import { toStructuredProcessLifecycleActivity } from './agent/process-activity-bridge';
 import { ProviderManager } from './ai/provider-manager';
 import { ChatManager } from './ai/chat-manager';
@@ -334,6 +335,8 @@ const executionTimelinePersistence = new ExecutionTimelinePersistence(executionT
 const operationalLedgerStore = new OperationalLedgerStore(storage);
 const operationalLedgerPersistence = new OperationalLedgerPersistence(operationalLedgerStore);
 const operationalLedgerRetrieval = new OperationalLedgerRetrieval(operationalLedger);
+const operationalTraceRuntime = new OperationalTraceRuntime(operationalLedgerRetrieval, executionTimeline);
+agentRuntime.configureOperationalTraceProvider((chatId, runId) => operationalTraceRuntime.snapshot(chatId, runId));
 const mcpGatewayExecutionRuntime = new McpGatewayExecutionRuntime(agentRuntime, pluginToolCatalog, operationalLedger);
 const mcpGatewayProtocol = new McpGatewayProtocol(operationalLedgerRetrieval, mcpGatewayExecutionRuntime);
 const mcpGatewayServer = new McpGatewayHttpServer(mcpGatewayProtocol);
