@@ -14,6 +14,7 @@ function report(): ExecutionReport {
     planArchived: true,
     steps: { total: 1, pending: 0, running: 0, completed: 1, failed: 0, skipped: 0 },
     evidence: { tool: 0, test: 1, build: 0, file: 1, result: 0 },
+    recordedTools: { observed: 0, completed: 0, failed: 0, waiting: 0, cancelled: 0, running: 0, tools: [] },
     timeline: [
       { sequence: 1, chatId: 'chat-a', runId: 'run-a', at: 1000, type: 'started', state: 'running' },
       { sequence: 2, chatId: 'chat-a', runId: 'run-a', at: 1200, type: 'tool_changed', state: 'running', currentTool: 'read_file' },
@@ -120,4 +121,25 @@ test('rejeita relatório sem identidade canônica', () => {
   const invalid = report();
   invalid.chatId = '';
   assert.throws(() => buildExecutionGraph(invalid), /Chat do relatório inválido/);
+});
+
+
+test('projeta estados V2 com nomes legíveis sem afirmar sucesso para operações em espera', () => {
+  const input = report();
+  input.timeline = [
+    { sequence: 1, chatId: 'chat-a', runId: 'run-a', at: 1000, type: 'started', state: 'running' },
+    { sequence: 2, chatId: 'chat-a', runId: 'run-a', at: 1200, type: 'structured_activity', toolCallId: 'c1', toolName: 'create_file', activityId: 'c1:waiting', activityPhase: 'waiting' },
+    { sequence: 3, chatId: 'chat-a', runId: 'run-a', at: 1300, type: 'structured_activity', toolCallId: 'c1', toolName: 'create_file', activityId: 'c1:completed', activityPhase: 'completed' },
+    { sequence: 4, chatId: 'chat-a', runId: 'run-a', at: 1400, type: 'structured_activity', toolCallId: 'c2', toolName: 'inspect_instance', activityId: 'c2:failed', activityPhase: 'failed' },
+  ];
+  input.plan = undefined;
+  const nodes = buildExecutionGraph(input).nodes;
+  assert.deepEqual(nodes.map((node) => node.kind), ['started', 'tool', 'tool', 'tool']);
+  assert.equal(nodes[1].activityPhase, 'waiting');
+  assert.match(nodes[1].label, /aguardando aprovação/);
+  assert.equal(nodes[2].activityPhase, 'completed');
+  assert.match(nodes[2].label, /concluída/);
+  assert.equal(nodes[3].activityPhase, 'failed');
+  assert.match(nodes[3].label, /falhou/);
+  assert.equal(nodes[3].tool, 'inspect_instance');
 });
