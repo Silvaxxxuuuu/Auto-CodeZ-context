@@ -16,6 +16,7 @@ import type { AttachmentStore } from './attachment-store';
 import { isNativeImageMediaType } from './provider-attachments';
 import { VisualGroundingCoordinator } from './visual-grounding/visual-grounding-coordinator';
 import { ContextCompiler } from './context-compiler';
+import type { ComputerRuntimeFact } from '../agent/computer-context';
 
 const PROVIDER_RECENT_TOOL_ROUNDS = 2;
 const PROVIDER_RECENT_TOOL_RESULT_CHARS = 12_000;
@@ -228,7 +229,7 @@ export class ChatRuntime {
     }];
   }
 
-  private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { disableTools?: boolean }) {
+  private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { disableTools?: boolean; runtimeFacts?: readonly ComputerRuntimeFact[] }) {
     const adapter = this.registry.get(config.id);
     signal?.throwIfAborted();
     const model = await runWithAbortSignal(signal, () => this.models.resolveForRequest(config, chat.model));
@@ -339,6 +340,7 @@ export class ChatRuntime {
       disableTools: Boolean(options?.disableTools),
       capabilityToolNames: toolsEnabled ? tools.map((tool) => tool.name) : [],
       capabilityQuery: currentUserMessage?.content ?? '',
+      ...(options?.runtimeFacts?.length ? { runtimeFacts: options.runtimeFacts } : {}),
     });
     const messages = [...systemMessages, ...providerHistory];
     if (groundedAnswerOnly) {
@@ -366,10 +368,10 @@ export class ChatRuntime {
     return this.requestJournal.begin(request, fingerprintProviderScope(config), { allowInterruptedRetry: isExplicitProviderRecovery() });
   }
 
-  async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal): Promise<AIResponse> {
+  async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { runtimeFacts?: readonly ComputerRuntimeFact[] }): Promise<AIResponse> {
     try {
       signal?.throwIfAborted();
-      const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal);
+      const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal, options);
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
       const journal = await this.beginProviderRequest(config, request);
       if (journal.cachedResponse) {
@@ -401,7 +403,7 @@ export class ChatRuntime {
     }
   }
 
-  async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { disableTools?: boolean }): AsyncGenerator<AIStreamEvent> {
+  async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { disableTools?: boolean; runtimeFacts?: readonly ComputerRuntimeFact[] }): AsyncGenerator<AIStreamEvent> {
     try {
       signal?.throwIfAborted();
       const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal, options);
