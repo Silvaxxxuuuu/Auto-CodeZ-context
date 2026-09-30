@@ -206,6 +206,7 @@ export type ProcessHandle = {
   startedAt: number;
   finishedAt?: number;
   exitCode?: number | null;
+  chatId?: string;
   runId?: string;
   toolCallId?: string;
   capabilityId?: 'process.start';
