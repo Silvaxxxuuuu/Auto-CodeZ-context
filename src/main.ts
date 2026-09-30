@@ -1344,16 +1344,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
     return { pendingApprovalIds: [], chat: current, error: message };
   }
 
-  if (preparedRetry) {
-    try {
-      chat = await chatManager.update(preparedRetry.chat);
-    } catch (error) {
-      executionManager.remove(chatId);
-      const message = error instanceof Error ? error.message : String(error);
-      sendStreamEvent({ type: 'error', chatId, runId: execution.runId, error: message });
-      return { pendingApprovalIds: [], chat: current, error: message };
-    }
-  }
+  if (preparedRetry) chat = preparedRetry.chat;
   const lastMessage = chat.messages.at(-1);
   const isRetryOfPersistedUserMessage = lastMessage?.role === 'user' && lastMessage.content === content;
 
@@ -1388,7 +1379,9 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
         ...(attachments.length ? { attachments } : {}),
       });
     }
-    const persistedWorkingChat = (await chatManager.list()).find((item) => item.id === chat.id);
+    const persistedWorkingChat = preparedRetry
+      ? chat
+      : (await chatManager.list()).find((item) => item.id === chat.id);
     if (!persistedWorkingChat) throw new Error('Chat desapareceu durante a execução.');
     const workingChat = await hydrateChatAttachments(persistedWorkingChat);
     let result;
