@@ -240,6 +240,11 @@ test('open_instance ligado ao workspace falha fechado enquanto Shadow legado est
     );
     assert.equal(captured.ok, false);
     assert.match(captured.error ?? '', /Shadow Workspace legado|visão divergente/i);
+
+    const inspected = await fx.tools.execute('chat-a', 'project-a', 'read-only',
+      toolCall('inspect-shadow-preview', 'inspect_instance', { instanceId: 'existing-preview' }), 'run-a');
+    assert.equal(inspected.ok, false);
+    assert.match(inspected.error ?? '', /Shadow Workspace legado|visão divergente/i);
     assert.deepEqual(fx.openedInstances, []);
   } finally {
     await fx.cleanup();
