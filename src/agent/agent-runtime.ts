@@ -4,6 +4,7 @@ import { ActivityRuntime } from './activity-runtime';
 import { ToolRuntime } from './tool-runtime';
 import { SYSTEM_PROJECT_ID } from './command-runtime';
 import { ChatRuntime } from '../ai/chat-runtime';
+import type { ComputerRuntimeFact } from './computer-context';
 import { createToolActivitySnapshot, toActivityInput, toStructuredToolActivity } from './tool-activity-bridge';
 import {
   ProgressWatchdog,
@@ -132,6 +133,7 @@ type PendingRun = {
   config: AIProviderConfig;
   chat: ChatRecord;
   projectContext?: string;
+  runtimeFacts?: ComputerRuntimeFact[];
   permission: PermissionLevel;
   workingChat: ChatRecord;
   pendingApprovalIds: string[];
@@ -149,6 +151,7 @@ interface PersistedPendingRun {
   config: AIProviderConfig;
   chat: ChatRecord;
   projectContext?: string;
+  runtimeFacts?: ComputerRuntimeFact[];
   permission: PermissionLevel;
   workingChat: ChatRecord;
   pendingApprovalIds: string[];
@@ -319,9 +322,10 @@ export class AgentRuntime {
     projectContext: string | undefined,
     permission: PermissionLevel,
     runId: string = crypto.randomUUID(),
+    runtimeFacts?: ComputerRuntimeFact[],
   ): Promise<AgentRunResult> {
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
-    const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0, progressWatchdog: freshWatchdogSnapshot() };
+    const run: PendingRun = { runId, config, chat, projectContext, runtimeFacts, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0, progressWatchdog: freshWatchdogSnapshot() };
     this.recoverableRuns.set(run.runId, run);
     await this.persist();
     return this.runLoop(run);
@@ -336,10 +340,11 @@ export class AgentRuntime {
     signal?: AbortSignal,
     runId: string = crypto.randomUUID(),
     options?: { disableTools?: boolean },
+    runtimeFacts?: ComputerRuntimeFact[],
   ): Promise<AgentRunResult> {
     signal?.throwIfAborted();
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
-    const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0, progressWatchdog: freshWatchdogSnapshot(), streamEmitter: emit, disableTools: Boolean(options?.disableTools) };
+    const run: PendingRun = { runId, config, chat, projectContext, runtimeFacts, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0, progressWatchdog: freshWatchdogSnapshot(), streamEmitter: emit, disableTools: Boolean(options?.disableTools) };
     this.recoverableRuns.set(run.runId, run);
     await this.persist();
     return this.runStreamLoop(run, signal);
@@ -510,6 +515,7 @@ export class AgentRuntime {
         config: run.config,
         chat: run.chat,
         projectContext: run.projectContext,
+        runtimeFacts: run.runtimeFacts ? run.runtimeFacts.map((fact) => ({ ...fact })) : undefined,
         permission: run.permission,
         workingChat: run.workingChat,
         pendingApprovalIds: [...run.pendingApprovalIds],
@@ -623,7 +629,7 @@ export class AgentRuntime {
       signal?.throwIfAborted();
       let response: AIResponse;
       try {
-        response = await this.chatRuntime.send(run.config, run.workingChat, this.effectiveProjectContext(run), signal);
+        response = await this.chatRuntime.send(run.config, run.workingChat, this.effectiveProjectContext(run), signal, { runtimeFacts: run.runtimeFacts });
         this.consumeReplanDirective(run);
         run.lastError = undefined;
       } catch (error) {
@@ -709,7 +715,7 @@ export class AgentRuntime {
       let response: AIResponse | undefined;
       let streamError: string | undefined;
 
-      for await (const event of this.chatRuntime.stream(run.config, run.workingChat, this.effectiveProjectContext(run), signal, { disableTools: run.disableTools })) {
+      for await (const event of this.chatRuntime.stream(run.config, run.workingChat, this.effectiveProjectContext(run), signal, { disableTools: run.disableTools, runtimeFacts: run.runtimeFacts })) {
         signal?.throwIfAborted();
         const contextualEvent: AIStreamEvent = {
           ...event,
