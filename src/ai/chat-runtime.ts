@@ -225,6 +225,7 @@ export class ChatRuntime {
     private readonly attachmentIndexer?: AttachmentIndexer,
     private readonly visualGrounding = new VisualGroundingCoordinator(),
     private readonly attachmentStore?: Pick<AttachmentStore, 'hydrate'>,
+    private readonly memoryContext?: (chat: ChatRecord) => string | undefined,
   ) {}
 
   async init(): Promise<void> {
@@ -369,6 +370,8 @@ export class ChatRuntime {
     }
 
     const systemMessages = [{ role: 'system' as const, content: `${AUTOCODEZ_SYSTEM_INSTRUCTIONS}\n\nRuntime OS: ${runtimePlatform()}.\nRuntime date: ${runtimeDate()}.` }];
+    const memoryContext = this.memoryContext?.(chat);
+    if (memoryContext) systemMessages.push({ role: 'system' as const, content: memoryContext });
     if (lightweightTurn) {
       systemMessages.push({
         role: 'system' as const,
