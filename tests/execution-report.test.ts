@@ -121,11 +121,11 @@ test('execution report exposes factual final tool phases without upgrading compl
   executions.start('chat-a', tick(), 'run-a');
   const completed = {
     contractVersion: 1 as const, kind: 'tool', chatId: 'chat-a', runId: 'run-a',
-    toolCallId: 'tool-1', capabilityId: 'run_command', createdAt: tick(),
+    toolCallId: 'tool-1', toolName: 'run_command', capabilityId: 'command.run', createdAt: tick(),
   };
   timeline.recordStructuredActivity({ ...completed, id: 'tool-1:waiting', phase: 'waiting' });
   timeline.recordStructuredActivity({ ...completed, id: 'tool-1:completed', phase: 'completed', createdAt: tick() });
-  timeline.recordStructuredActivity({ ...completed, id: 'tool-2:failed', toolCallId: 'tool-2', capabilityId: 'inspect_instance', phase: 'failed', createdAt: tick() });
+  timeline.recordStructuredActivity({ ...completed, id: 'tool-2:failed', toolCallId: 'tool-2', toolName: 'inspect_instance', capabilityId: 'instance.inspect', phase: 'failed', createdAt: tick() });
   executions.update('chat-a', { state: 'completed', runId: 'run-a' }, tick());
   const report = reports.build('chat-a', 'run-a');
   assert.equal(report?.recordedTools.observed, 2);
