@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AUTOCODEZ_AGENT_HANDBOOK, compileCapabilityGuidance, compileOperationalTrace, compileRuntimeFacts, ContextCompiler } from '../src/ai/context-compiler';
+import { AUTOCODEZ_AGENT_HANDBOOK, compactContextClass, compileCapabilityGuidance, compileOperationalTrace, compileRuntimeFacts, ContextCompiler } from '../src/ai/context-compiler';
 import type { OperationalTraceSnapshot } from '../src/agent-core/operational-trace';
 
 test('ContextCompiler preserves deterministic system-context ordering', () => {
@@ -273,4 +273,61 @@ test('ContextCompiler omits Operational Trace from lightweight turns', () => {
 
   assert.equal(messages.some((message) => message.content.includes('Operational Trace')), false);
   assert.equal(messages.some((message) => message.content.includes('PRIVATE TRACE')), false);
+});
+
+
+test('ContextCompiler bounds memory, provider, web and project context classes deterministically', () => {
+  const compiler = new ContextCompiler();
+  const memoryContext = `MEMORY-${'m'.repeat(120)}`;
+  const providerInstructions = [`PROVIDER-A-${'a'.repeat(90)}`, `PROVIDER-B-${'b'.repeat(90)}`];
+  const webContext = `WEB-${'w'.repeat(160)}`;
+  const projectContext = `PROJECT-${'p'.repeat(220)}`;
+  const input = {
+    runtimePlatform: 'Windows',
+    runtimeDate: '2026-09-30',
+    memoryContext,
+    providerInstructions,
+    webContext,
+    projectContext,
+    memoryBudgetChars: 80,
+    providerInstructionsBudgetChars: 90,
+    webBudgetChars: 100,
+    projectBudgetChars: 120,
+  };
+
+  const first = compiler.compile(input);
+  const second = compiler.compile(input);
+
+  assert.deepEqual(first, second);
+  assert.equal(memoryContext.length > 80, true);
+  assert.deepEqual(providerInstructions, [`PROVIDER-A-${'a'.repeat(90)}`, `PROVIDER-B-${'b'.repeat(90)}`]);
+  const memory = first.find((message) => message.content.startsWith('MEMORY-'));
+  const provider = first.find((message) => message.content.startsWith('PROVIDER-A-'));
+  const web = first.find((message) => message.content.startsWith('WEB-'));
+  const project = first.find((message) => message.content.startsWith('Contexto do workspace atual:'));
+
+  assert.ok(memory);
+  assert.ok(provider);
+  assert.ok(web);
+  assert.ok(project);
+  assert.ok(memory.content.length <= 80);
+  assert.ok(provider.content.length <= 90);
+  assert.ok(web.content.length <= 100);
+  assert.ok(project.content.length <= 'Contexto do workspace atual:\n'.length + 120);
+  assert.match(memory.content, /memory context truncated by Auto CodeZ context budget/i);
+  assert.match(web.content, /web context truncated by Auto CodeZ context budget/i);
+  assert.match(project.content, /project context truncated by Auto CodeZ context budget/i);
+  assert.equal(first.some((message) => message.content.startsWith('PROVIDER-B-')), false);
+});
+
+test('compactContextClass preserves ranked prefix and emits a deterministic truncation marker', () => {
+  const value = `rank-1\nrank-2\n${'x'.repeat(200)}`;
+  const first = compactContextClass(value, 96, 'project context');
+  const second = compactContextClass(value, 96, 'project context');
+
+  assert.equal(first, second);
+  assert.ok(first);
+  assert.ok(first.length <= 96);
+  assert.match(first, /^rank-1\nrank-2/);
+  assert.match(first, /project context truncated by Auto CodeZ context budget/i);
 });
