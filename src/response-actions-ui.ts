@@ -26,13 +26,14 @@ function installStyle(): void {
   document.head.appendChild(style);
 }
 
-function icon(kind: 'copy' | 'work' | 'changes'): string {
+function icon(kind: 'copy' | 'retry' | 'work' | 'changes'): string {
   if (kind === 'copy') return '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>';
+  if (kind === 'retry') return '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg>';
   if (kind === 'changes') return '<svg viewBox="0 0 24 24"><path d="M8 6h11"/><path d="M8 12h11"/><path d="M8 18h11"/><path d="m3 6 1 1 2-2"/><path d="m3 12 1 1 2-2"/><path d="m3 18 1 1 2-2"/></svg>';
   return '<svg viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 4-4 3 2 5-6"/></svg>';
 }
 
-function button(kind: 'copy' | 'work' | 'changes', title: string, runId?: string): HTMLButtonElement {
+function button(kind: 'copy' | 'retry' | 'work' | 'changes', title: string, runId?: string): HTMLButtonElement {
   const element = document.createElement('button');
   element.type = 'button';
   element.className = 'ac-response-action';
@@ -82,6 +83,30 @@ async function openWorkReport(runId: string): Promise<void> {
   showWorkReport(report);
 }
 
+const reportCache = new Map<string, Promise<ExecutionReport | null>>();
+
+function reportFor(runId: string): Promise<ExecutionReport | null> {
+  const chatId = selectedChatId();
+  if (!chatId || !reportBridge?.getExecutionReport) return Promise.resolve(null);
+  const key = `${chatId}:${runId}`;
+  const cached = reportCache.get(key);
+  if (cached) return cached;
+  const request = reportBridge.getExecutionReport({ chatId, runId }).then((report) =>
+    report && report.chatId === chatId && report.runId === runId ? report : null,
+  ).catch(() => null);
+  reportCache.set(key, request);
+  return request;
+}
+
+async function hydrateRunEligibility(message: HTMLElement, runId: string): Promise<void> {
+  const actions = message.querySelector<HTMLElement>(':scope > .ac-response-actions');
+  const retry = actions?.querySelector<HTMLButtonElement>('[data-response-action="retry"]');
+  if (!retry) return;
+  const report = await reportFor(runId);
+  if (!message.isConnected || message.dataset.runId !== runId) return;
+  retry.hidden = !report || report.recordedTools.observed !== 0;
+}
+
 function matchingRun(runId: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`.execution-run[data-run-id="${CSS.escape(runId)}"]`);
 }
@@ -99,12 +124,16 @@ function hydrate(): void {
       actions.appendChild(button('copy', 'Copiar resposta'));
       const runId = message.dataset.runId;
       if (runId) {
+        const retry = button('retry', 'Tentar novamente', runId);
+        retry.hidden = true;
+        actions.appendChild(retry);
         actions.appendChild(button('work', 'Ver trabalho realizado', runId));
         const changes = button('changes', 'Ver alterações', runId);
         changes.hidden = !hasVisibleChanges(runId);
         actions.appendChild(changes);
       }
       message.appendChild(actions);
+      if (runId) void hydrateRunEligibility(message, runId);
     } else {
       const changes = actions.querySelector<HTMLButtonElement>('[data-response-action="changes"]');
       const runId = changes?.dataset.runId;
@@ -160,6 +189,13 @@ function initialize(): void {
     }
     const runId = target.dataset.runId;
     if (!runId) return;
+    if (action === 'retry') {
+      const message = target.closest<HTMLElement>('.message.assistant[data-final-assistant="true"]');
+      const messageIndex = Number.parseInt(message?.dataset.messageIndex ?? '', 10);
+      if (!message || !Number.isInteger(messageIndex)) return;
+      window.dispatchEvent(new CustomEvent('auto-codez-retry-response', { detail: { runId, messageIndex } }));
+      return;
+    }
     if (action === 'work') { void openWorkReport(runId); return; }
     revealRun(runId, true);
   });
