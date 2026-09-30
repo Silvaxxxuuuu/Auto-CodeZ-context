@@ -2,9 +2,10 @@ import type { LocalStorage } from './core/storage';
 import type { ExecutionTimelineEvent } from './execution-timeline';
 
 const DEFAULT_FILE = 'execution-timeline.json';
-const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'recovered', 'state_changed', 'tool_changed', 'approval_decision', 'error', 'removed']);
+const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'recovered', 'state_changed', 'tool_changed', 'approval_decision', 'structured_activity', 'error', 'removed']);
 const STATES = new Set(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
 const APPROVAL_DECISIONS = new Set(['approved', 'denied']);
+const ACTIVITY_PHASES = new Set(['queued', 'running', 'waiting', 'completed', 'failed', 'cancelled']);
 
 type StoredExecutionTimeline = {
   version: 1;
@@ -32,7 +33,9 @@ function isEvent(value: unknown): value is ExecutionTimelineEvent {
     && (event.approvalId === undefined || (typeof event.approvalId === 'string' && event.approvalId.length > 0))
     && (event.toolCallId === undefined || (typeof event.toolCallId === 'string' && event.toolCallId.length > 0))
     && (event.toolName === undefined || (typeof event.toolName === 'string' && event.toolName.length > 0))
-    && (event.approvalDecision === undefined || APPROVAL_DECISIONS.has(event.approvalDecision));
+    && (event.approvalDecision === undefined || APPROVAL_DECISIONS.has(event.approvalDecision))
+    && (event.activityId === undefined || (typeof event.activityId === 'string' && event.activityId.length > 0))
+    && (event.activityPhase === undefined || ACTIVITY_PHASES.has(event.activityPhase));
   if (!validBase) return false;
   if (event.type === 'recovered') {
     return event.state !== undefined
@@ -43,6 +46,13 @@ function isEvent(value: unknown): value is ExecutionTimelineEvent {
       && event.toolName === undefined
       && event.approvalDecision === undefined;
   }
+  if (event.type === 'structured_activity') {
+    return event.activityId !== undefined && event.activityPhase !== undefined
+      && event.toolCallId !== undefined && event.toolName !== undefined
+      && event.state === undefined && event.startedAt === undefined
+      && event.approvalId === undefined && event.approvalDecision === undefined;
+  }
+  if (event.activityId !== undefined || event.activityPhase !== undefined) return false;
   if (event.type === 'approval_decision') {
     return event.startedAt === undefined
       && event.approvalId !== undefined
