@@ -77,13 +77,13 @@ test('account memory requires an authenticated account and validates scope/conte
     read: async <T>(name: string, fallback: T): Promise<T> => values.has(name) ? values.get(name) as T : fallback,
     write: async <T>(name: string, value: T): Promise<void> => { values.set(name, value); },
   };
-  let accountId: string | undefined;
-  const memory = new AccountMemoryRuntime(storage as never, () => accountId);
+  const account = { id: undefined as string | undefined };
+  const memory = new AccountMemoryRuntime(storage as never, () => account.id);
   await memory.init();
   await assert.rejects(() => memory.add({ scope: { type: 'global' }, content: 'x' }), /Entre em uma conta/i);
   assert.throws(() => memory.list(), /Entre em uma conta/i);
 
-  accountId = 'account-a';
+  account.id = 'account-a';
   await assert.rejects(() => memory.add({ scope: { type: 'project', projectId: ' ' }, content: 'x' }), /Escopo/i);
   await assert.rejects(() => memory.add({ scope: { type: 'global' }, content: '   ' }), /vazia/i);
   await assert.rejects(() => memory.add({ scope: { type: 'global' }, content: 'x'.repeat(8001) }), /8000/);
