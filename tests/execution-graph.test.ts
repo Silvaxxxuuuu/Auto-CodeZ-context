@@ -138,7 +138,7 @@ test('projeta estados V2 com nomes legíveis sem afirmar sucesso para operaçõe
   assert.equal(nodes[1].activityPhase, 'waiting');
   assert.match(nodes[1].label, /aguardando aprovação/);
   assert.equal(nodes[2].activityPhase, 'completed');
-  assert.match(nodes[2].label, /concluída/);
+  assert.match(nodes[2].label, /etapa concluída; publicação a verificar/);
   assert.equal(nodes[3].activityPhase, 'failed');
   assert.match(nodes[3].label, /falhou/);
   assert.equal(nodes[3].tool, 'inspect_instance');
