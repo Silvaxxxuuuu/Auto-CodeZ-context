@@ -77,7 +77,7 @@ const definitions: AIToolDefinition[] = [
   { name: 'git_commit', description: 'Create a Git commit from the currently staged changes. This operation requires user approval.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Git commit message.' } }, required: ['message'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
 ];
 
-interface ToolExecution { output: string; changes?: FileDiff[]; operationId?: string; commandResult?: CommandResultSummary; attachments?: import('../ai/types').AIAttachment[]; }
+interface ToolExecution { output: string; changes?: FileDiff[]; operationId?: string; executionId?: string; processId?: string; commandResult?: CommandResultSummary; attachments?: import('../ai/types').AIAttachment[]; }
 interface ToolJournalStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
 type JournalEntry = { approvalId: string; projectId: string; toolCall: AIToolCall; diffPlan: DiffPlan; status: 'executing'; };
 type ExecutionCheckpointRecord = { chatId: string; runId: string; projectId: string; toolCallId: string; operationId?: string; changes: FileDiff[] };
@@ -486,7 +486,7 @@ export class ToolRuntime {
       this.recordChangeBudget(context, call, execution);
       this.recordCheckpoint(projectId, context, call, execution);
       this.recordPlanEvidence(context, call, execution);
-      const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, ...(execution.changes ? { changes: execution.changes } : {}), ...(execution.commandResult ? { commandResult: execution.commandResult } : {}), ...(execution.attachments ? { attachments: execution.attachments } : {}) };
+      const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, ...(execution.executionId ? { executionId: execution.executionId } : {}), ...(execution.processId ? { processId: execution.processId } : {}), ...(execution.changes ? { changes: execution.changes } : {}), ...(execution.commandResult ? { commandResult: execution.commandResult } : {}), ...(execution.attachments ? { attachments: execution.attachments } : {}) };
       this.activity.emit({ type: 'action', message: `Concluído: ${call.name}`, status: 'success', toolCallId: call.id, toolName: call.name, ...context, ...(execution.commandResult ? { commandResult: execution.commandResult } : {}), ...(execution.changes ? { changes: execution.changes } : {}), ...(diffPlan ? { diffPlan } : {}) });
       if (approvalId) await this.finishJournal(approvalId);
       return result;
@@ -734,7 +734,7 @@ export class ToolRuntime {
           ...(context.runId ? { runId: context.runId } : {}),
           ...(context.toolCallId ? { toolCallId: context.toolCallId } : {}),
         });
-        return { output: JSON.stringify({ type: 'process_started', processId: started.id, pid: started.pid, command: started.command, status: started.status, startedAt: started.startedAt, ...(started.runId ? { runId: started.runId } : {}), ...(started.toolCallId ? { toolCallId: started.toolCallId } : {}) }) };
+        return { output: JSON.stringify({ type: 'process_started', processId: started.id, pid: started.pid, command: started.command, status: started.status, startedAt: started.startedAt, ...(started.runId ? { runId: started.runId } : {}), ...(started.toolCallId ? { toolCallId: started.toolCallId } : {}), ...(started.executionId ? { executionId: started.executionId } : {}) }), ...(started.executionId ? { executionId: started.executionId } : {}), processId: started.id };
       }
       case 'read_process_output': {
         const runtime = this.requireProcessRuntime();
@@ -827,7 +827,7 @@ export class ToolRuntime {
         const runtime = this.requireInstanceRuntime();
         return { output: JSON.stringify(runtime.list(projectId)) };
       }
-      case 'run_command': { const result = await this.commands.run(projectId, this.stringValue(input, 'command')); return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', commandResult: result }; }
+      case 'run_command': { const executionId = context.runId && context.toolCallId ? `command:${context.runId}:${context.toolCallId}` : undefined; const result = await this.commands.run(projectId, this.stringValue(input, 'command')); const commandResult = executionId ? { ...result, executionId } : result; return { output: result.stdout || result.stderr || 'Comando concluído sem saída.', ...(executionId ? { executionId } : {}), commandResult }; }
       case 'git_status': return this.gitExecution(projectId, await this.requireGit().status(projectId));
       case 'git_diff': return this.gitExecution(projectId, await this.requireGit().diff(projectId));
       case 'git_log': return this.gitExecution(projectId, await this.requireGit().log(projectId, Number(input.limit)));
