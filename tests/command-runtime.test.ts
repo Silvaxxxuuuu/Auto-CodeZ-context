@@ -19,7 +19,7 @@ async function createProject(parentEnvironment: NodeJS.ProcessEnv = process.env)
   return {
     root,
     runtime: new CommandRuntime(async () => [project], parentEnvironment),
-    cleanup: () => fs.rm(root, { recursive: true, force: true }),
+    cleanup: () => fs.rm(root, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 50 : 0, retryDelay: 100 }),
   };
 }
 
