@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createToolActivitySnapshot, toActivityInput, toStructuredToolActivity } from '../src/agent/tool-activity-bridge';
 import type { AIToolResult, CommandResultSummary, GitOperationSummary } from '../src/ai/types';
 
-const commandResult: CommandResultSummary = { command: 'npm test', exitCode: 0, stdout: 'ok', stderr: '', timedOut: false, startedAt: 100, finishedAt: 150, durationMs: 50 };
+const commandResult: CommandResultSummary = { command: 'npm test', exitCode: 0, stdout: 'ok', stderr: '', timedOut: false, startedAt: 100, finishedAt: 150, durationMs: 50, executionId: 'command:run:command-1' };
 const gitResult: GitOperationSummary = { operation: 'commit', branch: 'feature/test', output: '[feature/test abc123] test' };
 const runId = '00000000-0000-4000-8000-000000000010';
 
@@ -73,7 +73,7 @@ test('file mutations are described as prepared until the shadow workspace is pub
 
 
 test('V2 activity adapter preserves verified command timing without changing the legacy transport', () => {
-  const result: AIToolResult = { toolCallId: 'command-1', ok: true, output: 'ok', commandResult };
+  const result: AIToolResult = { toolCallId: 'command-1', ok: true, output: 'ok', executionId: 'command:run:command-1', commandResult };
   const snapshot = createToolActivitySnapshot(runId, 'command-1', 'run_command', result);
   const before = toActivityInput(snapshot);
   const mapped = toStructuredToolActivity(snapshot, 1000);
@@ -83,6 +83,7 @@ test('V2 activity adapter preserves verified command timing without changing the
   assert.equal(mapped.toolCallId, 'command-1');
   assert.equal(mapped.toolName, 'run_command');
   assert.equal(mapped.capabilityId, 'command.run');
+  assert.equal(mapped.executionId, 'command:run:command-1');
   assert.deepEqual(mapped.subject, { command: 'npm test' });
   assert.equal(mapped.durationMs, 50);
   assert.equal(mapped.createdAt, 1000);
@@ -111,4 +112,22 @@ test('V2 activity adapter differentiates pending approvals, failures and verifie
   assert.deepEqual(changed.subject, { path: 'src/a.ts' });
   assert.equal(changed.summary?.includes('src/a.ts'), true);
   assert.equal(changed.id, `tool:${runId}:file-1:completed`);
+});
+
+
+test('V2 activity adapter preserves persistent process execution identity and process subject', () => {
+  const result: AIToolResult = {
+    toolCallId: 'process-start',
+    ok: true,
+    output: '{}',
+    executionId: 'process:run-a:process-start',
+    processId: 'process-123',
+  };
+  const mapped = toStructuredToolActivity(
+    createToolActivitySnapshot('run-a', 'process-start', 'start_process', result),
+    3000,
+  );
+  assert.equal(mapped.capabilityId, 'process.start');
+  assert.equal(mapped.executionId, 'process:run-a:process-start');
+  assert.deepEqual(mapped.subject, { processId: 'process-123' });
 });
