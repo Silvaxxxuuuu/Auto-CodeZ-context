@@ -731,6 +731,7 @@ export class ToolRuntime {
       case 'start_process': {
         const runtime = this.requireProcessRuntime();
         const started = await runtime.start(projectId, this.stringValue(input, 'command'), {
+          ...(context.chatId ? { chatId: context.chatId } : {}),
           ...(context.runId ? { runId: context.runId } : {}),
           ...(context.toolCallId ? { toolCallId: context.toolCallId } : {}),
         });
