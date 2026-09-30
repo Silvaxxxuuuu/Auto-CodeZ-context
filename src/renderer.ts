@@ -30,6 +30,9 @@ declare global {
       previewChatAttachment: (attachment: Attachment) => Promise<string | null>;
       pasteChatImage: (input: { name?: string; mediaType: string; bytes: Uint8Array }) => Promise<PickedAttachment | null>;
       streamChat: (input: { chatId: string; content: string; attachments?: Attachment[]; retryRunId?: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
+      listMemories: (scope?: { type: 'global' | 'project' | 'chat'; projectId?: string; chatId?: string }) => Promise<Array<{ id: string; content: string; scope: { type: 'global' | 'project' | 'chat'; projectId?: string; chatId?: string } }>>;
+      addMemory: (input: { scopeType: 'global' | 'project' | 'chat'; projectId?: string; chatId?: string; content: string; source?: { chatId?: string; runId?: string; messageCreatedAt?: number } }) => Promise<{ id: string }>;
+      removeMemory: (id: string) => Promise<boolean>;
       stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
       listMcpConnections: () => Promise<Array<{ clientId: 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other'; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string } }>>;
@@ -702,6 +705,47 @@ window.addEventListener('auto-codez-retry-response', (event) => {
   const detail = (event as CustomEvent<{ runId?: string; messageIndex?: number }>).detail;
   if (!detail?.runId || !Number.isInteger(detail.messageIndex)) return;
   void retryAssistantResponse(detail.runId, detail.messageIndex as number);
+});
+
+async function openAddMemoryDialog(runId: string, messageIndex: number): Promise<void> {
+  if (!activeChat) return;
+  const message = activeChat.messages[messageIndex];
+  if (!message || message.role !== 'assistant' || message.runId !== runId || !message.content.trim()) return;
+  const chatId = activeChat.id;
+  const projectId = activeChat.projectId;
+  const excerpt = message.content.trim().replace(/\s+/g, ' ').slice(0, 220);
+  openModal(`<div class="modal-head"><div><div class="eyebrow">MEMÓRIA</div><h2>Adicionar à memória</h2><p>Escolha onde esta informação deve ser lembrada.</p></div><button class="modal-close" data-action="close-modal" title="Fechar" aria-label="Fechar"></button></div><div class="empty-panel" style="margin-bottom:12px;text-align:left">${escapeHtml(excerpt)}${message.content.trim().length > 220 ? '…' : ''}</div><div class="memory-scope-actions" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px"><button class="primary-button" style="margin-top:0" data-memory-scope="global">Global</button><button class="primary-button" style="margin-top:0" data-memory-scope="project" ${projectId ? '' : 'disabled'}>Projeto</button><button class="primary-button" style="margin-top:0" data-memory-scope="chat">Conversa</button></div><p id="memory-save-error" style="color:#d18c8c"></p>`);
+
+  const modal = document.querySelector<HTMLElement>('.modal-root .modal');
+  if (!modal) return;
+  modal.querySelectorAll<HTMLButtonElement>('[data-memory-scope]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const scopeType = button.dataset.memoryScope as 'global' | 'project' | 'chat' | undefined;
+      if (!scopeType) return;
+      modal.querySelectorAll<HTMLButtonElement>('[data-memory-scope]').forEach((item) => { item.disabled = true; });
+      try {
+        const saved = await window.autoCodez.addMemory({
+          scopeType,
+          ...(scopeType === 'project' && projectId ? { projectId } : {}),
+          ...(scopeType === 'chat' ? { chatId } : {}),
+          content: message.content,
+          source: { chatId, runId, ...(message.createdAt ? { messageCreatedAt: message.createdAt } : {}) },
+        });
+        closeModal();
+        window.dispatchEvent(new CustomEvent('auto-codez-memory-added', { detail: { runId, messageIndex, memoryId: saved.id } }));
+      } catch (error) {
+        const target = document.querySelector<HTMLElement>('#memory-save-error');
+        if (target) target.textContent = error instanceof Error ? error.message : 'Não foi possível salvar a memória.';
+        modal.querySelectorAll<HTMLButtonElement>('[data-memory-scope]').forEach((item) => { item.disabled = item.dataset.memoryScope === 'project' && !projectId; });
+      }
+    });
+  });
+}
+
+window.addEventListener('auto-codez-add-memory', (event) => {
+  const detail = (event as CustomEvent<{ runId?: string; messageIndex?: number }>).detail;
+  if (!detail?.runId || !Number.isInteger(detail.messageIndex)) return;
+  void openAddMemoryDialog(detail.runId, detail.messageIndex as number);
 });
 
 async function resumeApproval(id: string, approve: boolean): Promise<void> {
