@@ -2111,6 +2111,11 @@ app.whenReady().then(async () => {
       credentialAvailable: mcpTunnelEnvironmentCredentialAvailable(),
     });
   });
+  activityRuntime.subscribeStructured((event) => {
+    if (!event.chatId) return;
+    const recorded = executionTimeline.recordStructuredActivity(event);
+    if (recorded.length && executionTimelinePersistenceEnabled) executionTimelinePersistence.schedule(executionTimeline.list());
+  });
   activityRuntime.subscribe((event) => {
     sendActivity(event);
     const changes = event.changes ?? event.diffPlan?.changes ?? [];
