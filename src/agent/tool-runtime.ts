@@ -59,6 +59,7 @@ const definitions: AIToolDefinition[] = [
   { name: 'list_processes', description: 'List managed persistent processes belonging to the active workspace, including lifecycle state, PID, command and timestamps.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'open_instance', description: 'Open and register a managed visual or navigable instance for the active workspace. Supported kinds are preview, url, file, folder and application. Preview windows are controlled by Auto CodeZ; external URL/file/folder/application launches do not claim focus or close control they do not possess.', parameters: { type: 'object', properties: { kind: { type: 'string', enum: ['application', 'url', 'file', 'folder', 'preview'], description: 'Instance kind to open.' }, target: { type: 'string', description: 'HTTP(S) URL for url/preview, or workspace-relative path for file/folder/application.' } }, required: ['kind', 'target'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'capture_instance', description: 'Capture an actual PNG screenshot of a managed preview belonging to the active workspace. The tool stores verified image bytes and returns an artifact reference. Do not claim to have seen or analyzed the image until the selected model receives it through its vision channel; external windows cannot be captured.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed preview instance identifier returned by open_instance.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'inspect_instance', description: 'Read a bounded snapshot of title, URL, visible page text, headings and links from a controlled managed preview. This is structural DOM inspection, not a screenshot or pixel-level vision analysis; does not read form values, cookies or arbitrary OS windows.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed preview instance identifier returned by open_instance.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'instance_status', description: 'Read the current lifecycle status and real control capabilities of one managed instance belonging to the active workspace.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier returned by open_instance.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'focus_instance', description: 'Focus a managed instance only when the platform adapter reports real focus control. Fails explicitly for external launches that Auto CodeZ cannot focus.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'close_instance', description: 'Close a managed instance only when the platform adapter reports real close control. Fails explicitly for external launches that Auto CodeZ cannot close.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
@@ -134,6 +135,7 @@ function executionActivityMessage(call: AIToolCall): string {
     case 'list_processes': return 'Listando processos persistentes.';
     case 'open_instance': return value('target') ? `Abrindo instância: ${value('target')}` : 'Abrindo instância.';
     case 'capture_instance': return value('instanceId') ? `Capturando preview ${value('instanceId')}` : 'Capturando preview.';
+    case 'inspect_instance': return value('instanceId') ? `Inspecionando preview ${value('instanceId')}` : 'Inspecionando preview.';
     case 'instance_status': return value('instanceId') ? `Consultando instância ${value('instanceId')}` : 'Consultando instância.';
     case 'focus_instance': return value('instanceId') ? `Focando instância ${value('instanceId')}` : 'Focando instância.';
     case 'close_instance': return value('instanceId') ? `Fechando instância ${value('instanceId')}` : 'Fechando instância.';
@@ -775,6 +777,13 @@ export class ToolRuntime {
           output: JSON.stringify({ type: 'preview_capture', instanceId, projectId, captured: true, artifact: { id: attachment.id, storageKey: attachment.storageKey, sha256: attachment.sha256, mediaType: attachment.mediaType, size: attachment.size }, visualAnalysis: 'requires_model_vision_delivery' }),
           attachments: [attachment],
         };
+      }
+      case 'inspect_instance': {
+        const instanceId = this.stringValue(input, 'instanceId');
+        const runtime = this.requireInstanceRuntime();
+        this.assertInstanceProject(runtime, instanceId, projectId);
+        const inspected = await runtime.inspect(instanceId);
+        return { output: JSON.stringify({ type: 'preview_inspection', instanceId, ...inspected, visualAnalysis: 'dom_only_not_pixel_vision' }) };
       }
       case 'instance_status': {
         const runtime = this.requireInstanceRuntime();
