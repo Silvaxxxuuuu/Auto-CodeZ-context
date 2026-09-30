@@ -34,6 +34,11 @@ test('classifica como verified quando execução e plano terminaram com evidênc
   assert.equal(report?.evidence.file, 1);
   assert.equal(report?.evidence.test, 1);
   assert.equal(report?.plan?.objective, 'Corrigir login');
+  assert.equal(report?.summary?.status, 'completed');
+  assert.equal(report?.summary?.facts.testsPassed, 1);
+  assert.equal(report?.summary?.facts.testsFailed, 0);
+  assert.match(report?.summary?.headline ?? '', /evidência verificada/i);
+  assert.equal(report?.summary?.evidenceIds.some((id) => id.startsWith('plan:')), true);
 });
 
 test('execução concluída sem plano fica explicitamente unplanned', () => {
@@ -66,6 +71,8 @@ test('reconstrói execução histórica depois que snapshot ativo foi removido',
   assert.equal(report?.completionProof, 'failed');
   assert.equal(report?.error, 'build falhou');
   assert.ok(report?.timeline.some((event) => event.type === 'removed'));
+  assert.equal(report?.summary?.status, 'failed');
+  assert.equal(report?.summary?.unresolved.includes('build falhou'), true);
 });
 
 test('reconstrói execução histórica apenas a partir de recovery baseline', () => {
@@ -88,6 +95,7 @@ test('reconstrói execução histórica apenas a partir de recovery baseline', (
   assert.equal(report?.startedAt, 1000);
   assert.equal(report?.updatedAt, 5000);
   assert.equal(report?.completionProof, 'interrupted');
+  assert.equal(report?.summary, undefined);
 });
 
 test('lista runs históricas em ordem de atualização e isola chats', () => {
@@ -134,4 +142,51 @@ test('execution report exposes factual final tool phases without upgrading compl
   assert.equal(report?.recordedTools.waiting, 0);
   assert.deepEqual(report?.recordedTools.tools.map((tool) => tool.toolName), ['run_command', 'inspect_instance']);
   assert.equal(report?.completionProof, 'unplanned');
+});
+
+
+test('evidence-derived run summary counts only observed terminal tool facts', () => {
+  const { executions, timeline, reports, tick } = setup();
+  executions.start('chat-a', tick(), 'run-summary');
+  const events = [
+    ['create_file', 'workspace.create_file', 'completed'],
+    ['write_file', 'workspace.write_file', 'completed'],
+    ['delete_file', 'workspace.delete_file', 'completed'],
+    ['create_folder', 'workspace.create_folder', 'completed'],
+    ['run_command', 'command.run', 'failed'],
+    ['start_process', 'process.start', 'completed'],
+    ['open_instance', 'instance.open', 'completed'],
+  ] as const;
+  events.forEach(([toolName, capabilityId, phase], index) => {
+    timeline.recordStructuredActivity({
+      contractVersion: 1,
+      id: `summary-${index}`,
+      kind: 'tool',
+      chatId: 'chat-a',
+      runId: 'run-summary',
+      toolCallId: `call-${index}`,
+      toolName,
+      capabilityId,
+      phase,
+      createdAt: tick(),
+    });
+  });
+  executions.update('chat-a', { state: 'completed', runId: 'run-summary' }, tick());
+
+  const report = reports.build('chat-a', 'run-summary');
+  assert.deepEqual(report?.summary?.facts, {
+    filesCreated: 1,
+    filesChanged: 1,
+    filesDeleted: 1,
+    foldersCreated: 1,
+    commandsRun: 1,
+    processesStarted: 1,
+    instancesOpened: 1,
+    testsPassed: 0,
+    testsFailed: 0,
+    buildsPassed: 0,
+    buildsFailed: 0,
+  });
+  assert.equal(report?.summary?.unresolved.includes('Falha observada em run_command.'), true);
+  assert.equal(report?.summary?.evidenceIds.filter((id) => id.startsWith('activity:')).length, events.length);
 });
