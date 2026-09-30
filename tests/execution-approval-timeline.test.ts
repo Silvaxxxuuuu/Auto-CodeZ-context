@@ -29,6 +29,7 @@ function baseReport(timeline: ExecutionReport['timeline']): ExecutionReport {
     planArchived: false,
     steps: { total: 0, pending: 0, running: 0, completed: 0, failed: 0, skipped: 0 },
     evidence: { tool: 0, test: 0, build: 0, file: 0, result: 0 },
+    recordedTools: { observed: 0, completed: 0, failed: 0, waiting: 0, cancelled: 0, running: 0, tools: [] },
     timeline,
   };
 }
