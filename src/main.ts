@@ -1336,7 +1336,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
     const workingChat = await hydrateChatAttachments(persistedWorkingChat);
     let result;
     try {
-      result = await runWithAbortSignal(controller.signal, () => agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId));
+      result = await runWithAbortSignal(controller.signal, () => agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId, { disableTools: Boolean(retryRunId) }));
     } catch (initialError) {
       let recoveryError: unknown = initialError;
       let recoveryAttempts = 0;
