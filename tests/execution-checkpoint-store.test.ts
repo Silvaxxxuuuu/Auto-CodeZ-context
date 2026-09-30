@@ -29,6 +29,7 @@ function checkpoint(input: Partial<ExecutionCheckpoint> = {}): ExecutionCheckpoi
     runId: input.runId ?? 'run-a',
     projectId: input.projectId ?? 'project-a',
     toolCallId: input.toolCallId ?? 'tool-a',
+    ...(input.operationId !== undefined ? { operationId: input.operationId } : {}),
     createdAt: input.createdAt ?? 1000,
     status: input.status ?? 'ready',
     changes: input.changes ?? [{
@@ -46,13 +47,14 @@ function checkpoint(input: Partial<ExecutionCheckpoint> = {}): ExecutionCheckpoi
 test('salva e carrega checkpoints válidos sem compartilhar referências', async () => {
   const storage = new MemoryStorage();
   const store = new ExecutionCheckpointStore(storage as unknown as LocalStorage);
-  const original = checkpoint();
+  const original = checkpoint({ operationId: 'op-a' });
 
   await store.save([original]);
   original.changes[0].path = 'mutated.ts';
 
   const loaded = await store.load();
   assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].operationId, 'op-a');
   assert.equal(loaded[0].changes[0].path, 'src/a.ts');
 
   loaded[0].changes[0].path = 'mutated-again.ts';
@@ -68,6 +70,7 @@ test('ignora registros inválidos e deduplica por id', async () => {
       checkpoint({ id: 'same', createdAt: 2000, runId: 'run-new' }),
       { ...checkpoint({ id: 'bad' }), status: 'unknown' },
       { ...checkpoint({ id: 'bad-time' }), createdAt: -1 },
+      { ...checkpoint({ id: 'bad-operation' }), operationId: '   ' },
     ],
   });
   const store = new ExecutionCheckpointStore(storage as unknown as LocalStorage);
