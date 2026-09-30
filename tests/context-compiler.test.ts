@@ -86,7 +86,7 @@ test('ContextCompiler injects only available canonical capability metadata in re
   assert.match(guidance, /run_command \[command\.run;/);
   assert.match(guidance, /start_process \[process\.start;/);
   assert.match(guidance, /Para testes, builds, inspeções e CLIs finitas/);
-  assert.match(guidance, /Não usar para servidor persistente; use start_process/);
+  assert.match(guidance, /Não usar shell para mutações de arquivo representadas por capabilities dedicadas/);
   assert.equal(guidance.includes('write_file [workspace.write_file;'), false);
   assert.ok(guidance.indexOf('run_command [command.run;') < guidance.indexOf('create_file [workspace.create_file;'));
 });
