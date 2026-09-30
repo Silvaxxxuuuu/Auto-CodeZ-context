@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { AIToolCall, ProjectRecord } from '../src/ai/types';
-import { InstanceRuntime, type InstancePlatformHandle } from '../src/agent/instance-runtime';
+import { InstanceRuntime, type InstancePlatformHandle, type PreviewInspection } from '../src/agent/instance-runtime';
 import { ToolRuntime } from '../src/agent/tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 
@@ -91,14 +91,14 @@ test('inspect_instance reads bounded preview DOM metadata and enforces project i
 
 test('inspect rejects malformed platform payload and closure during inspection', async () => {
   let open = true;
-  const deferred: { resolve?: (value: unknown) => void } = {};
+  const deferred: { resolve?: (value: PreviewInspection) => void } = {};
   const runtime = new InstanceRuntime({
     async open(): Promise<InstancePlatformHandle> {
       return {
         canFocus: false,
         canClose: false,
         isOpen: () => open,
-        inspect: () => new Promise((resolve) => { deferred.resolve = resolve; }),
+        inspect: () => new Promise<PreviewInspection>((resolve) => { deferred.resolve = resolve; }),
       };
     },
   });
