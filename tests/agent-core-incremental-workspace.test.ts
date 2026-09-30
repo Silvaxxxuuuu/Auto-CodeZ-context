@@ -338,3 +338,107 @@ test('rename rollback refuses destination directories containing external entrie
     await f.cleanup();
   }
 });
+
+
+test('create_file rollback removes only resources created by the operation and preserves existing parents', async () => {
+  const f = await fixture();
+  try {
+    await f.workspace.createFolder('project-a', 'existing');
+    const result = await f.incremental.createFile(context, 'existing/generated/deep/file.txt', 'generated');
+    await f.incremental.rollbackCreatedFile(result.operationId);
+
+    assert.deepEqual(await f.workspace.statPath('project-a', 'existing/generated/deep/file.txt'), { exists: false });
+    assert.deepEqual(await f.workspace.statPath('project-a', 'existing/generated/deep'), { exists: false });
+    assert.deepEqual(await f.workspace.statPath('project-a', 'existing/generated'), { exists: false });
+    assert.equal((await f.workspace.statPath('project-a', 'existing')).kind, 'directory');
+    assert.equal(f.journal.get(result.operationId)?.status, 'rolled_back');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('create_file rollback fails closed when the created file changed externally', async () => {
+  const f = await fixture();
+  try {
+    const result = await f.incremental.createFile(context, 'generated/file.txt', 'created');
+    await f.workspace.writeFile('project-a', 'generated/file.txt', 'external change');
+
+    await assert.rejects(() => f.incremental.rollbackCreatedFile(result.operationId), /mudou.*rollback bloqueado/i);
+    assert.equal(await f.workspace.readFile('project-a', 'generated/file.txt'), 'external change');
+    assert.equal(f.journal.get(result.operationId)?.status, 'rollback_conflict');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('create_folder rollback removes the created directory chain but blocks external children', async () => {
+  const clean = await fixture();
+  try {
+    const result = await clean.incremental.createFolder(context, 'assets/generated/deep');
+    assert.ok(result.operationId);
+    await clean.incremental.rollbackCreatedFolder(result.operationId as string);
+    assert.deepEqual(await clean.workspace.statPath('project-a', 'assets'), { exists: false });
+    assert.equal(clean.journal.get(result.operationId as string)?.status, 'rolled_back');
+  } finally {
+    await clean.cleanup();
+  }
+
+  const conflict = await fixture();
+  try {
+    const result = await conflict.incremental.createFolder(context, 'assets/generated');
+    assert.ok(result.operationId);
+    await conflict.workspace.createFile('project-a', 'assets/generated/external.txt', 'external');
+    await assert.rejects(
+      () => conflict.incremental.rollbackCreatedFolder(result.operationId as string),
+      /conteúdo externo.*rollback bloqueado/i,
+    );
+    assert.equal(await conflict.workspace.readFile('project-a', 'assets/generated/external.txt'), 'external');
+    assert.equal(conflict.journal.get(result.operationId as string)?.status, 'rollback_conflict');
+  } finally {
+    await conflict.cleanup();
+  }
+});
+
+test('write_file rollback restores encrypted previous content and blocks stale current state', async () => {
+  const success = await fixture();
+  try {
+    await success.workspace.createFile('project-a', 'src/app.ts', 'before');
+    const blobs = new Map<string, string>();
+    const rollbackBlobs = {
+      putText: async (content: string) => {
+        const ref = `blob:test:${Buffer.from(content, 'utf8').toString('base64')}`;
+        blobs.set(ref, content);
+        return ref;
+      },
+      getText: async (ref: string) => {
+        const content = blobs.get(ref);
+        if (content === undefined) throw new Error('missing blob');
+        return content;
+      },
+    };
+    const incremental = new IncrementalWorkspaceMutationRuntime(success.workspace, success.journal, rollbackBlobs);
+    const result = await incremental.writeFile(context, 'src/app.ts', 'after', 'before');
+    await incremental.restoreWrittenFile(result.operationId);
+    assert.equal(await success.workspace.readFile('project-a', 'src/app.ts'), 'before');
+    assert.equal(success.journal.get(result.operationId)?.status, 'rolled_back');
+  } finally {
+    await success.cleanup();
+  }
+
+  const conflict = await fixture();
+  try {
+    await conflict.workspace.createFile('project-a', 'src/app.ts', 'before');
+    const rollbackBlobs = {
+      putText: async (content: string) => `blob:test:${Buffer.from(content, 'utf8').toString('base64')}`,
+      getText: async (ref: string) => Buffer.from(ref.slice('blob:test:'.length), 'base64').toString('utf8'),
+    };
+    const incremental = new IncrementalWorkspaceMutationRuntime(conflict.workspace, conflict.journal, rollbackBlobs);
+    const result = await incremental.writeFile(context, 'src/app.ts', 'after', 'before');
+    await conflict.workspace.writeFile('project-a', 'src/app.ts', 'external');
+    await assert.rejects(() => incremental.restoreWrittenFile(result.operationId), /mudou.*rollback bloqueado/i);
+    assert.equal(await conflict.workspace.readFile('project-a', 'src/app.ts'), 'external');
+    assert.equal(conflict.journal.get(result.operationId)?.status, 'rollback_conflict');
+  } finally {
+    await conflict.cleanup();
+  }
+});
