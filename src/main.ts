@@ -308,6 +308,13 @@ const chatRuntime = new ChatRuntime(
   attachmentIndexer,
   visualGrounding,
   attachmentStore,
+  (chat) => {
+    try {
+      return accountMemoryRuntime.context({ chatId: chat.id, projectId: chat.projectId });
+    } catch {
+      return undefined;
+    }
+  },
 );
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const executionManager = new ExecutionManager();
