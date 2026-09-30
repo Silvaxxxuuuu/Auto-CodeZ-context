@@ -672,3 +672,12 @@ export const AGENT_CORE_V2_BASELINE_CAPABILITIES: readonly CapabilityContract[] 
     version: 1,
   },
 ] as const;
+
+const AGENT_CORE_V2_CAPABILITY_BY_NAME = new Map(
+  AGENT_CORE_V2_BASELINE_CAPABILITIES.map((capability) => [capability.name, capability] as const),
+);
+
+export function agentCoreV2CapabilityByName(name: string) {
+  return AGENT_CORE_V2_CAPABILITY_BY_NAME.get(name);
+}
+
