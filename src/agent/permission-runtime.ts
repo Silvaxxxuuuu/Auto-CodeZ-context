@@ -18,6 +18,7 @@ const readTools = new Set<ToolName>([
   'wait_for_port',
   'list_processes',
   'instance_status',
+  'capture_instance',
   'list_instances',
 ]);
 const safeWriteTools = new Set<ToolName>(['write_file', 'create_file', 'create_folder', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'focus_instance']);
