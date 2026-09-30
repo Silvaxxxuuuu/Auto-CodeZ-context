@@ -37,6 +37,7 @@ function isCheckpoint(value: unknown): value is ExecutionCheckpoint {
   if (typeof checkpoint.runId !== 'string' || !checkpoint.runId.trim()) return false;
   if (typeof checkpoint.projectId !== 'string' || !checkpoint.projectId.trim()) return false;
   if (typeof checkpoint.toolCallId !== 'string' || !checkpoint.toolCallId.trim()) return false;
+  if (checkpoint.operationId !== undefined && (typeof checkpoint.operationId !== 'string' || !checkpoint.operationId.trim())) return false;
   if (checkpoint.status !== 'ready' && checkpoint.status !== 'restored') return false;
   if (typeof checkpoint.createdAt !== 'number' || !Number.isFinite(checkpoint.createdAt) || checkpoint.createdAt < 0) return false;
   if (!Array.isArray(checkpoint.changes) || checkpoint.changes.length === 0 || checkpoint.changes.some((change) => !isFileDiff(change))) return false;
