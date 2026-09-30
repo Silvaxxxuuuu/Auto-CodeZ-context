@@ -93,7 +93,7 @@ function reportFor(runId: string): Promise<ExecutionReport | null> {
   if (cached) return cached;
   const request = reportBridge.getExecutionReport({ chatId, runId }).then((report) =>
     report && report.chatId === chatId && report.runId === runId ? report : null,
-  ).catch(() => null);
+  ).catch((): ExecutionReport | null => null);
   reportCache.set(key, request);
   return request;
 }
