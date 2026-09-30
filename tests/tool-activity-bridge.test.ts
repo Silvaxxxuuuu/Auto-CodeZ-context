@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createToolActivitySnapshot, toActivityInput } from '../src/agent/tool-activity-bridge';
+import { createToolActivitySnapshot, toActivityInput, toStructuredToolActivity } from '../src/agent/tool-activity-bridge';
 import type { AIToolResult, CommandResultSummary, GitOperationSummary } from '../src/ai/types';
 
 const commandResult: CommandResultSummary = { command: 'npm test', exitCode: 0, stdout: 'ok', stderr: '', timedOut: false, startedAt: 100, finishedAt: 150, durationMs: 50 };
@@ -69,4 +69,42 @@ test('file mutations are described as prepared until the shadow workspace is pub
     }],
   });
   assert.equal(snapshot.message, 'Preparado: Desktop/GameZone/index.html');
+});
+
+
+test('V2 activity adapter preserves verified command timing without changing the legacy transport', () => {
+  const result: AIToolResult = { toolCallId: 'command-1', ok: true, output: 'ok', commandResult };
+  const snapshot = createToolActivitySnapshot(runId, 'command-1', 'run_command', result);
+  const before = toActivityInput(snapshot);
+  const mapped = toStructuredToolActivity(snapshot, 1000);
+  assert.equal(mapped.contractVersion, 1);
+  assert.equal(mapped.phase, 'completed');
+  assert.equal(mapped.runId, runId);
+  assert.equal(mapped.toolCallId, 'command-1');
+  assert.deepEqual(mapped.subject, { command: 'npm test' });
+  assert.equal(mapped.durationMs, 50);
+  assert.equal(mapped.createdAt, 1000);
+  assert.deepEqual(toActivityInput(snapshot), before);
+});
+
+test('V2 activity adapter differentiates pending approvals, failures and verified file changes', () => {
+  const pending = toStructuredToolActivity(createToolActivitySnapshot(runId, 'pending-1', 'interact_instance', {
+    toolCallId: 'pending-1', ok: false, pendingApproval: true, approvalId: 'approval-1',
+  }), 2000);
+  assert.equal(pending.phase, 'waiting');
+  assert.equal(pending.subject, undefined);
+  assert.equal(pending.durationMs, undefined);
+  const failed = toStructuredToolActivity(createToolActivitySnapshot(runId, 'failed-1', 'inspect_instance', {
+    toolCallId: 'failed-1', ok: false, error: 'Preview fechado.',
+  }), 2001);
+  assert.equal(failed.phase, 'failed');
+  assert.equal(failed.subject, undefined);
+  const changed = toStructuredToolActivity(createToolActivitySnapshot(runId, 'file-1', 'create_file', {
+    toolCallId: 'file-1', ok: true,
+    changes: [{ path: 'src/a.ts', type: 'created', before: '', after: 'export {};', addedLines: 1, removedLines: 0 }],
+  }), 2002);
+  assert.equal(changed.phase, 'completed');
+  assert.deepEqual(changed.subject, { path: 'src/a.ts' });
+  assert.match(changed.summary ?? '', /src\\/a\\.ts/);
+  assert.equal(changed.id, `tool:${runId}:file-1:completed`);
 });
