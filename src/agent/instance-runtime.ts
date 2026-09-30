@@ -249,6 +249,10 @@ export class InstanceRuntime {
     if (record.snapshot.kind !== 'preview' || !record.handle?.interact) {
       throw new Error(`A instância ${instanceId} não oferece interação controlada.`);
     }
+    const hostname = new URL(record.snapshot.target).hostname.toLowerCase();
+    if (!['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
+      throw new Error('Interação indisponível em previews externos; somente loopback local é permitido.');
+    }
     if (input?.action !== 'click_button' || typeof input.selector !== 'string' || !input.selector.trim() || input.selector.length > 256 || /[\\r\\n\\x00-\\x1f]/.test(input.selector)) {
       throw new Error('Interação inválida: utilize click_button com seletor CSS de até 256 caracteres.');
     }
