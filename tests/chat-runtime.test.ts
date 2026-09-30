@@ -133,10 +133,8 @@ test('send exposes protected file tools, run_command and plugin gateway to a nor
   assert.match(request.messages[0].content, /Runtime OS:/);
   assert.match(request.messages[0].content, /protected system workspace rooted at the user's Home directory/i);
   assert.match(request.messages[0].content, /Desktop\/Novo site\/index\.html/i);
-  assert.match(request.messages[0].content, /only need one complete named TypeScript or JavaScript declaration, prefer read_symbol/i);
-  assert.match(request.messages[0].content, /replacing a complete named TypeScript or JavaScript declaration, prefer replace_symbol/i);
-  assert.match(request.messages[0].content, /smaller localized edits, prefer replace_text/i);
-  assert.match(request.messages[0].content, /Use write_file when most or all of a file genuinely needs replacement/i);
+  assert.equal(request.messages.some((message) => /read_file \[workspace\.read_file;/.test(message.content)), true);
+  assert.equal(request.messages.some((message) => /read_symbol \[workspace\.read_symbol;/.test(message.content)), true);
   assert.match(request.messages[0].content, /plugin_list_tools/);
   assert.match(request.messages[0].content, /plugin_call only with an exact generated tool name/i);
 });
