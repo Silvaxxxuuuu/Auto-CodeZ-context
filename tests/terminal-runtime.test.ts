@@ -172,8 +172,12 @@ test('terminal runtime rejects an empty command and unknown project', async () =
 test('terminal runtime preserves killed status until the process exits', async () => {
   const fixture = await createProject();
   try {
-    const command = process.platform === 'win32' ? 'ping 127.0.0.1 -n 30 > nul' : 'sleep 30';
-    const session = await fixture.runtime.start('terminal-project', command);
+    const session = await fixture.runtime.start('terminal-project', nodeCommand("process.stdout.write('terminal-ready'); setInterval(() => {}, 1000)"));
+    const readyDeadline = Date.now() + 5000;
+    while (!fixture.runtime.getOutput(session.id).includes('terminal-ready') && Date.now() < readyDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.match(fixture.runtime.getOutput(session.id), /terminal-ready/, 'O processo precisa iniciar antes do teste de encerramento.');
     const immediatelyAfterKill = fixture.runtime.kill(session.id);
     assert.equal(immediatelyAfterKill.status, 'running');
     const current = await waitForExit(fixture.runtime, session.id);
