@@ -1022,9 +1022,9 @@ async function buildExecutionContext(
   chat: Awaited<ReturnType<ChatManager['list']>>[number],
   runId: string,
   taskQuery: string,
-): Promise<string> {
-  const computerContext = computerContextRuntime.build();
-  if (!chat.projectId) return computerContext;
+): Promise<{ runtimeFacts: ReturnType<ComputerContextRuntime['buildFacts']>; projectContext?: string }> {
+  const runtimeFacts = computerContextRuntime.buildFacts();
+  if (!chat.projectId) return { runtimeFacts };
   const projectId = chat.projectId;
   const scope = executionPathScopeRuntime.get(chat.id, runId);
   if (scope && scope.projectId !== projectId) throw new Error('O escopo de caminhos da execução pertence a outro projeto.');
@@ -1038,7 +1038,7 @@ async function buildExecutionContext(
       : undefined,
     taskQuery,
   );
-  return `${computerContext}\n\n${projectContext}`;
+  return { runtimeFacts, projectContext };
 }
 
 function accountStateForRenderer(): ReturnType<AccountSessionRuntime['snapshot']> {
@@ -1234,11 +1234,11 @@ async function executeChat(chatId: string, content: string, allowedPaths?: strin
   try {
     captureExecutionTaskCapsule(chat, runId, content);
     await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
-    const projectContext = await buildExecutionContext(chat, runId, content);
+    const { runtimeFacts, projectContext } = await buildExecutionContext(chat, runId, content);
     await chatManager.addMessage(chat.id, { role: 'user', content, createdAt: Date.now() });
     const current = (await chatManager.list()).find((item) => item.id === chat.id);
     if (!current) throw new Error('Chat desapareceu durante a execução.');
-    const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel, runId);
+    const result = await agentRuntime.run(config, current, projectContext, current.permissionLevel, runId, runtimeFacts);
     await chatManager.update({ ...current, messages: result.messages });
     if (result.pendingApprovalIds.length) executionCoordinator.waitingApproval(chatId, runId);
     else {
@@ -1384,7 +1384,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   try {
     captureExecutionTaskCapsule(chat, runId, content);
     await configureInitialExecutionPathScope(chatId, runId, allowedPaths);
-    const projectContext = await buildExecutionContext(chat, runId, content);
+    const { runtimeFacts, projectContext } = await buildExecutionContext(chat, runId, content);
     if (!isRetryOfPersistedUserMessage) {
       await chatManager.addMessage(chat.id, {
         role: 'user',
@@ -1400,7 +1400,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
     const workingChat = await hydrateChatAttachments(persistedWorkingChat);
     let result;
     try {
-      result = await runWithAbortSignal(controller.signal, () => agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId, { disableTools: Boolean(retryRunId) }));
+      result = await runWithAbortSignal(controller.signal, () => agentRuntime.runStreaming(config, workingChat, projectContext, workingChat.permissionLevel, emit, controller.signal, runId, { disableTools: Boolean(retryRunId) }, runtimeFacts));
     } catch (initialError) {
       let recoveryError: unknown = initialError;
       let recoveryAttempts = 0;
