@@ -77,10 +77,10 @@ const definitions: AIToolDefinition[] = [
   { name: 'git_commit', description: 'Create a Git commit from the currently staged changes. This operation requires user approval.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Git commit message.' } }, required: ['message'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
 ];
 
-interface ToolExecution { output: string; changes?: FileDiff[]; commandResult?: CommandResultSummary; attachments?: import('../ai/types').AIAttachment[]; }
+interface ToolExecution { output: string; changes?: FileDiff[]; operationId?: string; commandResult?: CommandResultSummary; attachments?: import('../ai/types').AIAttachment[]; }
 interface ToolJournalStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
 type JournalEntry = { approvalId: string; projectId: string; toolCall: AIToolCall; diffPlan: DiffPlan; status: 'executing'; };
-type ExecutionCheckpointRecord = { chatId: string; runId: string; projectId: string; toolCallId: string; changes: FileDiff[] };
+type ExecutionCheckpointRecord = { chatId: string; runId: string; projectId: string; toolCallId: string; operationId?: string; changes: FileDiff[] };
 type ExecutionCheckpointRecorder = (record: ExecutionCheckpointRecord) => void;
 const JOURNAL_FILE = 'tool-execution-journal.json';
 
@@ -469,7 +469,7 @@ export class ToolRuntime {
   private recordCheckpoint(projectId: string, context: ActivityContext, call: AIToolCall, execution: ToolExecution): void {
     if (!this.executionCheckpointRecorder || !context.chatId || !context.runId || !this.isMutation(call.name) || !execution.changes?.length) return;
     try {
-      this.executionCheckpointRecorder({ chatId: context.chatId, runId: context.runId, projectId, toolCallId: call.id, changes: execution.changes });
+      this.executionCheckpointRecorder({ chatId: context.chatId, runId: context.runId, projectId, toolCallId: call.id, ...(execution.operationId ? { operationId: execution.operationId } : {}), changes: execution.changes });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.activity.emit({ type: 'action', message: `Checkpoint não registrado para ${call.name}: ${message}`, status: 'failed', toolCallId: call.id, toolName: call.name, ...context, error: message, changes: execution.changes });
@@ -590,6 +590,7 @@ export class ToolRuntime {
           }, path, content);
           return {
             output: JSON.stringify({ type: 'workspace_file_updated', path: result.path, operationId: result.operationId, beforeHash: result.beforeHash, afterHash: result.afterHash, bytes: result.bytes, rollbackRef: result.rollbackRef }),
+            operationId: result.operationId,
             changes: [this.diffs.create(result.path, 'modified', result.before, result.after)],
           };
         }
@@ -615,6 +616,7 @@ export class ToolRuntime {
           }, inspected.path, after, inspected.content);
           return {
             output: JSON.stringify({ type: 'workspace_file_incrementally_updated', tool: name, path: result.path, operationId: result.operationId, beforeHash: result.beforeHash, afterHash: result.afterHash, bytes: result.bytes, rollbackRef: result.rollbackRef }),
+            operationId: result.operationId,
             changes: [this.diffs.create(result.path, 'modified', result.before, result.after)],
           };
         }
@@ -642,6 +644,7 @@ export class ToolRuntime {
           }, inspected.path, structural.after, inspected.content);
           return {
             output: JSON.stringify({ type: 'workspace_symbol_updated', symbol, kind, path: result.path, operationId: result.operationId, beforeHash: result.beforeHash, afterHash: result.afterHash, bytes: result.bytes, rollbackRef: result.rollbackRef }),
+            operationId: result.operationId,
             changes: [this.diffs.create(result.path, 'modified', result.before, result.after)],
           };
         }
@@ -663,6 +666,7 @@ export class ToolRuntime {
           }, path, content);
           return {
             output: JSON.stringify({ type: 'workspace_file_created', path: result.path, operationId: result.operationId, hash: result.hash, bytes: result.bytes, createdDirectories: result.createdDirectories }),
+            operationId: result.operationId,
             changes: [this.diffs.create(result.path, 'created', '', content)],
           };
         }
@@ -694,6 +698,7 @@ export class ToolRuntime {
           }, inspected.path, inspected.content);
           return {
             output: JSON.stringify({ type: 'workspace_file_deleted', path: result.path, operationId: result.operationId, beforeHash: result.beforeHash, rollbackRef: result.rollbackRef }),
+            operationId: result.operationId,
             changes: [this.diffs.create(result.path, 'deleted', result.before, '')],
           };
         }
@@ -713,6 +718,7 @@ export class ToolRuntime {
           }, inspected.from.path, inspected.to, inspected.from.content);
           return {
             output: JSON.stringify({ type: 'workspace_file_renamed', from: result.from, to: result.to, operationId: result.operationId, hash: result.hash, rollbackRef: result.rollbackRef, createdDirectories: result.createdDirectories }),
+            operationId: result.operationId,
             changes: [this.diffs.create(result.to, 'renamed', result.content, result.content, result.from)],
           };
         }
