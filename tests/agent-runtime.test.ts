@@ -413,3 +413,39 @@ test('unrestricted AgentRuntime completes a multi-step workspace task with zero 
     await fixtureData.cleanup();
   }
 });
+
+
+test('tool-free response retry disables provider tools and still persists the new assistant run identity', async () => {
+  const finalResponse: AIResponse = { content: 'Regenerated.', model: 'test-model', providerId: config.id };
+  const fixtureData = await fixture(
+    [finalResponse],
+    [[
+      { type: 'start' },
+      { type: 'delta', text: 'Regenerated.' },
+      { type: 'complete', response: finalResponse },
+    ]],
+  );
+  try {
+    const emitted: AIStreamEvent[] = [];
+    const result = await fixtureData.agent.runStreaming(
+      config,
+      chat('unrestricted'),
+      undefined,
+      'unrestricted',
+      (event) => emitted.push(event),
+      undefined,
+      'retry-run',
+      { disableTools: true },
+    );
+    assert.equal(fixtureData.requests.length, 1);
+    assert.equal(fixtureData.requests[0].toolsEnabled, false);
+    assert.equal(fixtureData.requests[0].tools, undefined);
+    assert.equal(result.pendingApprovalIds.length, 0);
+    assert.equal(result.toolRounds, 0);
+    assert.equal(result.messages.at(-1)?.content, 'Regenerated.');
+    assert.equal(result.messages.at(-1)?.runId, 'retry-run');
+    assert.equal(emitted.some((event) => event.type === 'tool_call'), false);
+  } finally {
+    await fixtureData.cleanup();
+  }
+});
