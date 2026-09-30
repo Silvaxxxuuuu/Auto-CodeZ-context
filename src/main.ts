@@ -803,6 +803,31 @@ async function openManagedPreviewWindow(input: {
       })()`, true);
       return inspection;
     },
+    interact: async (input) => {
+      if (previewWindow.isDestroyed() || previewWindow.webContents.isDestroyed()) {
+        throw new Error('A janela de preview já foi fechada.');
+      }
+      if (previewWindow.webContents.getURL() && new URL(previewWindow.webContents.getURL()).origin !== allowedOrigin) {
+        throw new Error('O preview saiu da origem autorizada.');
+      }
+      const selectorLiteral = JSON.stringify(input.selector);
+      const result: unknown = await previewWindow.webContents.executeJavaScript(`(() => {
+        const selector = ${selectorLiteral};
+        let element;
+        try { element = document.querySelector(selector); } catch { throw new Error('Seletor CSS inválido.'); }
+        if (!(element instanceof HTMLButtonElement) || element.type !== 'button' || element.form
+            || element.disabled || !element.isConnected || element.closest('[inert]')) {
+          throw new Error('Somente botões habilitados type=button e sem formulário podem ser acionados.');
+        }
+        const style = getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden' || element.getClientRects().length === 0) {
+          throw new Error('O botão não está visível.');
+        }
+        element.click();
+        return { action: 'click_button', selector, executed: true };
+      })()`, true);
+      return result as { action: 'click_button'; selector: string; executed: true };
+    },
     isOpen: () => !previewWindow.isDestroyed(),
     onClosed: (listener) => {
       previewWindow.on('closed', listener);
