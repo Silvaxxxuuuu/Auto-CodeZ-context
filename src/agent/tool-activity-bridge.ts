@@ -1,5 +1,6 @@
 import type { ActivityEvent, AIToolResult, ToolName } from '../ai/types';
 import { AGENT_CORE_V2_CONTRACT_VERSION, type StructuredActivityEvent } from '../agent-core/contracts';
+import { agentCoreV2CapabilityByName } from '../agent-core/baseline-capabilities';
 
 export interface ToolActivitySnapshot {
   type: ActivityEvent['type'];
@@ -91,7 +92,7 @@ export function toStructuredToolActivity(snapshot: ToolActivitySnapshot, created
     phase,
     runId: snapshot.runId,
     toolCallId: snapshot.toolCallId,
-    capabilityId: snapshot.toolName,
+    ...(agentCoreV2CapabilityByName(snapshot.toolName)?.id ? { capabilityId: agentCoreV2CapabilityByName(snapshot.toolName)?.id } : {}),
     ...(subject ? { subject } : {}),
     summary: snapshot.message,
     ...(result.commandResult ? { durationMs: result.commandResult.durationMs } : {}),
