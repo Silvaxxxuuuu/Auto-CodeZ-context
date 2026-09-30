@@ -58,6 +58,10 @@ test('interact_instance respects project, permission, action, selector and close
       ...input, action: 'run_script',
     }), 'run-a');
     assert.equal(invalid.ok, false);
+    const control = await tools.execute('a', 'project-a', 'unrestricted', call('newline', 'interact_instance', {
+      ...input, selector: '#refresh\\nbutton'.replace('\\n', '\n'),
+    }), 'run-a');
+    assert.equal(control.ok, false);
     const oversized = await tools.execute('a', 'project-a', 'unrestricted', call('long', 'interact_instance', {
       ...input, selector: 'a'.repeat(257),
     }), 'run-a');
