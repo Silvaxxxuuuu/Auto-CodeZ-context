@@ -90,6 +90,8 @@ test('external instances have no interaction and platform results are validated'
   });
   const external = await runtime.open({ projectId: 'a', kind: 'url', target: 'https://example.com' });
   await assert.rejects(() => runtime.interact(external.instanceId, { action: 'click_button', selector: '#button' }), /não oferece interação controlada/i);
+  const remotePreview = await runtime.open({ projectId: 'a', kind: 'preview', target: 'https://example.com' });
+  await assert.rejects(() => runtime.interact(remotePreview.instanceId, { action: 'click_button', selector: '#button' }), /somente loopback local/i);
   const preview = await runtime.open({ projectId: 'a', kind: 'preview', target: 'http://localhost:3000' });
   await assert.rejects(() => runtime.interact(preview.instanceId, { action: 'click_button', selector: '#button' }), /resultado de interação inválido/i);
 });
