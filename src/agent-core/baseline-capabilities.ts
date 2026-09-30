@@ -941,7 +941,7 @@ export const AGENT_CORE_V2_BASELINE_CAPABILITIES: readonly CapabilityContract[] 
     description: 'Adiciona caminhos selecionados ao índice Git para o próximo commit.',
     whenToUse: ['Quando apenas arquivos específicos devem entrar no próximo commit.'],
     whenNotToUse: ['Não usar para stage global quando o usuário pretende selecionar arquivos específicos.'],
-    inputSchema: schemaObject({ paths: { type: 'array', items: { type: 'string' } }, ['paths']),
+    inputSchema: schemaObject({ paths: { type: 'array', items: { type: 'string' } } }, ['paths']),
     outputSchema: schemaObject({ staged: { type: 'array' } }, []),
     examples: ['Adicionar src/app.ts e tests/app.test.ts ao stage.'],
     failureModes: ['Lista vazia ou path inválido.', 'Git indisponível.', 'Arquivo fora do workspace.'],
