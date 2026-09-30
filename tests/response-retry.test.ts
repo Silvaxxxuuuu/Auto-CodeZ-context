@@ -71,3 +71,14 @@ test('safe retry rejects mismatched report or unrelated run identity', () => {
   assert.throws(() => prepareSafeResponseRetry(input, 'run-a', null), /comprovar/i);
   assert.throws(() => prepareSafeResponseRetry(input, 'run-b', report()), /comprovar|não encontrada/i);
 });
+
+
+test('safe retry rejects an older assistant response when later chat history exists', () => {
+  const input = chat([
+    { role: 'user', content: 'Pergunta antiga.' },
+    { role: 'assistant', content: 'Resposta antiga.', runId: 'run-a' },
+    { role: 'user', content: 'Pergunta nova.' },
+    { role: 'assistant', content: 'Resposta nova.', runId: 'run-b' },
+  ]);
+  assert.throws(() => prepareSafeResponseRetry(input, 'run-a', report()), /mais recente/i);
+});
