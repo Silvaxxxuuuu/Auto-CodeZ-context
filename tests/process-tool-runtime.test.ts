@@ -51,8 +51,12 @@ test('ToolRuntime exposes the full persistent process lifecycle without approval
     assert.equal(started.pendingApproval, undefined);
     const startedPayload = JSON.parse(started.output ?? '{}');
     assert.equal(typeof startedPayload.processId, 'string');
+    assert.equal(startedPayload.runId, 'run-a');
+    assert.equal(startedPayload.toolCallId, 'start');
 
     const processId = startedPayload.processId as string;
+    assert.equal(f.processes.get(processId).runId, 'run-a');
+    assert.equal(f.processes.get(processId).toolCallId, 'start');
     const polled = await f.tools.execute('chat-a', 'project-a', 'unrestricted', call('wait', 'wait_process', {
       processId,
       timeoutMs: 250,
