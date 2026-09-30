@@ -391,6 +391,7 @@ export class AgentRuntime {
       commandResult: result.commandResult,
       gitResult: result.gitResult,
       sources: result.sources,
+      ...(result.attachments?.length ? { attachments: result.attachments } : {}),
       createdAt: Date.now(),
     });
 
@@ -600,6 +601,7 @@ export class AgentRuntime {
       commandResult: result.commandResult,
       gitResult: result.gitResult,
       sources: result.sources,
+      ...(result.attachments?.length ? { attachments: result.attachments } : {}),
       createdAt: Date.now(),
     });
   }
