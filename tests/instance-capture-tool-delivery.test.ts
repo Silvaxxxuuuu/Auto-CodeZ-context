@@ -64,12 +64,19 @@ test('capture_instance returns only a verified artifact reference and cannot cro
     }), 'run-a');
     assert.equal(opened.ok, true, opened.error);
     const instanceId = (JSON.parse(opened.output ?? '{}') as { instanceId: string }).instanceId;
-    const foreign = await f.tools.execute('chat-b', 'project-b', 'read-only', call('foreign', 'capture_instance', { instanceId }), 'run-b');
+    const foreign = await f.tools.execute('chat-b', 'project-b', 'unrestricted', call('foreign', 'capture_instance', { instanceId }), 'run-b');
     assert.equal(foreign.ok, false);
     assert.match(foreign.error ?? '', /outro projeto/i);
     assert.equal(f.captures(), 0);
+    const readOnly = await f.tools.execute('chat-a', 'project-a', 'read-only', call('denied', 'capture_instance', { instanceId }), 'run-readonly');
+    assert.equal(readOnly.ok, false);
+    assert.match(readOnly.error ?? '', /permissões/i);
+    const pending = await f.tools.execute('chat-a', 'project-a', 'ask', call('ask', 'capture_instance', { instanceId }), 'run-ask');
+    assert.equal(pending.pendingApproval, true);
+    assert.equal(f.captures(), 0);
+    f.tools.deny(pending.approvalId as string);
 
-    const captured = await f.tools.execute('chat-a', 'project-a', 'read-only', call('capture', 'capture_instance', { instanceId }), 'run-a');
+    const captured = await f.tools.execute('chat-a', 'project-a', 'unrestricted', call('capture', 'capture_instance', { instanceId }), 'run-a');
     assert.equal(captured.ok, true, captured.error);
     assert.equal(captured.pendingApproval, undefined);
     assert.equal(f.captures(), 1);
@@ -84,7 +91,7 @@ test('capture_instance returns only a verified artifact reference and cannot cro
 
     const closed = await f.tools.execute('chat-a', 'project-a', 'unrestricted', call('close', 'close_instance', { instanceId }), 'run-a');
     assert.equal(closed.ok, true);
-    const afterClose = await f.tools.execute('chat-a', 'project-a', 'read-only', call('closed', 'capture_instance', { instanceId }), 'run-a');
+    const afterClose = await f.tools.execute('chat-a', 'project-a', 'unrestricted', call('closed', 'capture_instance', { instanceId }), 'run-a');
     assert.equal(afterClose.ok, false);
     assert.equal(f.captures(), 1);
   } finally {
@@ -96,7 +103,7 @@ test('latest capture is hydrated only for a vision provider and only in ephemera
   const f = await fixture();
   try {
     const instance = await f.instances.open({ projectId: 'project-a', kind: 'preview', target: 'http://localhost:5173' });
-    const capture = await f.tools.execute('chat-a', 'project-a', 'read-only', call('capture', 'capture_instance', { instanceId: instance.instanceId }), 'run-a');
+    const capture = await f.tools.execute('chat-a', 'project-a', 'unrestricted', call('capture', 'capture_instance', { instanceId: instance.instanceId }), 'run-a');
     assert.equal(capture.ok, true, capture.error);
     assert.equal(capture.attachments?.[0].dataBase64, undefined);
     const history: AIMessage[] = [
