@@ -8,6 +8,7 @@ export type ExecutionCheckpoint = {
   runId: string;
   projectId: string;
   toolCallId: string;
+  operationId?: string;
   createdAt: number;
   restoredAt?: number;
   status: ExecutionCheckpointStatus;
@@ -72,6 +73,7 @@ function validateCheckpoint(checkpoint: ExecutionCheckpoint): ExecutionCheckpoin
     runId: requireId(checkpoint.runId, 'Execução'),
     projectId: requireId(checkpoint.projectId, 'Projeto'),
     toolCallId: requireId(checkpoint.toolCallId, 'Tool call'),
+    ...(checkpoint.operationId !== undefined ? { operationId: requireId(checkpoint.operationId, 'Operação') } : {}),
     createdAt: checkpoint.createdAt,
     status: checkpoint.status,
     changes: validateChanges(checkpoint.changes),
@@ -169,6 +171,7 @@ export class ExecutionCheckpointRuntime {
     runId: string;
     projectId: string;
     toolCallId: string;
+    operationId?: string;
     changes: FileDiff[];
   }): ExecutionCheckpoint {
     const checkpoint = validateCheckpoint({
@@ -177,6 +180,7 @@ export class ExecutionCheckpointRuntime {
       runId: input.runId,
       projectId: input.projectId,
       toolCallId: input.toolCallId,
+      ...(input.operationId ? { operationId: input.operationId } : {}),
       createdAt: this.now(),
       status: 'ready',
       changes: input.changes,
@@ -230,6 +234,15 @@ export class ExecutionCheckpointRuntime {
       }
     }
 
+    checkpoint.status = 'restored';
+    checkpoint.restoredAt = this.now();
+    return cloneCheckpoint(checkpoint);
+  }
+
+  markRestored(id: string): ExecutionCheckpoint {
+    const checkpoint = this.checkpoints.get(requireId(id, 'Checkpoint'));
+    if (!checkpoint) throw new Error('Checkpoint não encontrado.');
+    if (checkpoint.status === 'restored') return cloneCheckpoint(checkpoint);
     checkpoint.status = 'restored';
     checkpoint.restoredAt = this.now();
     return cloneCheckpoint(checkpoint);
