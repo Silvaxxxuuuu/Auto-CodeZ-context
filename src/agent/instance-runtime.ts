@@ -28,6 +28,7 @@ export type InstancePlatformHandle = {
   canClose: boolean;
   focus?: () => void | Promise<void>;
   close?: () => void | Promise<void>;
+  capture?: () => Promise<Buffer>;
   isOpen?: () => boolean;
   onClosed?: (listener: () => void) => (() => void) | void;
 };
@@ -43,6 +44,7 @@ type ManagedInstanceRecord = {
 };
 
 const INSTANCE_KINDS = new Set<InstanceKind>(['application', 'url', 'file', 'folder', 'preview']);
+const MAX_CAPTURE_BYTES = 8 * 1024 * 1024;
 
 function cloneSnapshot(snapshot: ManagedInstanceSnapshot): ManagedInstanceSnapshot {
   return {
@@ -163,6 +165,30 @@ export class InstanceRuntime {
       record.snapshot.updatedAt = this.now();
       this.refresh(record);
       return cloneSnapshot(record.snapshot);
+    } catch (error) {
+      record.snapshot.error = errorMessage(error);
+      record.snapshot.updatedAt = this.now();
+      throw error;
+    }
+  }
+
+  async capture(instanceId: string): Promise<Buffer> {
+    const record = this.record(instanceId);
+    this.refresh(record);
+    if (record.snapshot.status !== 'open') throw new Error(`A instância ${instanceId} não está aberta.`);
+    if (record.snapshot.kind !== 'preview' || !record.handle?.capture) {
+      throw new Error(`A instância ${instanceId} não oferece captura controlada.`);
+    }
+
+    try {
+      const image = await record.handle.capture();
+      if (!Buffer.isBuffer(image) || image.length === 0 || image.length > MAX_CAPTURE_BYTES) {
+        throw new Error('Captura inválida ou maior que o limite de 8 MiB.');
+      }
+      this.refresh(record);
+      if (record.snapshot.status !== 'open') throw new Error('A janela de preview foi fechada durante a captura.');
+      record.snapshot.updatedAt = this.now();
+      return image;
     } catch (error) {
       record.snapshot.error = errorMessage(error);
       record.snapshot.updatedAt = this.now();
