@@ -114,3 +114,24 @@ test('histórico arquivado continua disponível no relatório', () => {
   assert.equal(report?.completionProof, 'verified');
   assert.equal(report?.planArchived, true);
 });
+
+
+test('execution report exposes factual final tool phases without upgrading completion proof', () => {
+  const { executions, timeline, reports, tick } = setup();
+  executions.start('chat-a', tick(), 'run-a');
+  const completed = {
+    contractVersion: 1 as const, kind: 'tool', chatId: 'chat-a', runId: 'run-a',
+    toolCallId: 'tool-1', capabilityId: 'run_command', createdAt: tick(),
+  };
+  timeline.recordStructuredActivity({ ...completed, id: 'tool-1:waiting', phase: 'waiting' });
+  timeline.recordStructuredActivity({ ...completed, id: 'tool-1:completed', phase: 'completed', createdAt: tick() });
+  timeline.recordStructuredActivity({ ...completed, id: 'tool-2:failed', toolCallId: 'tool-2', capabilityId: 'inspect_instance', phase: 'failed', createdAt: tick() });
+  executions.update('chat-a', { state: 'completed', runId: 'run-a' }, tick());
+  const report = reports.build('chat-a', 'run-a');
+  assert.equal(report?.recordedTools.observed, 2);
+  assert.equal(report?.recordedTools.completed, 1);
+  assert.equal(report?.recordedTools.failed, 1);
+  assert.equal(report?.recordedTools.waiting, 0);
+  assert.deepEqual(report?.recordedTools.tools.map((tool) => tool.toolName), ['run_command', 'inspect_instance']);
+  assert.equal(report?.completionProof, 'unplanned');
+});
