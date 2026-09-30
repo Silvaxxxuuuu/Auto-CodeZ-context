@@ -9,6 +9,7 @@ import { WorkspaceRuntime } from './workspace-runtime';
 import { CommandRuntime } from './command-runtime';
 import { ProcessRuntime } from './process-runtime';
 import { InstanceRuntime } from './instance-runtime';
+import { InstanceCaptureArtifactRuntime } from './instance-capture-artifact-runtime';
 import type { InstanceKind } from '../agent-core/contracts';
 import { DiffRuntime } from './diff-runtime';
 import { GitRuntime } from './git-runtime';
@@ -57,6 +58,7 @@ const definitions: AIToolDefinition[] = [
   { name: 'stop_process', description: 'Stop a managed persistent process and its child process tree. Use this to cleanly end dev servers, watchers and other processes previously started by start_process.', parameters: { type: 'object', properties: { processId: { type: 'string', description: 'Managed process identifier.' } }, required: ['processId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'list_processes', description: 'List managed persistent processes belonging to the active workspace, including lifecycle state, PID, command and timestamps.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'open_instance', description: 'Open and register a managed visual or navigable instance for the active workspace. Supported kinds are preview, url, file, folder and application. Preview windows are controlled by Auto CodeZ; external URL/file/folder/application launches do not claim focus or close control they do not possess.', parameters: { type: 'object', properties: { kind: { type: 'string', enum: ['application', 'url', 'file', 'folder', 'preview'], description: 'Instance kind to open.' }, target: { type: 'string', description: 'HTTP(S) URL for url/preview, or workspace-relative path for file/folder/application.' } }, required: ['kind', 'target'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
+  { name: 'capture_instance', description: 'Capture an actual PNG screenshot of a managed preview belonging to the active workspace. The tool stores verified image bytes and returns an artifact reference. Do not claim to have seen or analyzed the image until the selected model receives it through its vision channel; external windows cannot be captured.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed preview instance identifier returned by open_instance.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'instance_status', description: 'Read the current lifecycle status and real control capabilities of one managed instance belonging to the active workspace.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier returned by open_instance.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: false },
   { name: 'focus_instance', description: 'Focus a managed instance only when the platform adapter reports real focus control. Fails explicitly for external launches that Auto CodeZ cannot focus.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
   { name: 'close_instance', description: 'Close a managed instance only when the platform adapter reports real close control. Fails explicitly for external launches that Auto CodeZ cannot close.', parameters: { type: 'object', properties: { instanceId: { type: 'string', description: 'Managed instance identifier.' } }, required: ['instanceId'], additionalProperties: false }, requiresWriteAccess: false, requiresApproval: true },
@@ -73,7 +75,7 @@ const definitions: AIToolDefinition[] = [
   { name: 'git_commit', description: 'Create a Git commit from the currently staged changes. This operation requires user approval.', parameters: { type: 'object', properties: { message: { type: 'string', description: 'Git commit message.' } }, required: ['message'], additionalProperties: false }, requiresWriteAccess: true, requiresApproval: true },
 ];
 
-interface ToolExecution { output: string; changes?: FileDiff[]; commandResult?: CommandResultSummary; }
+interface ToolExecution { output: string; changes?: FileDiff[]; commandResult?: CommandResultSummary; attachments?: import('../ai/types').AIAttachment[]; }
 interface ToolJournalStorage { read<T>(name: string, fallback: T): Promise<T>; write<T>(name: string, value: T): Promise<void>; }
 type JournalEntry = { approvalId: string; projectId: string; toolCall: AIToolCall; diffPlan: DiffPlan; status: 'executing'; };
 type ExecutionCheckpointRecord = { chatId: string; runId: string; projectId: string; toolCallId: string; changes: FileDiff[] };
@@ -131,6 +133,7 @@ function executionActivityMessage(call: AIToolCall): string {
     case 'stop_process': return value('processId') ? `Encerrando processo ${value('processId')}` : 'Encerrando processo.';
     case 'list_processes': return 'Listando processos persistentes.';
     case 'open_instance': return value('target') ? `Abrindo instância: ${value('target')}` : 'Abrindo instância.';
+    case 'capture_instance': return value('instanceId') ? `Capturando preview ${value('instanceId')}` : 'Capturando preview.';
     case 'instance_status': return value('instanceId') ? `Consultando instância ${value('instanceId')}` : 'Consultando instância.';
     case 'focus_instance': return value('instanceId') ? `Focando instância ${value('instanceId')}` : 'Focando instância.';
     case 'close_instance': return value('instanceId') ? `Fechando instância ${value('instanceId')}` : 'Fechando instância.';
@@ -171,6 +174,7 @@ export class ToolRuntime {
   private incrementalWorkspace?: IncrementalWorkspaceMutationRuntime;
   private processRuntime?: ProcessRuntime;
   private instanceRuntime?: InstanceRuntime;
+  private instanceCaptures?: InstanceCaptureArtifactRuntime;
 
   constructor(private readonly workspace: WorkspaceRuntime, permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()]), workspacePathPolicy = new WorkspacePathPolicy(), commandSafetyPolicy = new CommandSafetyPolicy(workspacePathPolicy), private readonly toolPolicy = new ToolPolicyRuntime(permissions, workspacePathPolicy, commandSafetyPolicy)) {}
 
@@ -182,6 +186,7 @@ export class ToolRuntime {
   configureIncrementalWorkspaceRuntime(runtime: IncrementalWorkspaceMutationRuntime): void { this.incrementalWorkspace = runtime; }
   configureProcessRuntime(runtime: ProcessRuntime): void { this.processRuntime = runtime; }
   configureInstanceRuntime(runtime: InstanceRuntime): void { this.instanceRuntime = runtime; }
+  configureInstanceCaptureRuntime(runtime: InstanceCaptureArtifactRuntime): void { this.instanceCaptures = runtime; }
   protected hasIncrementalWorkspaceRuntime(): boolean { return Boolean(this.incrementalWorkspace); }
   protected hasProcessRuntime(): boolean { return Boolean(this.processRuntime); }
   protected hasInstanceRuntime(): boolean { return Boolean(this.instanceRuntime); }
@@ -477,7 +482,7 @@ export class ToolRuntime {
       this.recordChangeBudget(context, call, execution);
       this.recordCheckpoint(projectId, context, call, execution);
       this.recordPlanEvidence(context, call, execution);
-      const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, ...(execution.changes ? { changes: execution.changes } : {}), ...(execution.commandResult ? { commandResult: execution.commandResult } : {}) };
+      const result: AIToolResult = { toolCallId: call.id, ok: true, output: execution.output, ...(execution.changes ? { changes: execution.changes } : {}), ...(execution.commandResult ? { commandResult: execution.commandResult } : {}), ...(execution.attachments ? { attachments: execution.attachments } : {}) };
       this.activity.emit({ type: 'action', message: `Concluído: ${call.name}`, status: 'success', toolCallId: call.id, toolName: call.name, ...context, ...(execution.commandResult ? { commandResult: execution.commandResult } : {}), ...(execution.changes ? { changes: execution.changes } : {}), ...(diffPlan ? { diffPlan } : {}) });
       if (approvalId) await this.finishJournal(approvalId);
       return result;
@@ -758,6 +763,18 @@ export class ToolRuntime {
         const kind = this.stringValue(input, 'kind') as InstanceKind;
         const target = this.stringValue(input, 'target');
         return { output: JSON.stringify(await runtime.open({ projectId, kind, target })) };
+      }
+      case 'capture_instance': {
+        const instanceId = this.stringValue(input, 'instanceId');
+        const runtime = this.instanceCaptures;
+        if (!runtime) throw new Error('O transporte de capturas não está configurado.');
+        this.assertInstanceProject(this.requireInstanceRuntime(), instanceId, projectId);
+        const captured = await runtime.capture(projectId, instanceId);
+        const { attachment } = captured;
+        return {
+          output: JSON.stringify({ type: 'preview_capture', instanceId, projectId, captured: true, artifact: { id: attachment.id, storageKey: attachment.storageKey, sha256: attachment.sha256, mediaType: attachment.mediaType, size: attachment.size }, visualAnalysis: 'requires_model_vision_delivery' }),
+          attachments: [attachment],
+        };
       }
       case 'instance_status': {
         const runtime = this.requireInstanceRuntime();
