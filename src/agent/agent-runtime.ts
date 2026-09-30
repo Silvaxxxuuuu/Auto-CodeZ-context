@@ -5,6 +5,7 @@ import { ToolRuntime } from './tool-runtime';
 import { SYSTEM_PROJECT_ID } from './command-runtime';
 import { ChatRuntime } from '../ai/chat-runtime';
 import type { ComputerRuntimeFact } from './computer-context';
+import type { OperationalTraceSnapshot } from '../agent-core/operational-trace';
 import { createToolActivitySnapshot, toActivityInput, toStructuredToolActivity } from './tool-activity-bridge';
 import {
   ProgressWatchdog,
@@ -191,6 +192,7 @@ export type AgentRunSummary = {
 
 export class AgentRuntime {
   private readonly pendingRuns = new Map<string, PendingRun>();
+  private operationalTraceProvider?: (chatId: string, runId: string) => OperationalTraceSnapshot | undefined;
   private readonly recoverableRuns = new Map<string, PendingRun>();
   private persistenceWrite: Promise<void> = Promise.resolve();
 
@@ -200,6 +202,18 @@ export class AgentRuntime {
     private readonly activity = new ActivityRuntime(),
     private readonly storage?: AgentStateStorage,
   ) {}
+
+  configureOperationalTraceProvider(provider: (chatId: string, runId: string) => OperationalTraceSnapshot | undefined): void {
+    this.operationalTraceProvider = provider;
+  }
+
+  private operationalTraceFor(run: PendingRun): OperationalTraceSnapshot | undefined {
+    try {
+      return this.operationalTraceProvider?.(run.chat.id, run.runId);
+    } catch {
+      return undefined;
+    }
+  }
 
   async init(): Promise<void> {
     if (!this.storage) return;
@@ -629,7 +643,7 @@ export class AgentRuntime {
       signal?.throwIfAborted();
       let response: AIResponse;
       try {
-        response = await this.chatRuntime.send(run.config, run.workingChat, this.effectiveProjectContext(run), signal, { runtimeFacts: run.runtimeFacts });
+        response = await this.chatRuntime.send(run.config, run.workingChat, this.effectiveProjectContext(run), signal, { runtimeFacts: run.runtimeFacts, operationalTrace: this.operationalTraceFor(run) });
         this.consumeReplanDirective(run);
         run.lastError = undefined;
       } catch (error) {
@@ -715,7 +729,7 @@ export class AgentRuntime {
       let response: AIResponse | undefined;
       let streamError: string | undefined;
 
-      for await (const event of this.chatRuntime.stream(run.config, run.workingChat, this.effectiveProjectContext(run), signal, { disableTools: run.disableTools, runtimeFacts: run.runtimeFacts })) {
+      for await (const event of this.chatRuntime.stream(run.config, run.workingChat, this.effectiveProjectContext(run), signal, { disableTools: run.disableTools, runtimeFacts: run.runtimeFacts, operationalTrace: this.operationalTraceFor(run) })) {
         signal?.throwIfAborted();
         const contextualEvent: AIStreamEvent = {
           ...event,
