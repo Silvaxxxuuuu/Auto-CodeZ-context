@@ -9,6 +9,7 @@ import { IncrementalWorkspaceMutationRuntime } from './agent-core/incremental-wo
 import { RollbackBlobStore } from './agent-core/rollback-blob-store';
 import { ProviderManager } from './ai/provider-manager';
 import { ChatManager } from './ai/chat-manager';
+import { AccountMemoryRuntime, type MemoryScope } from './account-memory-runtime';
 import { ProjectManager } from './project/project-manager';
 import { ShadowAwareToolRuntime } from './agent/shadow-aware-tool-runtime';
 import { ShadowAwareWorkspaceRuntime } from './agent/shadow-aware-workspace-runtime';
@@ -255,6 +256,9 @@ app.on('open-url', (event, rawUrl) => {
 });
 const providerManager = new ProviderManager(storage);
 const chatManager = new ChatManager(storage);
+const accountMemoryRuntime = new AccountMemoryRuntime(storage, () => {
+  try { return accountSessionRuntime.snapshot().account?.id; } catch { return undefined; }
+});
 const projectManager = new ProjectManager(storage);
 const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
 const agentCoreOperationJournalRuntime = new OperationJournalRuntime();
@@ -1063,6 +1067,41 @@ ipcMain.handle('app:get-state', async () => ({ providers: await providerManager.
 ipcMain.handle('account:get-state', async () => accountStateForRenderer());
 ipcMain.handle('account:logout', async () => accountSessionRuntime.logout());
 ipcMain.handle('account:rename-device', async (_event, name: string) => accountSessionRuntime.renameDevice(requireNonEmptyString(name, 'Nome do dispositivo')));
+ipcMain.handle('memory:list', async (_event, rawScope?: unknown) => {
+  if (rawScope === undefined) return accountMemoryRuntime.list();
+  const value = requireObject(rawScope, 'Escopo da memória');
+  const type = requireNonEmptyString(value.type, 'Tipo do escopo');
+  let scope: MemoryScope;
+  if (type === 'global') scope = { type: 'global' };
+  else if (type === 'project') scope = { type: 'project', projectId: requireIdentifier(value.projectId, 'Projeto') };
+  else if (type === 'chat') scope = { type: 'chat', chatId: requireIdentifier(value.chatId, 'Chat') };
+  else throw new Error('Tipo de escopo de memória inválido.');
+  return accountMemoryRuntime.list(scope);
+});
+ipcMain.handle('memory:add', async (_event, input: unknown) => {
+  const value = requireObject(input, 'Memória');
+  const type = requireNonEmptyString(value.scopeType, 'Tipo do escopo');
+  let scope: MemoryScope;
+  if (type === 'global') scope = { type: 'global' };
+  else if (type === 'project') scope = { type: 'project', projectId: requireIdentifier(value.projectId, 'Projeto') };
+  else if (type === 'chat') scope = { type: 'chat', chatId: requireIdentifier(value.chatId, 'Chat') };
+  else throw new Error('Tipo de escopo de memória inválido.');
+  const source = value.source === undefined ? undefined : requireObject(value.source, 'Origem da memória');
+  return accountMemoryRuntime.add({
+    scope,
+    content: requireNonEmptyString(value.content, 'Conteúdo da memória'),
+    ...(source ? { source: {
+      ...(source.chatId === undefined ? {} : { chatId: requireIdentifier(source.chatId, 'Chat de origem') }),
+      ...(source.runId === undefined ? {} : { runId: requireIdentifier(source.runId, 'Execução de origem') }),
+      ...(source.messageCreatedAt === undefined ? {} : {
+        messageCreatedAt: typeof source.messageCreatedAt === 'number' && Number.isFinite(source.messageCreatedAt)
+          ? source.messageCreatedAt
+          : (() => { throw new Error('Data da mensagem de origem inválida.'); })(),
+      }),
+    } } : {}),
+  });
+});
+ipcMain.handle('memory:remove', async (_event, id: unknown) => accountMemoryRuntime.remove(requireIdentifier(id, 'Memória')));
 ipcMain.handle('account-auth-flow:get-state', async () => accountAuthFlowRuntime.snapshot());
 ipcMain.handle('account-auth-flow:reset', async () => accountAuthFlowRuntime.reset());
 ipcMain.handle('account-auth-flow:cancel', async () => accountAuthFlowRuntime.cancel());
@@ -2039,6 +2078,7 @@ app.whenReady().then(async () => {
   await mcpGatewayBindingStore.clear();
   await mcpConnectionRegistry.init();
   const initialAccountState = await accountSessionRuntime.hydrate();
+  await accountMemoryRuntime.init();
   scheduleAccountRefresh(initialAccountState);
   if (initialAccountState.state === 'authenticated') await deviceRegistryRuntime.ensureRegistered();
   operationalLedger.restore(await operationalLedgerStore.load());
