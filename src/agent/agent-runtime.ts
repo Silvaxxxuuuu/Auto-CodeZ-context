@@ -632,7 +632,7 @@ export class AgentRuntime {
 
       signal?.throwIfAborted();
       if (!response.toolCalls?.length) {
-        run.workingChat.messages.push({ role: 'assistant', content: response.content, sources: response.sources, createdAt: Date.now() });
+        run.workingChat.messages.push({ role: 'assistant', content: response.content, sources: response.sources, runId: run.runId, createdAt: Date.now() });
         this.activity.emit({ runId: run.runId, chatId: run.chat.id, type: 'complete', message: 'Execução concluída.', status: 'success' });
         this.recoverableRuns.delete(run.runId);
         await this.persist();
@@ -642,7 +642,7 @@ export class AgentRuntime {
       const executionProjectId = run.workingChat.projectId || SYSTEM_PROJECT_ID;
       run.toolRounds += 1;
       this.activity.emit({ runId: run.runId, chatId: run.chat.id, type: 'tool', message: `Executando ${response.toolCalls.length} ferramenta(s).`, status: 'running' });
-      run.workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, sources: response.sources, createdAt: Date.now() });
+      run.workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, sources: response.sources, runId: run.runId, createdAt: Date.now() });
       await this.persist();
 
       const pendingApprovalIds: string[] = [];
@@ -740,7 +740,7 @@ export class AgentRuntime {
       this.consumeReplanDirective(run);
       run.lastError = undefined;
       if (!response.toolCalls?.length) {
-        run.workingChat.messages.push({ role: 'assistant', content: response.content, sources: response.sources, createdAt: Date.now() });
+        run.workingChat.messages.push({ role: 'assistant', content: response.content, sources: response.sources, runId: run.runId, createdAt: Date.now() });
         const completion: AIStreamEvent = {
           type: 'activity',
           chatId: run.chat.id,
@@ -764,7 +764,7 @@ export class AgentRuntime {
       };
       this.activity.emit(roundActivity.activity!);
       emit(roundActivity);
-      run.workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, sources: response.sources, createdAt: Date.now() });
+      run.workingChat.messages.push({ role: 'assistant', content: response.content, toolCalls: response.toolCalls, sources: response.sources, runId: run.runId, createdAt: Date.now() });
       await this.persist();
 
       const pendingApprovalIds: string[] = [];
