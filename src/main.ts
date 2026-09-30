@@ -7,6 +7,7 @@ import { OperationJournalRuntime } from './agent-core/operation-journal';
 import { DurableOperationJournal, OperationJournalStore } from './agent-core/operation-journal-store';
 import { IncrementalWorkspaceMutationRuntime } from './agent-core/incremental-workspace-runtime';
 import { RollbackBlobStore } from './agent-core/rollback-blob-store';
+import { OperationRollbackRuntime } from './agent-core/operation-rollback-runtime';
 import { ProviderManager } from './ai/provider-manager';
 import { ChatManager } from './ai/chat-manager';
 import { AccountMemoryRuntime, type MemoryScope } from './account-memory-runtime';
@@ -267,6 +268,7 @@ const agentCoreOperationJournalStore = new OperationJournalStore(storage);
 const durableAgentCoreOperationJournal = new DurableOperationJournal(agentCoreOperationJournalRuntime, agentCoreOperationJournalStore);
 const agentCoreRollbackBlobStore = new RollbackBlobStore(storage);
 const incrementalWorkspaceMutationRuntime = new IncrementalWorkspaceMutationRuntime(workspaceRuntime, durableAgentCoreOperationJournal, agentCoreRollbackBlobStore);
+const operationRollbackRuntime = new OperationRollbackRuntime(durableAgentCoreOperationJournal, incrementalWorkspaceMutationRuntime);
 const executionShadowWorkspaceRuntime = new ExecutionShadowWorkspaceRuntime(workspaceRuntime);
 const shadowAwareWorkspaceRuntime = new ShadowAwareWorkspaceRuntime(workspaceRuntime, executionShadowWorkspaceRuntime);
 const permissionRuntime = new PermissionRuntime();
@@ -457,7 +459,13 @@ const executionCheckpointController = new ExecutionCheckpointController(
   (checkpoints) => {
     if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(checkpoints);
   },
+  operationRollbackRuntime,
 );
+toolRuntime.configureExecutionCheckpointRecorder((record) => {
+  if (!record.operationId) return;
+  executionCheckpointRuntime.record(record);
+  if (executionCheckpointPersistenceEnabled) executionCheckpointPersistence.schedule(executionCheckpointRuntime.list());
+});
 const executionShadowWorkspaceController = new ExecutionShadowWorkspaceController(
   executionShadowWorkspaceRuntime,
   (record) => {
