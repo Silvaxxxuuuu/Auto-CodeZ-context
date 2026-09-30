@@ -43,6 +43,15 @@ function nodeCommand(expression: string): string {
 
 test('ToolRuntime exposes the full persistent process lifecycle without approvals in unrestricted mode', async () => {
   const f = await fixture();
+  const lifecycle: Array<{ status: string; executionId?: string; chatId?: string; runId?: string; toolCallId?: string; capabilityId?: string }> = [];
+  f.processes.subscribeLifecycle((snapshot) => lifecycle.push({
+    status: snapshot.status,
+    executionId: snapshot.executionId,
+    chatId: snapshot.chatId,
+    runId: snapshot.runId,
+    toolCallId: snapshot.toolCallId,
+    capabilityId: snapshot.capabilityId,
+  }));
   try {
     const started = await f.tools.execute('chat-a', 'project-a', 'unrestricted', call('start', 'start_process', {
       command: nodeCommand("process.stdout.write('ready'); setTimeout(() => {}, 30000)"),
@@ -53,10 +62,16 @@ test('ToolRuntime exposes the full persistent process lifecycle without approval
     assert.equal(typeof startedPayload.processId, 'string');
     assert.equal(startedPayload.runId, 'run-a');
     assert.equal(startedPayload.toolCallId, 'start');
+    assert.equal(startedPayload.executionId, 'process:run-a:start');
+    assert.equal(started.executionId, 'process:run-a:start');
+    assert.equal(typeof started.processId, 'string');
 
     const processId = startedPayload.processId as string;
+    assert.equal(f.processes.get(processId).chatId, 'chat-a');
     assert.equal(f.processes.get(processId).runId, 'run-a');
     assert.equal(f.processes.get(processId).toolCallId, 'start');
+    assert.equal(f.processes.get(processId).capabilityId, 'process.start');
+    assert.equal(f.processes.get(processId).executionId, 'process:run-a:start');
     const polled = await f.tools.execute('chat-a', 'project-a', 'unrestricted', call('wait', 'wait_process', {
       processId,
       timeoutMs: 250,
@@ -78,6 +93,14 @@ test('ToolRuntime exposes the full persistent process lifecycle without approval
     const stopped = await f.tools.execute('chat-a', 'project-a', 'unrestricted', call('stop', 'stop_process', { processId }), 'run-a');
     assert.equal(stopped.ok, true);
     assert.equal(JSON.parse(stopped.output ?? '{}').status, 'stopped');
+    assert.deepEqual(lifecycle.map((item) => item.status), ['running', 'stopped']);
+    for (const item of lifecycle) {
+      assert.equal(item.executionId, 'process:run-a:start');
+      assert.equal(item.chatId, 'chat-a');
+      assert.equal(item.runId, 'run-a');
+      assert.equal(item.toolCallId, 'start');
+      assert.equal(item.capabilityId, 'process.start');
+    }
     assert.equal(f.tools.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
   } finally {
     await f.cleanup();
