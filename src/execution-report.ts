@@ -3,6 +3,9 @@ import type { ExecutionPlanHistory, ExecutionPlanHistoryRecord } from './executi
 import type { ExecutionEvidenceType, ExecutionPlan } from './execution-planner';
 import type { ExecutionTimeline, ExecutionTimelineEvent } from './execution-timeline';
 import { summarizeRecordedTools, type RunToolDigest } from './run-tool-digest';
+import { deriveAgentRunSummary } from './agent-core/run-summary';
+import type { AgentRunSummary } from './agent-core/contracts';
+import type { OperationalTraceSnapshot } from './agent-core/operational-trace';
 
 export type ExecutionCompletionProof = 'verified' | 'unplanned' | 'active' | 'failed' | 'interrupted' | 'incomplete' | 'unknown';
 
@@ -33,6 +36,7 @@ export type ExecutionReport = {
   evidence: ExecutionEvidenceSummary;
   timeline: ExecutionTimelineEvent[];
   recordedTools: RunToolDigest;
+  summary?: AgentRunSummary;
 };
 
 const EMPTY_STEPS: ExecutionStepSummary = {
@@ -130,6 +134,7 @@ export class ExecutionReportBuilder {
     private readonly executions: ExecutionManager,
     private readonly timeline: ExecutionTimeline,
     private readonly planHistory: ExecutionPlanHistory,
+    private readonly operationalTrace?: (chatId: string, runId: string) => OperationalTraceSnapshot | undefined,
   ) {}
 
   build(chatId: string, runId: string): ExecutionReport | undefined {
@@ -140,7 +145,7 @@ export class ExecutionReportBuilder {
     const plan = history?.plan;
     if (!snapshot && !plan && timeline.length === 0) return undefined;
 
-    return {
+    const report: ExecutionReport = {
       chatId,
       runId,
       state: snapshot?.state,
@@ -157,6 +162,8 @@ export class ExecutionReportBuilder {
       timeline,
       recordedTools: summarizeRecordedTools(timeline),
     };
+    const summary = deriveAgentRunSummary(report, this.operationalTrace?.(chatId, runId));
+    return summary ? { ...report, summary } : report;
   }
 
   list(chatId?: string): ExecutionReport[] {
