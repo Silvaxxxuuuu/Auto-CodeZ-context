@@ -29,6 +29,8 @@ export type ManagedProcessSnapshot = {
   outputSequence: number;
   runId?: string;
   toolCallId?: string;
+  capabilityId?: 'process.start';
+  executionId?: string;
 };
 
 export type ManagedProcessOutputEvent = {
@@ -112,12 +114,25 @@ async function probePort(host: '127.0.0.1' | '::1', port: number, timeoutMs: num
 
 export class ProcessRuntime {
   private readonly processes = new Map<string, ManagedProcessRecord>();
+  private readonly lifecycleListeners = new Set<(snapshot: ManagedProcessSnapshot) => void>();
 
   constructor(
     private readonly projects: () => Promise<ProjectRecord[]>,
     private readonly parentEnvironment: NodeJS.ProcessEnv = process.env,
     private readonly createId: () => string = () => crypto.randomUUID(),
   ) {}
+
+  subscribeLifecycle(listener: (snapshot: ManagedProcessSnapshot) => void): () => void {
+    this.lifecycleListeners.add(listener);
+    return () => this.lifecycleListeners.delete(listener);
+  }
+
+  private emitLifecycle(snapshot: ManagedProcessSnapshot): void {
+    const cloned = cloneSnapshot(snapshot);
+    for (const listener of this.lifecycleListeners) {
+      try { listener(cloned); } catch { /* Lifecycle observers cannot interrupt processes. */ }
+    }
+  }
 
   private async project(projectId: string): Promise<ProjectRecord> {
     const project = (await this.projects()).find((item) => item.id === projectId);
@@ -197,6 +212,7 @@ export class ProcessRuntime {
           outputSequence: 0,
           ...(options.runId?.trim() ? { runId: options.runId.trim() } : {}),
           ...(options.toolCallId?.trim() ? { toolCallId: options.toolCallId.trim() } : {}),
+          ...(options.runId?.trim() && options.toolCallId?.trim() ? { capabilityId: 'process.start' as const, executionId: `process:${id}` } : {}),
         },
         child,
         output: [],
@@ -214,6 +230,7 @@ export class ProcessRuntime {
         if (settledStart) return;
         settledStart = true;
         record.snapshot.pid = child.pid;
+        this.emitLifecycle(record.snapshot);
         resolve(cloneSnapshot(record.snapshot));
       });
 
@@ -222,6 +239,7 @@ export class ProcessRuntime {
         record.snapshot.error = commandFailure(error);
         record.snapshot.finishedAt = Date.now();
         this.notify(record);
+        this.emitLifecycle(record.snapshot);
         if (!settledStart) {
           settledStart = true;
           reject(error);
@@ -235,6 +253,7 @@ export class ProcessRuntime {
         record.snapshot.signal = signal ?? undefined;
         record.snapshot.finishedAt = Date.now();
         this.notify(record);
+        this.emitLifecycle(record.snapshot);
       });
     });
   }
@@ -344,6 +363,7 @@ export class ProcessRuntime {
       if (record.child.exitCode !== null) record.snapshot.exitCode = record.child.exitCode;
       if (record.child.signalCode) record.snapshot.signal = record.child.signalCode;
       this.notify(record);
+      this.emitLifecycle(record.snapshot);
     }
     return cloneSnapshot(record.snapshot);
   }
