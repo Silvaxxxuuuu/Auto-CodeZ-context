@@ -14,6 +14,7 @@ import { ShadowAwareWorkspaceRuntime } from './agent/shadow-aware-workspace-runt
 import { ShadowAwareCommandRuntime } from './agent/shadow-aware-command-runtime';
 import { ProcessRuntime } from './agent/process-runtime';
 import { InstanceRuntime, type InstancePlatformHandle } from './agent/instance-runtime';
+import { InstanceCaptureArtifactRuntime } from './agent/instance-capture-artifact-runtime';
 import { ElectronInstancePlatformAdapter } from './agent/electron-instance-platform';
 import { ShadowAwareGitRuntime } from './agent/shadow-aware-git-runtime';
 import { AgentRuntime } from './agent/agent-runtime';
@@ -275,6 +276,7 @@ const instancePlatformAdapter = new ElectronInstancePlatformAdapter(
   },
 );
 const instanceRuntime = new InstanceRuntime(instancePlatformAdapter);
+const instanceCaptureRuntime = new InstanceCaptureArtifactRuntime(instanceRuntime, attachmentStore);
 const diffRuntime = new DiffRuntime();
 const gitRuntime = new ShadowAwareGitRuntime(() => projectManager.list(), executionShadowWorkspaceRuntime);
 const gitService = new GitService(gitRuntime);
@@ -285,6 +287,7 @@ toolRuntime.configureShadowWorkspace(executionShadowWorkspaceRuntime);
 toolRuntime.configureIncrementalWorkspaceRuntime(incrementalWorkspaceMutationRuntime);
 toolRuntime.configureProcessRuntime(processRuntime);
 toolRuntime.configureInstanceRuntime(instanceRuntime);
+toolRuntime.configureInstanceCaptureRuntime(instanceCaptureRuntime);
 toolRuntime.configureGitRuntime(gitRuntime);
 const providerRequestJournal = new ProviderRequestJournal(storage);
 const chatRuntime = new ChatRuntime(
@@ -298,6 +301,7 @@ const chatRuntime = new ChatRuntime(
   undefined,
   attachmentIndexer,
   visualGrounding,
+  attachmentStore,
 );
 const agentRuntime = new AgentRuntime(chatRuntime, toolRuntime, activityRuntime, storage);
 const executionManager = new ExecutionManager();
