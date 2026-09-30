@@ -27,6 +27,8 @@ export type ManagedProcessSnapshot = {
   signal?: string;
   error?: string;
   outputSequence: number;
+  runId?: string;
+  toolCallId?: string;
 };
 
 export type ManagedProcessOutputEvent = {
@@ -54,6 +56,8 @@ export type WaitForPortResult = {
 
 export type StartProcessOptions = {
   label?: string;
+  runId?: string;
+  toolCallId?: string;
 };
 
 type ManagedProcessRecord = {
@@ -162,7 +166,7 @@ export class ProcessRuntime {
 
   }
 
-  async start(projectId: string, command: string, _options: StartProcessOptions = {}): Promise<ManagedProcessSnapshot> {
+  async start(projectId: string, command: string, options: StartProcessOptions = {}): Promise<ManagedProcessSnapshot> {
     const normalizedCommand = normalizeUnicodeText(command.trim());
     if (!normalizedCommand) throw new Error('O comando do processo não pode estar vazio.');
 
@@ -191,6 +195,8 @@ export class ProcessRuntime {
           pid: child.pid,
           startedAt: Date.now(),
           outputSequence: 0,
+          ...(options.runId?.trim() ? { runId: options.runId.trim() } : {}),
+          ...(options.toolCallId?.trim() ? { toolCallId: options.toolCallId.trim() } : {}),
         },
         child,
         output: [],
