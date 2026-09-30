@@ -4,7 +4,7 @@ import { ActivityRuntime } from './activity-runtime';
 import { ToolRuntime } from './tool-runtime';
 import { SYSTEM_PROJECT_ID } from './command-runtime';
 import { ChatRuntime } from '../ai/chat-runtime';
-import { createToolActivitySnapshot, toActivityInput } from './tool-activity-bridge';
+import { createToolActivitySnapshot, toActivityInput, toStructuredToolActivity } from './tool-activity-bridge';
 import {
   ProgressWatchdog,
   type ProgressSignal,
@@ -609,8 +609,9 @@ export class AgentRuntime {
   private emitToolActivity(runId: string, chatId: string, call: AIToolCall, result: Awaited<ReturnType<ToolRuntime['execute']>>, emit?: StreamEmitter): void {
     const snapshot = createToolActivitySnapshot(runId, call.id, call.name, result);
     const activityInput = { ...toActivityInput(snapshot), chatId, runId };
-    this.activity.emit({ ...activityInput });
-    if (emit) emit({ type: 'activity', chatId, runId, activity: { id: `tool_${call.id}`, createdAt: Date.now(), ...activityInput } });
+    const legacyEvent = this.activity.emit({ ...activityInput });
+    this.activity.emitStructured(toStructuredToolActivity(snapshot, legacyEvent.createdAt));
+    if (emit) emit({ type: 'activity', chatId, runId, activity: { id: `tool_${call.id}`, createdAt: legacyEvent.createdAt, ...activityInput } });
   }
 
   private async runLoop(run: PendingRun, signal?: AbortSignal): Promise<AgentRunResult> {
