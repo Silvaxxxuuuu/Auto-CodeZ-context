@@ -148,6 +148,7 @@ export type StructuredActivityEvent = {
   kind: string;
   phase: StructuredActivityPhase;
   runId: string;
+  chatId?: string;
   toolCallId?: string;
   operationId?: string;
   capabilityId?: string;
