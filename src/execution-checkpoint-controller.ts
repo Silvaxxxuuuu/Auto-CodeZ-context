@@ -2,6 +2,7 @@ import type { FileDiff } from './ai/types';
 import type { ExecutionManager } from './execution-manager';
 import type { ExecutionCheckpoint, ExecutionCheckpointWorkspace } from './execution-checkpoint';
 import { ExecutionCheckpointRuntime } from './execution-checkpoint';
+import type { OperationRollbackRuntime } from './agent-core/operation-rollback-runtime';
 
 export type ExecutionCheckpointChangeSummary = Pick<FileDiff, 'path' | 'type' | 'addedLines' | 'removedLines' | 'renamedFrom'>;
 
@@ -21,6 +22,7 @@ function summarize(checkpoint: ExecutionCheckpoint): ExecutionCheckpointSummary 
     runId: checkpoint.runId,
     projectId: checkpoint.projectId,
     toolCallId: checkpoint.toolCallId,
+    ...(checkpoint.operationId ? { operationId: checkpoint.operationId } : {}),
     createdAt: checkpoint.createdAt,
     status: checkpoint.status,
     ...(checkpoint.restoredAt !== undefined ? { restoredAt: checkpoint.restoredAt } : {}),
@@ -40,6 +42,7 @@ export class ExecutionCheckpointController {
     private readonly workspace: ExecutionCheckpointWorkspace,
     private readonly executions: ExecutionManager,
     private readonly onChanged?: (checkpoints: ExecutionCheckpoint[]) => void,
+    private readonly operationRollback?: Pick<OperationRollbackRuntime, 'rollback'>,
   ) {}
 
   list(chatId?: string, runId?: string): ExecutionCheckpointSummary[] {
@@ -61,6 +64,16 @@ export class ExecutionCheckpointController {
     const current = this.executions.get(chatId);
     if (current && (current.state === 'running' || current.state === 'waiting_approval')) {
       throw new Error('Não é possível restaurar um checkpoint enquanto o chat possui uma execução ativa.');
+    }
+
+    if (checkpoint.operationId) {
+      if (!this.operationRollback) {
+        throw new Error('Rollback V2 indisponível para este checkpoint; restauração legada bloqueada.');
+      }
+      await this.operationRollback.rollback(checkpoint.operationId);
+      const restored = this.runtime.markRestored(checkpointId);
+      this.onChanged?.(this.runtime.list());
+      return summarize(restored);
     }
 
     const restored = await this.runtime.restore(checkpointId, this.workspace);
