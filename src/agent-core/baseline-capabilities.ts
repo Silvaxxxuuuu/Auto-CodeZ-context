@@ -174,7 +174,7 @@ export const AGENT_CORE_V2_BASELINE_CAPABILITIES: readonly CapabilityContract[] 
     description: 'Substitui um símbolo TypeScript/JavaScript identificado estruturalmente pela AST, sem depender de correspondência textual aproximada.',
     whenToUse: ['Para substituir função, método, classe, interface, type ou enum conhecido.'],
     whenNotToUse: ['Não usar para linguagens sem suporte estrutural desta capability.'],
-    inputSchema: schemaObject({ path: { type: 'string' }, symbol: { type: 'string' }, kind: { type: 'string' }, content: { type: 'string' } }, ['path', 'symbol', 'kind', 'content']),
+    inputSchema: schemaObject({ path: { type: 'string' }, symbol: { type: 'string' }, kind: { type: 'string', enum: ['function', 'method', 'class', 'interface', 'type', 'enum'] }, content: { type: 'string' } }, ['path', 'symbol', 'kind', 'content']),
     outputSchema: schemaObject({ path: { type: 'string' }, operationId: { type: 'string' }, symbol: { type: 'string' } }, ['path', 'symbol']),
     examples: ['Substituir a função createApp em src/app.ts usando a AST.'],
     failureModes: ['Símbolo ausente ou ambíguo.', 'Kind não suportado.', 'Arquivo inválido.'],
