@@ -1,3 +1,6 @@
+import { AGENT_CORE_V2_BASELINE_CAPABILITIES } from '../agent-core/baseline-capabilities';
+import type { CapabilityContract } from '../agent-core/contracts';
+
 export type CompiledSystemMessage = {
   role: 'system';
   content: string;
@@ -14,7 +17,119 @@ export type ContextCompilerInput = {
   compactedHistory?: boolean;
   groundedAnswerOnly?: boolean;
   disableTools?: boolean;
+  capabilityToolNames?: readonly string[];
+  capabilityQuery?: string;
+  capabilityBudgetChars?: number;
 };
+
+const DEFAULT_CAPABILITY_CONTEXT_BUDGET = 4_200;
+const MAX_CAPABILITY_CONTEXT_ITEMS = 10;
+
+function normalizeCapabilitySearchText(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function capabilitySearchTokens(value: string): string[] {
+  return [...new Set(
+    normalizeCapabilitySearchText(value)
+      .split(/[^a-z0-9_]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3),
+  )];
+}
+
+function capabilitySearchText(capability: CapabilityContract): string {
+  return normalizeCapabilitySearchText([
+    capability.id,
+    capability.name,
+    capability.title,
+    capability.category,
+    capability.description,
+    ...capability.whenToUse,
+    ...capability.whenNotToUse,
+    ...capability.examples,
+  ].join(' '));
+}
+
+function capabilityScore(capability: CapabilityContract, query: string, tokens: readonly string[]): number {
+  const normalizedQuery = normalizeCapabilitySearchText(query).trim();
+  const searchable = capabilitySearchText(capability);
+  let score = 0;
+
+  if (normalizedQuery) {
+    if (normalizedQuery.includes(normalizeCapabilitySearchText(capability.name))) score += 1_000;
+    if (normalizedQuery.includes(normalizeCapabilitySearchText(capability.id))) score += 900;
+    if (normalizedQuery.includes(normalizeCapabilitySearchText(capability.title))) score += 700;
+  }
+
+  for (const token of tokens) {
+    if (searchable.includes(token)) score += 10;
+  }
+
+  return score;
+}
+
+function capabilityFlags(capability: CapabilityContract): string {
+  const flags = [
+    capability.annotations.readOnly ? 'read-only' : 'mutating',
+    capability.annotations.destructive ? 'destructive' : undefined,
+    capability.annotations.openWorld ? 'open-world' : undefined,
+    capability.supportsRollback ? 'rollback' : 'no-rollback',
+  ].filter(Boolean);
+  return flags.join(', ');
+}
+
+function capabilityGuidanceLine(capability: CapabilityContract): string {
+  return [
+    `- ${capability.name} [${capability.id}; ${capability.category}; ${capability.permissionClass}; ${capabilityFlags(capability)}]`,
+    capability.description,
+    `Use: ${capability.whenToUse[0]}`,
+    `Avoid: ${capability.whenNotToUse[0]}`,
+  ].join(' ');
+}
+
+export function compileCapabilityGuidance(
+  availableToolNames: readonly string[],
+  query = '',
+  budgetChars = DEFAULT_CAPABILITY_CONTEXT_BUDGET,
+): string | undefined {
+  const normalizedBudget = Number.isFinite(budgetChars)
+    ? Math.max(0, Math.floor(budgetChars))
+    : DEFAULT_CAPABILITY_CONTEXT_BUDGET;
+  if (!normalizedBudget || !availableToolNames.length) return undefined;
+
+  const available = new Set(availableToolNames);
+  const tokens = capabilitySearchTokens(query);
+  const candidates = AGENT_CORE_V2_BASELINE_CAPABILITIES
+    .map((capability, index) => ({
+      capability,
+      index,
+      score: capabilityScore(capability, query, tokens),
+    }))
+    .filter(({ capability }) => available.has(capability.name))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, MAX_CAPABILITY_CONTEXT_ITEMS);
+
+  if (!candidates.length) return undefined;
+
+  const header = 'Canonical capability guidance from Agent Core V2 metadata. Tool definitions remain authoritative for input schemas. Prefer these whenToUse/whenNotToUse rules over generic tool-selection guesses:';
+  if (header.length > normalizedBudget) return undefined;
+
+  const lines = [header];
+  let used = header.length;
+  for (const { capability } of candidates) {
+    const line = capabilityGuidanceLine(capability);
+    const nextSize = used + 1 + line.length;
+    if (nextSize > normalizedBudget) continue;
+    lines.push(line);
+    used = nextSize;
+  }
+
+  return lines.length > 1 ? lines.join('\n') : undefined;
+}
 
 export const AUTOCODEZ_AGENT_HANDBOOK = `
 You are operating inside Auto CodeZ, a local desktop AI development agent. Auto CodeZ is not only a chat interface. When tools are provided, you have controlled access to the user's active local workspace and should use those tools to perform development tasks requested by the user.
@@ -48,13 +163,11 @@ Live activity summaries:
 
 Workspace and filesystem:
 - Contexto do workspace atual: when project context is supplied with this request, treat it as authoritative context for the active workspace.
-- File tools such as read_file, read_symbol, write_file, create_file, create_folder, replace_range, replace_text, replace_symbol, insert_before, insert_after, delete_file, rename_file, and search_files operate on the active Auto CodeZ workspace and use workspace-relative paths.
-- Inside an Auto CodeZ project workspace, use file tools for direct file mutations whenever they can represent the requested operation. When you only need one complete named TypeScript or JavaScript declaration, prefer read_symbol over read_file when its supported syntax kind is known. For replacing a complete named TypeScript or JavaScript declaration, prefer replace_symbol. For smaller localized edits, prefer replace_text when you have an exact unique fragment from a recent read; otherwise use replace_range, insert_before or insert_after instead of rewriting the whole file with write_file. Use write_file when most or all of a file genuinely needs replacement. Do not substitute shell redirection, PowerShell file-writing commands or similar run_command filesystem edits for these file tools. This preserves smaller diffs, diff review, stale-file protection, approval ownership and recoverability.
-- In a normal chat, file tools operate inside a protected system workspace rooted at the user's Home directory. Use workspace-relative paths such as Desktop/Novo site/index.html, Documents/example.txt or Downloads/data.csv. These tools cannot escape the protected Home workspace.
-- In a normal chat, prefer create_file/create_folder/write_file/replace_range/replace_text/replace_symbol/insert_before/insert_after/delete_file/rename_file over run_command for direct workspace mutations. For localized edits, prefer the incremental tools instead of replacing the whole file.
-- create_file automatically creates missing parent directories. If you already know the first file that belongs inside a new directory, create that file directly instead of calling create_folder first.
-- Use create_folder when the directory itself is part of the requested result, needs to remain empty, must exist before a later operation, or the user explicitly asks to create/open that folder. Do not use mkdir, md or New-Item when create_folder represents the operation.
-- Use run_command for tests, builds, read-only inspections, scripts, CLIs and operations that genuinely require a shell. Do not rely on filesystem mutations made only inside run_command as the persistent workspace result when an Auto CodeZ file tool can represent that result.
+- Workspace tools operate on the active Auto CodeZ workspace and use workspace-relative paths.
+- When canonical capability guidance is present in this request, treat its whenToUse, whenNotToUse, permission, rollback and open-world metadata as the source of truth for choosing among supported Agent Core V2 tools. Tool definitions remain the source of truth for argument schemas.
+- Prefer the most specific supported workspace capability over a more general mechanism when both represent the same requested operation.
+- In a normal chat, workspace tools operate inside a protected system workspace rooted at the user's Home directory. Use workspace-relative paths such as Desktop/Novo site/index.html, Documents/example.txt or Downloads/data.csv. These tools cannot escape the protected Home workspace.
+- Do not substitute shell filesystem mutations for a dedicated workspace capability merely to bypass its policy, evidence, approval or recovery semantics.
 - run_command executes inside an isolated command sandbox. In a project chat it starts from the active workspace view; in a normal chat it starts from the protected system workspace view. On Windows, %USERPROFILE% inside that sandbox maps to the protected Home view, so standard paths such as %USERPROFILE%\\Desktop remain usable without exposing paths outside the workspace.
 - If the user asks for a standard local folder such as Desktop, use the resolved runtime path/context instead of asking which OS or path they use.
 - Tool access is subject to the active chat permission level and the approval system. If a tool requires approval, request the tool call normally and wait for the user's approval. Do not bypass or simulate approval.
@@ -92,6 +205,13 @@ export class ContextCompiler {
       role: 'system',
       content: `${AUTOCODEZ_AGENT_HANDBOOK}\n\nRuntime OS: ${input.runtimePlatform}.\nRuntime date: ${input.runtimeDate}.`,
     }];
+
+    const capabilityGuidance = compileCapabilityGuidance(
+      input.capabilityToolNames ?? [],
+      input.capabilityQuery ?? '',
+      input.capabilityBudgetChars,
+    );
+    if (capabilityGuidance) messages.push({ role: 'system', content: capabilityGuidance });
 
     if (input.memoryContext) messages.push({ role: 'system', content: input.memoryContext });
 
