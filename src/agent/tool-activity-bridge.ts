@@ -1,4 +1,5 @@
 import type { ActivityEvent, AIToolResult, ToolName } from '../ai/types';
+import { AGENT_CORE_V2_CONTRACT_VERSION, type StructuredActivityEvent } from '../agent-core/contracts';
 
 export interface ToolActivitySnapshot {
   type: ActivityEvent['type'];
@@ -68,5 +69,31 @@ export function toActivityInput(snapshot: ToolActivitySnapshot): Omit<ActivityEv
     ...(result.diffPlan ? { diffPlan: result.diffPlan } : {}),
     ...(result.sources ? { sources: result.sources } : {}),
     ...(result.error ? { error: result.error } : {}),
+  };
+}
+
+/** Adapter for the V2 narrative/inspector. Keeps the existing ActivityEvent channel intact. */
+export function toStructuredToolActivity(snapshot: ToolActivitySnapshot, createdAt: number): StructuredActivityEvent {
+  const { result } = snapshot;
+  const changed = result.changes ?? result.diffPlan?.changes;
+  const subject = changed?.length === 1
+    ? { path: changed[0].path }
+    : result.commandResult
+      ? { command: result.commandResult.command }
+      : undefined;
+  const phase: StructuredActivityEvent['phase'] = result.pendingApproval
+    ? 'waiting'
+    : result.ok ? 'completed' : 'failed';
+  return {
+    contractVersion: AGENT_CORE_V2_CONTRACT_VERSION,
+    id: `tool:${snapshot.runId}:${snapshot.toolCallId}:${phase}`,
+    kind: 'tool',
+    phase,
+    runId: snapshot.runId,
+    toolCallId: snapshot.toolCallId,
+    ...(subject ? { subject } : {}),
+    summary: snapshot.message,
+    ...(result.commandResult ? { durationMs: result.commandResult.durationMs } : {}),
+    createdAt,
   };
 }
