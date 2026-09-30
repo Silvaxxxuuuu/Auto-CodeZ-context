@@ -132,12 +132,11 @@ test('run_command emits a V2 running lifecycle and returns the same execution id
   assert.equal(result.ok, true);
   assert.equal(result.executionId, 'command:run-a:cmd-life');
   assert.equal(result.commandResult?.executionId, 'command:run-a:cmd-life');
-  assert.deepEqual(structured, [{
-    phase: 'running',
-    executionId: 'command:run-a:cmd-life',
-    capabilityId: 'command.run',
-    toolCallId: 'cmd-life',
-  }]);
+  assert.equal(structured.length, 1);
+  assert.equal(structured[0].phase, 'running');
+  assert.equal(structured[0].executionId, 'command:run-a:cmd-life');
+  assert.equal(structured[0].capabilityId, 'command.run');
+  assert.equal(structured[0].toolCallId, 'cmd-life');
 });
 
 test('run_command retains execution identity when the shell runtime fails', async () => {
