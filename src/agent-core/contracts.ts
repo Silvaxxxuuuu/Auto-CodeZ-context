@@ -150,6 +150,7 @@ export type StructuredActivityEvent = {
   runId: string;
   chatId?: string;
   toolCallId?: string;
+  toolName?: string;
   operationId?: string;
   capabilityId?: string;
   subject?: StructuredActivitySubject;
