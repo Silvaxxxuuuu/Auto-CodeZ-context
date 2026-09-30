@@ -2,6 +2,8 @@ import type { ExecutionReport } from './execution-report';
 import type { ExecutionEvidenceType, ExecutionPlanStepStatus } from './execution-planner';
 import type { ExecutionState } from './execution-manager';
 import type { ExecutionApprovalDecision } from './execution-timeline';
+import type { StructuredActivityPhase } from './agent-core/contracts';
+import { AGENT_CORE_V2_BASELINE_CAPABILITIES } from './agent-core/baseline-capabilities';
 
 export type ExecutionGraphNodeKind = 'started' | 'recovered' | 'state' | 'tool' | 'approval' | 'evidence' | 'error';
 export type ExecutionGraphNodeSource = 'timeline' | 'plan';
@@ -16,6 +18,7 @@ export type ExecutionGraphNode = {
   label: string;
   state?: ExecutionState;
   tool?: string;
+  activityPhase?: StructuredActivityPhase;
   approvalId?: string;
   approvalDecision?: ExecutionApprovalDecision;
   evidenceType?: ExecutionEvidenceType;
@@ -40,6 +43,12 @@ export type ExecutionGraph = {
 };
 
 type OrderedNode = ExecutionGraphNode & { order: number };
+
+const CAPABILITY_TITLES = new Map(AGENT_CORE_V2_BASELINE_CAPABILITIES.map((capability) => [capability.name, capability.title]));
+const ACTIVITY_PHASE_LABELS: Record<StructuredActivityPhase, string> = {
+  queued: 'na fila', running: 'em andamento', waiting: 'aguardando aprovação',
+  completed: 'concluída', failed: 'falhou', cancelled: 'cancelada',
+};
 
 const STATE_LABELS: Record<ExecutionState, string> = {
   idle: 'Execução ociosa',
@@ -102,6 +111,18 @@ function timelineNodes(report: ExecutionReport): OrderedNode[] {
         label: event.currentTool,
         state: event.state,
         tool: event.currentTool,
+      });
+      continue;
+    }
+
+    if (event.type === 'structured_activity' && event.toolName && event.activityPhase && event.toolCallId) {
+      nodes.push({
+        ...base,
+        id: `timeline:${event.sequence}:structured:${event.activityId ?? event.toolCallId}`,
+        kind: 'tool',
+        label: `${CAPABILITY_TITLES.get(event.toolName) ?? event.toolName}: ${ACTIVITY_PHASE_LABELS[event.activityPhase]}`,
+        tool: event.toolName,
+        activityPhase: event.activityPhase,
       });
       continue;
     }
