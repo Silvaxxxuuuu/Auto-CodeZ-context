@@ -788,6 +788,21 @@ async function openManagedPreviewWindow(input: {
       if (image.isEmpty()) throw new Error('A captura do preview está vazia.');
       return image.toPNG();
     },
+    inspect: async () => {
+      if (previewWindow.isDestroyed() || previewWindow.webContents.isDestroyed()) {
+        throw new Error('A janela de preview já foi fechada.');
+      }
+      const inspection = await previewWindow.webContents.executeJavaScript(`(() => {
+        const visibleText = (element) => (element?.innerText || '').trim();
+        const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).slice(0, 60)
+          .map((element) => ({ level: Number(element.tagName.slice(1)), text: visibleText(element).slice(0, 250) }));
+        const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 100)
+          .map((element) => ({ text: visibleText(element).slice(0, 150), href: element.href.slice(0, 2000) }));
+        return { title: document.title.slice(0, 250), url: location.href.slice(0, 2000),
+          text: visibleText(document.body).slice(0, 12000), headings, links };
+      })()`, true);
+      return inspection;
+    },
     isOpen: () => !previewWindow.isDestroyed(),
     onClosed: (listener) => {
       previewWindow.on('closed', listener);
