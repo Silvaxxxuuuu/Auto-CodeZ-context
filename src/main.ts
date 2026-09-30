@@ -257,6 +257,7 @@ app.on('open-url', (event, rawUrl) => {
 const providerManager = new ProviderManager(storage);
 const chatManager = new ChatManager(storage);
 const accountMemoryRuntime = new AccountMemoryRuntime(storage, () => {
+  if (process.env.AUTO_CODEZ_VISUAL_TEST === '1' && process.env.AUTO_CODEZ_VISUAL_ACCOUNT_PROFILE === '1') return 'visual-account-user';
   try { return accountSessionRuntime.snapshot().account?.id; } catch { return undefined; }
 });
 const projectManager = new ProjectManager(storage);
