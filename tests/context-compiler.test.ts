@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AUTOCODEZ_AGENT_HANDBOOK, ContextCompiler } from '../src/ai/context-compiler';
+import { AUTOCODEZ_AGENT_HANDBOOK, compileCapabilityGuidance, ContextCompiler } from '../src/ai/context-compiler';
 
 test('ContextCompiler preserves deterministic system-context ordering', () => {
   const compiler = new ContextCompiler();
@@ -64,6 +64,53 @@ test('ContextCompiler ignores blank provider instructions and does not mutate in
 test('Agent Handbook retains core evidence and security invariants after extraction', () => {
   assert.match(AUTOCODEZ_AGENT_HANDBOOK, /Never claim an operation succeeded unless a tool result confirms success/i);
   assert.match(AUTOCODEZ_AGENT_HANDBOOK, /Do not bypass or simulate approval/i);
-  assert.match(AUTOCODEZ_AGENT_HANDBOOK, /Use run_command for tests, builds/i);
+  assert.match(AUTOCODEZ_AGENT_HANDBOOK, /canonical capability guidance/i);
   assert.match(AUTOCODEZ_AGENT_HANDBOOK, /unrestricted: supported write and sensitive operations execute without an approval step/i);
+});
+
+
+test('ContextCompiler injects only available canonical capability metadata in relevance order', () => {
+  const compiler = new ContextCompiler();
+  const toolNames = ['run_command', 'create_file', 'start_process'];
+  const messages = compiler.compile({
+    runtimePlatform: 'Windows',
+    runtimeDate: '2026-09-30',
+    capabilityToolNames: toolNames,
+    capabilityQuery: 'Execute os testes com run_command e depois inicie o servidor.',
+  });
+
+  assert.deepEqual(toolNames, ['run_command', 'create_file', 'start_process']);
+  assert.equal(messages.length, 2);
+  const guidance = messages[1].content;
+  assert.match(guidance, /Canonical capability guidance/);
+  assert.match(guidance, /run_command \[command\.run;/);
+  assert.match(guidance, /start_process \[process\.start;/);
+  assert.match(guidance, /Para testes, builds, inspeções e CLIs finitas/);
+  assert.match(guidance, /Não usar para servidor persistente; use start_process/);
+  assert.equal(guidance.includes('write_file [workspace.write_file;'), false);
+  assert.ok(guidance.indexOf('run_command [command.run;') < guidance.indexOf('create_file [workspace.create_file;'));
+});
+
+test('canonical capability guidance obeys an explicit character budget deterministically', () => {
+  const names = ['create_file', 'create_folder', 'write_file', 'run_command', 'start_process'];
+  const first = compileCapabilityGuidance(names, 'criar arquivo e executar testes', 900);
+  const second = compileCapabilityGuidance(names, 'criar arquivo e executar testes', 900);
+
+  assert.equal(first, second);
+  assert.ok(first);
+  assert.ok(first.length <= 900);
+  assert.match(first, /create_file \[workspace\.create_file;/);
+});
+
+test('ContextCompiler omits capability guidance when tools are disabled for the request', () => {
+  const compiler = new ContextCompiler();
+  const messages = compiler.compile({
+    runtimePlatform: 'Linux',
+    runtimeDate: '2026-09-30',
+    disableTools: true,
+    capabilityToolNames: [],
+    capabilityQuery: 'execute npm test',
+  });
+
+  assert.equal(messages.some((message) => message.content.includes('Canonical capability guidance')), false);
 });
