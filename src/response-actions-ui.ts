@@ -26,14 +26,15 @@ function installStyle(): void {
   document.head.appendChild(style);
 }
 
-function icon(kind: 'copy' | 'retry' | 'work' | 'changes'): string {
+function icon(kind: 'copy' | 'retry' | 'memory' | 'work' | 'changes'): string {
   if (kind === 'copy') return '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>';
   if (kind === 'retry') return '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg>';
+  if (kind === 'memory') return '<svg viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>';
   if (kind === 'changes') return '<svg viewBox="0 0 24 24"><path d="M8 6h11"/><path d="M8 12h11"/><path d="M8 18h11"/><path d="m3 6 1 1 2-2"/><path d="m3 12 1 1 2-2"/><path d="m3 18 1 1 2-2"/></svg>';
   return '<svg viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 4-4 3 2 5-6"/></svg>';
 }
 
-function button(kind: 'copy' | 'retry' | 'work' | 'changes', title: string, runId?: string): HTMLButtonElement {
+function button(kind: 'copy' | 'retry' | 'memory' | 'work' | 'changes', title: string, runId?: string): HTMLButtonElement {
   const element = document.createElement('button');
   element.type = 'button';
   element.className = 'ac-response-action';
@@ -128,6 +129,7 @@ function hydrate(): void {
         retry.hidden = true;
         actions.appendChild(retry);
         actions.appendChild(button('work', 'Ver trabalho realizado', runId));
+        actions.appendChild(button('memory', 'Adicionar à memória', runId));
         const changes = button('changes', 'Ver alterações', runId);
         changes.hidden = !hasVisibleChanges(runId);
         actions.appendChild(changes);
@@ -189,11 +191,11 @@ function initialize(): void {
     }
     const runId = target.dataset.runId;
     if (!runId) return;
-    if (action === 'retry') {
+    if (action === 'retry' || action === 'memory') {
       const message = target.closest<HTMLElement>('.message.assistant[data-final-assistant="true"]');
       const messageIndex = Number.parseInt(message?.dataset.messageIndex ?? '', 10);
       if (!message || !Number.isInteger(messageIndex)) return;
-      window.dispatchEvent(new CustomEvent('auto-codez-retry-response', { detail: { runId, messageIndex } }));
+      window.dispatchEvent(new CustomEvent(action === 'retry' ? 'auto-codez-retry-response' : 'auto-codez-add-memory', { detail: { runId, messageIndex } }));
       return;
     }
     if (action === 'work') { void openWorkReport(runId); return; }
@@ -203,6 +205,16 @@ function initialize(): void {
   if (messages) new MutationObserver(hydrate).observe(messages, { childList: true, subtree: true });
   window.addEventListener('auto-codez-execution-run-rendered', hydrate);
   window.addEventListener('auto-codez-execution-refresh', hydrate);
+  window.addEventListener('auto-codez-memory-added', (event) => {
+    const detail = (event as CustomEvent<{ runId?: string; messageIndex?: number }>).detail;
+    if (!detail?.runId || !Number.isInteger(detail.messageIndex)) return;
+    const message = document.querySelector<HTMLElement>(`.message.assistant[data-final-assistant="true"][data-run-id="${CSS.escape(detail.runId)}"][data-message-index="${detail.messageIndex}"]`);
+    const button = message?.querySelector<HTMLButtonElement>('[data-response-action="memory"]');
+    if (!button) return;
+    button.dataset.state = 'done';
+    button.title = 'Adicionado à memória';
+    button.setAttribute('aria-label', 'Adicionado à memória');
+  });
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
