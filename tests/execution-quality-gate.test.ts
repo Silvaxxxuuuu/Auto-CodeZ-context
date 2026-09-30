@@ -12,6 +12,7 @@ function report(overrides: Partial<ExecutionReport> = {}): ExecutionReport {
     planArchived: false,
     steps: { total: 2, pending: 0, running: 0, completed: 2, failed: 0, skipped: 0 },
     evidence: { tool: 2, test: 1, build: 1, file: 3, result: 2 },
+    recordedTools: { observed: 0, completed: 0, failed: 0, waiting: 0, cancelled: 0, running: 0, tools: [] },
     timeline: [],
     ...overrides,
   };
