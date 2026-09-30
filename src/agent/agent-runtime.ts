@@ -141,6 +141,7 @@ type PendingRun = {
   replanPending?: boolean;
   lastError?: string;
   streamEmitter?: StreamEmitter;
+  disableTools?: boolean;
 };
 
 interface PersistedPendingRun {
@@ -156,6 +157,7 @@ interface PersistedPendingRun {
   progressWatchdog?: ProgressWatchdogSnapshot;
   replanPending?: boolean;
   lastError?: string;
+  disableTools?: boolean;
 }
 
 interface PersistedAgentState {
@@ -333,10 +335,11 @@ export class AgentRuntime {
     emit: StreamEmitter,
     signal?: AbortSignal,
     runId: string = crypto.randomUUID(),
+    options?: { disableTools?: boolean },
   ): Promise<AgentRunResult> {
     signal?.throwIfAborted();
     const workingChat: ChatRecord = { ...chat, messages: [...chat.messages] };
-    const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0, progressWatchdog: freshWatchdogSnapshot(), streamEmitter: emit };
+    const run: PendingRun = { runId, config, chat, projectContext, permission, workingChat, pendingApprovalIds: [], approvalCalls: {}, toolRounds: 0, progressWatchdog: freshWatchdogSnapshot(), streamEmitter: emit, disableTools: Boolean(options?.disableTools) };
     this.recoverableRuns.set(run.runId, run);
     await this.persist();
     return this.runStreamLoop(run, signal);
@@ -515,6 +518,7 @@ export class AgentRuntime {
         progressWatchdog: run.progressWatchdog,
         replanPending: run.replanPending,
         lastError: run.lastError,
+        disableTools: run.disableTools,
       })),
       approvals: this.tools.listApprovals(),
     };
@@ -705,7 +709,7 @@ export class AgentRuntime {
       let response: AIResponse | undefined;
       let streamError: string | undefined;
 
-      for await (const event of this.chatRuntime.stream(run.config, run.workingChat, this.effectiveProjectContext(run), signal)) {
+      for await (const event of this.chatRuntime.stream(run.config, run.workingChat, this.effectiveProjectContext(run), signal, { disableTools: run.disableTools })) {
         signal?.throwIfAborted();
         const contextualEvent: AIStreamEvent = {
           ...event,
