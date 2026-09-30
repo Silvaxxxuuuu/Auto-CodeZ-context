@@ -134,7 +134,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
       bytes: value.bytes,
     });
   },
-  streamChat: async (input: { chatId: string; content: string; attachments?: unknown[]; allowedPaths?: string[] }) => {
+  streamChat: async (input: { chatId: string; content: string; attachments?: unknown[]; allowedPaths?: string[]; retryRunId?: string }) => {
     const value = requireObject(input, 'Mensagem');
     const allowedPaths = normalizeOptionalExecutionAllowedPaths(value.allowedPaths);
     const result = await invoke<{ pendingApprovalIds: string[]; chat: unknown; error?: string }>('chat:stream', {
@@ -142,6 +142,7 @@ contextBridge.exposeInMainWorld('autoCodez', {
       content: requireNonEmptyString(value.content, 'Mensagem'),
       ...(Array.isArray(value.attachments) && value.attachments.length ? { attachments: value.attachments } : {}),
       ...(allowedPaths === undefined ? {} : { allowedPaths }),
+      ...(value.retryRunId === undefined ? {} : { retryRunId: requireIdentifier(value.retryRunId, 'Execução da resposta') }),
     });
     if (result.error) throw new Error(result.error);
     return result;
