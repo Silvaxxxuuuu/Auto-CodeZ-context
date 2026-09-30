@@ -100,7 +100,7 @@ function isValidEvent(value: unknown): value is ExecutionTimelineEvent {
       && event.state === undefined && event.startedAt === undefined
       && event.approvalId === undefined && event.approvalDecision === undefined;
   }
-  if (event.activityId !== undefined || event.activityPhase !== undefined) return false;
+  if (event.activityId !== undefined || event.activityPhase !== undefined || event.capabilityId !== undefined) return false;
   if (event.type === 'approval_decision') {
     return event.startedAt === undefined
       && event.approvalId !== undefined
