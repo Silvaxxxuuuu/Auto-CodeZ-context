@@ -31,6 +31,9 @@ export type PreviewInspection = {
   links: Array<{ text: string; href: string }>;
 };
 
+export type PreviewInteraction = { action: 'click_button'; selector: string };
+export type PreviewInteractionResult = { action: 'click_button'; selector: string; executed: true };
+
 export type InstancePlatformHandle = {
   canFocus: boolean;
   canClose: boolean;
@@ -38,6 +41,7 @@ export type InstancePlatformHandle = {
   close?: () => void | Promise<void>;
   capture?: () => Promise<Buffer>;
   inspect?: () => Promise<PreviewInspection>;
+  interact?: (input: PreviewInteraction) => Promise<PreviewInteractionResult>;
   isOpen?: () => boolean;
   onClosed?: (listener: () => void) => (() => void) | void;
 };
@@ -231,6 +235,33 @@ export class InstanceRuntime {
       ).map((item) => ({ text: item.text.slice(0, 150), href: item.href.slice(0, 2000) }));
       record.snapshot.updatedAt = this.now();
       return { title, url, text, headings, links };
+    } catch (error) {
+      record.snapshot.error = errorMessage(error);
+      record.snapshot.updatedAt = this.now();
+      throw error;
+    }
+  }
+
+  async interact(instanceId: string, input: PreviewInteraction): Promise<PreviewInteractionResult> {
+    const record = this.record(instanceId);
+    this.refresh(record);
+    if (record.snapshot.status !== 'open') throw new Error(`A instância ${instanceId} não está aberta.`);
+    if (record.snapshot.kind !== 'preview' || !record.handle?.interact) {
+      throw new Error(`A instância ${instanceId} não oferece interação controlada.`);
+    }
+    if (input?.action !== 'click_button' || typeof input.selector !== 'string' || !input.selector.trim() || input.selector.length > 256 || /[\\r\\n\\x00-\\x1f]/.test(input.selector)) {
+      throw new Error('Interação inválida: utilize click_button com seletor CSS de até 256 caracteres.');
+    }
+    const normalized: PreviewInteraction = { action: 'click_button', selector: input.selector.trim() };
+    try {
+      const result = await record.handle.interact(normalized);
+      this.refresh(record);
+      if (record.snapshot.status !== 'open') throw new Error('A janela de preview foi fechada durante a interação.');
+      if (!result || result.action !== normalized.action || result.selector !== normalized.selector || result.executed !== true) {
+        throw new Error('O preview retornou resultado de interação inválido.');
+      }
+      record.snapshot.updatedAt = this.now();
+      return { ...result };
     } catch (error) {
       record.snapshot.error = errorMessage(error);
       record.snapshot.updatedAt = this.now();
