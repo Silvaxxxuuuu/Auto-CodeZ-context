@@ -27,6 +27,7 @@ export type ManagedProcessSnapshot = {
   signal?: string;
   error?: string;
   outputSequence: number;
+  chatId?: string;
   runId?: string;
   toolCallId?: string;
   capabilityId?: 'process.start';
@@ -58,6 +59,7 @@ export type WaitForPortResult = {
 
 export type StartProcessOptions = {
   label?: string;
+  chatId?: string;
   runId?: string;
   toolCallId?: string;
 };
@@ -210,6 +212,7 @@ export class ProcessRuntime {
           pid: child.pid,
           startedAt: Date.now(),
           outputSequence: 0,
+          ...(options.chatId?.trim() ? { chatId: options.chatId.trim() } : {}),
           ...(options.runId?.trim() ? { runId: options.runId.trim() } : {}),
           ...(options.toolCallId?.trim() ? { toolCallId: options.toolCallId.trim() } : {}),
           ...(options.runId?.trim() && options.toolCallId?.trim() ? { capabilityId: 'process.start' as const, executionId: `process:${id}` } : {}),
