@@ -724,8 +724,11 @@ export class ToolRuntime {
       case 'search_files': { const matches = await this.workspace.searchFiles(projectId, this.stringValue(input, 'query')); return { output: JSON.stringify(await this.visibleSearchPaths(projectId, matches, context)) }; }
       case 'start_process': {
         const runtime = this.requireProcessRuntime();
-        const started = await runtime.start(projectId, this.stringValue(input, 'command'));
-        return { output: JSON.stringify({ type: 'process_started', processId: started.id, pid: started.pid, command: started.command, status: started.status, startedAt: started.startedAt }) };
+        const started = await runtime.start(projectId, this.stringValue(input, 'command'), {
+          ...(context.runId ? { runId: context.runId } : {}),
+          ...(context.toolCallId ? { toolCallId: context.toolCallId } : {}),
+        });
+        return { output: JSON.stringify({ type: 'process_started', processId: started.id, pid: started.pid, command: started.command, status: started.status, startedAt: started.startedAt, ...(started.runId ? { runId: started.runId } : {}), ...(started.toolCallId ? { toolCallId: started.toolCallId } : {}) }) };
       }
       case 'read_process_output': {
         const runtime = this.requireProcessRuntime();
