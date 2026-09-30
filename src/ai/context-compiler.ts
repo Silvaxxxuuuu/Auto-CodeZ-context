@@ -136,7 +136,7 @@ export function compileCapabilityGuidance(
 }
 
 function normalizeRuntimeFactPart(value: string): string {
-  return value.replace(/[\\r\\n\\t]+/g, ' ').replace(/\\s{2,}/g, ' ').trim();
+  return value.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
 }
 
 export function compileRuntimeFacts(
