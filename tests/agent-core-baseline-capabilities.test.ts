@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AGENT_CORE_V2_BASELINE_CAPABILITIES, agentCoreV2CapabilityByName } from '../src/agent-core/baseline-capabilities';
 import { assertCapabilityContract } from '../src/agent-core/capability-contract';
+import { ToolRuntime } from '../src/agent/tool-runtime';
+import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 
 const workspaceMutations = [
   'create_file',
@@ -61,5 +63,25 @@ test('structured process and instance tools remain in the same canonical catalog
     'focus_instance', 'close_instance', 'list_instances',
   ]) {
     assert.ok(agentCoreV2CapabilityByName(name), `missing capability metadata for ${name}`);
+  }
+});
+
+
+test('catalog input schemas stay aligned with tool definitions exposed to providers', () => {
+  const runtime = new ToolRuntime(new WorkspaceRuntime(async () => []));
+  const definitions = new Map(runtime.listDefinitions().map((definition) => [definition.name, definition]));
+  for (const capability of AGENT_CORE_V2_BASELINE_CAPABILITIES) {
+    const definition = definitions.get(capability.name as never);
+    assert.ok(definition, `missing provider tool definition for ${capability.name}`);
+    const capabilityProperties = capability.inputSchema.properties as Record<string, { type?: string; enum?: unknown[] }> | undefined;
+    const definitionProperties = definition.parameters.properties as Record<string, { type?: string; enum?: unknown[] }> | undefined;
+    assert.deepEqual(Object.keys(capabilityProperties ?? {}).sort(), Object.keys(definitionProperties ?? {}).sort(), `property mismatch for ${capability.name}`);
+    assert.deepEqual([...(capability.inputSchema.required as string[] | undefined ?? [])].sort(), [...(definition.parameters.required as string[] | undefined ?? [])].sort(), `required mismatch for ${capability.name}`);
+    for (const key of Object.keys(capabilityProperties ?? {})) {
+      assert.equal(capabilityProperties?.[key]?.type, definitionProperties?.[key]?.type, `type mismatch for ${capability.name}.${key}`);
+      if (capabilityProperties?.[key]?.enum || definitionProperties?.[key]?.enum) {
+        assert.deepEqual(capabilityProperties?.[key]?.enum, definitionProperties?.[key]?.enum, `enum mismatch for ${capability.name}.${key}`);
+      }
+    }
   }
 });
