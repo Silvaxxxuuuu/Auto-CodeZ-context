@@ -12,7 +12,7 @@ function event(overrides: Partial<StructuredActivityEvent> = {}): StructuredActi
   return {
     contractVersion: 1, id: 'tool:run-a:call-1:completed', kind: 'tool',
     phase: 'completed', chatId: 'chat-a', runId: 'run-a',
-    toolCallId: 'call-1', capabilityId: 'run_command', createdAt: 1200,
+    toolCallId: 'call-1', toolName: 'run_command', capabilityId: 'command.run', createdAt: 1200,
     summary: 'A command containing sensitive arguments was executed.',
     subject: { command: 'echo PRIVATE_COMMAND_ARGUMENT' },
     ...overrides,
@@ -37,7 +37,7 @@ test('V2 tool timeline persists scoped identifiers and phases without sensitive 
     assert.equal(first.length, 1);
     assert.deepEqual(first[0], {
       sequence: 1, chatId: 'chat-a', runId: 'run-a', at: 1200,
-      type: 'structured_activity', toolCallId: 'call-1', toolName: 'run_command',
+      type: 'structured_activity', toolCallId: 'call-1', toolName: 'run_command', capabilityId: 'command.run',
       activityId: 'tool:run-a:call-1:completed', activityPhase: 'completed',
     });
     assert.equal(timeline.recordStructuredActivity(event()).length, 0);
