@@ -432,7 +432,7 @@ const executionPlanPersistence = new ExecutionPlanPersistence(executionPlanStore
 const executionPlanHistory = new ExecutionPlanHistory();
 const executionPlanHistoryStore = new ExecutionPlanHistoryStore(storage);
 const executionPlanHistoryPersistence = new ExecutionPlanHistoryPersistence(executionPlanHistoryStore);
-const executionReportBuilder = new ExecutionReportBuilder(executionManager, executionTimeline, executionPlanHistory);
+const executionReportBuilder = new ExecutionReportBuilder(executionManager, executionTimeline, executionPlanHistory, (chatId, runId) => operationalTraceRuntime.snapshot(chatId, runId));
 const executionQualityGateRuntime = new ExecutionQualityGateRuntime();
 const executionQualityGateStore = new ExecutionQualityGateStore(storage);
 const executionQualityGatePersistence = new ExecutionQualityGatePersistence(executionQualityGateStore);
