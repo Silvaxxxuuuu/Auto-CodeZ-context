@@ -776,6 +776,14 @@ async function openManagedPreviewWindow(input: {
     close: () => {
       if (!previewWindow.isDestroyed()) previewWindow.close();
     },
+    capture: async () => {
+      if (previewWindow.isDestroyed() || previewWindow.webContents.isDestroyed()) {
+        throw new Error('A janela de preview já foi fechada.');
+      }
+      const image = await previewWindow.webContents.capturePage();
+      if (image.isEmpty()) throw new Error('A captura do preview está vazia.');
+      return image.toPNG();
+    },
     isOpen: () => !previewWindow.isDestroyed(),
     onClosed: (listener) => {
       previewWindow.on('closed', listener);
