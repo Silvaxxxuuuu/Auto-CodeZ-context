@@ -152,3 +152,70 @@ test('list valida filtros e devolve somente o escopo solicitado', () => {
   assert.deepEqual(controller.list('chat-b', 'run-b').map((item) => item.runId), ['run-b']);
   assert.throws(() => controller.list('   '), /chat inválido/i);
 });
+
+
+test('checkpoint V2 usa operationId e não toca no workspace legado', async () => {
+  const runtime = createRuntime();
+  runtime.record({
+    chatId: 'chat-a',
+    runId: 'run-a',
+    projectId: 'project-a',
+    toolCallId: 'tool-a',
+    operationId: 'op-a',
+    changes: [{
+      path: 'src/a.ts',
+      type: 'modified',
+      before: 'before',
+      after: 'after',
+      addedLines: 1,
+      removedLines: 1,
+    }],
+  });
+  const workspace = new FakeWorkspace();
+  workspace.seed('project-a', 'src/a.ts', 'after');
+  const calls: string[] = [];
+  const rollback = {
+    rollback: async (operationId: string) => {
+      calls.push(operationId);
+      return { operation: {} as never, alreadyRolledBack: false };
+    },
+  };
+  const controller = new ExecutionCheckpointController(runtime, workspace, new ExecutionManager(), undefined, rollback as never);
+
+  const restored = await controller.restore({ checkpointId: 'checkpoint-a', chatId: 'chat-a', runId: 'run-a' });
+
+  assert.deepEqual(calls, ['op-a']);
+  assert.deepEqual(workspace.operations, []);
+  assert.equal(restored.operationId, 'op-a');
+  assert.equal(restored.status, 'restored');
+  assert.equal(runtime.get('checkpoint-a')?.status, 'restored');
+});
+
+test('checkpoint V2 falha fechado quando o dispatcher de rollback não está disponível', async () => {
+  const runtime = createRuntime();
+  runtime.record({
+    chatId: 'chat-a',
+    runId: 'run-a',
+    projectId: 'project-a',
+    toolCallId: 'tool-a',
+    operationId: 'op-a',
+    changes: [{
+      path: 'src/a.ts',
+      type: 'modified',
+      before: 'before',
+      after: 'after',
+      addedLines: 1,
+      removedLines: 1,
+    }],
+  });
+  const workspace = new FakeWorkspace();
+  workspace.seed('project-a', 'src/a.ts', 'after');
+  const controller = new ExecutionCheckpointController(runtime, workspace, new ExecutionManager());
+
+  await assert.rejects(
+    () => controller.restore({ checkpointId: 'checkpoint-a', chatId: 'chat-a', runId: 'run-a' }),
+    /rollback v2 indisponível/i,
+  );
+  assert.deepEqual(workspace.operations, []);
+  assert.equal(runtime.get('checkpoint-a')?.status, 'ready');
+});
