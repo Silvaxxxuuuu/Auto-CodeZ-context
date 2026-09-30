@@ -10,7 +10,8 @@ import { CommandRuntime } from './command-runtime';
 import { ProcessRuntime } from './process-runtime';
 import { InstanceRuntime } from './instance-runtime';
 import { InstanceCaptureArtifactRuntime } from './instance-capture-artifact-runtime';
-import type { InstanceKind } from '../agent-core/contracts';
+import { AGENT_CORE_V2_CONTRACT_VERSION, type InstanceKind } from '../agent-core/contracts';
+import { agentCoreV2CapabilityByName } from '../agent-core/baseline-capabilities';
 import { DiffRuntime } from './diff-runtime';
 import { GitRuntime } from './git-runtime';
 import { applyIncrementalEdit, type IncrementalEditToolName } from './incremental-file-edit';
@@ -479,6 +480,25 @@ export class ToolRuntime {
   private async executeNow(projectId: string, call: AIToolCall, approvalId?: string, diffPlan?: DiffPlan, context: ActivityContext = {}): Promise<AIToolResult> {
     const activityType = call.name === 'run_command' || call.name === 'start_process' || call.name === 'stop_process' ? 'action' : 'tool';
     this.activity.emit({ type: activityType, message: executionActivityMessage(call), status: 'running', toolCallId: call.id, toolName: call.name, ...context });
+    if (call.name === 'run_command' && context.chatId && context.runId) {
+      const capability = agentCoreV2CapabilityByName(call.name);
+      const executionId = `command:${context.runId}:${call.id}`;
+      this.activity.emitStructured({
+        contractVersion: AGENT_CORE_V2_CONTRACT_VERSION,
+        id: `execution:${executionId}:running`,
+        kind: 'command',
+        phase: 'running',
+        chatId: context.chatId,
+        runId: context.runId,
+        toolCallId: call.id,
+        toolName: call.name,
+        executionId,
+        ...(capability ? { capabilityId: capability.id } : {}),
+        subject: { command: this.stringValue(call.input, 'command') },
+        summary: executionActivityMessage(call),
+        createdAt: Date.now(),
+      });
+    }
     try {
       this.assertChangeBudget(context.chatId, context.runId, call, diffPlan);
       if (approvalId && diffPlan && this.isMutation(call.name)) await this.beginJournal(approvalId, projectId, call, diffPlan);
