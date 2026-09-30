@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AUTOCODEZ_AGENT_HANDBOOK, compileCapabilityGuidance, compileOperationalTrace, compileRuntimeFacts, ContextCompiler } from '../src/ai/context-compiler';
+import type { OperationalTraceSnapshot } from '../src/agent-core/operational-trace';
 
 test('ContextCompiler preserves deterministic system-context ordering', () => {
   const compiler = new ContextCompiler();
@@ -173,7 +174,7 @@ test('ContextCompiler omits runtime facts from lightweight turns', () => {
 
 test('ContextCompiler injects Operational Trace as evidence below canonical runtime layers', () => {
   const compiler = new ContextCompiler();
-  const trace = {
+  const trace: OperationalTraceSnapshot = {
     chatId: 'chat-a',
     runId: 'run-a',
     eventCount: 3,
@@ -215,7 +216,7 @@ test('ContextCompiler injects Operational Trace as evidence below canonical runt
 });
 
 test('Operational Trace obeys a deterministic explicit character budget', () => {
-  const trace = {
+  const trace: OperationalTraceSnapshot = {
     chatId: 'chat-a',
     runId: 'run-a',
     eventCount: 2,
