@@ -25,6 +25,9 @@ export function prepareSafeResponseRetry(chat: ChatRecord, runId: string, report
     }
   }
   if (targetIndex < 0) throw new Error('Resposta final da execução não encontrada.');
+  if (targetIndex !== chat.messages.length - 1) {
+    throw new Error('Tentar novamente só é permitido para a resposta final mais recente do chat.');
+  }
 
   let userIndex = -1;
   for (let index = targetIndex - 1; index >= 0; index -= 1) {
