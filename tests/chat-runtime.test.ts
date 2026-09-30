@@ -64,9 +64,11 @@ test('send includes workspace context and tool definitions only when tools are s
   assert.equal(request.projectContext, 'src/index.ts contains the current implementation.');
   assert.equal(request.messages[0].role, 'system');
   assert.match(request.messages[0].content, /Contexto do workspace atual/);
-  assert.equal(request.messages[1].role, 'system');
-  assert.match(request.messages[1].content, /src\/index\.ts contains the current implementation/);
-  assert.equal(request.messages[2].content, 'Inspect the current implementation.');
+  assert.equal(request.messages.some((message) => /read_file \[workspace\.read_file;/.test(message.content)), true);
+  const workspaceMessage = request.messages.find((message) => message.content.includes('src/index.ts contains the current implementation.'));
+  assert.ok(workspaceMessage);
+  assert.equal(workspaceMessage.role, 'system');
+  assert.equal(request.messages.at(-1)?.content, 'Inspect the current implementation.');
 });
 
 test('trivial greeting isolates the current turn from old task history, workspace context and tools', async () => {
