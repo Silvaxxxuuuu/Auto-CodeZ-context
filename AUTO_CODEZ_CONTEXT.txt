@@ -11503,3 +11503,103 @@ TESTE DE ACEITAÇÃO ALVO:
 - diff/trabalho acessível na barra da resposta;
 - nenhum arquivo corrompido;
 - rollback possível.
+------------------------------------------------------------
+24.83. CHECKPOINT REAL — AGENT CORE V2 / 2026-09-30
+------------------------------------------------------------
+
+ESTADO DE REFERÊNCIA ANTES DESTE UPDATE DOCUMENTAL:
+- HEAD de runtime/testes: 8ada0b10106958ae9e7af309bfb2681664754014
+- PR #9: OPEN + DRAFT; NÃO mergeada.
+- Validate Auto CodeZ nesse HEAD: SUCCESS completo
+  - TypeScript
+  - Core tests
+  - ESLint
+  - Electron Forge package
+  - Electron startup smoke
+- Validate Account API: SUCCESS.
+- Real Vision Integration: SUCCESS.
+- Visual Auto CodeZ e Real Local Attachment Chat ainda estavam executando quando este contexto foi atualizado.
+
+AGENT CORE V2 — JÁ IMPLEMENTADO:
+1. Contratos formais + invariantes V2 existem em src/agent-core/contracts.ts.
+2. Operation Journal durável + store existem e bloqueiam mutação real quando PREPARED não pode ser persistido.
+3. IncrementalWorkspaceMutationRuntime está conectado ao ToolRuntime real.
+4. create_file/create_folder/write_file/replace_range/replace_text/replace_symbol/insert_before/insert_after/delete_file/rename_file passam pelo runtime incremental nas execuções com runId/toolCallId.
+5. create_file/create_folder/write_file/delete_file/rename_file produzem Operation Journal com capabilityId canônico e verificação posterior.
+6. Rollback executável e fail-closed:
+   - create_file -> remove somente arquivo/diretórios realmente criados e bloqueia se houve mudança externa;
+   - create_folder -> remove cadeia realmente criada somente se ela continuar sem conteúdo externo;
+   - write_file -> restaura snapshot criptografado somente se o estado atual ainda corresponde ao hash pós-operação;
+   - delete_file -> restauração exata já implementada;
+   - rename_file -> restauração segura já implementada.
+7. RollbackBlobStore mantém snapshots de conteúdo necessários para write/delete/rename.
+8. Catálogo de capabilities V2 agora cobre:
+   - todas as mutações reais de workspace;
+   - run_command;
+   - lifecycle de processos;
+   - lifecycle/inspeção/captura/interação de instâncias.
+9. Existe teste automático de schema drift: properties/required/types/enums do catálogo V2 precisam permanecer alinhados às AIToolDefinitions realmente expostas ao provider.
+10. StructuredActivityEvent separa:
+   - toolName bruto;
+   - capabilityId canônico.
+   Ex.: run_command -> command.run; create_file -> workspace.create_file.
+11. Timeline persistente guarda toolName e capabilityId separadamente sem quebrar tools ainda não catalogadas.
+12. start_process agora preserva proveniência runId + toolCallId no handle gerenciado.
+13. unrestricted continua sem approval rotineira para run_command/start_process permitidos, mas CommandSafetyPolicy, path scope e demais guardas continuam ativos.
+
+INSTÂNCIAS / PREVIEW:
+- capture_instance: PNG real armazenado como artifact; não injeta base64 textual; visão só é alegada quando o modelo realmente recebe a imagem.
+- inspect_instance: snapshot estrutural DOM limitado, sem fingir análise visual.
+- interact_instance: somente botão visível type=button, fora de form, em preview loopback local; sem JS arbitrário, links ou inputs.
+
+ACTIVITY / RESPOSTAS:
+- Activity Engine V2 publica canal estruturado em paralelo ao legado.
+- Timeline persiste fases estruturadas por chat/run.
+- ExecutionReport contém digest factual das operações observadas.
+- Execution Graph mostra fases V2 e distingue conclusão da tool de publicação verificada no workspace.
+- Mensagens finais da IA persistem runId.
+- Barra de resposta implementada:
+  - Copiar;
+  - Tentar novamente;
+  - Ver trabalho realizado;
+  - Ver alterações;
+  - Adicionar à memória.
+- Retry seguro:
+  - somente última resposta final;
+  - somente run com zero tools observadas;
+  - geração explicitamente tool-free;
+  - atômico: resposta antiga só é substituída após sucesso;
+  - não pode truncar histórico posterior.
+- Memória:
+  - por accountId;
+  - criptografada localmente;
+  - escopos global/projeto/conversa;
+  - entra no contexto de qualquer provider;
+  - gerenciável em Configurações -> Memória.
+
+SHELL:
+- F11 alterna fullscreen real da BrowserWindow principal e possui testes.
+
+PRÓXIMOS GAPS APROVADOS DO AGENT CORE V2:
+1. Criar dispatch/orquestração unificada de rollback por operationId e conectá-la aos fluxos de recovery/restore point sem bypassar checks de conflito.
+2. Continuar migração de commands/processes para identidade/lifecycle V2 comum, mantendo run_command explicitamente open-world e não prometendo rollback impossível de shell arbitrário.
+3. Continuar ContextCompiler/Agent Handbook/Operational Trace somente sobre contratos já validados.
+4. NÃO remover Shadow Workspace default até paridade, rollback e teste de aceitação real estarem comprovados.
+5. Teste de aceitação final continua:
+   - projeto grande via IA real;
+   - arquivos surgindo incrementalmente no disco;
+   - >12 tool calls;
+   - servidor persistente;
+   - reparo de erros;
+   - cancelamento consistente;
+   - retry seguro;
+   - activity narrativa;
+   - resumo factual;
+   - diff/trabalho acessível;
+   - rollback verificável;
+   - nenhum arquivo corrompido.
+
+REGRA:
+- Não regredir para IDs de capability inventados/ad-hoc.
+- Não declarar rollback para side effects open-world que o Auto CodeZ não consegue reverter.
+- Não remover guardas de segurança para satisfazer o modo unrestricted.
