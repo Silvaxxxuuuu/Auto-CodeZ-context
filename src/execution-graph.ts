@@ -45,6 +45,7 @@ export type ExecutionGraph = {
 type OrderedNode = ExecutionGraphNode & { order: number };
 
 const CAPABILITY_TITLES = new Map(AGENT_CORE_V2_BASELINE_CAPABILITIES.map((capability) => [capability.name, capability.title]));
+const WORKSPACE_MUTATION_TOOLS = new Set(['create_file', 'create_folder', 'write_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'rename_file', 'delete_file']);
 const ACTIVITY_PHASE_LABELS: Record<StructuredActivityPhase, string> = {
   queued: 'na fila', running: 'em andamento', waiting: 'aguardando aprovação',
   completed: 'concluída', failed: 'falhou', cancelled: 'cancelada',
@@ -120,7 +121,7 @@ function timelineNodes(report: ExecutionReport): OrderedNode[] {
         ...base,
         id: `timeline:${event.sequence}:structured:${event.activityId ?? event.toolCallId}`,
         kind: 'tool',
-        label: `${CAPABILITY_TITLES.get(event.toolName) ?? event.toolName}: ${ACTIVITY_PHASE_LABELS[event.activityPhase]}`,
+        label: `${CAPABILITY_TITLES.get(event.toolName) ?? event.toolName}: ${event.activityPhase === 'completed' && WORKSPACE_MUTATION_TOOLS.has(event.toolName) ? 'etapa concluída; publicação a verificar' : ACTIVITY_PHASE_LABELS[event.activityPhase]}`,
         tool: event.toolName,
         activityPhase: event.activityPhase,
       });
