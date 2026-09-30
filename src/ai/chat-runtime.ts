@@ -295,7 +295,7 @@ export class ChatRuntime {
     }];
   }
 
-  private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal) {
+  private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { disableTools?: boolean }) {
     const adapter = this.registry.get(config.id);
     signal?.throwIfAborted();
     const model = await runWithAbortSignal(signal, () => this.models.resolveForRequest(config, chat.model));
@@ -421,7 +421,11 @@ export class ChatRuntime {
       : webContext
         ? scopedTools.filter((tool) => tool.name !== 'web_search' && tool.name !== 'web_fetch')
         : scopedTools;
-    const toolsEnabled = !lightweightTurn && this.capabilities.supports(model, 'tools') && tools.length > 0;
+    if (options?.disableTools) {
+      systemMessages.push({ role: 'system' as const, content: 'Esta é uma regeneração textual segura. Responda sem chamar ferramentas, sem emitir pseudo-chamadas e sem iniciar ações no workspace.' });
+      messages.splice(0, messages.length, ...systemMessages, ...providerHistory);
+    }
+    const toolsEnabled = !options?.disableTools && !lightweightTurn && this.capabilities.supports(model, 'tools') && tools.length > 0;
     return {
       adapter,
       request: {
@@ -476,10 +480,10 @@ export class ChatRuntime {
     }
   }
 
-  async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal): AsyncGenerator<AIStreamEvent> {
+  async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { disableTools?: boolean }): AsyncGenerator<AIStreamEvent> {
     try {
       signal?.throwIfAborted();
-      const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal);
+      const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal, options);
       if (!resolution.supported) this.activity.emit({ type: 'action', message: `Perfil ${chat.intelligence} ajustado para ${resolution.effective}.`, status: 'success' });
       const journal = await this.beginProviderRequest(config, request);
       if (journal.cachedResponse) {
