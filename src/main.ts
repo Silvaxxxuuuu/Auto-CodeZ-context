@@ -8,6 +8,7 @@ import { DurableOperationJournal, OperationJournalStore } from './agent-core/ope
 import { IncrementalWorkspaceMutationRuntime } from './agent-core/incremental-workspace-runtime';
 import { RollbackBlobStore } from './agent-core/rollback-blob-store';
 import { OperationRollbackRuntime } from './agent-core/operation-rollback-runtime';
+import { AGENT_CORE_V2_CONTRACT_VERSION, type StructuredActivityPhase } from './agent-core/contracts';
 import { ProviderManager } from './ai/provider-manager';
 import { ChatManager } from './ai/chat-manager';
 import { AccountMemoryRuntime, type MemoryScope } from './account-memory-runtime';
@@ -276,6 +277,38 @@ const activityRuntime = new ActivityRuntime();
 const approvalRuntime = new ApprovalRuntime();
 const commandRuntime = new ShadowAwareCommandRuntime(() => projectManager.list(), executionShadowWorkspaceRuntime);
 const processRuntime = new ProcessRuntime(() => projectManager.list());
+processRuntime.subscribeLifecycle((snapshot) => {
+  if (!snapshot.chatId || !snapshot.runId || !snapshot.toolCallId || !snapshot.executionId) return;
+  const phase: StructuredActivityPhase = snapshot.status === 'running'
+    ? 'running'
+    : snapshot.status === 'exited'
+      ? 'completed'
+      : snapshot.status === 'stopped'
+        ? 'cancelled'
+        : 'failed';
+  activityRuntime.emitStructured({
+    contractVersion: AGENT_CORE_V2_CONTRACT_VERSION,
+    id: `execution:${snapshot.executionId}:${phase}:${snapshot.finishedAt ?? snapshot.startedAt}`,
+    kind: 'process',
+    phase,
+    chatId: snapshot.chatId,
+    runId: snapshot.runId,
+    toolCallId: snapshot.toolCallId,
+    toolName: 'start_process',
+    executionId: snapshot.executionId,
+    capabilityId: snapshot.capabilityId ?? 'process.start',
+    subject: { processId: snapshot.id, command: snapshot.command },
+    summary: snapshot.status === 'running'
+      ? `Processo iniciado: ${snapshot.command}`
+      : snapshot.status === 'exited'
+        ? `Processo concluído com código ${snapshot.exitCode ?? 0}.`
+        : snapshot.status === 'stopped'
+          ? 'Processo interrompido.'
+          : `Processo falhou${snapshot.error ? `: ${snapshot.error}` : '.'}`,
+    ...(snapshot.finishedAt !== undefined ? { durationMs: Math.max(0, snapshot.finishedAt - snapshot.startedAt) } : {}),
+    createdAt: snapshot.finishedAt ?? snapshot.startedAt,
+  });
+});
 const instancePlatformAdapter = new ElectronInstancePlatformAdapter(
   () => projectManager.list(),
   {
