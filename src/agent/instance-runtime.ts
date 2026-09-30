@@ -23,12 +23,21 @@ export type InstancePlatformOpenRequest = InstanceOpenRequest & {
   instanceId: string;
 };
 
+export type PreviewInspection = {
+  title: string;
+  url: string;
+  text: string;
+  headings: Array<{ level: number; text: string }>;
+  links: Array<{ text: string; href: string }>;
+};
+
 export type InstancePlatformHandle = {
   canFocus: boolean;
   canClose: boolean;
   focus?: () => void | Promise<void>;
   close?: () => void | Promise<void>;
   capture?: () => Promise<Buffer>;
+  inspect?: () => Promise<PreviewInspection>;
   isOpen?: () => boolean;
   onClosed?: (listener: () => void) => (() => void) | void;
 };
@@ -189,6 +198,39 @@ export class InstanceRuntime {
       if (record.snapshot.status !== 'open') throw new Error('A janela de preview foi fechada durante a captura.');
       record.snapshot.updatedAt = this.now();
       return image;
+    } catch (error) {
+      record.snapshot.error = errorMessage(error);
+      record.snapshot.updatedAt = this.now();
+      throw error;
+    }
+  }
+
+  async inspect(instanceId: string): Promise<PreviewInspection> {
+    const record = this.record(instanceId);
+    this.refresh(record);
+    if (record.snapshot.status !== 'open') throw new Error(`A instância ${instanceId} não está aberta.`);
+    if (record.snapshot.kind !== 'preview' || !record.handle?.inspect) {
+      throw new Error(`A instância ${instanceId} não oferece inspeção controlada.`);
+    }
+    try {
+      const inspection = await record.handle.inspect();
+      this.refresh(record);
+      if (record.snapshot.status !== 'open') throw new Error('A janela de preview foi fechada durante a inspeção.');
+      if (!inspection || typeof inspection.title !== 'string' || typeof inspection.url !== 'string'
+        || typeof inspection.text !== 'string' || !Array.isArray(inspection.headings) || !Array.isArray(inspection.links)) {
+        throw new Error('O preview retornou inspeção inválida.');
+      }
+      const title = inspection.title.slice(0, 250);
+      const url = inspection.url.slice(0, 2000);
+      const text = inspection.text.slice(0, 12000);
+      const headings = inspection.headings.slice(0, 60).filter((item) =>
+        item && Number.isInteger(item.level) && item.level >= 1 && item.level <= 6 && typeof item.text === 'string',
+      ).map((item) => ({ level: item.level, text: item.text.slice(0, 250) }));
+      const links = inspection.links.slice(0, 100).filter((item) =>
+        item && typeof item.text === 'string' && typeof item.href === 'string',
+      ).map((item) => ({ text: item.text.slice(0, 150), href: item.href.slice(0, 2000) }));
+      record.snapshot.updatedAt = this.now();
+      return { title, url, text, headings, links };
     } catch (error) {
       record.snapshot.error = errorMessage(error);
       record.snapshot.updatedAt = this.now();
