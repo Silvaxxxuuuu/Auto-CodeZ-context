@@ -113,7 +113,7 @@ test('latest capture is hydrated only for a vision provider and only in ephemera
     ];
     for (const vision of [true, false]) {
       const registry = new ProviderRegistry();
-      let observed: AIRequest | undefined;
+      const observed: AIRequest[] = [];
       registry.register({
         id: config.id,
         displayName: 'Test',
@@ -121,7 +121,7 @@ test('latest capture is hydrated only for a vision provider and only in ephemera
           return [{ id: 'capture-model', name: 'Capture', providerId: config.id, capabilities: vision ? ['text', 'vision', 'tools'] : ['text', 'tools'] }];
         },
         async send(_config, request) {
-          observed = request;
+          observed.push(request);
           return { content: 'Model response', model: 'capture-model', providerId: config.id };
         },
       });
@@ -131,14 +131,14 @@ test('latest capture is hydrated only for a vision provider and only in ephemera
         model: 'capture-model', intelligence: 'normal', permissionLevel: 'read-only',
         messages: history, createdAt: 1, updatedAt: 1,
       });
-      assert.ok(observed);
-      assert.equal(observed.messages.at(-1)?.role, vision ? 'user' : 'tool');
+      assert.equal(observed.length, 1);
+      assert.equal(observed[0].messages.at(-1)?.role, vision ? 'user' : 'tool');
       if (vision) {
-        const ephemeral = observed.messages.at(-1)!;
+        const ephemeral = observed[0].messages.at(-1)!;
         assert.match(ephemeral.content, /gerada automaticamente/);
         assert.equal(ephemeral.attachments?.[0].dataBase64, PNG.toString('base64'));
       } else {
-        assert.equal(observed.messages.some((item) => item.attachments?.some((att) => Boolean(att.dataBase64))), false);
+        assert.equal(observed[0].messages.some((item) => item.attachments?.some((att) => Boolean(att.dataBase64))), false);
       }
       assert.equal(history[2].attachments?.[0].dataBase64, undefined);
     }
