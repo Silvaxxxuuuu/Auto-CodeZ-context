@@ -81,6 +81,8 @@ test('V2 activity adapter preserves verified command timing without changing the
   assert.equal(mapped.phase, 'completed');
   assert.equal(mapped.runId, runId);
   assert.equal(mapped.toolCallId, 'command-1');
+  assert.equal(mapped.toolName, 'run_command');
+  assert.equal(mapped.capabilityId, 'command.run');
   assert.deepEqual(mapped.subject, { command: 'npm test' });
   assert.equal(mapped.durationMs, 50);
   assert.equal(mapped.createdAt, 1000);
@@ -104,6 +106,8 @@ test('V2 activity adapter differentiates pending approvals, failures and verifie
     changes: [{ path: 'src/a.ts', type: 'created', before: '', after: 'export {};', addedLines: 1, removedLines: 0 }],
   }), 2002);
   assert.equal(changed.phase, 'completed');
+  assert.equal(changed.toolName, 'create_file');
+  assert.equal(changed.capabilityId, 'workspace.create_file');
   assert.deepEqual(changed.subject, { path: 'src/a.ts' });
   assert.equal(changed.summary?.includes('src/a.ts'), true);
   assert.equal(changed.id, `tool:${runId}:file-1:completed`);
