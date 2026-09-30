@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AttachmentStore } from '../src/ai/attachment-store';
+import { imageDataUrl, nativeImageAttachments } from '../src/ai/provider-attachments';
 import { InstanceCaptureArtifactRuntime } from '../src/agent/instance-capture-artifact-runtime';
 import { InstanceRuntime, type InstancePlatformHandle } from '../src/agent/instance-runtime';
 
@@ -56,6 +57,9 @@ test('preview capture reuses the verified attachment store without exposing base
     assert.equal(result.attachment.storageKey, result.attachment.sha256);
     assert.equal(result.attachment.dataBase64, undefined);
     assert.deepEqual(await f.store.readBytes(result.attachment), PNG);
+    const hydrated = await f.store.hydrate(result.attachment);
+    assert.deepEqual(nativeImageAttachments({ role: 'tool', content: '', attachments: [hydrated] }), [hydrated]);
+    assert.equal(imageDataUrl(hydrated), `data:image/png;base64,${PNG.toString('base64')}`);
     assert.equal(f.captureCalls(), 1);
   } finally {
     await f.cleanup();
