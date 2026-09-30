@@ -397,3 +397,31 @@ test('pure informational grounded turn disables all agent tools for a one-call a
   assert.equal(requests[0].messages.some((message) => message.role === 'tool'), false);
   assert.equal(requests[0].messages.some((message) => message.content.includes('<|toolcall')), false);
 });
+
+
+test('send injects scoped account memory context into provider messages without provider-specific handling', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry, ['text']);
+  const runtime = new ChatRuntime(
+    registry,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    [],
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    (currentChat) => currentChat.id === 'chat-test'
+      ? 'Memórias persistentes salvas explicitamente pelo usuário nesta conta.\n- [global] Responda de forma objetiva.\n- [project:project-test] Este projeto usa TypeScript.'
+      : undefined,
+  );
+  await runtime.send(config, chat(), undefined);
+  const request = requests[0] as { messages: Array<{ role: string; content: string }> };
+  const memoryMessage = request.messages.find((message) => message.role === 'system' && message.content.includes('Memórias persistentes'));
+  assert.ok(memoryMessage);
+  assert.match(memoryMessage.content, /Responda de forma objetiva/);
+  assert.match(memoryMessage.content, /project:project-test/);
+});
