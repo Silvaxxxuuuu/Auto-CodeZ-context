@@ -1,4 +1,5 @@
 import { app, dialog, ipcMain, Menu, shell, BrowserWindow } from 'electron';
+import { handleMainWindowShortcut } from './main-window-shortcuts';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalStorage } from './core/storage';
@@ -848,6 +849,10 @@ function createWindow(): void {
       nodeIntegration: false,
       sandbox: false,
     },
+  });
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (!mainWindow) return;
+    if (handleMainWindowShortcut(mainWindow, input)) event.preventDefault();
   });
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   else void mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
