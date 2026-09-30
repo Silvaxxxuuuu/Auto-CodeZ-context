@@ -215,7 +215,7 @@ export class ProcessRuntime {
           ...(options.chatId?.trim() ? { chatId: options.chatId.trim() } : {}),
           ...(options.runId?.trim() ? { runId: options.runId.trim() } : {}),
           ...(options.toolCallId?.trim() ? { toolCallId: options.toolCallId.trim() } : {}),
-          ...(options.runId?.trim() && options.toolCallId?.trim() ? { capabilityId: 'process.start' as const, executionId: `process:${id}` } : {}),
+          ...(options.runId?.trim() && options.toolCallId?.trim() ? { capabilityId: 'process.start' as const, executionId: `process:${options.runId.trim()}:${options.toolCallId.trim()}` } : {}),
         },
         child,
         output: [],
