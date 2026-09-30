@@ -418,7 +418,7 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
     const shadow = this.shadowWorkspaces?.get(chatId, runId);
     if (!shadow) return undefined;
 
-    if (this.hasInstanceRuntime() && (call.name === 'capture_instance' || (call.name === 'open_instance' && call.input.kind !== 'url'))) {
+    if (this.hasInstanceRuntime() && (['capture_instance', 'inspect_instance'].includes(call.name) || (call.name === 'open_instance' && call.input.kind !== 'url'))) {
       return {
         toolCallId: call.id,
         ok: false,
