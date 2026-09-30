@@ -1277,16 +1277,14 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
   const context = await getChatContext(chatId);
   let chat = context.chat;
   const config = context.config;
+  let preparedRetry: ReturnType<typeof prepareSafeResponseRetry> | undefined;
   if (retryRunId) {
-    const retry = prepareSafeResponseRetry(chat, retryRunId, executionReportBuilder.build(chatId, retryRunId));
-    if (content !== retry.content) throw new Error('A mensagem original não corresponde à execução selecionada para retry.');
+    preparedRetry = prepareSafeResponseRetry(chat, retryRunId, executionReportBuilder.build(chatId, retryRunId));
+    if (content !== preparedRetry.content) throw new Error('A mensagem original não corresponde à execução selecionada para retry.');
     if (attachments.length) throw new Error('Anexos não devem ser reenviados manualmente durante retry seguro.');
-    chat = await chatManager.update(retry.chat);
-    content = retry.content;
-    attachments = await requireStoredAttachments(retry.attachments);
+    content = preparedRetry.content;
+    attachments = await requireStoredAttachments(preparedRetry.attachments);
   }
-  const lastMessage = chat.messages.at(-1);
-  const isRetryOfPersistedUserMessage = lastMessage?.role === 'user' && lastMessage.content === content;
   const current = (await chatManager.list()).find((item) => item.id === chat.id);
   if (!current) throw new Error('Chat desapareceu durante a execução.');
 
@@ -1299,6 +1297,19 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
     sendStreamEvent({ type: 'error', chatId, error: message });
     return { pendingApprovalIds: [], chat: current, error: message };
   }
+
+  if (preparedRetry) {
+    try {
+      chat = await chatManager.update(preparedRetry.chat);
+    } catch (error) {
+      executionManager.remove(chatId);
+      const message = error instanceof Error ? error.message : String(error);
+      sendStreamEvent({ type: 'error', chatId, runId: execution.runId, error: message });
+      return { pendingApprovalIds: [], chat: current, error: message };
+    }
+  }
+  const lastMessage = chat.messages.at(-1);
+  const isRetryOfPersistedUserMessage = lastMessage?.role === 'user' && lastMessage.content === content;
 
   const controller = new AbortController();
   activeStreamControllers.set(chatId, { runId: execution.runId, controller });
