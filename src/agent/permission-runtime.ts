@@ -30,6 +30,7 @@ const sensitiveWriteTools = new Set<ToolName>([
   'stop_process',
   'open_instance',
   'capture_instance',
+  'interact_instance',
   'close_instance',
   'git_create_branch',
   'git_checkout',
