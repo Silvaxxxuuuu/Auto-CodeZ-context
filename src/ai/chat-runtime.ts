@@ -17,6 +17,7 @@ import { isNativeImageMediaType } from './provider-attachments';
 import { VisualGroundingCoordinator } from './visual-grounding/visual-grounding-coordinator';
 import { ContextCompiler } from './context-compiler';
 import type { ComputerRuntimeFact } from '../agent/computer-context';
+import type { OperationalTraceSnapshot } from '../agent-core/operational-trace';
 
 const PROVIDER_RECENT_TOOL_ROUNDS = 2;
 const PROVIDER_RECENT_TOOL_RESULT_CHARS = 12_000;
@@ -229,7 +230,7 @@ export class ChatRuntime {
     }];
   }
 
-  private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { disableTools?: boolean; runtimeFacts?: readonly ComputerRuntimeFact[] }) {
+  private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { disableTools?: boolean; runtimeFacts?: readonly ComputerRuntimeFact[]; operationalTrace?: OperationalTraceSnapshot }) {
     const adapter = this.registry.get(config.id);
     signal?.throwIfAborted();
     const model = await runWithAbortSignal(signal, () => this.models.resolveForRequest(config, chat.model));
@@ -341,6 +342,7 @@ export class ChatRuntime {
       capabilityToolNames: toolsEnabled ? tools.map((tool) => tool.name) : [],
       capabilityQuery: currentUserMessage?.content ?? '',
       ...(options?.runtimeFacts?.length ? { runtimeFacts: options.runtimeFacts } : {}),
+      ...(options?.operationalTrace ? { operationalTrace: options.operationalTrace } : {}),
     });
     const messages = [...systemMessages, ...providerHistory];
     if (groundedAnswerOnly) {
@@ -368,7 +370,7 @@ export class ChatRuntime {
     return this.requestJournal.begin(request, fingerprintProviderScope(config), { allowInterruptedRetry: isExplicitProviderRecovery() });
   }
 
-  async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { runtimeFacts?: readonly ComputerRuntimeFact[] }): Promise<AIResponse> {
+  async send(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { runtimeFacts?: readonly ComputerRuntimeFact[]; operationalTrace?: OperationalTraceSnapshot }): Promise<AIResponse> {
     try {
       signal?.throwIfAborted();
       const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal, options);
@@ -403,7 +405,7 @@ export class ChatRuntime {
     }
   }
 
-  async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { disableTools?: boolean; runtimeFacts?: readonly ComputerRuntimeFact[] }): AsyncGenerator<AIStreamEvent> {
+  async *stream(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal, options?: { disableTools?: boolean; runtimeFacts?: readonly ComputerRuntimeFact[]; operationalTrace?: OperationalTraceSnapshot }): AsyncGenerator<AIStreamEvent> {
     try {
       signal?.throwIfAborted();
       const { adapter, request, resolution } = await this.prepare(config, chat, projectContext, signal, options);
