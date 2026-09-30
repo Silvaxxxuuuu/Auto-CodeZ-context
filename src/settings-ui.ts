@@ -4,6 +4,7 @@ const sections = [
   { id: 'ai', label: 'IA e modelos', icon: 'sparkles', description: 'Modelo, raciocínio e credenciais' },
   { id: 'execution', label: 'Execução', icon: 'zap', description: 'Acesso do agente e aprovações' },
   { id: 'privacy', label: 'Privacidade', icon: 'shield-check', description: 'Dados locais e proteção de secrets' },
+  { id: 'memory', label: 'Memória', icon: 'bookmark', description: 'Contexto persistente da sua conta' },
   { id: 'interface', label: 'Interface', icon: 'sliders', description: 'Densidade e movimento' },
 ] as const;
 
@@ -18,6 +19,7 @@ type Chat = {
   intelligence: IntelligenceLevel;
   permissionLevel: PermissionLevel;
 };
+type MemoryEntry = { id: string; content: string; scope: { type: 'global' | 'project' | 'chat'; projectId?: string; chatId?: string }; updatedAt: number };
 type State = {
   providers: Array<{ id: string; displayName: string; requiresApiKey?: boolean }>;
   chats: Chat[];
@@ -26,6 +28,8 @@ type State = {
 type SettingsBridge = {
   getState: () => Promise<State>;
   listApiKeys?: () => Promise<unknown[]>;
+  listMemories?: () => Promise<MemoryEntry[]>;
+  removeMemory?: (id: string) => Promise<boolean>;
   updateChatSettings: (input: {
     chatId: string;
     providerId: string;
@@ -45,6 +49,7 @@ const icon = (name: string): string => {
     zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z"/>',
     'shield-check': '<path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/>',
     sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/>',
+    bookmark: '<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
   };
   return `<svg class="settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.sliders}</svg>`;
@@ -65,6 +70,11 @@ const sectionMeta: Record<SectionId, { eyebrow: string; title: string; descripti
     eyebrow: 'LOCAL-FIRST',
     title: 'Privacidade',
     description: 'Veja quais proteções estão ativas e onde ficam suas credenciais e dados de trabalho.',
+  },
+  memory: {
+    eyebrow: 'CONTEXTO',
+    title: 'Memória',
+    description: 'Gerencie informações salvas explicitamente para esta conta e usadas como contexto pelas IAs.',
   },
   interface: {
     eyebrow: 'EXPERIÊNCIA',
@@ -186,6 +196,34 @@ async function renderSection(id: SectionId): Promise<void> {
     return;
   }
 
+  if (id === 'memory') {
+    if (!bridge.listMemories || !bridge.removeMemory) {
+      if (token === renderToken) body.innerHTML = renderShell(meta, '<section class="settings-card"><div class="settings-loading">Memória indisponível nesta versão.</div></section>');
+      return;
+    }
+    try {
+      const memories = await bridge.listMemories();
+      if (token !== renderToken) return;
+      const scopeLabel = (entry: MemoryEntry): string => entry.scope.type === 'global'
+        ? 'Global'
+        : entry.scope.type === 'project'
+          ? `Projeto · ${entry.scope.projectId || 'desconhecido'}`
+          : `Conversa · ${entry.scope.chatId || 'desconhecida'}`;
+      const cards = memories.length
+        ? `<section class="settings-card"><div class="local-ai-card-heading"><div><strong>Memórias salvas</strong><span>${memories.length} item${memories.length === 1 ? '' : 's'} disponível${memories.length === 1 ? '' : 'is'} para esta conta.</span></div>${badge('Por conta', 'good')}</div>${memories.map((entry) => row(
+            scopeLabel(entry),
+            entry.content.length > 180 ? `${entry.content.slice(0, 180)}…` : entry.content,
+            `<button class="settings-action-button" type="button" data-memory-delete="${escapeHtml(entry.id)}">Remover</button>`,
+          )).join('')}</section>`
+        : '<section class="settings-card"><div class="settings-loading">Nenhuma memória salva nesta conta.</div></section>';
+      body.innerHTML = renderShell(meta, cards, 'Memórias são criptografadas localmente e filtradas pelo accountId atual. Global vale para todos os chats; projeto e conversa são restritos aos respectivos escopos.');
+    } catch (error) {
+      if (token !== renderToken) return;
+      body.innerHTML = renderShell(meta, `<section class="settings-card"><div class="settings-loading">${escapeHtml(error instanceof Error ? error.message : 'Não foi possível carregar as memórias.')}</div></section>`);
+    }
+    return;
+  }
+
   if (id === 'privacy') {
     const keys = bridge.listApiKeys ? await bridge.listApiKeys().catch((): unknown[] => []) : [];
     if (token !== renderToken) return;
@@ -273,7 +311,18 @@ document.addEventListener('click', (event) => {
     void renderSection(id);
     return;
   }
-  const action = target.closest<HTMLElement>('[data-settings-action]')?.dataset.settingsAction;
+  const memoryDelete = target.closest<HTMLButtonElement>('[data-memory-delete]');
+  if (memoryDelete?.dataset.memoryDelete && bridge.removeMemory) {
+    memoryDelete.disabled = true;
+    void bridge.removeMemory(memoryDelete.dataset.memoryDelete)
+      .then(() => renderSection('memory'))
+      .catch((error) => {
+        window.dispatchEvent(new CustomEvent('auto-codez-ui-error', { detail: error instanceof Error ? error.message : 'Não foi possível remover a memória.' }));
+        void renderSection('memory');
+      });
+    return;
+  }
+    const action = target.closest<HTMLElement>('[data-settings-action]')?.dataset.settingsAction;
   if (action === 'open-api-keys') {
     closeSettings();
     document.querySelector<HTMLElement>('.api-key-rail-button')?.click();
