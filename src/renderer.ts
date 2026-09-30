@@ -29,7 +29,7 @@ declare global {
       pickChatAttachments: (kind: 'file' | 'image') => Promise<PickedAttachment[]>;
       previewChatAttachment: (attachment: Attachment) => Promise<string | null>;
       pasteChatImage: (input: { name?: string; mediaType: string; bytes: Uint8Array }) => Promise<PickedAttachment | null>;
-      streamChat: (input: { chatId: string; content: string; attachments?: Attachment[] }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
+      streamChat: (input: { chatId: string; content: string; attachments?: Attachment[]; retryRunId?: string }) => Promise<{ pendingApprovalIds: string[]; chat: Chat }>;
       stopChat: (chatId: string) => Promise<{ stopped: boolean }>;
       onStreamEvent: (listener: (event: StreamEvent) => void) => () => void;
       listMcpConnections: () => Promise<Array<{ clientId: 'chatgpt' | 'codex' | 'claude-desktop' | 'claude-code' | 'cursor' | 'other'; setupState: 'added' | 'configured'; addedAt: number; updatedAt: number; configuredAt?: number; lastConnectedAt?: number; metadata?: { tunnelId?: string } }>>;
@@ -661,6 +661,48 @@ async function retryLastMessage(): Promise<void> {
   const content = retryContent;
   await sendMessage(content, true);
 }
+
+async function retryAssistantResponse(runId: string, messageIndex: number): Promise<void> {
+  if (!activeChat || (executionState !== 'idle' && executionState !== 'failed') || pendingApprovals.length) return;
+  const target = activeChat.messages[messageIndex];
+  if (!target || target.role !== 'assistant' || target.runId !== runId || target.toolCalls?.length) return;
+  let userIndex = -1;
+  for (let index = messageIndex - 1; index >= 0; index -= 1) {
+    if (activeChat.messages[index].role === 'user') { userIndex = index; break; }
+  }
+  if (userIndex < 0) return;
+  const content = activeChat.messages[userIndex].content.trim();
+  if (!content) return;
+  const chatId = activeChat.id;
+  streamingText = '';
+  streamingActivity = [`Regenerando resposta de ${providerName(activeChat.providerId)}`];
+  lastError = '';
+  retryContent = '';
+  lastSubmittedContent = content;
+  activeRunId = undefined;
+  setExecutionState('running');
+  try {
+    const result = await window.autoCodez.streamChat({ chatId, content, retryRunId: runId });
+    if (!activeChat || activeChat.id !== chatId) return;
+    activeChat = result.chat;
+    pendingApprovals = [];
+    executionState = 'idle';
+    activeRunId = undefined;
+    streamingText = '';
+    streamingActivity = [];
+    lastSubmittedContent = '';
+    await refresh();
+  } catch (error) {
+    if (!activeChat || activeChat.id !== chatId) return;
+    setExecutionState('failed', error instanceof Error ? error.message : 'Não foi possível tentar novamente.');
+  }
+}
+
+window.addEventListener('auto-codez-retry-response', (event) => {
+  const detail = (event as CustomEvent<{ runId?: string; messageIndex?: number }>).detail;
+  if (!detail?.runId || !Number.isInteger(detail.messageIndex)) return;
+  void retryAssistantResponse(detail.runId, detail.messageIndex as number);
+});
 
 async function resumeApproval(id: string, approve: boolean): Promise<void> {
   if (executionState !== 'waiting_approval' || !activeChat) return;
