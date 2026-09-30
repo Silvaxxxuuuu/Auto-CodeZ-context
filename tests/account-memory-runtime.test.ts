@@ -39,6 +39,13 @@ test('account memory stays isolated by account and scope and is encrypted at res
     assert.deepEqual(memory.list({ type: 'global' }).map((entry) => entry.id), [global.id]);
     assert.deepEqual(memory.list({ type: 'project', projectId: 'project-a' }).map((entry) => entry.id), [project.id]);
     assert.equal(memory.list().length, 3);
+    const fullContext = memory.context({ chatId: 'chat-a', projectId: 'project-a' });
+    assert.match(fullContext ?? '', /Use respostas curtas/);
+    assert.match(fullContext ?? '', /Este projeto usa TypeScript/);
+    assert.match(fullContext ?? '', /Contexto só desta conversa/);
+    const otherContext = memory.context({ chatId: 'chat-b', projectId: 'project-b' });
+    assert.match(otherContext ?? '', /Use respostas curtas/);
+    assert.doesNotMatch(otherContext ?? '', /TypeScript|só desta conversa/);
 
     accountId = 'account-b';
     assert.deepEqual(memory.list(), []);
