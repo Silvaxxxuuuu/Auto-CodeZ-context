@@ -34,6 +34,7 @@ function isEvent(value: unknown): value is ExecutionTimelineEvent {
     && (event.toolCallId === undefined || (typeof event.toolCallId === 'string' && event.toolCallId.length > 0))
     && (event.toolName === undefined || (typeof event.toolName === 'string' && event.toolName.length > 0))
     && (event.capabilityId === undefined || (typeof event.capabilityId === 'string' && event.capabilityId.length > 0))
+    && (event.executionId === undefined || (typeof event.executionId === 'string' && event.executionId.length > 0))
     && (event.approvalDecision === undefined || APPROVAL_DECISIONS.has(event.approvalDecision))
     && (event.activityId === undefined || (typeof event.activityId === 'string' && event.activityId.length > 0))
     && (event.activityPhase === undefined || ACTIVITY_PHASES.has(event.activityPhase));
@@ -53,7 +54,7 @@ function isEvent(value: unknown): value is ExecutionTimelineEvent {
       && event.state === undefined && event.startedAt === undefined
       && event.approvalId === undefined && event.approvalDecision === undefined;
   }
-  if (event.activityId !== undefined || event.activityPhase !== undefined || event.capabilityId !== undefined) return false;
+  if (event.activityId !== undefined || event.activityPhase !== undefined || event.capabilityId !== undefined || event.executionId !== undefined) return false;
   if (event.type === 'approval_decision') {
     return event.startedAt === undefined
       && event.approvalId !== undefined
