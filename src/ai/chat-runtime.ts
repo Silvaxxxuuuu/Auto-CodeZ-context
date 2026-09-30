@@ -301,29 +301,12 @@ export class ChatRuntime {
       }
     }
 
-    const systemMessages = [{ role: 'system' as const, content: `${AUTOCODEZ_SYSTEM_INSTRUCTIONS}\n\nRuntime OS: ${runtimePlatform()}.\nRuntime date: ${runtimeDate()}.` }];
     const memoryContext = this.memoryContext?.(chat);
-    if (memoryContext) systemMessages.push({ role: 'system' as const, content: memoryContext });
-    if (lightweightTurn) {
-      systemMessages.push({
-        role: 'system' as const,
-        content: 'O turno atual é uma saudação ou conversa leve. Responda apenas ao turno atual. Não retome, continue, execute nem complete automaticamente tarefas de turnos anteriores. As ferramentas estão intencionalmente desativadas neste turno leve. Só retome uma tarefa anterior quando o usuário pedir isso explicitamente em uma nova instrução acionável.',
-      });
-    }
+    const providerInstructions: string[] = [];
     if (!lightweightTurn && config.id === 'azure-openai' && /^Kimi-K2\.6(?:$|[-_.])/i.test(model.id.trim())) {
-      systemMessages.push({
-        role: 'system' as const,
-        content: 'Regras de tool calling para Kimi-K2.6 no Azure Foundry: gere argumentos de ferramentas como JSON completo e estritamente válido. Para create_file, write_file, replace_range, replace_text, replace_symbol, insert_before ou insert_after com conteúdo substancial, emita no máximo uma mutação de arquivo com conteúdo grande por resposta. Aguarde o resultado dessa ferramenta e continue o próximo arquivo no ciclo seguinte. Não agrupe vários conteúdos completos de arquivos em tool calls paralelas. Nunca interrompa um objeto JSON no meio para caber na resposta.',
-      });
+      providerInstructions.push('Regras de tool calling para Kimi-K2.6 no Azure Foundry: gere argumentos de ferramentas como JSON completo e estritamente válido. Para create_file, write_file, replace_range, replace_text, replace_symbol, insert_before ou insert_after com conteúdo substancial, emita no máximo uma mutação de arquivo com conteúdo grande por resposta. Aguarde o resultado dessa ferramenta e continue o próximo arquivo no ciclo seguinte. Não agrupe vários conteúdos completos de arquivos em tool calls paralelas. Nunca interrompa um objeto JSON no meio para caber na resposta.');
     }
-    if (webContext) {
-      systemMessages.push({ role: 'system' as const, content: webContext });
-      systemMessages.push({
-        role: 'system' as const,
-        content: 'O grounding Web deste turno já foi concluído pelo Auto CodeZ. Use as fontes e trechos acima diretamente. Não repita a mesma pesquisa. As ferramentas web_search e web_fetch ficam deliberadamente fora deste request quando o grounding já trouxe fontes suficientes, para reduzir latência e chamadas redundantes.',
-      });
-    }
-    if (projectContext && !lightweightTurn) systemMessages.push({ role: 'system' as const, content: `Contexto do workspace atual:\n${projectContext}` });
+
     const currentUserMessage = [...attachmentMessages].reverse().find((message) => message.role === 'user');
     const groundedAnswerOnly = Boolean(
       webContext
@@ -333,21 +316,23 @@ export class ChatRuntime {
     const compactedHistory = lightweightTurn || groundedAnswerOnly
       ? { messages: currentUserMessage ? [currentUserMessage] : [], compacted: false }
       : compactToolHistoryForProvider(attachmentMessages);
-    if (compactedHistory.compacted) {
-      systemMessages.push({
-        role: 'system' as const,
-        content: 'O Auto CodeZ compactou resultados ou argumentos antigos de ferramentas somente no contexto enviado ao provider para controlar uso de tokens. O histórico local permanece completo. Se um detalhe omitido for necessário, consulte novamente a fonte ou arquivo com a ferramenta apropriada.',
-      });
-    }
     const providerHistory = await this.attachLatestToolCaptureForVision(compactedHistory.messages, model.capabilities.includes('vision'), signal);
+    const systemMessages = this.contextCompiler.compile({
+      runtimePlatform: runtimePlatform(),
+      runtimeDate: runtimeDate(),
+      ...(memoryContext ? { memoryContext } : {}),
+      lightweightTurn,
+      ...(providerInstructions.length ? { providerInstructions } : {}),
+      ...(webContext ? { webContext } : {}),
+      ...(projectContext ? { projectContext } : {}),
+      compactedHistory: compactedHistory.compacted,
+      groundedAnswerOnly,
+      disableTools: Boolean(options?.disableTools),
+    });
     const messages = [...systemMessages, ...providerHistory];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
     if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
     if (groundedAnswerOnly) {
-      systemMessages.push({
-        role: 'system' as const,
-        content: 'Este turno é uma consulta informativa já grounded. Responda diretamente em texto normal com base nas fontes recuperadas. Não planeje ações, não tente chamar ferramentas e não emita protocolo interno, pseudo-chamadas, nomes de funções ou argumentos JSON de ferramentas. O request não possui ferramentas disponíveis.',
-      });
       messages.splice(0, messages.length, ...systemMessages, ...compactedHistory.messages);
     }
     const scopedTools = hasProject ? this.toolDefinitions : this.toolDefinitions.filter((tool) => SYSTEM_CHAT_TOOL_NAMES.has(tool.name));
@@ -357,7 +342,6 @@ export class ChatRuntime {
         ? scopedTools.filter((tool) => tool.name !== 'web_search' && tool.name !== 'web_fetch')
         : scopedTools;
     if (options?.disableTools) {
-      systemMessages.push({ role: 'system' as const, content: 'Esta é uma regeneração textual segura. Responda sem chamar ferramentas, sem emitir pseudo-chamadas e sem iniciar ações no workspace.' });
       messages.splice(0, messages.length, ...systemMessages, ...providerHistory);
     }
     const toolsEnabled = !options?.disableTools && !lightweightTurn && this.capabilities.supports(model, 'tools') && tools.length > 0;
