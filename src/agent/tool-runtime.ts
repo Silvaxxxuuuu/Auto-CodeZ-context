@@ -514,7 +514,10 @@ export class ToolRuntime {
       if (isAbortError(error)) throw error;
       const message = error instanceof Error ? error.message : String(error);
       this.activity.emit({ type: activityType, message: `Falha em ${call.name}: ${message}`, status: 'failed', toolCallId: call.id, toolName: call.name, ...context, error: message, ...(diffPlan ? { diffPlan } : {}) });
-      return { toolCallId: call.id, ok: false, error: message };
+      const executionId = context.runId && (call.name === 'run_command' || call.name === 'start_process')
+        ? `${call.name === 'run_command' ? 'command' : 'process'}:${context.runId}:${call.id}`
+        : undefined;
+      return { toolCallId: call.id, ok: false, error: message, ...(executionId ? { executionId } : {}) };
     }
   }
 
