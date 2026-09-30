@@ -54,13 +54,13 @@ async function fixture(responses: AIResponse[], streamResponses?: AIStreamEvent[
 
 test('run returns a normal response without tools', async () => {
   const fixtureData = await fixture([{ content: 'Done.', model: 'test-model', providerId: config.id }]);
-  try { const result = await fixtureData.agent.run(config, chat(), undefined, 'ask'); assert.equal(result.response.content, 'Done.'); assert.equal(result.toolRounds, 0); assert.deepEqual(result.pendingApprovalIds, []); assert.equal(result.messages.at(-1)?.content, 'Done.'); }
+  try { const result = await fixtureData.agent.run(config, chat(), undefined, 'ask'); assert.equal(result.response.content, 'Done.'); assert.equal(result.toolRounds, 0); assert.deepEqual(result.pendingApprovalIds, []); assert.equal(result.messages.at(-1)?.content, 'Done.'); assert.equal(typeof result.messages.at(-1)?.runId, 'string'); assert.ok(result.messages.at(-1)?.runId); }
   finally { await fixtureData.cleanup(); }
 });
 
 test('run preserves the tool round count across an approval resume', async () => {
   const fixtureData = await fixture(fixtureDataResponses());
-  try { const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask'); assert.equal(pending.toolRounds, 1); assert.equal(pending.pendingApprovalIds.length, 1); const resumed = await fixtureData.agent.resume(pending.pendingApprovalIds[0]); assert.equal(resumed.toolRounds, 1); assert.equal(resumed.pendingApprovalIds.length, 0); assert.equal(resumed.response.content, 'Finished.'); assert.equal(resumed.messages.filter((message) => message.role === 'tool').length, 1); }
+  try { const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask'); assert.equal(pending.toolRounds, 1); assert.equal(pending.pendingApprovalIds.length, 1); const resumed = await fixtureData.agent.resume(pending.pendingApprovalIds[0]); assert.equal(resumed.toolRounds, 1); assert.equal(resumed.pendingApprovalIds.length, 0); assert.equal(resumed.response.content, 'Finished.'); assert.equal(resumed.messages.filter((message) => message.role === 'tool').length, 1); const assistantRunIds = resumed.messages.filter((message) => message.role === 'assistant').map((message) => message.runId); assert.ok(assistantRunIds.length >= 2); assert.equal(new Set(assistantRunIds).size, 1); assert.ok(assistantRunIds[0]); }
   finally { await fixtureData.cleanup(); }
 });
 
