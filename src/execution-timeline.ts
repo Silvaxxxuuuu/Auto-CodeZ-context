@@ -17,6 +17,7 @@ export type ExecutionTimelineEvent = {
   toolCallId?: string;
   toolName?: string;
   capabilityId?: string;
+  executionId?: string;
   approvalDecision?: ExecutionApprovalDecision;
   activityId?: string;
   activityPhase?: StructuredActivityPhase;
@@ -81,6 +82,7 @@ function isValidEvent(value: unknown): value is ExecutionTimelineEvent {
     && (event.toolCallId === undefined || (typeof event.toolCallId === 'string' && event.toolCallId.length > 0))
     && (event.toolName === undefined || (typeof event.toolName === 'string' && event.toolName.length > 0))
     && (event.capabilityId === undefined || (typeof event.capabilityId === 'string' && event.capabilityId.length > 0))
+    && (event.executionId === undefined || (typeof event.executionId === 'string' && event.executionId.length > 0))
     && (event.approvalDecision === undefined || APPROVAL_DECISIONS.has(event.approvalDecision))
     && (event.activityId === undefined || (typeof event.activityId === 'string' && event.activityId.length > 0))
     && (event.activityPhase === undefined || ACTIVITY_PHASES.has(event.activityPhase));
@@ -100,7 +102,7 @@ function isValidEvent(value: unknown): value is ExecutionTimelineEvent {
       && event.state === undefined && event.startedAt === undefined
       && event.approvalId === undefined && event.approvalDecision === undefined;
   }
-  if (event.activityId !== undefined || event.activityPhase !== undefined || event.capabilityId !== undefined) return false;
+  if (event.activityId !== undefined || event.activityPhase !== undefined || event.capabilityId !== undefined || event.executionId !== undefined) return false;
   if (event.type === 'approval_decision') {
     return event.startedAt === undefined
       && event.approvalId !== undefined
@@ -214,7 +216,7 @@ export class ExecutionTimeline {
     if (!Number.isFinite(event.createdAt) || event.createdAt < 0) throw new Error('Data de atividade inválida.');
     if (this.events.some((entry) => entry.type === 'structured_activity' && entry.chatId === chatId && entry.runId === runId && entry.activityId === activityId)) return [];
     return [this.append({ chatId, runId, at: event.createdAt, type: 'structured_activity',
-      toolCallId, toolName, ...(event.capabilityId ? { capabilityId: event.capabilityId } : {}), activityId, activityPhase: event.phase })];
+      toolCallId, toolName, ...(event.capabilityId ? { capabilityId: event.capabilityId } : {}), ...(event.executionId ? { executionId: event.executionId } : {}), activityId, activityPhase: event.phase })];
   }
 
   list(chatId?: string, runId?: string): ExecutionTimelineEvent[] {
