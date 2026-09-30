@@ -610,7 +610,7 @@ export class AgentRuntime {
     const snapshot = createToolActivitySnapshot(runId, call.id, call.name, result);
     const activityInput = { ...toActivityInput(snapshot), chatId, runId };
     const legacyEvent = this.activity.emit({ ...activityInput });
-    this.activity.emitStructured(toStructuredToolActivity(snapshot, legacyEvent.createdAt));
+    this.activity.emitStructured({ ...toStructuredToolActivity(snapshot, legacyEvent.createdAt), chatId });
     if (emit) emit({ type: 'activity', chatId, runId, activity: { id: `tool_${call.id}`, createdAt: legacyEvent.createdAt, ...activityInput } });
   }
 
