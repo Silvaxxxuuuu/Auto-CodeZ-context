@@ -2,6 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+export type ComputerRuntimeFact = {
+  key: string;
+  value: string;
+};
+
 function existingDirectory(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const candidate = path.resolve(value);
@@ -34,8 +39,17 @@ function discoverDrives(): string[] {
   return drives;
 }
 
+function formatFacts(facts: readonly ComputerRuntimeFact[]): string {
+  return [
+    'Local computer context:',
+    ...facts.map((fact) => `${fact.key}: ${fact.value}`),
+    'Use these resolved paths instead of asking the user for a path when the requested location is a standard local folder.',
+    'For arbitrary locations outside the active workspace, use the appropriate local command and respect the chat permission/approval policy.',
+  ].join('\n');
+}
+
 export class ComputerContextRuntime {
-  build(): string {
+  buildFacts(): ComputerRuntimeFact[] {
     const home = os.homedir();
     const oneDrive = firstExisting([
       process.env.OneDriveConsumer,
@@ -58,16 +72,17 @@ export class ComputerContextRuntime {
       ['Temp', existingDirectory(os.tmpdir())],
       ['ApplicationDirectory', existingDirectory(process.cwd())],
     ];
-    const lines = [
-      'Local computer context:',
-      `OS: ${process.platform} ${os.release()} (${process.arch})`,
-      `User: ${os.userInfo().username}`,
-      `Shell: ${process.env.ComSpec ?? process.env.SHELL ?? 'unknown'}`,
-      `Drives: ${discoverDrives().join(', ') || 'unknown'}`,
+    const facts: ComputerRuntimeFact[] = [
+      { key: 'OS', value: `${process.platform} ${os.release()} (${process.arch})` },
+      { key: 'User', value: os.userInfo().username },
+      { key: 'Shell', value: process.env.ComSpec ?? process.env.SHELL ?? 'unknown' },
+      { key: 'Drives', value: discoverDrives().join(', ') || 'unknown' },
     ];
-    for (const [label, value] of paths) if (value) lines.push(`${label}: ${value}`);
-    lines.push('Use these resolved paths instead of asking the user for a path when the requested location is a standard local folder.');
-    lines.push('For arbitrary locations outside the active workspace, use the appropriate local command and respect the chat permission/approval policy.');
-    return lines.join('\n');
+    for (const [key, value] of paths) if (value) facts.push({ key, value });
+    return facts;
+  }
+
+  build(): string {
+    return formatFacts(this.buildFacts());
   }
 }
