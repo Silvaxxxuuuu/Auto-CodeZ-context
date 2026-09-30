@@ -91,6 +91,7 @@ export function toStructuredToolActivity(snapshot: ToolActivitySnapshot, created
     phase,
     runId: snapshot.runId,
     toolCallId: snapshot.toolCallId,
+    capabilityId: snapshot.toolName,
     ...(subject ? { subject } : {}),
     summary: snapshot.message,
     ...(result.commandResult ? { durationMs: result.commandResult.durationMs } : {}),
