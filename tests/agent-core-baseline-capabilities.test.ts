@@ -67,6 +67,14 @@ test('structured process and instance tools remain in the same canonical catalog
 });
 
 
+test('canonical capability catalog covers every real ToolRuntime definition exactly once', () => {
+  const runtime = new ToolRuntime(new WorkspaceRuntime(async () => []));
+  const definitionNames = runtime.listDefinitions().map((definition) => definition.name).sort();
+  const capabilityNames = AGENT_CORE_V2_BASELINE_CAPABILITIES.map((capability) => capability.name).sort();
+
+  assert.deepEqual(capabilityNames, definitionNames);
+});
+
 test('catalog input schemas stay aligned with tool definitions exposed to providers', () => {
   const runtime = new ToolRuntime(new WorkspaceRuntime(async () => []));
   const definitions = new Map(runtime.listDefinitions().map((definition) => [definition.name, definition]));
