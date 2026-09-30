@@ -4,6 +4,7 @@ import type { AIToolCall } from '../src/ai/types';
 import type { CommandRuntime } from '../src/agent/command-runtime';
 import { ToolRuntime } from '../src/agent/tool-runtime';
 import type { WorkspaceRuntime } from '../src/agent/workspace-runtime';
+import { ActivityRuntime } from '../src/agent/activity-runtime';
 
 function call(id: string, command: string): AIToolCall {
   return { id, name: 'run_command', input: { command } };
@@ -116,4 +117,41 @@ test('Git somente leitura e template de env executam direto em unrestricted sem 
   assert.equal(template.pendingApproval, undefined);
   assert.deepEqual(commands.executed, ['git status', 'echo TOKEN= > .env.example']);
   assert.equal(runtime.listApprovals({ chatId: 'chat-a', runId: 'run-a' }).length, 0);
+});
+
+
+test('run_command emits a V2 running lifecycle and returns the same execution identity on success', async () => {
+  const commands = fakeCommands();
+  const activity = new ActivityRuntime();
+  const structured: Array<{ phase: string; executionId?: string; capabilityId?: string; toolCallId?: string }> = [];
+  activity.subscribeStructured((event) => structured.push(event));
+  const runtime = new ToolRuntime(fakeWorkspace(), undefined, activity, undefined, commands.runtime);
+
+  const result = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-life', 'npm test'), 'run-a');
+
+  assert.equal(result.ok, true);
+  assert.equal(result.executionId, 'command:run-a:cmd-life');
+  assert.equal(result.commandResult?.executionId, 'command:run-a:cmd-life');
+  assert.deepEqual(structured, [{
+    phase: 'running',
+    executionId: 'command:run-a:cmd-life',
+    capabilityId: 'command.run',
+    toolCallId: 'cmd-life',
+  }]);
+});
+
+test('run_command retains execution identity when the shell runtime fails', async () => {
+  const activity = new ActivityRuntime();
+  const structured: Array<{ phase: string; executionId?: string }> = [];
+  activity.subscribeStructured((event) => structured.push({ phase: event.phase, executionId: event.executionId }));
+  const commands = {
+    run: async () => { throw new Error('shell failed'); },
+  } as unknown as CommandRuntime;
+  const runtime = new ToolRuntime(fakeWorkspace(), undefined, activity, undefined, commands);
+
+  const result = await runtime.execute('chat-a', 'project-a', 'unrestricted', call('cmd-fail', 'npm test'), 'run-a');
+
+  assert.equal(result.ok, false);
+  assert.equal(result.executionId, 'command:run-a:cmd-fail');
+  assert.deepEqual(structured, [{ phase: 'running', executionId: 'command:run-a:cmd-fail' }]);
 });
