@@ -56,13 +56,13 @@ test('capture refuses empty images and oversized buffers', async () => {
 });
 
 test('capture fails when preview closes during asynchronous capture', async () => {
-  let finishCapture: ((image: Buffer) => void) | undefined;
-  const f = fixture(() => new Promise<Buffer>((resolve) => { finishCapture = resolve; }));
+  const deferred: { resolve?: (image: Buffer) => void } = {};
+  const f = fixture(() => new Promise<Buffer>((resolve) => { deferred.resolve = resolve; }));
   const opened = await f.runtime.open({ projectId: 'a', kind: 'preview', target: 'http://localhost:3000' });
   const pending = f.runtime.capture(opened.instanceId);
   f.closeFromPlatform();
-  assert.ok(finishCapture);
-  finishCapture(Buffer.from('image'));
+  assert.ok(deferred.resolve);
+  deferred.resolve(Buffer.from('image'));
   await assert.rejects(pending, /fechada durante a captura/i);
   assert.equal(f.runtime.get(opened.instanceId).status, 'closed');
 });
