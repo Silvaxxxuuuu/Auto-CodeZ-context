@@ -11716,3 +11716,215 @@ PRÓXIMO GAP:
 2. Usar capability metadata canônica para descrever comportamento/ferramentas sem hardcodes divergentes.
 3. Integrar memória, workspace context, runtime facts e Operational Trace com budgets explícitos.
 4. Não transformar Operational Trace em autoridade superior às regras de sistema/usuário.
+
+
+------------------------------------------------------------
+24.86. CHECKPOINT REAL — CONTEXTCOMPILER + CAPABILITY METADATA / 2026-09-30
+------------------------------------------------------------
+
+ESTADO VALIDADO ANTES DESTE UPDATE DOCUMENTAL:
+- HEAD de runtime/testes: 2d7f7afd3f27761ff67218d83f794f6a9397eca1
+- PR #9: OPEN + DRAFT; NÃO mergeada.
+- Validate Auto CodeZ: SUCCESS.
+- Validate Account API: SUCCESS.
+- Real Vision Integration: SUCCESS.
+- Real Local Attachment Chat: SUCCESS.
+- Visual Auto CodeZ: SUCCESS.
+
+CONTEXTCOMPILER / HANDBOOK:
+1. src/ai/context-compiler.ts agora consome metadata canônica do Agent Core V2.
+2. ContextCompilerInput possui suporte a:
+   - capabilityToolNames;
+   - capabilityQuery;
+   - capabilityBudgetChars.
+3. Guidance de capabilities:
+   - só inclui tools realmente expostas naquele request;
+   - usa seleção por relevância;
+   - desempate determinístico pela ordem canônica do catálogo;
+   - máximo padrão de 10 capabilities;
+   - budget padrão de 4200 caracteres;
+   - não muta inputs;
+   - não é emitida quando tools estão desabilitadas.
+4. O bloco emitido deriva capabilityId, category, permissionClass, flags, description, whenToUse e whenNotToUse da metadata canônica.
+5. ChatRuntime passa ao compiler somente os nomes das tools habilitadas no request e usa a mensagem atual como query de relevância.
+6. Parte das listas hardcoded do antigo handbook foi removida.
+7. Guidance estrutural de edição foi preservada enquanto read_file/read_symbol/search_files ainda não possuem cobertura equivalente no catálogo canônico.
+8. Tests cobrem disponibilidade real, ordenação por relevância, não-mutação, budget determinístico, limite explícito e disableTools.
+
+COMMITS DA ETAPA:
+- 828738746c7e648226f20998e5fd60d04f1fdc2f
+  feat(agent-core): compile canonical capability guidance
+- c589a7092f8b08feef9d25e2bde6a76555d3f848
+  feat(agent-core): feed capability metadata into context
+- 425595252078abf3c6484964090995beeb6de607
+  test(agent-core): cover capability-aware context budgets
+- e4483e31c5dc3c1c49ca8b9f029e601f9ef49aba
+  fix(agent-core): preserve structural edit guidance
+- 2d7f7afd3f27761ff67218d83f794f6a9397eca1
+  test(agent-core): align capability guidance assertions
+
+PRÓXIMA DIREÇÃO DO AGENT CORE V2:
+1. Completar cobertura canônica de famílias ainda fora do Capability Contract quando necessário, sem duplicar catálogo paralelo.
+2. Separar runtime facts de projectContext e integrá-los ao ContextCompiler com budget explícito e formatação determinística.
+3. Derivar Operational Trace do OperationalLedger/ExecutionTimeline já existentes, sem criar store paralelo.
+4. Operational Trace é evidence/runtime history, nunca autoridade acima de system/user/policy/capability contract.
+5. Continuar budgets explícitos por classe de contexto e compaction determinística.
+6. Manter Shadow Workspace até paridade/acceptance final comprovadas.
+
+------------------------------------------------------------
+24.87. IMAGES — DECISÃO DE PRODUTO/ARQUITETURA PARA ETAPA FUTURA
+------------------------------------------------------------
+
+STATUS:
+- Planejamento aprovado.
+- NÃO iniciar Images V1 agora.
+- Agent Core V2 e seus gaps atuais continuam prioritários.
+- Esta seção existe para impedir que as decisões de Images se percam quando a etapa for retomada.
+
+VISÃO DA ÁREA DE IMAGENS:
+1. A aba Imagens terá arquitetura visual semelhante a um chat, mas dedicada estritamente a geração/edição visual.
+2. Terá configuração própria equivalente a "Configurar IA", com:
+   - providers de imagem;
+   - API keys BYOK;
+   - modelos;
+   - modelos locais opcionais;
+   - seleção de modelo;
+   - resolução/proporção;
+   - recursos avançados conforme capability real do provider.
+3. O sistema deve suportar providers heterogêneos sem acoplar UI/Agent Core a um vendor específico.
+4. Capability nativa desejada:
+   - image.generate;
+   - futuramente image.edit / image.variation quando suportadas.
+5. Geração de imagem é capability nativa do produto, não deve ser implementada como PluginToolCatalog improvisado.
+
+AUTO CODEZ FREE:
+1. Deve existir uma opção online gratuita fornecida pelo Auto CodeZ, sem depender da GPU do usuário e sem exigir API key própria.
+2. Texto de produto aprovado:
+   "Grátis para uso. Limites se aplicam."
+3. Não prometer "ilimitado" como garantia técnica.
+4. O nome apresentado ao usuário pode ser "Auto CodeZ Free", sem acoplar a identidade visual ao backend usado.
+5. Backend inicial/candidato principal: Perchance FluxGen, sujeito a validação técnica/termos/estabilidade antes da implementação.
+6. Auto CodeZ Free deve ser uma abstração de provider:
+   Images UI -> image.generate -> ImageRuntime -> AutoCodeZFreeProvider -> adapter concreto.
+7. O restante do produto não deve conhecer seletores/DOM/URLs específicos do Perchance.
+8. Se o backend mudar no futuro, Biblioteca, Context Assets, Agent Core e UI não devem precisar ser reescritos.
+
+SESSÃO WEB LOCAL PARA AUTO CODEZ FREE:
+1. Estratégia aprovada para investigação futura: sessão web interna por instalação do usuário.
+2. A sessão roda no Electron/Main de forma isolada, sem mostrar:
+   - URL;
+   - página externa;
+   - barra de endereço;
+   - controles do navegador;
+   - qualquer UI do provider ao usuário.
+3. O usuário interage somente com a UI nativa do Auto CodeZ:
+   prompt no composer -> geração -> imagem aparece no chat/biblioteca.
+4. Cada instalação usa sua própria sessão web local/persistente; não existe uma conta/login central do Auto CodeZ concentrando gerações.
+5. O objetivo arquitetural é evitar infraestrutura central de GPU/API key do Auto CodeZ e manter a sessão pertencente ao usuário.
+6. NÃO projetar a solução para burlar rate limit, anti-bot, detecção de automação ou controles do serviço.
+7. Limites por IP, sessão, rede, fingerprint ou política do provider ainda podem existir e devem ser respeitados.
+8. Implementação futura deve respeitar termos e comportamento suportado pelo serviço.
+
+SEGURANÇA DA SESSÃO WEB:
+- tratar conteúdo remoto como não confiável;
+- nodeIntegration=false;
+- contextIsolation=true;
+- sandbox=true;
+- partição/sessão própria;
+- nenhuma ponte genérica de IPC;
+- nenhuma exposição de filesystem/projeto/Agent Core/secrets;
+- allowlist de navegação/origens;
+- bloquear popups/navegações inesperadas quando apropriado;
+- provider web não deve receber contexto local além do necessário à geração.
+
+ADAPTER:
+1. Toda lógica específica do Perchance deve ficar isolada em PerchanceWebAdapter.
+2. Mudança de seletor/estrutura externa deve exigir correção somente nesse adapter.
+3. O adapter deve mapear lifecycle real:
+   started -> generating -> completed/failed/cancelled.
+4. Nunca inferir sucesso sem obter imagem/evidence real.
+5. Não usar hacks frágeis como tamanho exato de Buffer para detectar rate limit/placeholder.
+6. Se o backend não puder ser integrado de forma estável/permitida, AutoCodeZFreeProvider deve poder trocar de adapter.
+
+ARTEFATOS / PERFORMANCE:
+1. Binário pesado deve ser tratado no processo Main/runtime apropriado, não despejado no renderer.
+2. Imagem resultante deve ser externalizada/persistida como artifact real em disco.
+3. Renderer recebe referência/metadados, não base64 enorme.
+4. OperationalLedger/ExecutionTimeline registram metadados/lifecycle/evidence, nunca payload base64 bruto.
+5. Artifact pertence ao Auto CodeZ, não ao provider que o criou.
+6. Imagens podem ser reutilizadas entre providers posteriormente.
+
+BIBLIOTECA DE IMAGENS:
+1. Fica dentro da área Imagens.
+2. Armazena todas as imagens geradas como artifacts persistentes.
+3. Cada item deve preservar quando disponível:
+   - prompt;
+   - negative prompt;
+   - provider;
+   - modelo;
+   - seed;
+   - resolução/proporção;
+   - data;
+   - referências usadas;
+   - relação com chat/projeto;
+   - lineage/versionamento.
+4. Ações previstas:
+   - excluir;
+   - adicionar ao contexto;
+   - usar como referência;
+   - Refazer daqui;
+   - editar quando provider suportar;
+   - copiar;
+   - salvar/exportar;
+   - ver detalhes da geração.
+
+CONTEXT ASSETS:
+1. "Adicionar ao contexto" é semelhante visualmente a "Adicionar à memória", mas internamente NÃO é memória textual.
+2. Criar conceito de Context Assets para assets visuais persistentes.
+3. Escopos previstos:
+   - Global;
+   - Chat atual;
+   - Projeto.
+4. Exemplos:
+   - logo.png;
+   - personagem-principal.png;
+   - referencia-ui.png.
+5. Context Assets poderão ser reutilizados por chats, geração de imagens e ferramentas futuras.
+
+REFAZER DAQUI / LINEAGE:
+1. Refazer daqui cria uma nova geração derivada da imagem selecionada.
+2. Deve carregar prompt/parâmetros/referência compatíveis e permitir mudanças.
+3. Nunca sobrescrever silenciosamente a imagem original.
+4. Preservar relação parent/child entre artifacts para permitir árvore de versões/variações.
+
+IMAGEM DE REFERÊNCIA:
+1. Composer de Imagens deve aceitar referência por:
+   - seletor de arquivo;
+   - drag/drop;
+   - Ctrl+V.
+2. O comportamento depende das capabilities reais do provider/modelo.
+3. Provider deve declarar suporte explícito a recursos como:
+   - textToImage;
+   - imageToImage;
+   - inpainting;
+   - referenceImages;
+   - negativePrompt;
+   - seed;
+   - guidance.
+4. UI só mostra/ativa recursos realmente suportados.
+5. Não fingir suporte uniforme entre providers.
+
+PROVIDERS FUTUROS:
+- Auto CodeZ Free;
+- providers BYOK;
+- Pollinations via autenticação/conta do próprio usuário quando desejado;
+- OpenAI/Google/fal e outros adapters;
+- modelos locais opcionais.
+- Modelo local é opção, não requisito para o provider grátis padrão.
+
+PRINCÍPIO FINAL:
+- Auto CodeZ Free é uma experiência do produto, não um acoplamento permanente ao Perchance.
+- O usuário vê uma geração online gratuita integrada.
+- O backend fica encapsulado e substituível.
+- Nenhum custo de GPU central deve ser assumido pelo Auto CodeZ nessa estratégia.
+- Implementação somente após a etapa atual do Agent Core V2 ser encerrada e validada.
