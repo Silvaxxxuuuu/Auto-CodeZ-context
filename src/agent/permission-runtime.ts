@@ -18,7 +18,6 @@ const readTools = new Set<ToolName>([
   'wait_for_port',
   'list_processes',
   'instance_status',
-  'capture_instance',
   'list_instances',
 ]);
 const safeWriteTools = new Set<ToolName>(['write_file', 'create_file', 'create_folder', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'focus_instance']);
@@ -29,6 +28,7 @@ const sensitiveWriteTools = new Set<ToolName>([
   'start_process',
   'stop_process',
   'open_instance',
+  'capture_instance',
   'close_instance',
   'git_create_branch',
   'git_checkout',
