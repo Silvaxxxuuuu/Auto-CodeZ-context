@@ -11662,3 +11662,57 @@ PRÓXIMO GAP DO AGENT CORE V2:
 1. Continuar identidade/lifecycle V2 de commands/processes sem colocar shell arbitrário no journal reversível.
 2. Consolidar ContextCompiler / Agent Handbook / Operational Trace sobre capabilityId/toolName já canônicos.
 3. Manter Shadow Workspace até o teste de aceitação real provar paridade/publicação/rollback completos.
+------------------------------------------------------------
+24.85. CHECKPOINT REAL — COMMAND/PROCESS LIFECYCLE V2 / 2026-09-30
+------------------------------------------------------------
+
+ESTADO DE REFERÊNCIA:
+- HEAD de runtime/testes antes deste update documental: 0729b8ba7f7a33545f6becd01fb83e1e32f903f5
+- PR #9: OPEN + DRAFT; NÃO mergeada.
+- Validate Auto CodeZ: SUCCESS completo.
+- Validate Account API: SUCCESS.
+- Real Vision Integration: SUCCESS.
+- Visual Auto CodeZ e Real Local Attachment Chat ainda executavam sem falha registrada neste momento.
+
+IDENTIDADE V2 DE EXECUÇÕES OPEN-WORLD:
+1. executionId é separado de operationId.
+   - operationId permanece reservado para mutações reversíveis do Operation Journal.
+   - executionId representa execução observável não necessariamente reversível.
+2. run_command:
+   - executionId determinístico: command:<runId>:<toolCallId>;
+   - StructuredActivityEvent running é emitido antes do shell;
+   - sucesso/falha preservam o mesmo executionId no AIToolResult;
+   - CommandResultSummary pode carregar executionId;
+   - capabilityId canônico permanece command.run.
+3. start_process / ProcessRuntime:
+   - handle preserva chatId + runId + toolCallId + capabilityId + executionId;
+   - executionId determinístico: process:<runId>:<toolCallId>;
+   - processId continua sendo o handle concreto do processo;
+   - lifecycle listener publica snapshots reais de running/exited/failed/stopped;
+   - bridge converte esses snapshots para StructuredActivityEvent:
+     running -> running
+     exited -> completed
+     failed -> failed
+     stopped -> cancelled
+   - lifecycle tardio continua sendo publicado mesmo depois de start_process já ter retornado.
+4. ExecutionTimeline e store persistem executionId em structured_activity.
+5. Process lifecycle mapping foi extraído de main.ts para src/agent/process-activity-bridge.ts e possui testes próprios.
+6. main.ts apenas encaminha snapshots do ProcessRuntime para o ActivityRuntime estruturado.
+
+SEM FALSO ROLLBACK:
+- run_command e processos NÃO entram no Operation Journal reversível.
+- lifecycle/evidence é observabilidade factual, não promessa de undo.
+- CommandSafetyPolicy e escopo continuam ativos em unrestricted.
+
+VALIDAÇÃO:
+- testes command lifecycle cobrem running + mesmo executionId em success/failure;
+- testes process lifecycle cobrem chat/run/tool provenance, capabilityId e execução estável de running até stopped;
+- tests do bridge cobrem running/exited/stopped/failed e snapshots incompletos;
+- timeline criptografada preserva executionId após persistência/restart;
+- Validate Auto CodeZ completo passou após correção de uma asserção de teste que esperava um objeto parcial em vez do evento estruturado completo.
+
+PRÓXIMO GAP:
+1. Extrair AUTOCODEZ_SYSTEM_INSTRUCTIONS monolítico para um ContextCompiler/Agent Handbook provider-independent.
+2. Usar capability metadata canônica para descrever comportamento/ferramentas sem hardcodes divergentes.
+3. Integrar memória, workspace context, runtime facts e Operational Trace com budgets explícitos.
+4. Não transformar Operational Trace em autoridade superior às regras de sistema/usuário.
