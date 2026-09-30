@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AUTOCODEZ_AGENT_HANDBOOK, compileCapabilityGuidance, ContextCompiler } from '../src/ai/context-compiler';
+import { AUTOCODEZ_AGENT_HANDBOOK, compileCapabilityGuidance, compileRuntimeFacts, ContextCompiler } from '../src/ai/context-compiler';
 
 test('ContextCompiler preserves deterministic system-context ordering', () => {
   const compiler = new ContextCompiler();
@@ -113,4 +113,59 @@ test('ContextCompiler omits capability guidance when tools are disabled for the 
   });
 
   assert.equal(messages.some((message) => message.content.includes('Canonical capability guidance')), false);
+});
+
+
+test('ContextCompiler injects runtime facts as a separate bounded system layer', () => {
+  const compiler = new ContextCompiler();
+  const facts = [
+    { key: 'OS', value: 'win32 10.0.19045 (x64)' },
+    { key: 'Home', value: 'C:\\Users\\User' },
+    { key: 'Desktop', value: 'C:\\Users\\User\\Desktop' },
+  ];
+  const messages = compiler.compile({
+    runtimePlatform: 'Windows',
+    runtimeDate: '2026-09-30',
+    runtimeFacts: facts,
+    projectContext: 'PROJECT',
+  });
+
+  assert.deepEqual(facts, [
+    { key: 'OS', value: 'win32 10.0.19045 (x64)' },
+    { key: 'Home', value: 'C:\\Users\\User' },
+    { key: 'Desktop', value: 'C:\\Users\\User\\Desktop' },
+  ]);
+  assert.equal(messages.length, 3);
+  assert.match(messages[1].content, /Runtime facts observed locally by Auto CodeZ/);
+  assert.match(messages[1].content, /Desktop: C:\\Users\\User\\Desktop/);
+  assert.equal(messages[2].content, 'Contexto do workspace atual:\nPROJECT');
+  assert.equal(messages[2].content.includes('Runtime facts'), false);
+});
+
+test('runtime facts obey an explicit deterministic character budget', () => {
+  const facts = [
+    { key: 'OS', value: 'Windows' },
+    { key: 'Home', value: 'C:\\Users\\User' },
+    { key: 'Desktop', value: 'C:\\Users\\User\\Desktop' },
+  ];
+  const first = compileRuntimeFacts(facts, 150);
+  const second = compileRuntimeFacts(facts, 150);
+
+  assert.equal(first, second);
+  assert.ok(first);
+  assert.ok(first.length <= 150);
+  assert.match(first, /OS: Windows/);
+});
+
+test('ContextCompiler omits runtime facts from lightweight turns', () => {
+  const compiler = new ContextCompiler();
+  const messages = compiler.compile({
+    runtimePlatform: 'Windows',
+    runtimeDate: '2026-09-30',
+    lightweightTurn: true,
+    runtimeFacts: [{ key: 'Desktop', value: 'C:\\Users\\User\\Desktop' }],
+  });
+
+  assert.equal(messages.some((message) => message.content.includes('Runtime facts observed locally')), false);
+  assert.equal(messages.some((message) => message.content.includes('C:\\Users\\User\\Desktop')), false);
 });
