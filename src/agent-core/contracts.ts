@@ -152,6 +152,7 @@ export type StructuredActivityEvent = {
   toolCallId?: string;
   toolName?: string;
   operationId?: string;
+  executionId?: string;
   capabilityId?: string;
   subject?: StructuredActivitySubject;
   summary?: string;
@@ -183,6 +184,19 @@ export type AgentRunSummary = {
   durationMs: number;
 };
 
+export type CommandExecutionHandle = {
+  executionId: string;
+  runId: string;
+  toolCallId: string;
+  capabilityId: 'command.run';
+  command: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  startedAt: number;
+  finishedAt?: number;
+  exitCode?: number;
+  durationMs?: number;
+};
+
 export type ProcessHandle = {
   processId: string;
   pid: number;
@@ -192,6 +206,10 @@ export type ProcessHandle = {
   startedAt: number;
   finishedAt?: number;
   exitCode?: number | null;
+  runId?: string;
+  toolCallId?: string;
+  capabilityId?: 'process.start';
+  executionId?: string;
 };
 
 export type InstanceKind = 'application' | 'url' | 'file' | 'folder' | 'preview';
