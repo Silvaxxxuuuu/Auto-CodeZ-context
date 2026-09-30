@@ -425,3 +425,30 @@ test('send injects scoped account memory context into provider messages without 
   assert.match(memoryMessage.content, /Responda de forma objetiva/);
   assert.match(memoryMessage.content, /project:project-test/);
 });
+
+
+test('send keeps runtime facts separate from projectContext in provider requests', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry, ['text']);
+  const runtime = new ChatRuntime(registry);
+
+  await runtime.send(
+    config,
+    chat(),
+    'src/index.ts contains the workspace context.',
+    undefined,
+    { runtimeFacts: [
+      { key: 'OS', value: 'win32 10.0.19045 (x64)' },
+      { key: 'Desktop', value: 'C:\\Users\\User\\Desktop' },
+    ] },
+  );
+
+  const request = requests[0] as {
+    projectContext?: string;
+    messages: Array<{ role: string; content: string }>;
+  };
+  assert.equal(request.projectContext, 'src/index.ts contains the workspace context.');
+  assert.equal(request.projectContext?.includes('Desktop'), false);
+  assert.equal(request.messages.some((message) => /Runtime facts observed locally by Auto CodeZ/.test(message.content)), true);
+  assert.equal(request.messages.some((message) => message.content.includes('C:\\Users\\User\\Desktop')), true);
+});
