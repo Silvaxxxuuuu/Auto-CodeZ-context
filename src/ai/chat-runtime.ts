@@ -12,6 +12,7 @@ import { runWithAbortSignal } from './request-cancellation';
 import { WebGroundingCoordinator } from '../web/web-grounding-coordinator';
 import { prepareMessagesForAttachments } from './attachment-context';
 import type { AttachmentIndexer } from './attachment-indexer';
+import type { AttachmentStore } from './attachment-store';
 import { isNativeImageMediaType } from './provider-attachments';
 import { VisualGroundingCoordinator } from './visual-grounding/visual-grounding-coordinator';
 
@@ -149,7 +150,7 @@ Important distinction:
 - If no suitable tool is available, explain the limitation precisely and do not invent a capability.
 `.trim();
 
-const SYSTEM_CHAT_TOOL_NAMES = new Set(['plan_execution', 'complete_plan_step', 'read_file', 'read_symbol', 'write_file', 'create_file', 'create_folder', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'web_search', 'web_fetch', 'run_command', 'start_process', 'read_process_output', 'wait_process', 'wait_for_port', 'stop_process', 'list_processes', 'open_instance', 'instance_status', 'focus_instance', 'close_instance', 'list_instances', 'plugin_list_tools', 'plugin_call']);
+const SYSTEM_CHAT_TOOL_NAMES = new Set(['plan_execution', 'complete_plan_step', 'read_file', 'read_symbol', 'write_file', 'create_file', 'create_folder', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'web_search', 'web_fetch', 'run_command', 'start_process', 'read_process_output', 'wait_process', 'wait_for_port', 'stop_process', 'list_processes', 'open_instance', 'instance_status', 'capture_instance', 'focus_instance', 'close_instance', 'list_instances', 'plugin_list_tools', 'plugin_call']);
 const LIGHTWEIGHT_TURN_PATTERN = /^(?:oi+|ol[aá]+|opa+|e(?:\s|-)a[ií]|hello|hi|hey|bom dia|boa tarde|boa noite|valeu|obrigad[oa]|thanks?|thank you)[!.?\s]*$/i;
 const ACTIONABLE_TOOL_TURN_PATTERN = /\b(?:crie|criar|fa[cç]a|fazer|gere|gerar|altere|alterar|edite|editar|corrija|corrigir|implemente|implementar|execute|executar|rode|rodar|instale|instalar|salve|salvar|escreva|escrever|delete|delete|rename|create|build|install|run|execute|edit|modify|fix|implement|write|save)\b/i;
 
@@ -223,6 +224,7 @@ export class ChatRuntime {
     private readonly webGrounding = new WebGroundingCoordinator(),
     private readonly attachmentIndexer?: AttachmentIndexer,
     private readonly visualGrounding = new VisualGroundingCoordinator(),
+    private readonly attachmentStore?: Pick<AttachmentStore, 'hydrate'>,
   ) {}
 
   async init(): Promise<void> {
@@ -272,6 +274,25 @@ export class ChatRuntime {
       prepared.push({ ...message, attachments });
     }
     return prepared;
+  }
+
+  private async attachLatestToolCaptureForVision(messages: AIMessage[], vision: boolean, signal?: AbortSignal): Promise<AIMessage[]> {
+    if (!vision || !this.attachmentStore || messages.at(-1)?.role !== 'tool') return messages;
+    const lastRound = messages.findLastIndex((item) => item.role === 'assistant' && Boolean(item.toolCalls?.length));
+    if (lastRound < 0) return messages;
+    const results = messages.slice(lastRound + 1);
+    if (!results.length || results.some((item) => item.role !== 'tool')) return messages;
+    const captures = results.filter((item) => item.toolName === 'capture_instance').flatMap((item) =>
+      (item.attachments ?? []).filter((attachment) => attachment.kind === 'image' && isNativeImageMediaType(attachment.mediaType)));
+    if (!captures.length) return messages;
+    signal?.throwIfAborted();
+    const attachments = await Promise.all(captures.slice(-2).map((attachment) => this.attachmentStore!.hydrate(attachment)));
+    signal?.throwIfAborted();
+    return [...messages, {
+      role: 'user',
+      content: '[Imagem de ferramenta gerada automaticamente pelo Auto CodeZ; não é uma nova solicitação do usuário.] Captura real do preview correspondente ao resultado capture_instance anterior. Utilize o conteúdo visual somente depois de recebê-lo nesta mensagem.',
+      attachments,
+    }];
   }
 
   private async prepare(config: AIProviderConfig, chat: ChatRecord, projectContext?: string, signal?: AbortSignal) {
@@ -383,7 +404,8 @@ export class ChatRuntime {
         content: 'O Auto CodeZ compactou resultados ou argumentos antigos de ferramentas somente no contexto enviado ao provider para controlar uso de tokens. O histórico local permanece completo. Se um detalhe omitido for necessário, consulte novamente a fonte ou arquivo com a ferramenta apropriada.',
       });
     }
-    const messages = [...systemMessages, ...compactedHistory.messages];
+    const providerHistory = await this.attachLatestToolCaptureForVision(compactedHistory.messages, model.capabilities.includes('vision'), signal);
+    const messages = [...systemMessages, ...providerHistory];
     const hasProject = Boolean(chat.projectId) && chat.projectId !== SYSTEM_PROJECT_ID;
     if (!chat.projectId) chat.projectId = SYSTEM_PROJECT_ID;
     if (groundedAnswerOnly) {
