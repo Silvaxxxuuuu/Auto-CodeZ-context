@@ -95,77 +95,81 @@ test('production incremental configuration mutates the real workspace without cr
   const f = await fixture();
   const runId = 'run-v2';
   try {
-    await f.base.createFile('project-a', 'src/app.ts', "export const value = 1;\nexport function greet() {\n  return 'hello';\n}\n");
-
+    const multilineWrite = "export const value = 2;\nexport function greet() {\n  return 'hello';\n}\n";
+    await f.base.createFile('project-a', 'src/write.ts', 'export const value = 1;\n');
     await execute(
       f.tools,
       runId,
-      call('write-1', 'write_file', { path: 'src/app.ts', content: "export const value = 2;\nexport function greet() {\n  return 'hello';\n}\n" }),
+      call('write-1', 'write_file', { path: 'src/write.ts', content: multilineWrite }),
     );
-    assert.equal(await f.base.readFile('project-a', 'src/app.ts'), 'export const value = 2;\n');
+    assert.equal(await f.base.readFile('project-a', 'src/write.ts'), multilineWrite);
     assert.equal(f.shadows.get('chat-a', runId), undefined);
 
+    await f.base.createFile('project-a', 'src/text.ts', 'export const value = 2;\n');
     await execute(
       f.tools,
       runId,
       call('replace-1', 'replace_text', {
-        path: 'src/app.ts',
+        path: 'src/text.ts',
         oldText: 'value = 2',
         newText: 'value = 3',
       }),
     );
-    assert.match(await f.base.readFile('project-a', 'src/app.ts'), /value = 3/);
+    assert.equal(await f.base.readFile('project-a', 'src/text.ts'), 'export const value = 3;\n');
     assert.equal(f.shadows.get('chat-a', runId), undefined);
 
+    await f.base.createFile('project-a', 'src/range.ts', 'one\ntwo\nthree\n');
     await execute(
       f.tools,
       runId,
       call('range-1', 'replace_range', {
-        path: 'src/app.ts',
-        startLine: 1,
-        endLine: 1,
-        content: 'export const value = 4;',
+        path: 'src/range.ts',
+        startLine: 2,
+        endLine: 2,
+        content: 'TWO',
       }),
     );
-    assert.match(await f.base.readFile('project-a', 'src/app.ts'), /value = 4/);
+    assert.equal(await f.base.readFile('project-a', 'src/range.ts'), 'one\nTWO\nthree\n');
     assert.equal(f.shadows.get('chat-a', runId), undefined);
 
+    await f.base.createFile('project-a', 'src/before.txt', 'one\ntwo\nthree\n');
     await execute(
       f.tools,
       runId,
       call('before-1', 'insert_before', {
-        path: 'src/app.ts',
+        path: 'src/before.txt',
         line: 2,
-        content: 'export const before = true;',
+        content: 'before-two',
       }),
     );
-    assert.match(await f.base.readFile('project-a', 'src/app.ts'), /before = true/);
+    assert.equal(await f.base.readFile('project-a', 'src/before.txt'), 'one\nbefore-two\ntwo\nthree\n');
     assert.equal(f.shadows.get('chat-a', runId), undefined);
 
+    await f.base.createFile('project-a', 'src/after.txt', 'one\ntwo\nthree\n');
     await execute(
       f.tools,
       runId,
       call('after-1', 'insert_after', {
-        path: 'src/app.ts',
+        path: 'src/after.txt',
         line: 2,
-        content: 'export const after = true;',
+        content: 'after-two',
       }),
     );
-    assert.match(await f.base.readFile('project-a', 'src/app.ts'), /after = true/);
+    assert.equal(await f.base.readFile('project-a', 'src/after.txt'), 'one\ntwo\nafter-two\nthree\n');
     assert.equal(f.shadows.get('chat-a', runId), undefined);
 
+    await f.base.createFile('project-a', 'src/symbol.ts', "export function greet() {\n  return 'hello';\n}\n");
     await execute(
       f.tools,
       runId,
       call('symbol-1', 'replace_symbol', {
-        path: 'src/app.ts',
+        path: 'src/symbol.ts',
         symbol: 'greet',
         kind: 'function',
         content: "export function greet() {\n  return 'updated';\n}",
       }),
     );
-    const structurallyEdited = await f.base.readFile('project-a', 'src/app.ts');
-    assert.match(structurallyEdited, /return 'updated'/);
+    assert.match(await f.base.readFile('project-a', 'src/symbol.ts'), /return 'updated'/);
     assert.equal(f.shadows.get('chat-a', runId), undefined);
 
     await execute(
