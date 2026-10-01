@@ -5,10 +5,17 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { AgentRuntime } from '../src/agent/agent-runtime';
+import { ShadowAwareCommandRuntime } from '../src/agent/shadow-aware-command-runtime';
+import { ShadowAwareToolRuntime } from '../src/agent/shadow-aware-tool-runtime';
+import { ShadowAwareWorkspaceRuntime } from '../src/agent/shadow-aware-workspace-runtime';
 import { InstanceRuntime, type InstancePlatformHandle } from '../src/agent/instance-runtime';
 import { ProcessRuntime } from '../src/agent/process-runtime';
-import { ToolRuntime } from '../src/agent/tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
+import { IncrementalWorkspaceMutationRuntime } from '../src/agent-core/incremental-workspace-runtime';
+import { OperationJournalRuntime } from '../src/agent-core/operation-journal';
+import { DurableOperationJournal, OperationJournalStore } from '../src/agent-core/operation-journal-store';
+import type { LocalStorage } from '../src/core/storage';
+import { ExecutionShadowWorkspaceRuntime } from '../src/execution-shadow-workspace';
 import { ChatRuntime } from '../src/ai/chat-runtime';
 import { ProviderRegistry } from '../src/ai/provider-registry';
 import type { AIProviderAdapter, AIProviderConfig, AIRequest, AIResponse, ChatRecord, ProjectRecord } from '../src/ai/types';
@@ -19,6 +26,16 @@ const providerConfig: AIProviderConfig = {
   apiKey: 'test-key',
   enabled: true,
 };
+
+class MemoryStorage {
+  private readonly values = new Map<string, unknown>();
+  async read<T>(name: string, fallback: T): Promise<T> {
+    return structuredClone((this.values.has(name) ? this.values.get(name) : fallback) as T);
+  }
+  async write<T>(name: string, value: T): Promise<void> {
+    this.values.set(name, structuredClone(value));
+  }
+}
 
 async function reservePort(): Promise<number> {
   const server = net.createServer();
@@ -143,15 +160,49 @@ function acceptanceAdapter(port: number): AIProviderAdapter {
         };
       }
 
+      const command = parsedToolPayload(request, 'run_command');
+      if (command) {
+        assert.match(String(command.output ?? command.commandResult ?? ''), /workspace-ready/);
+        return {
+          content: '',
+          model: request.model,
+          providerId: providerConfig.id,
+          toolCalls: [{
+            id: 'start-server',
+            name: 'start_process',
+            input: {
+              command: `node -e "require('node:http').createServer((req,res)=>res.end('agent-core-acceptance')).listen(${port},'127.0.0.1')"`,
+            },
+          }],
+        };
+      }
+
+      const written = parsedToolPayload(request, 'write_file');
+      if (written) {
+        return {
+          content: '',
+          model: request.model,
+          providerId: providerConfig.id,
+          toolCalls: [{
+            id: 'verify-workspace',
+            name: 'run_command',
+            input: {
+              command: 'node -e "process.stdout.write(require(\'node:fs\').readFileSync(\'acceptance.txt\',\'utf8\'))"',
+            },
+          }],
+        };
+      }
+
       return {
         content: '',
         model: request.model,
         providerId: providerConfig.id,
         toolCalls: [{
-          id: 'start-server',
-          name: 'start_process',
+          id: 'write-workspace',
+          name: 'write_file',
           input: {
-            command: `node -e "require('node:http').createServer((req,res)=>res.end('agent-core-acceptance')).listen(${port},'127.0.0.1')"`,
+            path: 'acceptance.txt',
+            content: 'workspace-ready',
           },
         }],
       };
@@ -188,8 +239,44 @@ test('AgentRuntime orchestrates a full process and preview lifecycle with stable
       };
     },
   });
-  const workspace = new WorkspaceRuntime(projects);
-  const tools = new ToolRuntime(workspace);
+  const baseWorkspace = new WorkspaceRuntime(projects);
+  const shadows = new ExecutionShadowWorkspaceRuntime(baseWorkspace);
+  const workspace = new ShadowAwareWorkspaceRuntime(baseWorkspace, shadows);
+  const tools = new ShadowAwareToolRuntime(
+    workspace,
+    undefined,
+    undefined,
+    undefined,
+    new ShadowAwareCommandRuntime(projects, shadows),
+  );
+  const storage = new MemoryStorage();
+  let operationIndex = 0;
+  const journal = new DurableOperationJournal(
+    new OperationJournalRuntime({
+      now: () => 1000 + operationIndex,
+      createId: () => `acceptance-op-${++operationIndex}`,
+    }),
+    new OperationJournalStore(storage as unknown as LocalStorage),
+  );
+  await journal.init();
+  const rollback = new Map<string, string>();
+  tools.configureShadowWorkspace(shadows);
+  tools.configureIncrementalWorkspaceRuntime(new IncrementalWorkspaceMutationRuntime(
+    baseWorkspace,
+    journal,
+    {
+      putText: async (value: string) => {
+        const ref = `acceptance-rollback-${rollback.size + 1}`;
+        rollback.set(ref, value);
+        return ref;
+      },
+      getText: async (ref: string) => {
+        const value = rollback.get(ref);
+        if (value === undefined) throw new Error('Rollback blob ausente.');
+        return value;
+      },
+    },
+  ));
   tools.configureProcessRuntime(processRuntime);
   tools.configureInstanceRuntime(instanceRuntime);
   const port = await reservePort();
@@ -220,12 +307,18 @@ test('AgentRuntime orchestrates a full process and preview lifecycle with stable
     );
 
     assert.equal(result.response.content, 'Preview lifecycle completed with process stopped and instance closed.');
-    assert.equal(result.toolRounds, 6);
+    assert.equal(result.toolRounds, 8);
     assert.deepEqual(
       result.messages.filter((message) => message.role === 'tool').map((message) => message.toolName),
-      ['start_process', 'wait_for_port', 'open_instance', 'instance_status', 'close_instance', 'stop_process'],
+      ['write_file', 'run_command', 'start_process', 'wait_for_port', 'open_instance', 'instance_status', 'close_instance', 'stop_process'],
     );
     assert.equal(tools.listApprovals({ chatId: 'chat-a', runId: 'acceptance-run' }).length, 0);
+    assert.equal(await baseWorkspace.readFile('project-a', 'acceptance.txt'), 'workspace-ready');
+    assert.deepEqual(shadows.list(), []);
+    const verified = journal.list({ runId: 'acceptance-run', status: 'verified' });
+    assert.equal(verified.length, 1);
+    assert.equal(verified[0]?.toolCallId, 'write-workspace');
+    assert.equal(verified[0]?.capabilityId, 'workspace.write_file');
 
     const process = processRuntime.list('project-a')[0];
     assert.ok(process);
