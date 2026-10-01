@@ -7,7 +7,7 @@ import { deriveAgentRunSummary } from './agent-core/run-summary';
 import type { AgentRunSummary } from './agent-core/contracts';
 import type { OperationalTraceSnapshot } from './agent-core/operational-trace';
 
-export type ExecutionCompletionProof = 'verified' | 'unplanned' | 'active' | 'failed' | 'interrupted' | 'incomplete' | 'unknown';
+export type ExecutionCompletionProof = 'verified' | 'unplanned' | 'active' | 'failed' | 'interrupted' | 'cancelled' | 'incomplete' | 'unknown';
 
 export type ExecutionEvidenceSummary = Record<ExecutionEvidenceType, number>;
 
@@ -116,6 +116,7 @@ function completionProof(state: ExecutionState | undefined, plan?: ExecutionPlan
   if (state === 'running' || state === 'waiting_approval' || state === 'idle') return 'active';
   if (state === 'failed') return 'failed';
   if (state === 'interrupted') return 'interrupted';
+  if (state === 'cancelled') return 'cancelled';
   if (state === 'completed') {
     if (!plan) return 'unplanned';
     return plan.status === 'completed' ? 'verified' : 'incomplete';
