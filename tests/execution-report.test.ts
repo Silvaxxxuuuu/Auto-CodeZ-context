@@ -98,6 +98,32 @@ test('reconstrói execução histórica apenas a partir de recovery baseline', (
   assert.equal(report?.summary, undefined);
 });
 
+test('execução cancelada preserva estado e resumo evidence-derived sem virar falha', () => {
+  const { executions, timeline, reports, tick } = setup();
+  executions.start('chat-a', tick(), 'run-cancelled');
+  timeline.recordStructuredActivity({
+    contractVersion: 1,
+    id: 'cancelled-read',
+    kind: 'tool',
+    chatId: 'chat-a',
+    runId: 'run-cancelled',
+    toolCallId: 'tool-read',
+    toolName: 'read_file',
+    capabilityId: 'workspace.read_file',
+    phase: 'completed',
+    createdAt: tick(),
+  });
+  executions.update('chat-a', { state: 'cancelled', runId: 'run-cancelled' }, tick());
+
+  const report = reports.build('chat-a', 'run-cancelled');
+  assert.equal(report?.state, 'cancelled');
+  assert.equal(report?.completionProof, 'cancelled');
+  assert.equal(report?.summary?.status, 'cancelled');
+  assert.match(report?.summary?.headline ?? '', /cancelada/i);
+  assert.equal(report?.summary?.evidenceIds.includes('activity:cancelled-read'), true);
+  assert.equal(report?.error, undefined);
+});
+
 test('lista runs históricas em ordem de atualização e isola chats', () => {
   const { executions, reports, tick } = setup();
   executions.start('chat-a', tick(), 'run-a');
