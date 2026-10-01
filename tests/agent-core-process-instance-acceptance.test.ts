@@ -240,6 +240,7 @@ test('AgentRuntime orchestrates a full process and preview lifecycle with stable
     },
   });
   const baseWorkspace = new WorkspaceRuntime(projects);
+  await baseWorkspace.createFile('project-a', 'acceptance.txt', 'before');
   const shadows = new ExecutionShadowWorkspaceRuntime(baseWorkspace);
   const workspace = new ShadowAwareWorkspaceRuntime(baseWorkspace, shadows);
   const tools = new ShadowAwareToolRuntime(
