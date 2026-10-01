@@ -127,7 +127,7 @@ test('send exposes protected file tools, run_command and plugin gateway to a nor
     tool('git_status', false, false),
   ]);
 
-  await runtime.send(config, chat('test-model', '', 'Inspect the current implementation and list the available plugin tools.'));
+  await runtime.send(config, chat('test-model', ''));
   const request = requests[0] as { toolsEnabled: boolean; tools?: Array<{ name: string }>; messages: Array<{ content: string }> };
   assert.equal(request.toolsEnabled, true);
   assert.deepEqual(request.tools?.map((item) => item.name), ['read_file', 'read_symbol', 'write_file', 'create_file', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'delete_file', 'rename_file', 'search_files', 'run_command', 'plugin_list_tools', 'plugin_call']);
@@ -147,7 +147,7 @@ test('send derives plugin gateway guidance from canonical capability metadata wh
     tool('plugin_call', false, false),
   ]);
 
-  await runtime.send(config, chat('test-model', '', 'List the available plugin tools, then invoke the exact plugin action that matches my request.'));
+  await runtime.send(config, chat('test-model', '', 'Execute the connected plugin action using the exact plugin tool exposed by Auto CodeZ.'));
   const request = requests[0] as { messages: Array<{ content: string }>; tools?: Array<{ name: string }> };
 
   assert.deepEqual(request.tools?.map((item) => item.name), ['plugin_list_tools', 'plugin_call']);
