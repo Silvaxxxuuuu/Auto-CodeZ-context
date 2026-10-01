@@ -81,6 +81,31 @@ test('stale approved changes remain pending and are never overwritten', async ()
   } finally { await fixtureData.cleanup(); }
 });
 
+test('cancelChat clears pending approvals and persisted recoverable state without caller-specific cleanup', async () => {
+  const storage = new MemoryStorage();
+  const fixtureData = await fixture(fixtureDataResponses(), undefined, storage);
+  try {
+    const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask', 'cancel-run');
+    assert.equal(pending.pendingApprovalIds.length, 1);
+    assert.equal(fixtureData.tools.listApprovals({ chatId: 'chat-test' }).length, 1);
+    assert.equal(fixtureData.agent.hasPendingForChat('chat-test'), true);
+
+    await fixtureData.agent.cancelChat('chat-test');
+
+    assert.equal(fixtureData.tools.listApprovals({ chatId: 'chat-test' }).length, 0);
+    assert.equal(fixtureData.agent.hasPendingForChat('chat-test'), false);
+    assert.deepEqual(fixtureData.agent.listRecoverableRuns(), []);
+    const persisted = await storage.read<{ runs: unknown[]; approvals: unknown[] }>(
+      'agent-runs.json',
+      { runs: [], approvals: [] },
+    );
+    assert.deepEqual(persisted.runs, []);
+    assert.deepEqual(persisted.approvals, []);
+  } finally {
+    await fixtureData.cleanup();
+  }
+});
+
 test('resume consumes an approval exactly once', async () => {
   const fixtureData = await fixture(fixtureDataResponses());
   try { const pending = await fixtureData.agent.run(config, chat(), undefined, 'ask'); const approvalId = pending.pendingApprovalIds[0]; await fixtureData.agent.resume(approvalId); await assert.rejects(fixtureData.agent.resume(approvalId), /Aprovação não encontrada/); }
