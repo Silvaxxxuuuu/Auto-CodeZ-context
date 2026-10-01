@@ -12086,3 +12086,11 @@ REGRA PARA PRÓXIMOS CHATS:
 - Código V2 novo não deve chamar beginLegacy().
 - Se um fluxo novo precisar de isolamento, criar abstração própria apropriada; não reativar Shadow Workspace como workspace padrão.
 
+SHADOW RETIREMENT — ACCEPTANCE GUARDS ADICIONAIS:
+13. Código de produção não pode chamar beginLegacy(); há teste de arquitetura que varre src/**/*.ts e falha se surgir caller novo.
+14. execution-shadow-workspace.ts pode apenas declarar beginLegacy(); não pode usá-lo internamente para recriar criação implícita.
+15. workspace() permanece fail-closed sem estado legado preexistente.
+16. Guards de conflito entre incremental V2 e Shadow legado (create/write/replace_symbol/delete/rename) usam beginLegacy() explícito nos fixtures.
+17. Esses guards garantem que uma mutation V2 não sobrescreva silenciosamente paths ainda divergentes em um overlay legado.
+18. A separação final é: V2 novo = workspace real + journal; legado restaurado = beginLegacy()/restore + shadow compatibility path.
+
