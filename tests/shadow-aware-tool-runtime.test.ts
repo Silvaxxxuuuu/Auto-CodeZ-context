@@ -53,7 +53,7 @@ function toolCall(id: string, name: AIToolCall['name'], input: Record<string, un
 test('mutação irrestrita fica no shadow e leitura da mesma run enxerga o overlay', async () => {
   const fx = await fixture();
   try {
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     const write = await fx.tools.execute(
       'chat-a',
       'project-a',
@@ -82,7 +82,7 @@ test('mutação irrestrita fica no shadow e leitura da mesma run enxerga o overl
 test('outra run continua vendo a base enquanto o primeiro shadow está ativo', async () => {
   const fx = await fixture();
   try {
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await fx.tools.execute(
       'chat-a',
       'project-a',
@@ -110,7 +110,7 @@ test('outra run continua vendo a base enquanto o primeiro shadow está ativo', a
 test('aprovação é executada dentro do shadow pertencente ao approval', async () => {
   const fx = await fixture();
   try {
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     const pending = await fx.tools.execute(
       'chat-a',
       'project-a',
@@ -136,7 +136,7 @@ test('aprovação é executada dentro do shadow pertencente ao approval', async 
 test('create delete rename e search usam o mesmo overlay da execução', async () => {
   const fx = await fixture();
   try {
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     const create = await fx.tools.execute(
       'chat-a',
       'project-a',
@@ -173,7 +173,7 @@ test('create delete rename e search usam o mesmo overlay da execução', async (
 test('mutação Git falha fechado depois que a run possui alterações isoladas', async () => {
   const fx = await fixture();
   try {
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     const write = await fx.tools.execute(
       'chat-a',
       'project-a',
@@ -241,7 +241,7 @@ test('tool call sem runId mantém comportamento direto na base', async () => {
 test('open_instance ligado ao workspace falha fechado enquanto Shadow legado está ativo', async () => {
   const fx = await fixture();
   try {
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     const write = await fx.tools.execute(
       'chat-a',
       'project-a',
