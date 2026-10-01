@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AGENT_CORE_V2_BASELINE_CAPABILITIES, agentCoreV2CapabilityByName } from '../src/agent-core/baseline-capabilities';
 import { assertCapabilityContract } from '../src/agent-core/capability-contract';
-import { ToolRuntime } from '../src/agent/tool-runtime';
+import { ShadowAwareToolRuntime } from '../src/agent/shadow-aware-tool-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 
 const workspaceMutations = [
@@ -67,8 +67,8 @@ test('structured process and instance tools remain in the same canonical catalog
 });
 
 
-test('canonical capability catalog covers every real ToolRuntime definition exactly once', () => {
-  const runtime = new ToolRuntime(new WorkspaceRuntime(async () => []));
+test('canonical capability catalog covers every real app tool definition exactly once', () => {
+  const runtime = new ShadowAwareToolRuntime(new WorkspaceRuntime(async () => []));
   const definitionNames = runtime.listDefinitions().map((definition) => definition.name).sort();
   const capabilityNames = AGENT_CORE_V2_BASELINE_CAPABILITIES.map((capability) => capability.name).sort();
 
@@ -76,7 +76,7 @@ test('canonical capability catalog covers every real ToolRuntime definition exac
 });
 
 test('catalog input schemas stay aligned with tool definitions exposed to providers', () => {
-  const runtime = new ToolRuntime(new WorkspaceRuntime(async () => []));
+  const runtime = new ShadowAwareToolRuntime(new WorkspaceRuntime(async () => []));
   const definitions = new Map(runtime.listDefinitions().map((definition) => [definition.name, definition]));
   for (const capability of AGENT_CORE_V2_BASELINE_CAPABILITIES) {
     const definition = definitions.get(capability.name as never);
