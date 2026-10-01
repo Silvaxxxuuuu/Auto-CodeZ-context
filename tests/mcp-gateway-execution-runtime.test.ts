@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { AIToolResult } from '../src/ai/types';
-import type { AgentRuntime } from '../src/agent/agent-runtime';
+import { AgentRuntime } from '../src/agent/agent-runtime';
+import { ShadowAwareToolRuntime } from '../src/agent/shadow-aware-tool-runtime';
+import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
+import { ChatRuntime } from '../src/ai/chat-runtime';
+import { ProviderRegistry } from '../src/ai/provider-registry';
 import { McpGatewayExecutionRuntime } from '../src/mcp-gateway/execution-runtime';
 import { OperationalLedger } from '../src/operational-ledger';
-import { PluginToolCatalog } from '../src/plugins/plugin-tool-catalog';
+import { PluginToolCatalog, pluginToolCatalog } from '../src/plugins/plugin-tool-catalog';
 
 function catalog() {
   const value = new PluginToolCatalog();
@@ -197,4 +201,64 @@ test('MCP Gateway execution keeps approval decision events on the same operation
   assert.equal(events.every((event) => event.causationId === pending.operationId), true);
   assert.equal(events.some((event) => event.state === 'waiting'), true);
   assert.equal(events.at(-1)?.state, 'success');
+});
+
+
+test('MCP Gateway cannot bypass the real plugin permission and approval path', async () => {
+  const pluginId = 'test.mcp-convergence';
+  pluginToolCatalog.clear(pluginId);
+  const [definition] = pluginToolCatalog.register(pluginId, [{
+    id: 'mutate_external',
+    description: 'Mutate one bounded external resource.',
+    risk: 'write',
+    parameters: {
+      type: 'object',
+      properties: { target: { type: 'string' } },
+      required: ['target'],
+      additionalProperties: false,
+    },
+  }]);
+  let executions = 0;
+  pluginToolCatalog.configureExecutor(async (_pluginId, _toolId, input) => {
+    executions += 1;
+    return { changed: true, target: input.target };
+  });
+
+  const tools = new ShadowAwareToolRuntime(new WorkspaceRuntime(async () => []));
+  const agent = new AgentRuntime(
+    new ChatRuntime(new ProviderRegistry(), undefined, undefined, undefined, undefined, tools.listDefinitions()),
+    tools,
+  );
+  const runtime = new McpGatewayExecutionRuntime(agent, pluginToolCatalog);
+  const externalName = runtime.listTools().find((tool) => tool.pluginId === pluginId && tool.pluginToolId === 'mutate_external')?.name;
+  assert.ok(externalName);
+  assert.equal(pluginToolCatalog.get(definition.name)?.risk, 'write');
+
+  try {
+    const blocked = await runtime.execute(externalName, { target: 'scene' }, {
+      clientId: 'readonly-client',
+      permission: 'read-only',
+    });
+    assert.equal(blocked.state, 'failed');
+    assert.equal(executions, 0);
+    assert.match(blocked.result?.error ?? '', /somente leitura/i);
+
+    const pending = await runtime.execute(externalName, { target: 'scene' }, {
+      clientId: 'ask-client',
+      permission: 'ask',
+    });
+    assert.equal(pending.state, 'waiting_approval');
+    assert.ok(pending.approvalId);
+    assert.equal(executions, 0);
+
+    const approved = await runtime.approve(pending.approvalId as string);
+    assert.equal(approved.state, 'success');
+    assert.equal(executions, 1);
+    assert.deepEqual(JSON.parse(approved.result?.output ?? '{}'), { changed: true, target: 'scene' });
+
+    await assert.rejects(runtime.approve(pending.approvalId as string), /not found|stale/i);
+    assert.equal(executions, 1);
+  } finally {
+    pluginToolCatalog.clear(pluginId);
+  }
 });
