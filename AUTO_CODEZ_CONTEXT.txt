@@ -12094,3 +12094,9 @@ SHADOW RETIREMENT — ACCEPTANCE GUARDS ADICIONAIS:
 17. Esses guards garantem que uma mutation V2 não sobrescreva silenciosamente paths ainda divergentes em um overlay legado.
 18. A separação final é: V2 novo = workspace real + journal; legado restaurado = beginLegacy()/restore + shadow compatibility path.
 
+SHADOW RETIREMENT — BOOTSTRAP/PERSISTENCE:
+19. A fronteira compatibility-only inclui também shadow-git-read-runtime.ts, que fornece visão Git somente leitura sobre overlay legado já existente.
+20. restore() do ExecutionShadowWorkspaceRuntime agora emite o estado reconciliado, inclusive lista vazia.
+21. Como main.ts persiste snapshots via subscriber, shadows órfãos filtrados pelo bootstrap são removidos do storage após restore, evitando releitura infinita em startups futuros.
+22. A razão restante para manter o runtime legado é compatibilidade com snapshots ativos persistidos de runs pendentes/recuperáveis; runs V2 novas não dependem dessa persistência.
+
