@@ -13,6 +13,7 @@ import { toStructuredProcessLifecycleActivity } from './agent/process-activity-b
 import { ProviderManager } from './ai/provider-manager';
 import { ChatManager } from './ai/chat-manager';
 import { AccountMemoryRuntime, type MemoryScope } from './account-memory-runtime';
+import { AccountPersonalizationRuntime } from './account-personalization-runtime';
 import { ProjectManager } from './project/project-manager';
 import { ShadowAwareToolRuntime } from './agent/shadow-aware-tool-runtime';
 import { ShadowAwareWorkspaceRuntime } from './agent/shadow-aware-workspace-runtime';
@@ -259,10 +260,12 @@ app.on('open-url', (event, rawUrl) => {
 });
 const providerManager = new ProviderManager(storage);
 const chatManager = new ChatManager(storage);
-const accountMemoryRuntime = new AccountMemoryRuntime(storage, () => {
+const currentAccountId = (): string | undefined => {
   if (process.env.AUTO_CODEZ_VISUAL_TEST === '1' && process.env.AUTO_CODEZ_VISUAL_ACCOUNT_PROFILE === '1') return 'visual-account-user';
   try { return accountSessionRuntime.snapshot().account?.id; } catch { return undefined; }
-});
+};
+const accountMemoryRuntime = new AccountMemoryRuntime(storage, currentAccountId);
+const accountPersonalizationRuntime = new AccountPersonalizationRuntime(storage, currentAccountId);
 const projectManager = new ProjectManager(storage);
 const workspaceRuntime = new WorkspaceRuntime(() => projectManager.list());
 const agentCoreOperationJournalRuntime = new OperationJournalRuntime();
@@ -320,6 +323,14 @@ const chatRuntime = new ChatRuntime(
   (chat) => {
     try {
       return accountMemoryRuntime.context({ chatId: chat.id, projectId: chat.projectId });
+    } catch {
+      return undefined;
+    }
+  },
+  undefined,
+  () => {
+    try {
+      return accountPersonalizationRuntime.context();
     } catch {
       return undefined;
     }
@@ -2109,6 +2120,7 @@ app.whenReady().then(async () => {
   await mcpConnectionRegistry.init();
   const initialAccountState = await accountSessionRuntime.hydrate();
   await accountMemoryRuntime.init();
+  await accountPersonalizationRuntime.init();
   scheduleAccountRefresh(initialAccountState);
   if (initialAccountState.state === 'authenticated') await deviceRegistryRuntime.ensureRegistered();
   operationalLedger.restore(await operationalLedgerStore.load());
