@@ -66,7 +66,7 @@ function call(id: string, name: AIToolCall['name'], input: Record<string, unknow
 test('tools Git somente leitura enxergam o shadow e mutações continuam bloqueadas sem tocar no repositório real', async () => {
   const fx = await fixture();
   try {
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     const indexBefore = await fs.readFile(fx.indexPath);
     const headBefore = (await git(fx.root, ['rev-parse', 'HEAD'])).trim();
 
