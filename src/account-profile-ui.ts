@@ -224,6 +224,19 @@ function panelMarkup(): string {
       </div>
       ${profileActionError ? `<div class="account-profile-warning" role="alert">${escapeHtml(profileActionError)}</div>` : ''}
 
+      <form class="account-profile-personalization" data-account-personalization-form>
+        <div class="account-profile-subheading">
+          <strong>Personalização da IA</strong>
+          <span>Instruções de estilo e colaboração aplicadas às IAs desta conta, independentemente do provider.</span>
+        </div>
+        <textarea data-account-personalization-input maxlength="1000" placeholder="Ex.: Seja mais direto, use respostas curtas e priorize código completo.">${escapeHtml(personalizationInstructions)}</textarea>
+        <div class="account-profile-personalization-footer">
+          <span data-account-personalization-count>${personalizationInstructions.length}/1000</span>
+          <span class="account-profile-personalization-status" data-account-personalization-status>${escapeHtml(personalizationStatus)}</span>
+          <button class="profile-primary-button" type="submit">Salvar personalização</button>
+        </div>
+      </form>
+
       <div class="account-profile-subsection">
         <div class="account-profile-subheading row">
           <div><strong>Métodos de acesso</strong><span>Veja o que já está vinculado e quais métodos podem ser adicionados com segurança.</span></div>
