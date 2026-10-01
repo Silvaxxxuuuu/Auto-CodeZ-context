@@ -102,6 +102,7 @@ export class ExecutionShadowWorkspaceRuntime {
     }
     this.transactions.clear();
     for (const [key, transaction] of next) this.transactions.set(key, transaction);
+    this.emit();
   }
 
   async commit(chatId: string, runId: string): Promise<ShadowWorkspaceSnapshot> {
