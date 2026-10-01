@@ -8,7 +8,7 @@ type ExecutionBridge = {
 const bridge = (window as unknown as { autoCodez?: ExecutionBridge }).autoCodez;
 const manager = new ExecutionManager();
 const STYLE_ID = 'auto-codez-execution-visibility';
-const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
+const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted', 'cancelled']);
 let hydrateToken = 0;
 
 function installStyle(): void {
