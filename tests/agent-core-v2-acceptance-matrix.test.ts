@@ -22,7 +22,7 @@ const acceptanceEvidence: Record<AgentCoreV2Invariant, readonly string[]> = {
     'tests/agent-core-operation-rollback.test.ts',
   ],
   'unrestricted-no-routine-approval': [
-    'tests/agent-runtime-unrestricted.test.ts',
+    'tests/agent-runtime.test.ts',
     'tests/agent-core-process-instance-acceptance.test.ts',
   ],
   'security-remains-active': [
