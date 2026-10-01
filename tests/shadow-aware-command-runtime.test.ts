@@ -121,10 +121,7 @@ test('workspace de sistema materializa somente a pasta explicitamente usada pelo
     assert.match(result.stdout, /desktop-base/);
     assert.equal(await fs.readFile(path.join(projectFolder, 'a.txt'), 'utf8'), 'desktop-base');
     assert.equal(await fs.readFile(path.join(systemRoot, 'outside.txt'), 'utf8'), 'must-not-copy');
-    const shadow = fx.shadows.get('chat-system', 'run-system');
-    assert.ok(shadow);
-    assert.equal(shadow.projectId, SYSTEM_PROJECT_ID);
-    assert.equal(shadow.changes.length, 0);
+    assert.equal(fx.shadows.get('chat-system', 'run-system'), undefined);
   } finally {
     await Promise.all([
       fx.cleanup(),
