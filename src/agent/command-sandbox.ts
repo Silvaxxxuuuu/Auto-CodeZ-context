@@ -348,10 +348,9 @@ export class CommandSandboxRuntime {
     options: CommandRunOptions = {},
   ): Promise<CommandResult> {
     const shadow = this.shadows.get(chatId, runId);
-    if (!shadow) throw new Error('Shadow Workspace ativo não encontrado para o command sandbox.');
-    if (shadow.projectId !== projectId) throw new Error('Shadow Workspace pertence a outro projeto.');
+    if (shadow && shadow.projectId !== projectId) throw new Error('Shadow Workspace pertence a outro projeto.');
 
-    const sandbox = await this.materializer.materialize(projectId, shadow.changes, command);
+    const sandbox = await this.materializer.materialize(projectId, shadow?.changes ?? [], command);
     try {
       const environment = isolatedCommandEnvironment(this.parentEnvironment, sandbox);
       const sandboxProject: ProjectRecord = {
