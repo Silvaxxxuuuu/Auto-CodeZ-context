@@ -39,11 +39,13 @@ test('persiste e restaura snapshots válidos', async () => {
     await store.save([
       snapshot({ state: 'completed', updatedAt: 1400 }),
       snapshot({ chatId: 'chat-b', runId: 'run-b', state: 'failed', updatedAt: 1500, error: 'falhou' }),
+      snapshot({ chatId: 'chat-c', runId: 'run-c', state: 'cancelled', updatedAt: 1600 }),
     ]);
 
     assert.deepEqual(await store.load(), [
       snapshot({ state: 'completed', updatedAt: 1400 }),
       snapshot({ chatId: 'chat-b', runId: 'run-b', state: 'failed', updatedAt: 1500, error: 'falhou' }),
+      snapshot({ chatId: 'chat-c', runId: 'run-c', state: 'cancelled', updatedAt: 1600 }),
     ]);
   });
 });
