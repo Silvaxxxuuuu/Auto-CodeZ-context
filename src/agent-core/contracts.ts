@@ -242,7 +242,8 @@ export type AgentCoreV2Invariant =
   | 'provider-adapters-normalize'
   | 'context-compiler-is-authoritative'
   | 'memory-and-personalization-provider-independent'
-  | 'all-bridges-share-capability-policy-execution';
+  | 'all-bridges-share-capability-policy-execution'
+  | 'cancellation-is-consistent';
 
 export const AGENT_CORE_V2_INVARIANTS: readonly AgentCoreV2Invariant[] = [
   'evidence-before-success',
@@ -263,4 +264,5 @@ export const AGENT_CORE_V2_INVARIANTS: readonly AgentCoreV2Invariant[] = [
   'context-compiler-is-authoritative',
   'memory-and-personalization-provider-independent',
   'all-bridges-share-capability-policy-execution',
+  'cancellation-is-consistent',
 ] as const;
