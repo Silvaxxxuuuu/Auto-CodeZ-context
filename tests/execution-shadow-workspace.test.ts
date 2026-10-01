@@ -157,3 +157,28 @@ test('removeChat limpa somente transações do chat solicitado', async () => {
     await fx.cleanup();
   }
 });
+
+
+test('restore emite o estado reconciliado inclusive vazio para limpar persistência órfã', async () => {
+  const fx = await fixture();
+  try {
+    let time = 200;
+    const source = new ExecutionShadowWorkspaceRuntime(fx.workspace, () => time++);
+    source.beginLegacy('chat-a', 'run-a', 'project-a');
+    await source.workspace('chat-a', 'run-a', 'project-a').writeFile('project-a', 'a.txt', 'legacy');
+    const snapshot = source.get('chat-a', 'run-a');
+    assert.ok(snapshot);
+
+    const restored = new ExecutionShadowWorkspaceRuntime(fx.workspace, () => time++);
+    const emissions: string[][] = [];
+    restored.subscribe((snapshots) => emissions.push(snapshots.map((item) => item.runId)));
+
+    restored.restore([snapshot]);
+    restored.restore([]);
+
+    assert.deepEqual(emissions, [['run-a'], []]);
+    assert.deepEqual(restored.list(), []);
+  } finally {
+    await fx.cleanup();
+  }
+});
