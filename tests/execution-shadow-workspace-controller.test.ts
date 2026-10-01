@@ -128,7 +128,7 @@ test('discardIfPresent e removeChat não publicam alterações', async () => {
   const fx = await fixture();
   try {
     await fx.runtime.workspace('chat-a', 'run-a', 'project-a').writeFile('project-a', 'a.txt', 'shadow\n');
-    fx.runtime.begin('chat-a', 'run-b', 'project-a');
+    fx.runtime.beginLegacy('chat-a', 'run-b', 'project-a');
     const controller = new ExecutionShadowWorkspaceController(fx.runtime);
 
     const discarded = controller.discardIfPresent('chat-a', 'run-a');
