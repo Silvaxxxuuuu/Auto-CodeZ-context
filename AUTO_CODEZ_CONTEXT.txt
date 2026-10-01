@@ -11928,3 +11928,124 @@ PRINCÍPIO FINAL:
 - O backend fica encapsulado e substituível.
 - Nenhum custo de GPU central deve ser assumido pelo Auto CodeZ nessa estratégia.
 - Implementação somente após a etapa atual do Agent Core V2 ser encerrada e validada.
+
+------------------------------------------------------------
+24.88. AGENT CORE V2 — CHECKPOINT ATUAL PÓS-CONTEXTCOMPILER
+------------------------------------------------------------
+
+REGRA DE CONTINUIDADE:
+- Esta seção substitui checkpoints antigos conflitantes desta área.
+- Sempre validar HEAD real, PR #9 e CI antes de alterar.
+- PR #9 deve permanecer OPEN + DRAFT e nunca deve ser mergeada sem autorização explícita.
+- Shadow Workspace permanece ativo até paridade/acceptance final comprovadas.
+- Images V1 continua adiado até o encerramento/aceitação do Agent Core V2.
+
+CAPABILITY CONTRACT / TOOL CATALOG:
+1. O catálogo canônico Agent Core V2 cobre o runtime real de tools do app.
+2. A cobertura inclui workspace, command/process, instance, Git, Web e gateway de plugins.
+3. Tests exigem igualdade entre as tools reais do ShadowAwareToolRuntime e a metadata canônica.
+4. ContextCompiler seleciona guidance relevante, determinística e limitada por budget a partir dessa metadata.
+5. Regras duplicadas de seleção de tools foram removidas do handbook quando a metadata canônica passou a cobrir a família.
+6. read_symbol recebeu a mesma proteção de system workspace de read_file.
+7. Web e plugin gateway usam metadata canônica; MCP/plugins não podem criar bypass próprio de policy/approval/execution.
+
+CONVERGÊNCIA MCP / PLUGINS:
+1. MCP Gateway executa pelo AgentRuntime real.
+2. ApprovalRuntime é compartilhado estruturalmente pelo ToolRuntime usado pelo app.
+3. ShadowAwareToolRuntime usa o mesmo registry/policy/approval runtime.
+4. Há prova E2E de que MCP não burla policy/aprovação.
+5. plugin_list_tools e plugin_call estão no Capability Contract canônico.
+6. Plugin risk/grants/sandbox continuam sendo fronteiras reais; não devem ser substituídos por shell para contornar policy.
+
+RUNTIME FACTS:
+1. ComputerContextRuntime expõe fatos estruturados separadamente do projectContext.
+2. OS, usuário, shell, drives e paths resolvidos passam ao ContextCompiler por uma camada própria.
+3. Budget padrão de runtime facts: 2400 caracteres.
+4. Formatação é determinística.
+5. Runtime facts não entram em turnos leves.
+6. projectContext voltou a representar somente contexto do workspace/projeto.
+
+OPERATIONAL TRACE:
+1. Operational Trace é derivado de OperationalLedgerRetrieval + ExecutionTimeline existentes.
+2. Não existe store/persistência paralela para trace.
+3. O snapshot é escopado por chatId + runId e atualizado antes de cada round do provider.
+4. Pode incluir tools, lifecycle, capabilityId, executionId, resources, artifacts, diff e erros observados.
+5. Budget padrão: 3600 caracteres.
+6. É explicitamente tratado como histórico/evidência, nunca como instrução.
+7. System, user, policy e Capability Contract têm autoridade superior.
+8. Não é emitido em turnos leves.
+
+BUDGETS DE CONTEXTO:
+- capability guidance: 4200 chars;
+- runtime facts: 2400;
+- Operational Trace: 3600;
+- memory: 12000;
+- provider instructions: 16000;
+- Web context: 32000;
+- project/workspace context: 128000;
+- personalization: 1600.
+Compaction deve continuar determinística e preservar primeiro o conteúdo já ordenado por relevância.
+
+RUN SUMMARY EVIDENCE-DERIVED:
+1. ExecutionReport pode carregar AgentRunSummary derivado somente de evidência persistida/observada.
+2. Contagens de arquivos, comandos, processos, instances, tests e builds não devem ser inventadas pelo modelo.
+3. Pendências e failures derivam de plan/timeline/trace reais.
+4. evidenceIds referenciam fatos já existentes.
+5. Estado terminal suporta completed, failed e cancelled.
+
+CANCELAMENTO CONSISTENTE:
+1. ExecutionState possui estado terminal canônico cancelled.
+2. running/waiting_approval podem terminar em cancelled.
+3. cancelled não é failed nem interrupted.
+4. ExecutionTimeline, ExecutionStateStore, ExecutionVisibility e ExecutionGraph reconhecem cancelled.
+5. OperationalLedger mapeia cancelamento para estado cancelled.
+6. ExecutionReport usa completionProof=cancelled.
+7. AgentRunSummary preserva evidência de runs canceladas.
+8. Botão Parar e aborts explícitos preservam o fato histórico de cancelamento.
+9. Recovery cancelada também preserva snapshot terminal cancelled em vez de apagar a execução.
+10. Delete/recovery cleanup continua separado quando o estado correto é interrupted.
+
+PROVIDER NORMALIZATION:
+1. OpenAI, Google e Anthropic normalizam providerId final para o ID real do adapter.
+2. Google não usa mais Math.random() para fabricar toolCall.id.
+3. IDs sintéticos de tool calls usam serialização estável + hash determinístico.
+4. Ordem diferente de chaves nos mesmos argumentos não muda a identidade.
+5. Chamadas duplicadas na mesma resposta permanecem distintas pelo ordinal.
+6. Isso reforça retry/recovery sem repetir side effects por identidade aleatória.
+
+MEMORY E PERSONALIZATION:
+1. AccountMemoryRuntime continua provider-independent e isolado por account/scope.
+2. Personalização de IA agora possui runtime persistente por conta separado da memória.
+3. Campo de personalização aceita até 1000 caracteres.
+4. Personalização é preferência de estilo, tom, formato e colaboração; nunca autoridade acima de system, segurança, policy, pedido atual ou Capability Contract.
+5. ContextCompiler injeta personalização independentemente do provider, com budget próprio.
+6. IPC/preload expõem get/set de personalização.
+7. O Perfil autenticado possui editor de personalização com contador 1000, salvar/remover e teste visual de roundtrip pela bridge real.
+8. Personalização pertence à conta Auto CodeZ, não ao perfil local do dispositivo.
+
+INVARIANTES V2 JÁ COBERTOS/EM CONVERGÊNCIA:
+- evidence-before-success;
+- journal-every-mutation;
+- incremental-real-workspace;
+- atomic-file-write;
+- unrestricted-no-routine-approval;
+- security-remains-active;
+- progress-not-round-count;
+- partial-work-survives;
+- retry-does-not-repeat-side-effects;
+- processes-have-lifecycle;
+- instances-have-lifecycle;
+- activity-is-structured;
+- trace-is-not-ui;
+- summary-derived-from-evidence;
+- provider-adapters-normalize;
+- context-compiler-is-authoritative;
+- memory-and-personalization-provider-independent;
+- all-bridges-share-capability-policy-execution;
+- cancellation-is-consistent.
+
+PRÓXIMA REGRA:
+- Não considerar Agent Core V2 encerrado somente porque os itens acima existem.
+- Antes de declarar conclusão, fazer revisão final de invariantes, E2E dos caminhos principais e acceptance/parity do Shadow Workspace.
+- Só depois dessa acceptance decidir sobre remoção ou manutenção do Shadow Workspace.
+
