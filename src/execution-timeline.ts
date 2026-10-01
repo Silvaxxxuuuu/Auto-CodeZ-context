@@ -29,7 +29,7 @@ type TimelineCursor = {
 };
 
 const EVENT_TYPES = new Set<ExecutionTimelineEvent['type']>(['started', 'recovered', 'state_changed', 'tool_changed', 'approval_decision', 'structured_activity', 'error', 'removed']);
-const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
+const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted', 'cancelled']);
 const APPROVAL_DECISIONS = new Set<ExecutionApprovalDecision>(['approved', 'denied']);
 const ACTIVITY_PHASES = new Set<StructuredActivityPhase>(['queued', 'running', 'waiting', 'completed', 'failed', 'cancelled']);
 
