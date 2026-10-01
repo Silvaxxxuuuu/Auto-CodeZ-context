@@ -137,8 +137,23 @@ test('send exposes protected file tools, run_command and plugin gateway to a nor
   assert.match(request.messages[0].content, /Desktop\/Novo site\/index\.html/i);
   assert.equal(request.messages.some((message) => /read_file \[workspace\.read_file;/.test(message.content)), true);
   assert.equal(request.messages.some((message) => /read_symbol \[workspace\.read_symbol;/.test(message.content)), true);
+});
+
+test('send derives plugin gateway guidance from canonical capability metadata when plugin work is relevant', async () => {
+  const registry = new ProviderRegistry();
+  const { requests } = registerAdapter(registry);
+  const runtime = new ChatRuntime(registry, undefined, undefined, undefined, undefined, [
+    tool('plugin_list_tools', false, false),
+    tool('plugin_call', false, false),
+  ]);
+
+  await runtime.send(config, chat('test-model', '', 'List the available plugin tools, then invoke the exact plugin action that matches my request.'));
+  const request = requests[0] as { messages: Array<{ content: string }>; tools?: Array<{ name: string }> };
+
+  assert.deepEqual(request.tools?.map((item) => item.name), ['plugin_list_tools', 'plugin_call']);
   assert.equal(request.messages.some((message) => /plugin_list_tools \[plugin\.list_tools;/.test(message.content)), true);
   assert.equal(request.messages.some((message) => /plugin_call \[plugin\.call;/.test(message.content)), true);
+  assert.equal(request.messages.some((message) => /Somente depois de obter o nome exato/i.test(message.content)), true);
 });
 
 test('send keeps available protected file tools in a normal chat even when run_command is unavailable', async () => {
