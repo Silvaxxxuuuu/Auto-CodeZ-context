@@ -76,6 +76,8 @@ type Bridge = {
   revokeAccountDevice: (deviceId: string) => Promise<RegistrySnapshot>;
   openAccountPasskeyEnrollment: () => Promise<{ opened: boolean }>;
   logoutAccount: () => Promise<AccountSnapshot>;
+  getPersonalization: () => Promise<string>;
+  setPersonalization: (instructions: string) => Promise<string>;
   onAccountState: (listener: (state: AccountSnapshot) => void) => () => void;
   onAccountDeviceRegistryState: (listener: (state: RegistrySnapshot) => void) => () => void;
 };
@@ -86,6 +88,8 @@ let registry: RegistrySnapshot | undefined;
 let authConfiguration: AuthConfiguration | undefined;
 let confirmingAction = '';
 let profileActionError: string | undefined;
+let personalizationInstructions = '';
+let personalizationStatus = '';
 let unsubscribeAccount: (() => void) | undefined;
 let unsubscribeRegistry: (() => void) | undefined;
 
