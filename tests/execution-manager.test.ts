@@ -83,6 +83,22 @@ test('não cria uma execução implícita para estados terminais', () => {
   assert.throws(() => manager.update('chat-missing', { state: 'completed' }, 5000), /Nenhuma execução encontrada/);
 });
 
+test('cancelamento explícito é terminal, remove ferramenta ativa e permite nova execução', () => {
+  const manager = new ExecutionManager();
+  manager.start('chat-a', 1000, 'run-cancel');
+  const cancelled = manager.update('chat-a', { state: 'cancelled', runId: 'run-cancel' }, 1200);
+
+  assert.equal(cancelled.state, 'cancelled');
+  assert.equal(cancelled.currentTool, undefined);
+  assert.equal(cancelled.error, undefined);
+  assert.equal(manager.listActive().length, 0);
+  assert.throws(() => manager.update('chat-a', { state: 'completed', runId: 'run-cancel' }, 1300), /estado terminal|Transição inválida/i);
+
+  const next = manager.start('chat-a', 1400, 'run-next');
+  assert.equal(next.state, 'running');
+  assert.equal(next.runId, 'run-next');
+});
+
 test('permite nova execução após uma execução terminal', () => {
   const manager = new ExecutionManager();
   const first = manager.start('chat-a', 1000);
