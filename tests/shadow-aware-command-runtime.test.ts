@@ -48,7 +48,7 @@ test('sem contexto de execução usa o workspace real', async () => {
   }
 });
 
-test('primeiro comando de uma execução cria shadow vazio e não toca no projeto real', async () => {
+test('primeiro comando de uma execução V2 usa sandbox isolado sem criar shadow vazio', async () => {
   const fx = await fixture();
   try {
     await runWithExecutionWorkspaceContext(
@@ -57,9 +57,8 @@ test('primeiro comando de uma execução cria shadow vazio e não toca no projet
     );
 
     assert.equal(await fs.readFile(path.join(fx.root, 'a.txt'), 'utf8'), 'base');
-    const shadow = fx.shadows.get('chat-a', 'run-a');
-    assert.ok(shadow);
-    assert.equal(shadow.changes.length, 0);
+    assert.equal(fx.shadows.get('chat-a', 'run-a'), undefined);
+    assert.deepEqual(fx.shadows.list(), []);
   } finally {
     await fx.cleanup();
   }
