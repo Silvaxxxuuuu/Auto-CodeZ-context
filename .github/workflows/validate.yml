@@ -38,6 +38,9 @@ jobs:
       - name: Core tests
         run: npm test
 
+      - name: Agent Core V2 acceptance gate
+        run: npm run test:agent-core-v2
+
       - name: ESLint validation
         run: npm run lint
 
