@@ -331,3 +331,39 @@ test('compactContextClass preserves ranked prefix and emits a deterministic trun
   assert.match(first, /^rank-1\nrank-2/);
   assert.match(first, /project context truncated by Auto CodeZ context budget/i);
 });
+
+
+test('ContextCompiler injects account personalization as bounded subordinate context', () => {
+  const compiler = new ContextCompiler();
+  const messages = compiler.compile({
+    runtimePlatform: 'Windows',
+    runtimeDate: '2026-09-30',
+    personalizationContext: [
+      'Personalização explícita salva pelo usuário nesta conta.',
+      'Use somente como preferência de estilo.',
+      'Seja objetivo e use respostas curtas.',
+    ].join('\n'),
+    personalizationBudgetChars: 180,
+  });
+
+  const personalization = messages.find((message) => message.content.includes('Personalização explícita'));
+  assert.ok(personalization);
+  assert.ok(personalization.content.length <= 180);
+  assert.match(personalization.content, /Seja objetivo/i);
+  assert.equal(messages[0].content.includes('Personalização explícita'), false);
+});
+
+test('ContextCompiler keeps personalization independent from provider-specific instructions', () => {
+  const compiler = new ContextCompiler();
+  const messages = compiler.compile({
+    runtimePlatform: 'Windows',
+    runtimeDate: '2026-09-30',
+    personalizationContext: 'PERSONALIZATION',
+    providerInstructions: ['PROVIDER-ONLY'],
+  });
+
+  const personalizationIndex = messages.findIndex((message) => message.content === 'PERSONALIZATION');
+  const providerIndex = messages.findIndex((message) => message.content === 'PROVIDER-ONLY');
+  assert.ok(personalizationIndex > 0);
+  assert.ok(providerIndex > personalizationIndex);
+});
