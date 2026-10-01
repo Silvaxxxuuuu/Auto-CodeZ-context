@@ -158,7 +158,7 @@ test('recovery-controller keeps original startedAt when resumed recovery fails',
   assert.equal(execution?.startedAt, 100);
 });
 
-test('recovery-controller removes the active snapshot when recovery is cancelled', async () => {
+test('recovery-controller preserves a terminal cancelled snapshot when recovery is cancelled', async () => {
   const controller = new AbortController();
   const agentRuntime = {
     resumeRecovered: async (_runId: string, signal?: AbortSignal) => new Promise<never>((_resolve, reject) => {
@@ -183,7 +183,10 @@ test('recovery-controller removes the active snapshot when recovery is cancelled
   controller.abort();
 
   await assert.rejects(recovery, (error: unknown) => error instanceof Error && error.name === 'AbortError');
-  assert.equal(executionManager.get('chat-test'), undefined);
+  const snapshot = executionManager.get('chat-test');
+  assert.equal(snapshot?.runId, 'persisted-run');
+  assert.equal(snapshot?.state, 'cancelled');
+  assert.equal(snapshot?.error, undefined);
 });
 
 test('recovery-controller scopes provider retry permission only to the explicit recovery operation', async () => {
