@@ -1,0 +1,11 @@
+{
+  "apiVersion": 1,
+  "id": "autocodez.roblox-studio-manager",
+  "name": "Roblox Studio Manager",
+  "version": "0.1.0",
+  "description": "Conecta o Auto CodeZ ao Roblox Studio para inspecionar, editar e testar experiências.",
+  "publisher": "Auto CodeZ",
+  "main": "main.js",
+  "contributions": ["tool", "settings"],
+  "permissions": ["terminal:execute", "ai:tool", "background:run"]
+}

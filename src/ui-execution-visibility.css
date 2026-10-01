@@ -1,0 +1,84 @@
+.chat-execution .execution-run.execution-status-success:not(:has(.execution-graph)),
+.chat-execution .execution-run.execution-status-failed:not(:has(.execution-graph)) {
+  display: none !important;
+}
+.chat-execution:not(:has(.execution-run.execution-status-running)):not(:has(.execution-run.execution-status-pending)):not(:has(.execution-graph)) {
+  display: none !important;
+}
+
+/* Keep chat actions in a dedicated gutter. The higher specificity is intentional:
+   ui-polish injects its legacy positioning rules at runtime. */
+#nav-panel .chat-item {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 26px 26px !important;
+  align-items: center !important;
+  column-gap: 4px !important;
+  padding-right: 10px !important;
+}
+#nav-panel .chat-item-copy {
+  grid-column: 1 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+#nav-panel .chat-item-copy > span,
+#nav-panel .chat-item-copy > small {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+#nav-panel .chat-settings,
+#nav-panel .chat-delete {
+  position: static !important;
+  inset: auto !important;
+  right: auto !important;
+  left: auto !important;
+  transform: none !important;
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  grid-row: 1 !important;
+  justify-self: center !important;
+  align-self: center !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+#nav-panel .chat-settings { grid-column: 2 !important; }
+#nav-panel .chat-delete { grid-column: 3 !important; }
+#nav-panel .chat-settings .ac-lucide-icon,
+#nav-panel .chat-delete .ac-lucide-icon {
+  position: static !important;
+  margin: 0 !important;
+  transform: none !important;
+  width: 16px !important;
+  height: 16px !important;
+}
+#nav-panel .chat-item:has(> .execution-indicator) {
+  grid-template-columns: 20px minmax(0, 1fr) 26px 26px !important;
+}
+#nav-panel .chat-item > .execution-indicator {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  margin: 0 !important;
+}
+#nav-panel .chat-item:has(> .execution-indicator) > .chat-item-copy {
+  grid-column: 2 !important;
+}
+#nav-panel .chat-item:has(> .execution-indicator) > .chat-settings { grid-column: 3 !important; }
+#nav-panel .chat-item:has(> .execution-indicator) > .chat-delete { grid-column: 4 !important; }
+
+@media (max-width: 720px) {
+  #nav-panel .chat-item {
+    grid-template-columns: minmax(0, 1fr) 30px 30px !important;
+    padding-right: 8px !important;
+  }
+  #nav-panel .chat-settings,
+  #nav-panel .chat-delete {
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+  }
+}

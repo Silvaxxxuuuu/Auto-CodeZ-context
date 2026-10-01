@@ -194,3 +194,84 @@ test('searchFiles rejects an empty query', async () => {
     await workspace.cleanup();
   }
 });
+
+
+test('createFolder materializes nested directories idempotently and rejects file conflicts', async () => {
+  const workspace = await createWorkspace();
+  try {
+    assert.equal(await workspace.runtime.createFolder('project-test', 'assets/uploads'), true);
+    assert.equal(await workspace.runtime.createFolder('project-test', 'assets/uploads'), false);
+    assert.equal((await workspace.runtime.statPath('project-test', 'assets/uploads')).exists, true);
+
+    await workspace.runtime.createFile('project-test', 'assets/file.txt', 'content');
+    await assert.rejects(
+      workspace.runtime.createFolder('project-test', 'assets/file.txt'),
+      /Já existe um arquivo/,
+    );
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test('createFile materializes complete content atomically without temporary siblings', async () => {
+  const workspace = await createWorkspace();
+  try {
+    const content = 'Auto CodeZ'.repeat(10000);
+    await workspace.runtime.createFile('project-test', 'nested/atomic.txt', content);
+    assert.equal(await workspace.runtime.readFile('project-test', 'nested/atomic.txt'), content);
+    const entries = await fs.readdir(path.join(workspace.root, 'nested'));
+    assert.deepEqual(entries, ['atomic.txt']);
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+test('statPath distinguishes files, directories and missing paths', async () => {
+  const workspace = await createWorkspace();
+  try {
+    assert.deepEqual(await workspace.runtime.statPath('project-test', 'missing'), { exists: false });
+    await workspace.runtime.createFolder('project-test', 'folder');
+    await workspace.runtime.createFile('project-test', 'folder/file.txt', 'abc');
+    const directory = await workspace.runtime.statPath('project-test', 'folder');
+    const file = await workspace.runtime.statPath('project-test', 'folder/file.txt');
+    assert.equal(directory.exists && directory.kind, 'directory');
+    assert.equal(file.exists && file.kind, 'file');
+    assert.equal(file.exists && file.size, 3);
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+
+test('writeFile replaces existing content atomically and leaves no temporary siblings', async () => {
+  const workspace = await createWorkspace();
+  try {
+    await workspace.runtime.createFile('project-test', 'atomic-write.txt', 'before');
+    const content = 'after'.repeat(10000);
+    await workspace.runtime.writeFile('project-test', 'atomic-write.txt', content);
+    assert.equal(await workspace.runtime.readFile('project-test', 'atomic-write.txt'), content);
+    const entries = await fs.readdir(workspace.root);
+    assert.deepEqual(entries.sort(), ['atomic-write.txt']);
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
+
+test('Recovery helpers list direct directory names and only remove empty folders', async () => {
+  const workspace = await createWorkspace();
+  try {
+    await workspace.runtime.createFolder('project-test', 'recovery/nested');
+    await workspace.runtime.createFile('project-test', 'recovery/nested/file.txt', 'x');
+    assert.deepEqual(await workspace.runtime.listDirectoryNames('project-test', 'recovery'), ['nested']);
+    await assert.rejects(
+      workspace.runtime.removeEmptyFolder('project-test', 'recovery/nested'),
+      /não está vazia/i,
+    );
+    await workspace.runtime.deleteFile('project-test', 'recovery/nested/file.txt');
+    assert.equal(await workspace.runtime.removeEmptyFolder('project-test', 'recovery/nested'), true);
+    assert.equal(await workspace.runtime.removeEmptyFolder('project-test', 'recovery/nested'), false);
+  } finally {
+    await workspace.cleanup();
+  }
+});

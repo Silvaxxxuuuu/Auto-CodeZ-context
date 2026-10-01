@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": ".test-dist",
+    "rootDir": ".",
+    "sourceMap": false,
+    "noEmit": false
+  },
+  "include": [
+    "src/crypto.ts",
+    "src/env.ts",
+    "tests/**/*.test.ts"
+  ]
+}

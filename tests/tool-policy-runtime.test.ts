@@ -1,0 +1,273 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import type { AIToolCall } from '../src/ai/types';
+import { ExecutionPathScopeRuntime } from '../src/execution-path-scope';
+import { SYSTEM_WORKSPACE_ID } from '../src/agent/system-workspace';
+import { ToolPolicyRuntime } from '../src/agent/tool-policy-runtime';
+
+function call(name: AIToolCall['name'], input: Record<string, unknown> = {}): AIToolCall {
+  return { id: `call-${name}`, name, input };
+}
+
+const runtime = new ToolPolicyRuntime();
+
+test('normal read remains allowed in unrestricted mode', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('read_file', { path: 'src/index.ts' }),
+  });
+
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.blockedBy, null);
+  assert.equal(result.classification, 'normal');
+  assert.deepEqual(result.paths, ['src/index.ts']);
+  assert.deepEqual(result.sources, {
+    permission: 'allow',
+    path: 'allow',
+    command: 'allow',
+    systemWorkspace: 'allow',
+    executionScope: 'allow',
+  });
+});
+
+test('sensitive read is allowed directly in unrestricted mode while retaining classification telemetry', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('read_file', { path: '.env.production' }),
+  });
+
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.blockedBy, null);
+  assert.equal(result.classification, 'sensitive');
+  assert.equal(result.sources.path, 'ask');
+  assert.match(result.reasons.join(' '), /variáveis de ambiente/i);
+});
+
+test('sensitive mutation is denied by security before permission level can allow it', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('write_file', { path: '.env', content: 'TOKEN=x' }),
+  });
+
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.blockedBy, 'security');
+  assert.equal(result.sources.permission, 'allow');
+  assert.equal(result.sources.path, 'deny');
+});
+
+test('read-only write denial remains a permission denial', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'read-only',
+    projectId: 'project-a',
+    call: call('write_file', { path: 'notes.txt', content: 'x' }),
+  });
+
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.blockedBy, 'permission');
+  assert.equal(result.sources.permission, 'deny');
+  assert.equal(result.sources.path, 'allow');
+});
+
+test('system workspace file access requires approval outside unrestricted mode', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'safe',
+    projectId: SYSTEM_WORKSPACE_ID,
+    call: call('read_file', { path: 'README.md' }),
+  });
+
+  assert.equal(result.decision, 'ask');
+  assert.equal(result.sources.systemWorkspace, 'ask');
+  assert.match(result.reasons.join(' '), /workspace interno/i);
+});
+
+test('unrestricted system workspace read preserves explicit unrestricted behavior', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: SYSTEM_WORKSPACE_ID,
+    call: call('read_file', { path: 'README.md' }),
+  });
+
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.sources.systemWorkspace, 'allow');
+});
+
+test('read_symbol receives the same system-workspace protection as read_file', () => {
+  const protectedRead = runtime.evaluate({
+    permissionLevel: 'safe',
+    projectId: SYSTEM_WORKSPACE_ID,
+    call: call('read_symbol', { path: 'src/app.ts', symbol: 'createApp', kind: 'function' }),
+  });
+  const unrestrictedRead = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: SYSTEM_WORKSPACE_ID,
+    call: call('read_symbol', { path: 'src/app.ts', symbol: 'createApp', kind: 'function' }),
+  });
+
+  assert.equal(protectedRead.decision, 'ask');
+  assert.equal(protectedRead.sources.systemWorkspace, 'ask');
+  assert.deepEqual(protectedRead.paths, ['src/app.ts']);
+  assert.equal(unrestrictedRead.decision, 'allow');
+  assert.equal(unrestrictedRead.sources.systemWorkspace, 'allow');
+});
+
+test('harmless version probe is allowed in unrestricted mode', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('run_command', { command: 'node -v' }),
+  });
+
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.blockedBy, null);
+  assert.equal(result.sources.permission, 'allow');
+  assert.equal(result.sources.command, 'allow');
+  assert.equal(result.sources.executionScope, 'allow');
+});
+
+test('ordinary shell command executes without approval in unrestricted mode', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('run_command', { command: 'npm test' }),
+  });
+
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.sources.command, 'ask');
+});
+
+test('direct Git mutation through the shell does not prompt in unrestricted mode unless security denies it', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('run_command', { command: 'git reset --hard HEAD' }),
+  });
+
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.sources.command, 'ask');
+  assert.match(result.reasons.join(' '), /mutação Git direta/i);
+});
+
+test('shell mutation targeting a sensitive file is denied', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('run_command', { command: 'echo TOKEN=x > .env' }),
+  });
+
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.blockedBy, 'security');
+  assert.equal(result.sources.command, 'deny');
+  assert.match(result.reasons.join(' '), /variáveis de ambiente/i);
+});
+
+test('rename evaluates both source and destination paths', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('rename_file', { from: 'src/config.ts', to: '.env' }),
+  });
+
+  assert.deepEqual(result.paths, ['src/config.ts', '.env']);
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.blockedBy, 'security');
+});
+
+test('canonical paths drive sensitive-path classification instead of lexical aliases', () => {
+  const result = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('write_file', { path: 'src/config-link', content: 'TOKEN=x' }),
+    paths: ['.env'],
+  });
+
+  assert.deepEqual(result.paths, ['.env']);
+  assert.equal(result.classification, 'sensitive');
+  assert.equal(result.decision, 'deny');
+  assert.equal(result.sources.path, 'deny');
+});
+
+test('execution scope composes as a security boundary', () => {
+  const scopes = new ExecutionPathScopeRuntime(() => 1000);
+  scopes.configure({ chatId: 'chat-a', runId: 'run-a', projectId: 'project-a', allowedPaths: ['src'] });
+  const scopedRuntime = new ToolPolicyRuntime();
+  scopedRuntime.configureExecutionPathScope(scopes);
+
+  const allowed = scopedRuntime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    chatId: 'chat-a',
+    runId: 'run-a',
+    call: call('read_file', { path: 'src/a.ts' }),
+    paths: ['src/a.ts'],
+  });
+  const denied = scopedRuntime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    chatId: 'chat-a',
+    runId: 'run-a',
+    call: call('read_file', { path: 'package.json' }),
+    paths: ['package.json'],
+  });
+
+  assert.equal(allowed.decision, 'allow');
+  assert.equal(allowed.sources.executionScope, 'allow');
+  assert.equal(denied.decision, 'deny');
+  assert.equal(denied.blockedBy, 'security');
+  assert.equal(denied.sources.executionScope, 'deny');
+});
+
+test('active execution scope keeps shell approval in unrestricted mode', () => {
+  const scopes = new ExecutionPathScopeRuntime(() => 1000);
+  scopes.configure({ chatId: 'chat-a', runId: 'run-a', projectId: 'project-a', allowedPaths: ['src'] });
+  const scopedRuntime = new ToolPolicyRuntime();
+  scopedRuntime.configureExecutionPathScope(scopes);
+  const result = scopedRuntime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    chatId: 'chat-a',
+    runId: 'run-a',
+    call: call('run_command', { command: 'npm test' }),
+  });
+
+  assert.equal(result.decision, 'ask');
+  assert.equal(result.sources.command, 'ask');
+  assert.equal(result.sources.executionScope, 'ask');
+  assert.match(result.reasons.join(' '), /shell/i);
+});
+
+
+test('unrestricted relaxes contextual asks but never relaxes execution-scope or security denies', () => {
+  const unscoped = new ToolPolicyRuntime();
+  const shell = unscoped.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('run_command', { command: 'npm test' }),
+  });
+  const secretMutation = unscoped.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    call: call('write_file', { path: '.env', content: 'TOKEN=x' }),
+  });
+
+  const scopes = new ExecutionPathScopeRuntime(() => 1000);
+  scopes.configure({ chatId: 'chat-a', runId: 'run-a', projectId: 'project-a', allowedPaths: ['src'] });
+  const scoped = new ToolPolicyRuntime();
+  scoped.configureExecutionPathScope(scopes);
+  const scopedShell = scoped.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: 'project-a',
+    chatId: 'chat-a',
+    runId: 'run-a',
+    call: call('run_command', { command: 'npm test' }),
+  });
+
+  assert.equal(shell.decision, 'allow');
+  assert.equal(shell.sources.command, 'ask');
+  assert.equal(secretMutation.decision, 'deny');
+  assert.equal(secretMutation.blockedBy, 'security');
+  assert.equal(scopedShell.decision, 'ask');
+  assert.equal(scopedShell.sources.executionScope, 'ask');
+});

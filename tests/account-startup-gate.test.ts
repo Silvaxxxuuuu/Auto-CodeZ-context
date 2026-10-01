@@ -1,0 +1,68 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+
+test('renderer bootstrap waits for Account Core readiness before releasing startup splash', async () => {
+  const entry = await fs.readFile('src/renderer-entry.ts', 'utf8');
+  const criticalAwait = entry.indexOf('await Promise.all(criticalLoads);');
+  const accountAwait = entry.indexOf('await waitForAccountReady();');
+  const bootstrapReady = entry.indexOf("dataset.autoCodezBootstrapReady = 'true'");
+
+  assert.ok(criticalAwait >= 0);
+  assert.ok(accountAwait > criticalAwait);
+  assert.ok(bootstrapReady > accountAwait);
+});
+
+test('account onboarding always resolves its initial readiness marker', async () => {
+  const source = await fs.readFile('src/account-ui.ts', 'utf8');
+  assert.match(source, /finally\s*\{\s*markAccountReady\(\);\s*\}/);
+  assert.match(source, /if \(!bridge\)\s*\{\s*markAccountReady\(\);/);
+});
+
+
+test('device onboarding only completes after Device Registry rename succeeds', async () => {
+  const source = await fs.readFile('src/account-ui.ts', 'utf8');
+  const start = source.indexOf('async function finishDevice');
+  const end = source.indexOf("document.addEventListener('submit'", start);
+  assert.ok(start >= 0 && end > start);
+  const body = source.slice(start, end);
+
+  const remoteRename = body.indexOf('await bridge.renameAccountDeviceRegistryCurrent(normalized);');
+  const localRename = body.indexOf('accountState = await bridge.renameAccountDevice(normalized);');
+  const completion = body.indexOf('localStorage.setItem(DEVICE_ONBOARDING_KEY');
+
+  assert.ok(remoteRename >= 0);
+  assert.ok(localRename > remoteRename);
+  assert.ok(completion > localRename);
+  assert.doesNotMatch(body, /renameAccountDeviceRegistryCurrent\(normalized\)\.catch/);
+  assert.match(source, /const deviceError = flowState\.status === 'error' \? flowState\.lastError : undefined;/);
+  assert.match(source, /account-inline-error" role="alert/);
+});
+
+
+test('account profile actions surface async failures instead of creating unhandled rejections', async () => {
+  const source = await fs.readFile('src/account-profile-ui.ts', 'utf8');
+
+  assert.match(source, /let profileActionError: string \| undefined;/);
+  assert.match(source, /account-profile-warning" role="alert"/);
+  assert.match(source, /async function refreshRegistry[\s\S]*?catch \(error\)[\s\S]*?Não foi possível atualizar os dispositivos\./);
+  assert.match(source, /async function revokeDevice[\s\S]*?catch \(error\)[\s\S]*?Não foi possível revogar o dispositivo\./);
+  assert.match(source, /async function openPasskeyEnrollment[\s\S]*?catch \(error\)[\s\S]*?Não foi possível abrir o cadastro de passkey\./);
+  assert.match(source, /async function logout[\s\S]*?catch \(error\)[\s\S]*?Não foi possível sair da conta\./);
+  assert.match(source, /void initialize\(\)\.catch/);
+  assert.doesNotMatch(source, /void bridge\?\.openAccountPasskeyEnrollment\(\)/);
+});
+
+
+test('authenticated profile owns a stable account slot and exposes every access method', async () => {
+  const profileSource = await fs.readFile('src/profile-ui.ts', 'utf8');
+  const accountSource = await fs.readFile('src/account-profile-ui.ts', 'utf8');
+
+  assert.match(profileSource, /data-account-profile-slot/);
+  assert.match(accountSource, /const ACCESS_METHODS:[\s\S]*?'google'[\s\S]*?'github'[\s\S]*?'microsoft'[\s\S]*?'magic_link'[\s\S]*?'passkey'/);
+  assert.match(accountSource, /data-account-access-method/);
+  assert.match(accountSource, /slot\.replaceChildren\(\)/);
+  assert.doesNotMatch(accountSource, /content\.insertBefore\(panel/);
+  assert.doesNotMatch(accountSource, /beginAccountOAuth/);
+  assert.match(accountSource, /data-account-link-method/);
+});
