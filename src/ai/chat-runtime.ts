@@ -160,6 +160,7 @@ export class ChatRuntime {
     private readonly attachmentStore?: Pick<AttachmentStore, 'hydrate'>,
     private readonly memoryContext?: (chat: ChatRecord) => string | undefined,
     private readonly contextCompiler = new ContextCompiler(),
+    private readonly personalizationContext?: (chat: ChatRecord) => string | undefined,
   ) {}
 
   async init(): Promise<void> {
@@ -304,6 +305,7 @@ export class ChatRuntime {
     }
 
     const memoryContext = this.memoryContext?.(chat);
+    const personalizationContext = this.personalizationContext?.(chat);
     const providerInstructions: string[] = [];
     if (!lightweightTurn && config.id === 'azure-openai' && /^Kimi-K2\.6(?:$|[-_.])/i.test(model.id.trim())) {
       providerInstructions.push('Regras de tool calling para Kimi-K2.6 no Azure Foundry: gere argumentos de ferramentas como JSON completo e estritamente válido. Para create_file, write_file, replace_range, replace_text, replace_symbol, insert_before ou insert_after com conteúdo substancial, emita no máximo uma mutação de arquivo com conteúdo grande por resposta. Aguarde o resultado dessa ferramenta e continue o próximo arquivo no ciclo seguinte. Não agrupe vários conteúdos completos de arquivos em tool calls paralelas. Nunca interrompa um objeto JSON no meio para caber na resposta.');
@@ -332,6 +334,7 @@ export class ChatRuntime {
       runtimePlatform: runtimePlatform(),
       runtimeDate: runtimeDate(),
       ...(memoryContext ? { memoryContext } : {}),
+      ...(personalizationContext ? { personalizationContext } : {}),
       lightweightTurn,
       ...(providerInstructions.length ? { providerInstructions } : {}),
       ...(webContext ? { webContext } : {}),
