@@ -97,6 +97,7 @@ export class ShadowAwareWorkspaceRuntime extends WorkspaceRuntime {
   private mutationShadow(projectId: string) {
     const context = this.context(projectId);
     if (!context) return undefined;
+    if (!this.shadowWorkspaces.get(context.chatId, context.runId)) return undefined;
     return this.shadowWorkspaces.workspace(context.chatId, context.runId, projectId);
   }
 }
