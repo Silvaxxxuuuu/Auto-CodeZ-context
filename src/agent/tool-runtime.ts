@@ -219,6 +219,7 @@ export class ToolRuntime {
   }
   listDefinitions(): AIToolDefinition[] { return definitions.map((definition) => ({ ...definition, parameters: { ...definition.parameters } })); }
   listApprovals(filters?: { chatId?: string; runId?: string }): ApprovalRequest[] { return this.approvals.list(filters); }
+  removeApprovals(filters: { chatId?: string; runId?: string }): ApprovalRequest[] { return this.approvals.remove(filters); }
   restoreApprovals(approvals: ApprovalRequest[]): void { this.approvals.restore(approvals); }
   setApprovalChat(approvalId: string, chatId: string): ApprovalRequest { return this.approvals.setChatId(approvalId, chatId); }
   setApprovalRun(approvalId: string, runId: string): ApprovalRequest { return this.approvals.setRunId(approvalId, runId); }
