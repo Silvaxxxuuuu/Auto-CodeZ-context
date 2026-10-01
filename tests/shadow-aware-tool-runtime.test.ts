@@ -9,6 +9,11 @@ import { ShadowAwareToolRuntime } from '../src/agent/shadow-aware-tool-runtime';
 import { ShadowAwareWorkspaceRuntime } from '../src/agent/shadow-aware-workspace-runtime';
 import { WorkspaceRuntime } from '../src/agent/workspace-runtime';
 import { InstanceRuntime } from '../src/agent/instance-runtime';
+import { ActivityRuntime } from '../src/agent/activity-runtime';
+import { ApprovalRuntime } from '../src/agent/approval-runtime';
+import { PermissionRuntime } from '../src/agent/permission-runtime';
+import { ProcessRuntime } from '../src/agent/process-runtime';
+import { ShadowAwareCommandRuntime } from '../src/agent/shadow-aware-command-runtime';
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'auto-codez-shadow-aware-tools-'));
@@ -252,5 +257,63 @@ test('open_instance ligado ao workspace falha fechado enquanto Shadow legado est
     assert.deepEqual(fx.openedInstances, []);
   } finally {
     await fx.cleanup();
+  }
+});
+
+
+test('run_command V2 keeps sandbox isolation without creating shadow that blocks start_process', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'auto-codez-command-process-v2-'));
+  const projects = async () => [{
+    id: 'project-a',
+    name: 'Project A',
+    rootPath: root,
+    createdAt: 1,
+    updatedAt: 1,
+  }];
+  const base = new WorkspaceRuntime(projects);
+  const shadows = new ExecutionShadowWorkspaceRuntime(base);
+  const workspace = new ShadowAwareWorkspaceRuntime(base, shadows);
+  const approvals = new ApprovalRuntime();
+  const commandRuntime = new ShadowAwareCommandRuntime(projects, shadows);
+  const processRuntime = new ProcessRuntime(projects);
+  const tools = new ShadowAwareToolRuntime(
+    workspace,
+    new PermissionRuntime(),
+    new ActivityRuntime(),
+    approvals,
+    commandRuntime,
+  );
+  tools.configureShadowWorkspace(shadows);
+  tools.configureProcessRuntime(processRuntime);
+
+  const executeApproved = async (call: AIToolCall) => {
+    const initial = await tools.execute('chat-a', 'project-a', 'unrestricted', call, 'run-v2');
+    if (!initial.pendingApproval || !initial.approvalId) return initial;
+    return tools.approve(initial.approvalId);
+  };
+
+  try {
+    const command = await executeApproved(toolCall(
+      'command-1',
+      'run_command',
+      { command: 'node -e "process.stdout.write(\'sandbox-ok\')"' },
+    ));
+    assert.equal(command.ok, true, command.error);
+    assert.match(command.commandResult?.stdout ?? command.output ?? '', /sandbox-ok/);
+    assert.equal(shadows.get('chat-a', 'run-v2'), undefined);
+
+    const started = await executeApproved(toolCall(
+      'process-1',
+      'start_process',
+      { command: 'node -e "setInterval(()=>{},1000)"' },
+    ));
+    assert.equal(started.ok, true, started.error);
+    assert.ok(started.processId);
+    assert.equal(started.executionId, 'process:run-v2:process-1');
+    assert.equal(shadows.get('chat-a', 'run-v2'), undefined);
+    assert.equal(processRuntime.get('project-a', started.processId as string)?.status, 'running');
+  } finally {
+    await processRuntime.stopAll().catch((): never[] => []);
+    await rm(root, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 50 : 0, retryDelay: 100 });
   }
 });
