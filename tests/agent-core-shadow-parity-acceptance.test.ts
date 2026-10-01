@@ -100,7 +100,7 @@ test('production incremental configuration mutates the real workspace without cr
     await execute(
       f.tools,
       runId,
-      call('write-1', 'write_file', { path: 'src/app.ts', content: 'export const value = 2;\n' }),
+      call('write-1', 'write_file', { path: 'src/app.ts', content: "export const value = 2;\nexport function greet() {\n  return 'hello';\n}\n" }),
     );
     assert.equal(await f.base.readFile('project-a', 'src/app.ts'), 'export const value = 2;\n');
     assert.equal(f.shadows.get('chat-a', runId), undefined);
