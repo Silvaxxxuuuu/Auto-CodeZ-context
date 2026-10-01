@@ -479,6 +479,7 @@ export class AgentRuntime {
     const runIds = new Set<string>();
     for (const run of this.recoverableRuns.values()) if (run.chat.id === chatId) runIds.add(run.runId);
     for (const run of this.pendingRuns.values()) if (run.chat.id === chatId) runIds.add(run.runId);
+    this.tools.removeApprovals({ chatId });
     for (const runId of runIds) this.recoverableRuns.delete(runId);
     for (const [approvalId, run] of this.pendingRuns) if (run.chat.id === chatId) this.pendingRuns.delete(approvalId);
     await this.persist();
