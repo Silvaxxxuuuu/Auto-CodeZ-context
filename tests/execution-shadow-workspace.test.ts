@@ -22,6 +22,21 @@ async function fixture() {
   };
 }
 
+test('workspace não cria shadow novo e exige estado legado preexistente', async () => {
+  const fx = await fixture();
+  try {
+    const runtime = new ExecutionShadowWorkspaceRuntime(fx.workspace);
+    assert.throws(
+      () => runtime.workspace('chat-a', 'run-v2', 'project-a'),
+      /legado.*não encontrado/i,
+    );
+    assert.equal(runtime.get('chat-a', 'run-v2'), undefined);
+    assert.deepEqual(runtime.list(), []);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
 test('runtime reutiliza a mesma transação para chat run e projeto', async () => {
   const fx = await fixture();
   try {
@@ -45,6 +60,7 @@ test('workspace gerenciado notifica snapshots após mutações bem-sucedidas', a
     const runtime = new ExecutionShadowWorkspaceRuntime(fx.workspace, () => time++);
     const observations: number[] = [];
     runtime.subscribe((snapshots) => observations.push(snapshots[0]?.changes.length ?? 0));
+    runtime.beginLegacy('chat-a', 'run-a', 'project-a');
     const workspace = runtime.workspace('chat-a', 'run-a', 'project-a');
 
     await workspace.writeFile('project-a', 'a.txt', 'new');
@@ -64,6 +80,7 @@ test('commit publica alterações e remove somente a transação concluída', as
   try {
     let time = 100;
     const runtime = new ExecutionShadowWorkspaceRuntime(fx.workspace, () => time++);
+    runtime.beginLegacy('chat-a', 'run-a', 'project-a');
     const first = runtime.workspace('chat-a', 'run-a', 'project-a');
     runtime.beginLegacy('chat-b', 'run-b', 'project-a');
     await first.writeFile('project-a', 'a.txt', 'new');
@@ -84,6 +101,7 @@ test('discard remove transação sem publicar alterações', async () => {
   try {
     let time = 100;
     const runtime = new ExecutionShadowWorkspaceRuntime(fx.workspace, () => time++);
+    runtime.beginLegacy('chat-a', 'run-a', 'project-a');
     const workspace = runtime.workspace('chat-a', 'run-a', 'project-a');
     await workspace.writeFile('project-a', 'a.txt', 'shadow');
 
@@ -102,6 +120,8 @@ test('restore é atômico e preserva múltiplas execuções independentes', asyn
   try {
     let time = 100;
     const source = new ExecutionShadowWorkspaceRuntime(fx.workspace, () => time++);
+    source.beginLegacy('chat-a', 'run-a', 'project-a');
+    source.beginLegacy('chat-b', 'run-b', 'project-a');
     await source.workspace('chat-a', 'run-a', 'project-a').writeFile('project-a', 'a.txt', 'a-shadow');
     await source.workspace('chat-b', 'run-b', 'project-a').createFile('project-a', 'b.txt', 'b-shadow');
     const snapshots = source.list();
