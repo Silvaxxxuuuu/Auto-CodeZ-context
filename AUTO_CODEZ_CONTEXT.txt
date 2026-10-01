@@ -12141,3 +12141,28 @@ AGENT CORE V2 — RETIREMENT BOOTSTRAP ACCEPTANCE:
 9. O discard do snapshot legado não toca no workspace real.
 10. A matriz dos 19 invariantes foi conferida contra a árvore real do repositório; todos os arquivos de evidência referenciados existem.
 
+------------------------------------------------------------
+24.91. AGENT CORE V2 — CI ACCEPTANCE GATE
+------------------------------------------------------------
+
+GATE DEDICADO:
+1. Existe comando npm: test:agent-core-v2.
+2. O comando reutiliza .test-dist gerado pelo Core tests e reroda apenas o conjunto crítico de acceptance V2.
+3. O gate exige 11 evidências compiladas:
+   - acceptance matrix;
+   - process/instance integrated acceptance;
+   - Shadow parity;
+   - Shadow retirement architecture;
+   - Shadow retirement bootstrap acceptance;
+   - progress watchdog;
+   - recovery determinism;
+   - retry side-effect safety;
+   - cancellation consistency;
+   - execution report evidence;
+   - MCP shared execution path.
+4. Se qualquer evidência compilada estiver ausente, o gate falha antes de executar testes.
+5. O Validate Auto CodeZ agora executa:
+   Core tests -> Agent Core V2 acceptance gate -> ESLint.
+6. A árvore-fonte foi conferida e todos os 11 testes obrigatórios existem.
+7. O gate não substitui o Core tests completo; funciona como aceitação explícita e legível da V2 dentro do CI.
+
