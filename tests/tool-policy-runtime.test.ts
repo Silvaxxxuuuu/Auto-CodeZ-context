@@ -94,6 +94,25 @@ test('unrestricted system workspace read preserves explicit unrestricted behavio
   assert.equal(result.sources.systemWorkspace, 'allow');
 });
 
+test('read_symbol receives the same system-workspace protection as read_file', () => {
+  const protectedRead = runtime.evaluate({
+    permissionLevel: 'safe',
+    projectId: SYSTEM_WORKSPACE_ID,
+    call: call('read_symbol', { path: 'src/app.ts', symbol: 'createApp', kind: 'function' }),
+  });
+  const unrestrictedRead = runtime.evaluate({
+    permissionLevel: 'unrestricted',
+    projectId: SYSTEM_WORKSPACE_ID,
+    call: call('read_symbol', { path: 'src/app.ts', symbol: 'createApp', kind: 'function' }),
+  });
+
+  assert.equal(protectedRead.decision, 'ask');
+  assert.equal(protectedRead.sources.systemWorkspace, 'ask');
+  assert.deepEqual(protectedRead.paths, ['src/app.ts']);
+  assert.equal(unrestrictedRead.decision, 'allow');
+  assert.equal(unrestrictedRead.sources.systemWorkspace, 'allow');
+});
+
 test('harmless version probe is allowed in unrestricted mode', () => {
   const result = runtime.evaluate({
     permissionLevel: 'unrestricted',
