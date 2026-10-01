@@ -146,7 +146,7 @@ test('materialização suporta workspace de sistema usando raiz controlada', asy
 test('command sandbox executa contra o overlay e descarta mutações feitas pelo comando', async () => {
   const fx = await fixture();
   try {
-    const shadow = fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    const shadow = fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await shadow.writeFile('project-a', 'a.txt', 'shadow-value');
     const runtime = new CommandSandboxRuntime(fx.projects, fx.shadows);
 
@@ -168,7 +168,7 @@ test('command sandbox executa contra o overlay e descarta mutações feitas pelo
 test('command sandbox consegue resolver dependência copiada sem usar o node_modules real', async () => {
   const fx = await fixture();
   try {
-    const shadow = fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    const shadow = fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await shadow.writeFile('project-a', 'a.txt', 'shadow');
     const runtime = new CommandSandboxRuntime(fx.projects, fx.shadows);
 
@@ -193,7 +193,7 @@ test('command sandbox aceita run V2 sem shadow e ainda rejeita projeto divergent
     assert.equal(result.exitCode, 0);
     assert.equal(fx.shadows.get('chat-a', 'missing'), undefined);
 
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await assert.rejects(
       () => runtime.run('chat-a', 'run-a', 'project-b', 'node -v'),
       /outro projeto/i,
