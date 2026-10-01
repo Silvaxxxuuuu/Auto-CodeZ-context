@@ -12100,3 +12100,36 @@ SHADOW RETIREMENT — BOOTSTRAP/PERSISTENCE:
 21. Como main.ts persiste snapshots via subscriber, shadows órfãos filtrados pelo bootstrap são removidos do storage após restore, evitando releitura infinita em startups futuros.
 22. A razão restante para manter o runtime legado é compatibilidade com snapshots ativos persistidos de runs pendentes/recuperáveis; runs V2 novas não dependem dessa persistência.
 
+------------------------------------------------------------
+24.90. AGENT CORE V2 — ACCEPTANCE INTEGRADA / MATRIZ EXECUTÁVEL
+------------------------------------------------------------
+
+ACCEPTANCE INTEGRADA:
+1. O teste agent-core-process-instance-acceptance agora usa composição equivalente à produção:
+   - ShadowAwareToolRuntime;
+   - ShadowAwareWorkspaceRuntime;
+   - IncrementalWorkspaceMutationRuntime;
+   - Durable Operation Journal;
+   - ShadowAwareCommandRuntime;
+   - ProcessRuntime;
+   - InstanceRuntime.
+2. A sequência integrada exigida no mesmo run é:
+   write_file real -> run_command isolado -> start_process -> wait_for_port -> open_instance -> instance_status -> close_instance -> stop_process.
+3. O command sandbox precisa enxergar o arquivo já materializado no workspace real.
+4. O write_file precisa terminar verified no Operation Journal.
+5. O run precisa terminar com zero Shadow Workspace novo e zero approvals em unrestricted.
+6. Process e instance precisam terminar em estados terminais coerentes com executionId/runId/toolCallId/capabilityId.
+
+MATRIZ DE ACCEPTANCE V2:
+1. Existe teste executável agent-core-v2-acceptance-matrix.test.ts.
+2. A matriz precisa conter exatamente todos os invariantes de AGENT_CORE_V2_INVARIANTS.
+3. Cada invariante precisa apontar para pelo menos um arquivo de teste comportamental real.
+4. Se o contrato ganhar um invariante novo sem evidência, o CI deve falhar.
+5. Se um invariante for removido/renomeado sem atualizar a matriz, o CI deve falhar.
+6. A matriz é rastreabilidade; não substitui os testes comportamentais que referencia.
+
+ESTADO DE RETIREMENT:
+- Shadow Workspace continua compatibility-only.
+- beginLegacy() continua proibido fora da fronteira legada por guard arquitetural.
+- Não remover fisicamente runtime/store antes da conclusão dos E2E finais e da decisão explícita de retirement.
+
