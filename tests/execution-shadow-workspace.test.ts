@@ -27,12 +27,12 @@ test('runtime reutiliza a mesma transação para chat run e projeto', async () =
   try {
     let time = 100;
     const runtime = new ExecutionShadowWorkspaceRuntime(fx.workspace, () => time++);
-    const first = runtime.begin('chat-a', 'run-a', 'project-a');
-    const second = runtime.begin('chat-a', 'run-a', 'project-a');
+    const first = runtime.beginLegacy('chat-a', 'run-a', 'project-a');
+    const second = runtime.beginLegacy('chat-a', 'run-a', 'project-a');
 
     assert.equal(first, second);
     assert.equal(runtime.list().length, 1);
-    assert.throws(() => runtime.begin('chat-a', 'run-a', 'project-b'), /outro projeto/i);
+    assert.throws(() => runtime.beginLegacy('chat-a', 'run-a', 'project-b'), /outro projeto/i);
   } finally {
     await fx.cleanup();
   }
@@ -65,7 +65,7 @@ test('commit publica alterações e remove somente a transação concluída', as
     let time = 100;
     const runtime = new ExecutionShadowWorkspaceRuntime(fx.workspace, () => time++);
     const first = runtime.workspace('chat-a', 'run-a', 'project-a');
-    runtime.begin('chat-b', 'run-b', 'project-a');
+    runtime.beginLegacy('chat-b', 'run-b', 'project-a');
     await first.writeFile('project-a', 'a.txt', 'new');
 
     const committed = await runtime.commit('chat-a', 'run-a');
@@ -126,9 +126,9 @@ test('removeChat limpa somente transações do chat solicitado', async () => {
   try {
     let time = 100;
     const runtime = new ExecutionShadowWorkspaceRuntime(fx.workspace, () => time++);
-    runtime.begin('chat-a', 'run-a1', 'project-a');
-    runtime.begin('chat-a', 'run-a2', 'project-a');
-    runtime.begin('chat-b', 'run-b', 'project-a');
+    runtime.beginLegacy('chat-a', 'run-a1', 'project-a');
+    runtime.beginLegacy('chat-a', 'run-a2', 'project-a');
+    runtime.beginLegacy('chat-b', 'run-b', 'project-a');
 
     assert.equal(runtime.removeChat('chat-a'), 2);
     assert.equal(runtime.list().length, 1);
