@@ -71,6 +71,7 @@ test('legacy Shadow Workspace dependencies stay frozen to the compatibility boun
     'src/agent/shadow-aware-git-runtime.ts',
     'src/agent/shadow-aware-tool-runtime.ts',
     'src/agent/shadow-aware-workspace-runtime.ts',
+    'src/agent/shadow-git-read-runtime.ts',
     'src/execution-shadow-workspace-controller.ts',
     'src/execution-shadow-workspace.ts',
     'src/main.ts',
