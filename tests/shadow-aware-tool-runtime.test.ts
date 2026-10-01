@@ -199,6 +199,26 @@ test('mutação Git falha fechado depois que a run possui alterações isoladas'
   }
 });
 
+test('runId sem shadow legado preexistente não cria overlay e mantém mutação na base', async () => {
+  const fx = await fixture();
+  try {
+    const result = await fx.tools.execute(
+      'chat-a',
+      'project-a',
+      'unrestricted',
+      toolCall('write-v2-no-shadow', 'write_file', { path: 'a.txt', content: 'v2-direct' }),
+      'run-v2-no-shadow',
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(await fx.base.readFile('project-a', 'a.txt'), 'v2-direct');
+    assert.equal(fx.shadows.get('chat-a', 'run-v2-no-shadow'), undefined);
+    assert.deepEqual(fx.shadows.list(), []);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
 test('tool call sem runId mantém comportamento direto na base', async () => {
   const fx = await fixture();
   try {
