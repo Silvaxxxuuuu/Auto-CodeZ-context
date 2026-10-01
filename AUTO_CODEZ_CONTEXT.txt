@@ -12049,3 +12049,40 @@ PRÓXIMA REGRA:
 - Antes de declarar conclusão, fazer revisão final de invariantes, E2E dos caminhos principais e acceptance/parity do Shadow Workspace.
 - Só depois dessa acceptance decidir sobre remoção ou manutenção do Shadow Workspace.
 
+------------------------------------------------------------
+24.89. AGENT CORE V2 — SHADOW WORKSPACE RETIREMENT CHECKPOINT
+------------------------------------------------------------
+
+STATUS CANÔNICO:
+- Shadow Workspace não é mais caminho de criação para runs V2 novas.
+- O runtime continua preservado apenas como compatibilidade para estado legado/restaurado.
+- Ainda NÃO remover o runtime/persistência até a acceptance final completa confirmar que não existe fluxo legado necessário em produção.
+
+GARANTIAS FECHADAS:
+1. ShadowAwareWorkspaceRuntime só usa shadow quando já existe snapshot/transação para chatId + runId.
+2. Sem shadow preexistente, mutations seguem a base real; o wrapper não cria overlay novo.
+3. CommandSandboxRuntime não exige shadow e usa changes=[] em runs V2 normais.
+4. run_command mantém sandbox temporário isolado sem criar Shadow Workspace.
+5. Git runtime não cria shadow novo; apenas respeita/bloqueia estado legado já existente.
+6. ExecutionShadowLifecycle somente commit/discard de shadow preexistente; não inicia shadow em runs V2.
+7. ExecutionShadowWorkspaceRuntime.workspace() não cria mais transação.
+8. Criação explícita foi renomeada para beginLegacy(), deixando a intenção incompatível com V2 visível no contrato.
+9. workspace() sem beginLegacy()/restore() falha fechado com erro de Shadow Workspace legado ausente.
+10. Testes legados foram migrados para beginLegacy() explícito.
+11. Estados restaurados continuam podendo usar workspace(), commit, discard e controller normalmente.
+12. A API impede criação acidental de shadow por um caller V2 que apenas conhece workspace().
+
+ACCEPTANCE JÁ EXISTENTE:
+- mutations V2 no workspace real possuem prova de parity;
+- command sandbox não precisa criar shadow;
+- command → process no mesmo run V2 não deve ser bloqueado por shadow vazio;
+- compatibilidade legada continua testada separadamente;
+- restore legado permanece suportado;
+- não remover Shadow Workspace apenas por este checkpoint: ainda validar CI/E2E final e demais caminhos de acceptance antes de retirement físico.
+
+REGRA PARA PRÓXIMOS CHATS:
+- Não voltar a usar begin() genérico.
+- Qualquer teste/caller que precise criar Shadow Workspace deve declarar intenção legado via beginLegacy().
+- Código V2 novo não deve chamar beginLegacy().
+- Se um fluxo novo precisar de isolamento, criar abstração própria apropriada; não reativar Shadow Workspace como workspace padrão.
+
