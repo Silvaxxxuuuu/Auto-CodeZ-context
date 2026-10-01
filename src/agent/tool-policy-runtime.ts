@@ -24,6 +24,7 @@ export type ToolPolicyResult = {
 
 const systemFileTools = new Set<AIToolCall['name']>([
   'read_file',
+  'read_symbol',
   'write_file',
   'create_file',
   'create_folder',
