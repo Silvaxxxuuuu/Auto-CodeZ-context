@@ -21,7 +21,6 @@ export class ShadowAwareCommandRuntime extends CommandRuntime {
     if (!context) return super.run(projectId, command, options);
     if (context.projectId !== projectId) throw new Error('Contexto de execução pertence a outro projeto.');
 
-    this.shadows.begin(context.chatId, context.runId, projectId);
     return this.sandbox.run(context.chatId, context.runId, projectId, command, options);
   }
 }
