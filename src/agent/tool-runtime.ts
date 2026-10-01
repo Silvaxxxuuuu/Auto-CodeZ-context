@@ -181,7 +181,7 @@ export class ToolRuntime {
   private instanceRuntime?: InstanceRuntime;
   private instanceCaptures?: InstanceCaptureArtifactRuntime;
 
-  constructor(private readonly workspace: WorkspaceRuntime, permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), private readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()]), workspacePathPolicy = new WorkspacePathPolicy(), commandSafetyPolicy = new CommandSafetyPolicy(workspacePathPolicy), private readonly toolPolicy = new ToolPolicyRuntime(permissions, workspacePathPolicy, commandSafetyPolicy)) {}
+  constructor(private readonly workspace: WorkspaceRuntime, permissions = new PermissionRuntime(), private readonly activity = new ActivityRuntime(), protected readonly approvals = new ApprovalRuntime(), private readonly commands: CommandRuntime = unavailableCommandRuntime, private readonly diffs = new DiffRuntime(), private readonly journalStorage?: ToolJournalStorage, private readonly structuralEdits = new StructuralEditRuntime([new TypeScriptStructuralLocator()]), workspacePathPolicy = new WorkspacePathPolicy(), commandSafetyPolicy = new CommandSafetyPolicy(workspacePathPolicy), private readonly toolPolicy = new ToolPolicyRuntime(permissions, workspacePathPolicy, commandSafetyPolicy)) {}
 
   configureGitRuntime(runtime: GitRuntime): void { this.gitRuntime = runtime; }
   configureExecutionPlanner(runtime: ExecutionPlanner): void { this.executionPlanner = runtime; }
