@@ -97,16 +97,15 @@ test('production incremental configuration mutates the real workspace without cr
   try {
     await f.base.createFile('project-a', 'src/app.ts', 'export const value = 1;\n');
 
-    const write = await execute(
+    await execute(
       f.tools,
       runId,
       call('write-1', 'write_file', { path: 'src/app.ts', content: 'export const value = 2;\n' }),
     );
     assert.equal(await f.base.readFile('project-a', 'src/app.ts'), 'export const value = 2;\n');
     assert.equal(f.shadows.get('chat-a', runId), undefined);
-    assert.ok(write.operationId);
 
-    const replace = await execute(
+    await execute(
       f.tools,
       runId,
       call('replace-1', 'replace_text', {
@@ -117,27 +116,24 @@ test('production incremental configuration mutates the real workspace without cr
     );
     assert.equal(await f.base.readFile('project-a', 'src/app.ts'), 'export const value = 3;\n');
     assert.equal(f.shadows.get('chat-a', runId), undefined);
-    assert.ok(replace.operationId);
 
-    const created = await execute(
+    await execute(
       f.tools,
       runId,
       call('create-1', 'create_file', { path: 'src/generated.ts', content: 'export const generated = true;\n' }),
     );
     assert.equal(await f.base.readFile('project-a', 'src/generated.ts'), 'export const generated = true;\n');
     assert.equal(f.shadows.get('chat-a', runId), undefined);
-    assert.ok(created.operationId);
 
-    const folder = await execute(
+    await execute(
       f.tools,
       runId,
       call('folder-1', 'create_folder', { path: 'assets/generated' }),
     );
     assert.equal((await f.base.statPath('project-a', 'assets/generated')).exists, true);
     assert.equal(f.shadows.get('chat-a', runId), undefined);
-    assert.ok(folder.operationId);
 
-    const renamed = await execute(
+    await execute(
       f.tools,
       runId,
       call('rename-1', 'rename_file', { from: 'src/generated.ts', to: 'src/renamed.ts' }),
@@ -145,19 +141,21 @@ test('production incremental configuration mutates the real workspace without cr
     assert.equal((await f.base.statPath('project-a', 'src/generated.ts')).exists, false);
     assert.equal(await f.base.readFile('project-a', 'src/renamed.ts'), 'export const generated = true;\n');
     assert.equal(f.shadows.get('chat-a', runId), undefined);
-    assert.ok(renamed.operationId);
 
-    const deleted = await execute(
+    await execute(
       f.tools,
       runId,
       call('delete-1', 'delete_file', { path: 'src/renamed.ts' }),
     );
     assert.equal((await f.base.statPath('project-a', 'src/renamed.ts')).exists, false);
     assert.equal(f.shadows.get('chat-a', runId), undefined);
-    assert.ok(deleted.operationId);
 
     const verified = f.journal.list({ runId }).filter((record) => record.status === 'verified');
     assert.equal(verified.length, 6);
+    assert.deepEqual(
+      verified.map((record) => record.toolCallId).sort(),
+      ['create-1', 'delete-1', 'folder-1', 'rename-1', 'replace-1', 'write-1'],
+    );
     assert.deepEqual(f.shadows.list(), []);
   } finally {
     await f.cleanup();
