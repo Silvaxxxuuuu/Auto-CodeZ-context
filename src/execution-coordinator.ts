@@ -84,6 +84,16 @@ export class ExecutionCoordinator {
     };
   }
 
+  cancel(chatId: string, runId: string): ExecutionSnapshot | undefined {
+    this.planner.remove(chatId, runId);
+    const current = this.executions.get(chatId);
+    if (!current || current.runId !== runId) return current;
+    if (current.state === 'running' || current.state === 'waiting_approval') {
+      return this.executions.update(chatId, { state: 'cancelled', runId });
+    }
+    return current;
+  }
+
   interrupt(chatId: string, runId: string): ExecutionSnapshot | undefined {
     this.planner.remove(chatId, runId);
     const current = this.executions.get(chatId);
