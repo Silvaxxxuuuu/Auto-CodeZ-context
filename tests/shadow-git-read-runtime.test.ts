@@ -73,7 +73,7 @@ test('status e diff enxergam base real mais overlay sem tocar no index ou HEAD r
   try {
     await write(fx.repoRoot, 'node_modules/ignored/index.js', 'ignored');
     await write(fx.projectRoot, 'b.txt', 'real-dirty\n');
-    const shadow = fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    const shadow = fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await shadow.writeFile('project-a', 'a.txt', 'shadow-a\n');
 
     const indexBefore = await fs.readFile(fx.indexPath);
@@ -101,7 +101,7 @@ test('status e diff enxergam base real mais overlay sem tocar no index ou HEAD r
 test('projeto aninhado aplica alterações no caminho correto da raiz Git', async () => {
   const fx = await fixture('packages/app');
   try {
-    const shadow = fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    const shadow = fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await shadow.writeFile('project-a', 'a.txt', 'nested-shadow\n');
 
     const status = await fx.runtime.status('chat-a', 'run-a', 'project-a');
@@ -123,7 +123,7 @@ test('diretório gerado rastreado permanece na visão isolada e participa do dif
     await git(fx.repoRoot, ['add', '-f', 'dist/tracked.txt']);
     await git(fx.repoRoot, ['commit', '-m', 'track generated fixture']);
 
-    const shadow = fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    const shadow = fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await shadow.writeFile('project-a', 'dist/tracked.txt', 'tracked-shadow\n');
 
     const status = await fx.runtime.status('chat-a', 'run-a', 'project-a');
@@ -144,7 +144,7 @@ test('visão Git rejeita run inexistente e projeto divergente', async () => {
       /Shadow Workspace ativo não encontrado/i,
     );
 
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await assert.rejects(
       () => fx.runtime.diff('chat-a', 'run-a', 'project-b'),
       /outro projeto/i,
