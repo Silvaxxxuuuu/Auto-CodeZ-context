@@ -153,6 +153,7 @@ test('write_file is blocked when the same path has legacy Shadow Workspace chang
     const shadowWorkspace = new ShadowAwareWorkspaceRuntime(base, shadows);
     const runtime = new ShadowAwareToolRuntime(shadowWorkspace);
     runtime.configureShadowWorkspace(shadows);
+    shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     const transaction = shadows.workspace('chat-a', 'run-a', 'project-a');
     await transaction.writeFile('project-a', 'conflict.txt', 'shadow');
 
