@@ -150,6 +150,8 @@ contextBridge.exposeInMainWorld('autoCodez', {
   listMemories: (scope?: { type: 'global' | 'project' | 'chat'; projectId?: string; chatId?: string }) => invoke('memory:list', scope),
   addMemory: (input: { scopeType: 'global' | 'project' | 'chat'; projectId?: string; chatId?: string; content: string; source?: { chatId?: string; runId?: string; messageCreatedAt?: number } }) => invoke('memory:add', input),
   removeMemory: (id: string) => invoke('memory:remove', requireIdentifier(id, 'Memória')),
+  getPersonalization: () => invoke('personalization:get'),
+  setPersonalization: (instructions: string) => invoke('personalization:set', instructions),
   stopChat: (chatId: string) => invoke('chat:stop', requireIdentifier(chatId, 'Chat')),
   onStreamEvent: (listener: (event: unknown) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
