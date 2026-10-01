@@ -2,7 +2,7 @@ import type { LocalStorage } from './core/storage';
 import type { ExecutionSnapshot, ExecutionState } from './execution-manager';
 
 const DEFAULT_FILE = 'execution-state.json';
-const STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
+const STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted', 'cancelled']);
 
 type StoredExecutionState = {
   version: 1;
