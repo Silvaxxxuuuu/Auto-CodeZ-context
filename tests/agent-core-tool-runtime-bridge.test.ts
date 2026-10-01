@@ -119,6 +119,7 @@ test('create_file preview refuses a path that only exists in a legacy shadow ove
     const runtime = new ShadowAwareToolRuntime(shadowWorkspace);
     runtime.configureShadowWorkspace(shadows);
 
+    shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     const transaction = shadows.workspace('chat-a', 'run-a', 'project-a');
     await transaction.createFile('project-a', 'legacy.txt', 'shadow-only');
 
@@ -273,6 +274,7 @@ test('replace_symbol is blocked when its file has legacy Shadow Workspace change
     const shadows = new ExecutionShadowWorkspaceRuntime(base);
     const runtime = new ShadowAwareToolRuntime(new ShadowAwareWorkspaceRuntime(base, shadows));
     runtime.configureShadowWorkspace(shadows);
+    shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await shadows.workspace('chat-a', 'run-a', 'project-a').writeFile('project-a', 'service.ts', 'function run() { return 99; }\n');
 
     const storage = new MemoryStorage();
@@ -315,6 +317,7 @@ test('delete_file is blocked when its path has legacy Shadow Workspace changes',
     const shadows = new ExecutionShadowWorkspaceRuntime(base);
     const runtime = new ShadowAwareToolRuntime(new ShadowAwareWorkspaceRuntime(base, shadows));
     runtime.configureShadowWorkspace(shadows);
+    shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await shadows.workspace('chat-a', 'run-a', 'project-a').writeFile('project-a', 'conflict.txt', 'shadow-change');
 
     const storage = new MemoryStorage();
@@ -351,6 +354,7 @@ test('rename_file is blocked when either endpoint overlaps legacy Shadow Workspa
     const shadows = new ExecutionShadowWorkspaceRuntime(base);
     const runtime = new ShadowAwareToolRuntime(new ShadowAwareWorkspaceRuntime(base, shadows));
     runtime.configureShadowWorkspace(shadows);
+    shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await shadows.workspace('chat-a', 'run-a', 'project-a').createFile('project-a', 'destination.txt', 'shadow-only');
 
     const storage = new MemoryStorage();
