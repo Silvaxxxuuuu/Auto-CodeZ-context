@@ -53,7 +53,10 @@ export async function resumeRecoveredRun(
     return { result, execution };
   } catch (error) {
     if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
-      executionManager.remove(recoverable.chatId);
+      executionManager.update(recoverable.chatId, {
+        state: 'cancelled',
+        runId: recoverable.runId,
+      }, now);
       throw error;
     }
     const message = error instanceof Error ? error.message : String(error);
