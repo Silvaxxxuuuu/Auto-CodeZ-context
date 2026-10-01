@@ -221,6 +221,19 @@ async function main() {
     throw new Error('Perfil expôs login OAuth comum como se fosse vínculo autenticado de identidade.');
   }
 
+  const personalization = authenticatedProfile.locator('[data-account-personalization-form]');
+  await personalization.waitFor({ state: 'visible', timeout: 10_000 });
+  const personalizationInput = personalization.locator('[data-account-personalization-input]');
+  const personalizationText = 'Seja direto, use respostas curtas e priorize código completo.';
+  await personalizationInput.fill(personalizationText);
+  await personalization.locator('[data-account-personalization-count]').filter({ hasText: String(personalizationText.length) + '/1000' }).waitFor();
+  await personalization.getByRole('button', { name: 'Salvar personalização', exact: true }).click();
+  await personalization.locator('[data-account-personalization-status]').filter({ hasText: 'Personalização salva.' }).waitFor({ timeout: 10_000 });
+  const persistedPersonalization = await page.evaluate(() => window.autoCodez.getPersonalization());
+  if (persistedPersonalization !== personalizationText) {
+    throw new Error('Personalização da IA não persistiu pela bridge real da conta.');
+  }
+
   await page.screenshot({
     path: path.join(outputDir, 'funcional-profile-account-authenticated.png'),
     animations: 'disabled',
