@@ -57,7 +57,7 @@ async function fixture() {
 test('status e diff da execução usam a visão shadow enquanto chamadas externas continuam vendo a base', async () => {
   const fx = await fixture();
   try {
-    const shadow = fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    const shadow = fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await shadow.writeFile('project-a', 'a.txt', 'shadow\n');
 
     const external = await fx.runtime.status('project-a');
@@ -82,7 +82,7 @@ test('status e diff da execução usam a visão shadow enquanto chamadas externa
 test('branches e log continuam disponíveis porque o shadow não altera refs', async () => {
   const fx = await fixture();
   try {
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
 
     const result = await runWithExecutionWorkspaceContext(
       { chatId: 'chat-a', runId: 'run-a', projectId: 'project-a' },
@@ -102,7 +102,7 @@ test('branches e log continuam disponíveis porque o shadow não altera refs', a
 test('qualquer mutação Git é bloqueada enquanto existe shadow ativo no projeto, mesmo fora do contexto do agente', async () => {
   const fx = await fixture();
   try {
-    fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await fs.writeFile(path.join(fx.root, 'a.txt'), 'external-dirty\n', 'utf8');
     const indexBefore = await fs.readFile(fx.indexPath);
 
