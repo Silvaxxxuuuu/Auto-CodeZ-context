@@ -137,8 +137,8 @@ test('send exposes protected file tools, run_command and plugin gateway to a nor
   assert.match(request.messages[0].content, /Desktop\/Novo site\/index\.html/i);
   assert.equal(request.messages.some((message) => /read_file \[workspace\.read_file;/.test(message.content)), true);
   assert.equal(request.messages.some((message) => /read_symbol \[workspace\.read_symbol;/.test(message.content)), true);
-  assert.match(request.messages[0].content, /plugin_list_tools/);
-  assert.match(request.messages[0].content, /plugin_call only with an exact generated tool name/i);
+  assert.equal(request.messages.some((message) => /plugin_list_tools \[plugin\.list_tools;/.test(message.content)), true);
+  assert.equal(request.messages.some((message) => /plugin_call \[plugin\.call;/.test(message.content)), true);
 });
 
 test('send keeps available protected file tools in a normal chat even when run_command is unavailable', async () => {
