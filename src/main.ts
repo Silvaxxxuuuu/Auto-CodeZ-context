@@ -923,6 +923,19 @@ async function clearChatExecution(chatId: string): Promise<void> {
   executionManager.remove(chatId);
 }
 
+async function cancelChatExecution(chatId: string): Promise<void> {
+  const execution = executionManager.get(chatId);
+  const active = activeStreamControllers.get(chatId);
+  active?.controller.abort();
+  activeStreamControllers.delete(chatId);
+  approvalRuntime.remove({ chatId });
+  await agentRuntime.cancelChat(chatId);
+  executionShadowLifecycle.clearChat(chatId);
+  if (execution) executionCoordinator.cancel(chatId, execution.runId);
+  else executionPlanner.remove(chatId);
+  executionManager.remove(chatId);
+}
+
 async function withApprovalRunLock<T>(chatId: string, runId: string, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
   if (approvalRunLocks.has(runId)) throw new Error('Esta execução já está processando outra decisão de aprovação.');
   if (activeStreamControllers.has(chatId)) throw new Error('Esta execução já possui uma operação ativa.');
@@ -1301,7 +1314,7 @@ ipcMain.handle('chat:stop', async (_event, chatId: string) => {
     return { stopped: true };
   }
   if (agentRuntime.hasPendingForChat(id) || agentRuntime.hasRecoverableForChat(id)) {
-    await clearChatExecution(id);
+    await cancelChatExecution(id);
     sendStreamEvent({ type: 'cancelled', chatId: id });
     return { stopped: true };
   }
@@ -1458,7 +1471,7 @@ ipcMain.handle('chat:stream', async (_event, input: unknown) => {
           createdAt: Date.now(),
         });
       }
-      await clearChatExecution(chatId);
+      await cancelChatExecution(chatId);
       emit({ type: 'cancelled', chatId, runId });
       return { pendingApprovalIds: [], chat: (await chatManager.list()).find((item) => item.id === chat.id), error: undefined };
     }
@@ -1929,7 +1942,7 @@ ipcMain.handle('agent:resume-recovered', async (_event, runId: string) => {
       return result;
     } catch (error) {
       if (signal.aborted || isAbortError(error)) {
-        await clearChatExecution(recoverable.chatId);
+        await cancelChatExecution(recoverable.chatId);
         sendStreamEvent({ type: 'cancelled', chatId: recoverable.chatId, runId: id });
         return cancelledRunResult(recoverable.chatId);
       }
@@ -1982,7 +1995,7 @@ ipcMain.handle('agent:approve', async (_event, input: unknown) => {
       const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
       if (!stillPending) recordConsumedApprovalDecision(approval, 'approved', decisionAt);
       if (signal.aborted || isAbortError(error)) {
-        await clearChatExecution(chatId);
+        await cancelChatExecution(chatId);
         sendStreamEvent({ type: 'cancelled', chatId, runId });
         return cancelledRunResult(chatId);
       }
@@ -2030,7 +2043,7 @@ ipcMain.handle('agent:deny', async (_event, input: unknown) => {
       const stillPending = toolRuntime.listApprovals({ chatId, runId }).some((item) => item.id === id);
       if (!stillPending) recordConsumedApprovalDecision(approval, 'denied', decisionAt);
       if (signal.aborted || isAbortError(error)) {
-        await clearChatExecution(chatId);
+        await cancelChatExecution(chatId);
         sendStreamEvent({ type: 'cancelled', chatId, runId });
         return cancelledRunResult(chatId);
       }
