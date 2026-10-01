@@ -12,6 +12,7 @@ export type ContextCompilerInput = {
   runtimePlatform: string;
   runtimeDate: string;
   memoryContext?: string;
+  personalizationContext?: string;
   lightweightTurn?: boolean;
   providerInstructions?: string[];
   webContext?: string;
@@ -27,6 +28,7 @@ export type ContextCompilerInput = {
   operationalTrace?: OperationalTraceSnapshot;
   operationalTraceBudgetChars?: number;
   memoryBudgetChars?: number;
+  personalizationBudgetChars?: number;
   providerInstructionsBudgetChars?: number;
   webBudgetChars?: number;
   projectBudgetChars?: number;
@@ -37,6 +39,7 @@ const MAX_CAPABILITY_CONTEXT_ITEMS = 10;
 const DEFAULT_RUNTIME_FACTS_BUDGET = 2_400;
 const DEFAULT_OPERATIONAL_TRACE_BUDGET = 3_600;
 const DEFAULT_MEMORY_CONTEXT_BUDGET = 12_000;
+const DEFAULT_PERSONALIZATION_CONTEXT_BUDGET = 1_600;
 const DEFAULT_PROVIDER_INSTRUCTIONS_BUDGET = 16_000;
 const DEFAULT_WEB_CONTEXT_BUDGET = 32_000;
 const DEFAULT_PROJECT_CONTEXT_BUDGET = 128_000;
@@ -368,6 +371,13 @@ export class ContextCompiler {
       'memory context',
     );
     if (memoryContext) messages.push({ role: 'system', content: memoryContext });
+
+    const personalizationContext = compactContextClass(
+      input.personalizationContext,
+      normalizedContextBudget(input.personalizationBudgetChars, DEFAULT_PERSONALIZATION_CONTEXT_BUDGET),
+      'personalization context',
+    );
+    if (personalizationContext) messages.push({ role: 'system', content: personalizationContext });
 
     if (input.lightweightTurn) {
       messages.push({
