@@ -60,3 +60,54 @@ test('legacy Shadow Workspace creation API is explicit and workspace access cann
   assert.match(workspaceBody, /legado da execução não encontrado/);
   assert.doesNotMatch(workspaceBody, /beginLegacy\(/);
 });
+
+
+test('legacy Shadow Workspace dependencies stay frozen to the compatibility boundary', async () => {
+  const sourceRoot = path.resolve(process.cwd(), 'src');
+  const files = await sourceFiles(sourceRoot);
+  const allowed = new Set([
+    'src/agent/command-sandbox.ts',
+    'src/agent/shadow-aware-command-runtime.ts',
+    'src/agent/shadow-aware-git-runtime.ts',
+    'src/agent/shadow-aware-tool-runtime.ts',
+    'src/agent/shadow-aware-workspace-runtime.ts',
+    'src/execution-shadow-workspace-controller.ts',
+    'src/execution-shadow-workspace.ts',
+    'src/main.ts',
+  ]);
+  const dependencies: string[] = [];
+
+  for (const file of files) {
+    const relative = path.relative(process.cwd(), file).replaceAll('\\', '/');
+    const content = await fs.readFile(file, 'utf8');
+    if (/ExecutionShadowWorkspaceRuntime|executionShadowWorkspaceRuntime/.test(content)) {
+      dependencies.push(relative);
+    }
+  }
+
+  assert.deepEqual(
+    dependencies.sort(),
+    [...allowed].sort(),
+    'Dependências de Shadow Workspace em produção devem permanecer restritas à fronteira de compatibilidade conhecida.',
+  );
+});
+
+test('legacy workspace overlay is only accessed through ShadowAwareWorkspaceRuntime', async () => {
+  const sourceRoot = path.resolve(process.cwd(), 'src');
+  const files = await sourceFiles(sourceRoot);
+  const callers: string[] = [];
+
+  for (const file of files) {
+    const relative = path.relative(process.cwd(), file).replaceAll('\\', '/');
+    const content = await fs.readFile(file, 'utf8');
+    if (/(?:shadowWorkspaces|executionShadowWorkspaceRuntime|shadows)\.workspace\s*\(/.test(content)) {
+      callers.push(relative);
+    }
+  }
+
+  assert.deepEqual(
+    callers,
+    ['src/agent/shadow-aware-workspace-runtime.ts'],
+    'Acesso ao overlay legado deve passar somente pelo wrapper compatibility-only.',
+  );
+});
