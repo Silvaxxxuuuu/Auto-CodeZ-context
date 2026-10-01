@@ -93,6 +93,7 @@ function deriveEvidenceIds(report: ExecutionReport, trace?: OperationalTraceSnap
 
 function headline(report: ExecutionReport): string {
   if (report.state === 'failed') return 'Execução falhou com evidência operacional registrada.';
+  if (report.state === 'cancelled') return 'Execução cancelada com evidência operacional preservada.';
   if (report.completionProof === 'verified') return 'Execução concluída com evidência verificada.';
   if (report.completionProof === 'incomplete') return 'Execução terminou com pendências verificáveis.';
   if (report.recordedTools.observed === 0) return 'Resposta concluída sem operações de ferramenta.';
@@ -103,7 +104,7 @@ export function deriveAgentRunSummary(
   report: ExecutionReport,
   trace?: OperationalTraceSnapshot,
 ): AgentRunSummary | undefined {
-  if (report.state !== 'completed' && report.state !== 'failed') return undefined;
+  if (report.state !== 'completed' && report.state !== 'failed' && report.state !== 'cancelled') return undefined;
   const startedAt = report.startedAt ?? report.updatedAt ?? 0;
   const updatedAt = report.updatedAt ?? startedAt;
   return {
