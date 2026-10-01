@@ -39,7 +39,7 @@ test('account personalization stays isolated by account and survives runtime rec
 
 test('account personalization validates authentication, size and clearing', async () => {
   const storage = new MemoryStorage();
-  let accountId: string | undefined;
+  const accountId: string | undefined = undefined;
   const runtime = new AccountPersonalizationRuntime(storage as never, () => accountId);
   await runtime.init();
 
