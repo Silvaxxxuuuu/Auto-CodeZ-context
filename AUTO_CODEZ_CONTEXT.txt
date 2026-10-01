@@ -12133,3 +12133,11 @@ ESTADO DE RETIREMENT:
 - beginLegacy() continua proibido fora da fronteira legada por guard arquitetural.
 - Não remover fisicamente runtime/store antes da conclusão dos E2E finais e da decisão explícita de retirement.
 
+AGENT CORE V2 — RETIREMENT BOOTSTRAP ACCEPTANCE:
+7. Existe acceptance ponta a ponta para snapshot legado órfão:
+   Store -> reconcile bootstrap -> Runtime.restore([]) -> subscriber -> Persistence -> storage vazio.
+8. Existe acceptance ponta a ponta para snapshot legado recuperável:
+   Store -> reconcile bootstrap -> Runtime.restore(snapshot) -> storage preservado -> discard -> subscriber -> Persistence -> storage vazio.
+9. O discard do snapshot legado não toca no workspace real.
+10. A matriz dos 19 invariantes foi conferida contra a árvore real do repositório; todos os arquivos de evidência referenciados existem.
+
