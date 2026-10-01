@@ -42,6 +42,8 @@ test('commitIfPresent sem shadow é no-op', async () => {
 test('commit publica estado líquido e registra um único checkpoint sem paths duplicados', async () => {
   const fx = await fixture();
   try {
+    fx.runtime.beginLegacy('chat-a', 'run-a', 'project-a');
+    fx.runtime.beginLegacy('chat-a', 'run-a', 'project-a');
     const shadow = fx.runtime.workspace('chat-a', 'run-a', 'project-a');
     await shadow.writeFile('project-a', 'a.txt', 'middle\n');
     await shadow.writeFile('project-a', 'a.txt', 'final\n');
@@ -93,6 +95,7 @@ test('rename gera checkpoint delete create reversível', async () => {
 test('falha do recorder não transforma commit concluído em falha de publicação', async () => {
   const fx = await fixture();
   try {
+    fx.runtime.beginLegacy('chat-a', 'run-a', 'project-a');
     await fx.runtime.workspace('chat-a', 'run-a', 'project-a').writeFile('project-a', 'a.txt', 'new\n');
     const controller = new ExecutionShadowWorkspaceController(fx.runtime, () => {
       throw new Error('checkpoint unavailable');
@@ -112,6 +115,8 @@ test('falha do recorder não transforma commit concluído em falha de publicaç�
 test('stale base impede publicação e mantém shadow recuperável', async () => {
   const fx = await fixture();
   try {
+    fx.runtime.beginLegacy('chat-a', 'run-a', 'project-a');
+    fx.runtime.beginLegacy('chat-a', 'run-a', 'project-a');
     await fx.runtime.workspace('chat-a', 'run-a', 'project-a').writeFile('project-a', 'a.txt', 'shadow\n');
     await fx.workspace.writeFile('project-a', 'a.txt', 'external\n');
     const controller = new ExecutionShadowWorkspaceController(fx.runtime);
