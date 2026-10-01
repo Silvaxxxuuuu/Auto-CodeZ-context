@@ -1,4 +1,4 @@
-export type ExecutionState = 'idle' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'interrupted';
+export type ExecutionState = 'idle' | 'running' | 'waiting_approval' | 'completed' | 'failed' | 'interrupted' | 'cancelled';
 
 export type ExecutionSnapshot = {
   chatId: string;
@@ -23,16 +23,17 @@ export type ExecutionChange =
 
 export type ExecutionListener = (change: ExecutionChange) => void;
 
-const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted']);
+const EXECUTION_STATES = new Set<ExecutionState>(['idle', 'running', 'waiting_approval', 'completed', 'failed', 'interrupted', 'cancelled']);
 const ACTIVE_STATES = new Set<ExecutionState>(['running', 'waiting_approval']);
-const TERMINAL_STATES = new Set<ExecutionState>(['completed', 'failed', 'interrupted']);
+const TERMINAL_STATES = new Set<ExecutionState>(['completed', 'failed', 'interrupted', 'cancelled']);
 const ALLOWED_TRANSITIONS: Readonly<Record<ExecutionState, ReadonlySet<ExecutionState>>> = {
   idle: new Set<ExecutionState>(['running']),
-  running: new Set<ExecutionState>(['running', 'waiting_approval', 'completed', 'failed', 'interrupted']),
-  waiting_approval: new Set<ExecutionState>(['waiting_approval', 'running', 'failed', 'interrupted']),
+  running: new Set<ExecutionState>(['running', 'waiting_approval', 'completed', 'failed', 'interrupted', 'cancelled']),
+  waiting_approval: new Set<ExecutionState>(['waiting_approval', 'running', 'failed', 'interrupted', 'cancelled']),
   completed: new Set<ExecutionState>(['completed']),
   failed: new Set<ExecutionState>(['failed']),
   interrupted: new Set<ExecutionState>(['interrupted']),
+  cancelled: new Set<ExecutionState>(['cancelled']),
 };
 
 function createRunId(): string {
