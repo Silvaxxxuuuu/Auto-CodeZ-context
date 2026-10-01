@@ -67,7 +67,7 @@ test('primeiro comando de uma execução V2 usa sandbox isolado sem criar shadow
 test('shadow ativo executa comando contra a visão isolada', async () => {
   const fx = await fixture();
   try {
-    const shadow = fx.shadows.begin('chat-a', 'run-a', 'project-a');
+    const shadow = fx.shadows.beginLegacy('chat-a', 'run-a', 'project-a');
     await shadow.writeFile('project-a', 'a.txt', 'shadow');
 
     const result = await runWithExecutionWorkspaceContext(
