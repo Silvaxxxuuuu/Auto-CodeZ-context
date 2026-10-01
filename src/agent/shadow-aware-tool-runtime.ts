@@ -137,7 +137,7 @@ export class ShadowAwareToolRuntime extends ToolRuntime {
   constructor(...args: ConstructorParameters<typeof ToolRuntime>) {
     super(...args);
     this.webActivity = args[2] ?? new ActivityRuntime();
-    this.pluginApprovals = args[3] ?? new ApprovalRuntime();
+    this.pluginApprovals = this.approvals;
   }
 
   configureShadowWorkspace(runtime: ExecutionShadowWorkspaceRuntime): void {
