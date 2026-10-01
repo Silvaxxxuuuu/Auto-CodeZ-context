@@ -26,7 +26,7 @@ test('account personalization stays isolated by account and survives runtime rec
   assert.equal(runtime.get(), '');
   await runtime.set('Explique com mais detalhes.');
 
-  account.id = 'account-a';
+  accountId = 'account-a';
   assert.equal(runtime.get(), 'Seja objetivo e use respostas curtas.');
 
   const restored = new AccountPersonalizationRuntime(storage as never, () => accountId);
@@ -46,7 +46,7 @@ test('account personalization validates authentication, size and clearing', asyn
   assert.throws(() => runtime.get(), /Entre em uma conta/i);
   await assert.rejects(runtime.set('x'), /Entre em uma conta/i);
 
-  accountId = 'account-a';
+  account.id = 'account-a';
   await assert.rejects(runtime.set('x'.repeat(ACCOUNT_PERSONALIZATION_MAX_CHARS + 1)), /1000 caracteres/i);
   await runtime.set('Tom direto.');
   assert.equal(runtime.get(), 'Tom direto.');
