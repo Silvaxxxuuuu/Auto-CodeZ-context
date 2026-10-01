@@ -1150,6 +1150,11 @@ ipcMain.handle('memory:add', async (_event, input: unknown) => {
   });
 });
 ipcMain.handle('memory:remove', async (_event, id: unknown) => accountMemoryRuntime.remove(requireIdentifier(id, 'Memória')));
+ipcMain.handle('personalization:get', async () => accountPersonalizationRuntime.get());
+ipcMain.handle('personalization:set', async (_event, instructions: unknown) => {
+  if (typeof instructions !== 'string') throw new Error('Personalização inválida.');
+  return accountPersonalizationRuntime.set(instructions);
+});
 ipcMain.handle('account-auth-flow:get-state', async () => accountAuthFlowRuntime.snapshot());
 ipcMain.handle('account-auth-flow:reset', async () => accountAuthFlowRuntime.reset());
 ipcMain.handle('account-auth-flow:cancel', async () => accountAuthFlowRuntime.cancel());
