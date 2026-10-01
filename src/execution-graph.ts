@@ -58,6 +58,7 @@ const STATE_LABELS: Record<ExecutionState, string> = {
   completed: 'Execução concluída',
   failed: 'Execução falhou',
   interrupted: 'Execução interrompida',
+  cancelled: 'Execução cancelada',
 };
 
 function timelineNodes(report: ExecutionReport): OrderedNode[] {
