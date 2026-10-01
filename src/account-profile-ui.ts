@@ -279,6 +279,20 @@ function enhanceProfile(): void {
   if (panel) slot.appendChild(panel);
 }
 
+async function refreshPersonalization(): Promise<void> {
+  if (!bridge || !account?.account || (account.state !== 'authenticated' && account.state !== 'offline')) {
+    personalizationInstructions = '';
+    personalizationStatus = '';
+    return;
+  }
+  try {
+    personalizationInstructions = await bridge.getPersonalization();
+    personalizationStatus = '';
+  } catch (error) {
+    profileActionError = actionErrorMessage(error, 'Não foi possível carregar a personalização.');
+  }
+}
+
 async function refreshRegistry(): Promise<void> {
   if (!bridge || account?.state !== 'authenticated') return;
   profileActionError = undefined;
@@ -340,6 +354,39 @@ async function logout(): Promise<void> {
   }
 }
 
+document.addEventListener('input', (event) => {
+  const input = event.target instanceof HTMLTextAreaElement ? event.target : null;
+  if (!input?.matches('[data-account-personalization-input]')) return;
+  const count = document.querySelector<HTMLElement>('[data-account-personalization-count]');
+  if (count) count.textContent = `${input.value.length}/1000`;
+  const status = document.querySelector<HTMLElement>('[data-account-personalization-status]');
+  if (status) status.textContent = '';
+}, true);
+
+document.addEventListener('submit', (event) => {
+  const form = event.target instanceof HTMLFormElement ? event.target : null;
+  if (!form?.matches('[data-account-personalization-form]')) return;
+  event.preventDefault();
+  const input = form.querySelector<HTMLTextAreaElement>('[data-account-personalization-input]');
+  const status = form.querySelector<HTMLElement>('[data-account-personalization-status]');
+  const instructions = input?.value ?? '';
+  if (!bridge) return;
+  if (status) status.textContent = 'Salvando…';
+  void bridge.setPersonalization(instructions)
+    .then((saved) => {
+      personalizationInstructions = saved;
+      personalizationStatus = saved ? 'Personalização salva.' : 'Personalização removida.';
+      if (input) input.value = saved;
+      const count = form.querySelector<HTMLElement>('[data-account-personalization-count]');
+      if (count) count.textContent = `${saved.length}/1000`;
+      if (status) status.textContent = personalizationStatus;
+    })
+    .catch((error: unknown) => {
+      personalizationStatus = actionErrorMessage(error, 'Não foi possível salvar a personalização.');
+      if (status) status.textContent = personalizationStatus;
+    });
+}, true);
+
 document.addEventListener('click', (event) => {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
@@ -391,10 +438,11 @@ async function initialize(): Promise<void> {
   account = currentAccount;
   registry = currentRegistry;
   authConfiguration = currentAuthConfiguration;
+  await refreshPersonalization();
 
   unsubscribeAccount = bridge.onAccountState((snapshot) => {
     account = snapshot;
-    enhanceProfile();
+    void refreshPersonalization().finally(() => enhanceProfile());
   });
   unsubscribeRegistry = bridge.onAccountDeviceRegistryState((snapshot) => {
     registry = snapshot;
