@@ -121,7 +121,7 @@ test('aprovação é executada dentro do shadow pertencente ao approval', async 
 
     assert.equal(pending.pendingApproval, true);
     assert.ok(pending.approvalId);
-    assert.equal(fx.shadows.get('chat-a', 'run-a'), undefined);
+    assert.equal(fx.shadows.get('chat-a', 'run-a')?.changes.length, 0);
 
     const approved = await fx.tools.approve(pending.approvalId as string);
 
