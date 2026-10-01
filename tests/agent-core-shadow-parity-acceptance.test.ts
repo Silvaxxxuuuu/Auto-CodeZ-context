@@ -95,7 +95,7 @@ test('production incremental configuration mutates the real workspace without cr
   const f = await fixture();
   const runId = 'run-v2';
   try {
-    await f.base.createFile('project-a', 'src/app.ts', 'export const value = 1;\n');
+    await f.base.createFile('project-a', 'src/app.ts', "export const value = 1;\nexport function greet() {\n  return 'hello';\n}\n");
 
     await execute(
       f.tools,
@@ -114,7 +114,58 @@ test('production incremental configuration mutates the real workspace without cr
         newText: 'value = 3',
       }),
     );
-    assert.equal(await f.base.readFile('project-a', 'src/app.ts'), 'export const value = 3;\n');
+    assert.match(await f.base.readFile('project-a', 'src/app.ts'), /value = 3/);
+    assert.equal(f.shadows.get('chat-a', runId), undefined);
+
+    await execute(
+      f.tools,
+      runId,
+      call('range-1', 'replace_range', {
+        path: 'src/app.ts',
+        startLine: 1,
+        endLine: 1,
+        content: 'export const value = 4;',
+      }),
+    );
+    assert.match(await f.base.readFile('project-a', 'src/app.ts'), /value = 4/);
+    assert.equal(f.shadows.get('chat-a', runId), undefined);
+
+    await execute(
+      f.tools,
+      runId,
+      call('before-1', 'insert_before', {
+        path: 'src/app.ts',
+        line: 2,
+        content: 'export const before = true;',
+      }),
+    );
+    assert.match(await f.base.readFile('project-a', 'src/app.ts'), /before = true/);
+    assert.equal(f.shadows.get('chat-a', runId), undefined);
+
+    await execute(
+      f.tools,
+      runId,
+      call('after-1', 'insert_after', {
+        path: 'src/app.ts',
+        line: 2,
+        content: 'export const after = true;',
+      }),
+    );
+    assert.match(await f.base.readFile('project-a', 'src/app.ts'), /after = true/);
+    assert.equal(f.shadows.get('chat-a', runId), undefined);
+
+    await execute(
+      f.tools,
+      runId,
+      call('symbol-1', 'replace_symbol', {
+        path: 'src/app.ts',
+        symbol: 'greet',
+        kind: 'function',
+        content: "export function greet() {\n  return 'updated';\n}",
+      }),
+    );
+    const structurallyEdited = await f.base.readFile('project-a', 'src/app.ts');
+    assert.match(structurallyEdited, /return 'updated'/);
     assert.equal(f.shadows.get('chat-a', runId), undefined);
 
     await execute(
@@ -151,10 +202,10 @@ test('production incremental configuration mutates the real workspace without cr
     assert.equal(f.shadows.get('chat-a', runId), undefined);
 
     const verified = f.journal.list({ runId }).filter((record) => record.status === 'verified');
-    assert.equal(verified.length, 6);
+    assert.equal(verified.length, 10);
     assert.deepEqual(
       verified.map((record) => record.toolCallId).sort(),
-      ['create-1', 'delete-1', 'folder-1', 'rename-1', 'replace-1', 'write-1'],
+      ['after-1', 'before-1', 'create-1', 'delete-1', 'folder-1', 'range-1', 'rename-1', 'replace-1', 'symbol-1', 'write-1'],
     );
     assert.deepEqual(f.shadows.list(), []);
   } finally {
