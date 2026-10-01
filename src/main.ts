@@ -627,7 +627,7 @@ executionManager.subscribe((change) => {
         ? 'success'
         : change.snapshot.state === 'failed'
           ? 'failed'
-          : change.snapshot.state === 'interrupted'
+          : change.snapshot.state === 'interrupted' || change.snapshot.state === 'cancelled'
             ? 'cancelled'
             : 'running';
     operationalLedger.record({
