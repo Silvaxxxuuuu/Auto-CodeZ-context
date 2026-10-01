@@ -44,6 +44,7 @@ const readCommand = 'node -e "console.log(require(\'fs\').readFileSync(\'a.txt\'
 test('run_command em unrestricted executa direto e valida o conteúdo do shadow sem publicar a alteração', async () => {
   const fx = await fixture();
   try {
+    fx.shadows.begin('chat-a', 'run-a', 'project-a');
     const write = await fx.tools.execute(
       'chat-a',
       'project-a',
@@ -75,6 +76,7 @@ test('run_command em unrestricted executa direto e valida o conteúdo do shadow 
 test('run_command aprovado retoma no mesmo shadow e só executa depois da aprovação', async () => {
   const fx = await fixture();
   try {
+    fx.shadows.begin('chat-a', 'run-a', 'project-a');
     await fx.tools.execute(
       'chat-a',
       'project-a',
@@ -108,6 +110,7 @@ test('run_command aprovado retoma no mesmo shadow e só executa depois da aprova
 test('mutação Git continua bloqueada enquanto o command sandbox está disponível', async () => {
   const fx = await fixture();
   try {
+    fx.shadows.begin('chat-a', 'run-a', 'project-a');
     await fx.tools.execute(
       'chat-a',
       'project-a',
