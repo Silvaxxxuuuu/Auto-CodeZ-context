@@ -231,6 +231,7 @@ test('legacy Shadow Workspace support remains isolated when incremental V2 is no
     const shadows = new ExecutionShadowWorkspaceRuntime(base);
     const tools = new ShadowAwareToolRuntime(new ShadowAwareWorkspaceRuntime(base, shadows));
     tools.configureShadowWorkspace(shadows);
+    shadows.begin('chat-a', 'legacy-run', 'project-a');
 
     const result = await tools.execute(
       'chat-a',
