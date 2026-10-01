@@ -33,7 +33,7 @@ export class ExecutionShadowWorkspaceRuntime {
     return () => this.listeners.delete(listener);
   }
 
-  begin(chatId: string, runId: string, projectId: string): ShadowWorkspaceTransaction {
+  beginLegacy(chatId: string, runId: string, projectId: string): ShadowWorkspaceTransaction {
     const normalizedChatId = requireId(chatId, 'Chat');
     const normalizedRunId = requireId(runId, 'Execução');
     const normalizedProjectId = requireId(projectId, 'Projeto');
@@ -55,7 +55,12 @@ export class ExecutionShadowWorkspaceRuntime {
   }
 
   workspace(chatId: string, runId: string, projectId: string): ShadowWorkspaceBase {
-    const transaction = this.begin(chatId, runId, projectId);
+    const normalizedChatId = requireId(chatId, 'Chat');
+    const normalizedRunId = requireId(runId, 'Execução');
+    const normalizedProjectId = requireId(projectId, 'Projeto');
+    const transaction = this.transactions.get(keyOf(normalizedChatId, normalizedRunId));
+    if (!transaction) throw new Error('Shadow Workspace legado da execução não encontrado.');
+    if (transaction.projectId !== normalizedProjectId) throw new Error('Shadow Workspace pertence a outro projeto.');
     const notifyAfter = async <T>(operation: () => Promise<T>): Promise<T> => {
       const result = await operation();
       this.emit();
