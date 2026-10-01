@@ -185,14 +185,13 @@ test('command sandbox consegue resolver dependência copiada sem usar o node_mod
   }
 });
 
-test('command sandbox rejeita run ausente e projeto divergente', async () => {
+test('command sandbox aceita run V2 sem shadow e ainda rejeita projeto divergente de shadow legado', async () => {
   const fx = await fixture();
   try {
     const runtime = new CommandSandboxRuntime(fx.projects, fx.shadows);
-    await assert.rejects(
-      () => runtime.run('chat-a', 'missing', 'project-a', 'node -v'),
-      /Shadow Workspace ativo não encontrado/i,
-    );
+    const result = await runtime.run('chat-a', 'missing', 'project-a', 'node -v');
+    assert.equal(result.exitCode, 0);
+    assert.equal(fx.shadows.get('chat-a', 'missing'), undefined);
 
     fx.shadows.begin('chat-a', 'run-a', 'project-a');
     await assert.rejects(
