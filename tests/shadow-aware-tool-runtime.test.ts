@@ -317,7 +317,7 @@ test('run_command V2 keeps sandbox isolation without creating shadow that blocks
     assert.ok(started.processId);
     assert.equal(started.executionId, 'process:run-v2:process-1');
     assert.equal(shadows.get('chat-a', 'run-v2'), undefined);
-    assert.equal(processRuntime.get('project-a', started.processId as string)?.status, 'running');
+    assert.equal(processRuntime.get(started.processId as string).status, 'running');
   } finally {
     await processRuntime.stopAll().catch((): never[] => []);
     await rm(root, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 50 : 0, retryDelay: 100 });
