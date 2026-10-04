@@ -23,7 +23,12 @@ async function fixture(parentEnvironment: NodeJS.ProcessEnv = process.env) {
     runtime,
     cleanup: async () => {
       await runtime.stopAll().catch((): never[] => []);
-      await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(root, {
+        recursive: true,
+        force: true,
+        maxRetries: process.platform === 'win32' ? 50 : 0,
+        retryDelay: 100,
+      });
     },
   };
 }
