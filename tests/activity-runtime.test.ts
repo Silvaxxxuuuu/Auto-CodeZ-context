@@ -34,3 +34,31 @@ test('activity runtime preserves structured command results', () => {
   assert.deepEqual(received?.commandResult, result);
   assert.equal(received?.toolName, 'run_command');
 });
+
+
+test('structured V2 activity channel stays independent from legacy channel and isolates failures', () => {
+  const runtime = new ActivityRuntime();
+  const legacy: string[] = [];
+  const structured: string[] = [];
+  runtime.subscribe((event) => legacy.push(event.message));
+  runtime.subscribeStructured(() => { throw new Error('structured listener failure'); });
+  const unsubscribe = runtime.subscribeStructured((event) => structured.push(event.id));
+  const event = {
+    contractVersion: 1 as const,
+    id: 'tool:run-1:call-1:completed',
+    kind: 'tool',
+    phase: 'completed' as const,
+    runId: 'run-1',
+    toolCallId: 'call-1',
+    summary: 'Verificado.',
+    createdAt: 1234,
+  };
+  assert.doesNotThrow(() => runtime.emitStructured(event));
+  assert.deepEqual(structured, [event.id]);
+  assert.deepEqual(legacy, []);
+  unsubscribe();
+  runtime.emitStructured(event);
+  assert.deepEqual(structured, [event.id]);
+  runtime.emit({ type: 'tool', message: 'Legado preservado.', status: 'success' });
+  assert.deepEqual(legacy, ['Legado preservado.']);
+});

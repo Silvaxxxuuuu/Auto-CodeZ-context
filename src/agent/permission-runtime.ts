@@ -2,12 +2,36 @@ import type { PermissionLevel, ToolName } from '../ai/types';
 
 export type PermissionDecision = 'allow' | 'ask' | 'deny';
 
-const readTools = new Set<ToolName>(['read_file', 'search_files', 'git_status', 'git_diff', 'git_log', 'git_branches']);
-const safeWriteTools = new Set<ToolName>(['write_file', 'create_file']);
+const internalTools = new Set<ToolName>(['plan_execution', 'complete_plan_step']);
+const readTools = new Set<ToolName>([
+  'read_file',
+  'read_symbol',
+  'search_files',
+  'web_search',
+  'web_fetch',
+  'git_status',
+  'git_diff',
+  'git_log',
+  'git_branches',
+  'read_process_output',
+  'wait_process',
+  'wait_for_port',
+  'list_processes',
+  'instance_status',
+  'inspect_instance',
+  'list_instances',
+]);
+const safeWriteTools = new Set<ToolName>(['write_file', 'create_file', 'create_folder', 'replace_range', 'replace_text', 'replace_symbol', 'insert_before', 'insert_after', 'focus_instance']);
 const sensitiveWriteTools = new Set<ToolName>([
   'delete_file',
   'rename_file',
   'run_command',
+  'start_process',
+  'stop_process',
+  'open_instance',
+  'capture_instance',
+  'interact_instance',
+  'close_instance',
   'git_create_branch',
   'git_checkout',
   'git_stage',
@@ -17,7 +41,7 @@ const sensitiveWriteTools = new Set<ToolName>([
 
 export class PermissionRuntime {
   decide(level: PermissionLevel, tool: ToolName): PermissionDecision {
-    if (readTools.has(tool)) return 'allow';
+    if (internalTools.has(tool) || readTools.has(tool)) return 'allow';
     if (level === 'read-only') return 'deny';
     if (sensitiveWriteTools.has(tool)) return level === 'unrestricted' ? 'allow' : 'ask';
     if (safeWriteTools.has(tool)) return level === 'ask' ? 'ask' : 'allow';

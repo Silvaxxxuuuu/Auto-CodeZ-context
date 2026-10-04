@@ -5,6 +5,7 @@
     "src/activity-run-ui.ts",
     "src/diff-ui.ts",
     "src/git-ui.ts",
-    "tests/**/*.test.ts"
+    "tests/**/*.test.ts",
+    "services/account-api/**"
   ]
 }

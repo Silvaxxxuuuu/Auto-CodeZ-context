@@ -1,0 +1,653 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { AzureOpenAIAdapter } from '../src/ai/providers/azure-openai';
+import type { AIProviderConfig, AIRequest } from '../src/ai/types';
+
+function config(baseUrl: string): AIProviderConfig {
+  return {
+    id: 'azure-openai',
+    displayName: 'Azure OpenAI',
+    apiKey: 'azure-test-key',
+    baseUrl,
+    enabled: true,
+  };
+}
+
+function request(): AIRequest {
+  return {
+    providerId: 'azure-openai',
+    model: 'gpt-5.6-luna',
+    messages: [{ role: 'user', content: 'Olá' }],
+    intelligence: 'high',
+    toolsEnabled: true,
+    tools: [{
+      name: 'read_file',
+      description: 'Read a file',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
+        additionalProperties: false,
+      },
+      requiresWriteAccess: false,
+      requiresApproval: false,
+    }],
+  };
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+async function withMockedFetch(
+  handler: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>,
+  action: () => Promise<void>,
+): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = handler as typeof fetch;
+  try {
+    await action();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+test('Azure OpenAI discovers models using the v1 endpoint and api-key header', async () => {
+  const adapter = new AzureOpenAIAdapter();
+
+  await withMockedFetch(async (input, init) => {
+    assert.equal(String(input), 'https://example.openai.azure.com/openai/v1/models');
+    assert.equal((init?.headers as Record<string, string>)['api-key'], 'azure-test-key');
+    return jsonResponse({
+      object: 'list',
+      data: [
+        { id: 'gpt-5.6-luna' },
+        { id: 'gpt-4o' },
+      ],
+    });
+  }, async () => {
+    const models = await adapter.listModels(config('https://example.openai.azure.com'));
+    assert.deepEqual(models.map((model) => model.id), ['gpt-5.6-luna', 'gpt-4o']);
+    assert.equal(models[0]?.providerId, 'azure-openai');
+    assert.ok(models[0]?.capabilities.includes('reasoning'));
+    assert.ok(models[0]?.capabilities.includes('tools'));
+  });
+});
+
+test('Azure OpenAI preserves a fully qualified openai v1 base URL', async () => {
+  const adapter = new AzureOpenAIAdapter();
+
+  await withMockedFetch(async (input) => {
+    assert.equal(String(input), 'https://example.services.ai.azure.com/openai/v1/models');
+    return jsonResponse({ data: [] });
+  }, async () => {
+    await adapter.listModels(config('https://example.services.ai.azure.com/openai/v1/'));
+  });
+});
+
+test('Azure OpenAI sends Responses API requests with reasoning and tools', async () => {
+  const adapter = new AzureOpenAIAdapter();
+
+  await withMockedFetch(async (input, init) => {
+    assert.equal(String(input), 'https://example.openai.azure.com/openai/v1/responses');
+    assert.equal(init?.method, 'POST');
+    const headers = init?.headers as Record<string, string>;
+    assert.equal(headers['api-key'], 'azure-test-key');
+    assert.equal(headers['Content-Type'], 'application/json');
+
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    assert.equal(body.model, 'gpt-5.6-luna');
+    assert.deepEqual(body.reasoning, { effort: 'high' });
+    assert.ok(Array.isArray(body.tools));
+    assert.deepEqual(body.input, [{
+      role: 'user',
+      content: [{ type: 'input_text', text: 'Olá' }],
+    }]);
+
+    return jsonResponse({
+      output_text: 'Pronto',
+      output: [{
+        type: 'function_call',
+        call_id: 'call_1',
+        name: 'read_file',
+        arguments: '{"path":"README.md"}',
+      }],
+      usage: {
+        input_tokens: 10,
+        output_tokens: 5,
+        total_tokens: 15,
+      },
+    });
+  }, async () => {
+    const response = await adapter.send(config('https://example.openai.azure.com'), request());
+    assert.equal(response.providerId, 'azure-openai');
+    assert.equal(response.content, 'Pronto');
+    assert.deepEqual(response.usage, {
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+    });
+    assert.deepEqual(response.toolCalls, [{
+      id: 'call_1',
+      name: 'read_file',
+      input: { path: 'README.md' },
+    }]);
+  });
+});
+
+test('Azure OpenAI refuses missing resource endpoint before making a request', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  await assert.rejects(
+    () => adapter.listModels(config('')),
+    /exige a URL base do recurso/i,
+  );
+});
+
+
+test('Azure Foundry sends Kimi deployments through chat completions with api-key auth', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+
+  await withMockedFetch(async (input, init) => {
+    assert.equal(String(input), 'https://example.services.ai.azure.com/openai/v1/chat/completions');
+    assert.equal(init?.method, 'POST');
+    const headers = init?.headers as Record<string, string>;
+    assert.equal(headers['api-key'], 'azure-test-key');
+
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    assert.equal(body.model, 'Kimi-K2.6');
+    assert.equal(body.max_completion_tokens, 8_192);
+    assert.ok(Array.isArray(body.messages));
+    assert.ok(Array.isArray(body.tools));
+    assert.equal('input' in body, false);
+    assert.equal('reasoning' in body, false);
+
+    return jsonResponse({
+      choices: [{
+        message: {
+          content: 'Kimi pronto',
+          tool_calls: [{
+            id: 'call_kimi_1',
+            type: 'function',
+            function: {
+              name: 'read_file',
+              arguments: '{"path":"src/main.ts"}',
+            },
+          }],
+        },
+        finish_reason: 'tool_calls',
+      }],
+      usage: {
+        prompt_tokens: 12,
+        completion_tokens: 7,
+        total_tokens: 19,
+      },
+    });
+  }, async () => {
+    const response = await adapter.send(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    );
+    assert.equal(response.providerId, 'azure-openai');
+    assert.equal(response.content, 'Kimi pronto');
+    assert.deepEqual(response.usage, {
+      inputTokens: 12,
+      outputTokens: 7,
+      totalTokens: 19,
+    });
+    assert.deepEqual(response.toolCalls, [{
+      id: 'call_kimi_1',
+      name: 'read_file',
+      input: { path: 'src/main.ts' },
+    }]);
+  });
+});
+
+test('Azure Foundry streams Kimi chat completions and tool calls', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"Olá "},"finish_reason":null}]}',
+    '',
+    'data: {"choices":[{"delta":{"content":"do Kimi"},"finish_reason":null}]}',
+    '',
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_stream_1","function":{"name":"read_file","arguments":"{\\"path\\":\\"README.md\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}',
+    '',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+
+  await withMockedFetch(async (input, init) => {
+    assert.equal(String(input), 'https://example.services.ai.azure.com/openai/v1/chat/completions');
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    assert.equal(body.stream, true);
+    assert.equal(body.max_completion_tokens, 8_192);
+    return new Response(sse, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  }, async () => {
+    const events = [];
+    for await (const event of adapter.stream!(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    )) {
+      events.push(event);
+    }
+
+    assert.deepEqual(
+      events.filter((event) => event.type === 'delta').map((event) => event.text),
+      ['Olá ', 'do Kimi'],
+    );
+    assert.deepEqual(
+      events.filter((event) => event.type === 'tool_call').map((event) => event.toolCall),
+      [{
+        id: 'call_stream_1',
+        name: 'read_file',
+        input: { path: 'README.md' },
+      }],
+    );
+    const complete = events.find((event) => event.type === 'complete');
+    assert.equal(complete?.response?.content, 'Olá do Kimi');
+    assert.deepEqual(complete?.usage, {
+      inputTokens: 4,
+      outputTokens: 3,
+      totalTokens: 7,
+    });
+  });
+});
+
+
+test('Azure Foundry recovers embedded Kimi tool protocol without exposing control tokens', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+    messages: [{ role: 'user', content: 'Crie um site completo.' }],
+    tools: [{
+      name: 'plan_execution',
+      description: 'Plan',
+      parameters: {
+        type: 'object',
+        properties: {
+          objective: { type: 'string' },
+          steps: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['objective', 'steps'],
+        additionalProperties: false,
+      },
+      requiresWriteAccess: false,
+      requiresApproval: false,
+    }],
+  };
+
+  const raw = 'Planejando a criação do site.\n<|toolcallssectionbegin|><|toolcallbegin|>functions.planexecution:5<|toolcallargumentbegin|>{"plan":["Criar HTML","Criar CSS"]}<|toolcallend|><|toolcallssectionend|>';
+
+  await withMockedFetch(async () => jsonResponse({
+    choices: [{ message: { content: raw }, finish_reason: 'stop' }],
+  }), async () => {
+    const response = await adapter.send(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    );
+
+    assert.equal(response.content, 'Planejando a criação do site.');
+    assert.equal(response.content.includes('<|toolcall'), false);
+    assert.equal(response.toolCalls?.length, 1);
+    assert.equal(response.toolCalls?.[0]?.name, 'plan_execution');
+    assert.deepEqual(response.toolCalls?.[0]?.input, {
+      objective: 'Crie um site completo.',
+      steps: ['Criar HTML', 'Criar CSS'],
+    });
+  });
+});
+
+test('Azure Foundry hides split embedded Kimi tool markers during streaming', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+    messages: [{ role: 'user', content: 'Crie um site completo.' }],
+    tools: [{
+      name: 'plan_execution',
+      description: 'Plan',
+      parameters: {
+        type: 'object',
+        properties: {
+          objective: { type: 'string' },
+          steps: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['objective', 'steps'],
+        additionalProperties: false,
+      },
+      requiresWriteAccess: false,
+      requiresApproval: false,
+    }],
+  };
+
+  const chunks = [
+    'Planejando o site.',
+    '<|toolcallssect',
+    'ionbegin|><|toolcallbegin|>functions.planexecution:5',
+    '<|toolcallargumentbegin|>{"plan":["HTML","CSS"]}',
+    '<|toolcallend|><|toolcallssectionend|>',
+  ];
+  const sse = chunks.flatMap((content, index) => [
+    'data: ' + JSON.stringify({ choices: [{ delta: { content }, finish_reason: index === chunks.length - 1 ? 'stop' : null }] }),
+    '',
+  ]).concat(['data: [DONE]', '']).join('\n');
+
+  await withMockedFetch(async () => new Response(sse, {
+    status: 200,
+    headers: { 'content-type': 'text/event-stream' },
+  }), async () => {
+    const events = [];
+    for await (const event of adapter.stream!(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    )) events.push(event);
+
+    const streamedText = events
+      .filter((event) => event.type === 'delta')
+      .map((event) => event.text || '')
+      .join('');
+    assert.equal(streamedText, 'Planejando o site.');
+    assert.equal(streamedText.includes('<|toolcall'), false);
+
+    const recoveredCalls = events
+      .filter((event) => event.type === 'tool_call')
+      .map((event) => event.toolCall);
+    assert.equal(recoveredCalls.length, 1);
+    assert.equal(recoveredCalls[0]?.name, 'plan_execution');
+
+    const complete = events.find((event) => event.type === 'complete');
+    assert.equal(complete?.response?.content, 'Planejando o site.');
+    assert.deepEqual(complete?.response?.toolCalls?.[0]?.input, {
+      objective: 'Crie um site completo.',
+      steps: ['HTML', 'CSS'],
+    });
+  });
+});
+
+
+test('Azure Foundry retries a pre-stream 429 only when the provider supplies a retry window', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+  let attempts = 0;
+
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"Recuperado"},"finish_reason":"stop"}]}',
+    '',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+
+  await withMockedFetch(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      return new Response(JSON.stringify({
+        error: { message: 'Too many requests' },
+      }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'retry-after-ms': '0',
+        },
+      });
+    }
+    return new Response(sse, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  }, async () => {
+    const events = [];
+    for await (const event of adapter.stream!(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    )) events.push(event);
+
+    assert.equal(attempts, 2);
+    const complete = events.find((event) => event.type === 'complete');
+    assert.equal(complete?.response?.content, 'Recuperado');
+  });
+});
+
+test('Azure Foundry retries a transient 429 once immediately even without retry metadata', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+  let attempts = 0;
+
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"Recuperado sem spam"},"finish_reason":"stop"}]}',
+    '',
+    'data: [DONE]',
+    '',
+  ].join('\n');
+
+  await withMockedFetch(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      return new Response(JSON.stringify({
+        error: { message: 'Too many requests' },
+      }), {
+        status: 429,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(sse, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  }, async () => {
+    const events = [];
+    for await (const event of adapter.stream!(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    )) events.push(event);
+
+    assert.equal(attempts, 2);
+    assert.equal(events.find((event) => event.type === 'complete')?.response?.content, 'Recuperado sem spam');
+  });
+});
+
+test('Azure Foundry retries when the retry window exists only in the error body', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+  let attempts = 0;
+
+  await withMockedFetch(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      return new Response(JSON.stringify({
+        error: { message: 'Too many requests. Please retry after 0 seconds.' },
+      }), {
+        status: 429,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return jsonResponse({
+      choices: [{ message: { content: 'Body retry recuperado' }, finish_reason: 'stop' }],
+    });
+  }, async () => {
+    const response = await adapter.send(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    );
+    assert.equal(attempts, 2);
+    assert.equal(response.content, 'Body retry recuperado');
+  });
+});
+
+test('Azure Foundry does not retry a 429 classified as exhausted quota', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+  let attempts = 0;
+
+  await withMockedFetch(async () => {
+    attempts += 1;
+    return new Response(JSON.stringify({
+      error: { message: 'You exceeded your current quota' },
+    }), {
+      status: 429,
+      headers: { 'content-type': 'application/json' },
+    });
+  }, async () => {
+    await assert.rejects(
+      () => adapter.send(
+        config('https://example.services.ai.azure.com/openai/v1'),
+        kimiRequest,
+      ),
+      (error: unknown) => {
+        assert.equal(attempts, 1);
+        assert.equal((error as { status?: number }).status, 429);
+        return true;
+      },
+    );
+  });
+});
+
+test('Azure Foundry preserves retry-after metadata when automatic retry is not safe', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+
+  await withMockedFetch(async () => new Response(JSON.stringify({
+    error: { message: 'Too many requests' },
+  }), {
+    status: 429,
+    headers: {
+      'content-type': 'application/json',
+      'retry-after': '301',
+    },
+  }), async () => {
+    await assert.rejects(
+      () => adapter.send(
+        config('https://example.services.ai.azure.com/openai/v1'),
+        kimiRequest,
+      ),
+      (error: unknown) => {
+        assert.equal((error as { status?: number }).status, 429);
+        assert.equal((error as { retryAfterMs?: number }).retryAfterMs, 301_000);
+        return true;
+      },
+    );
+  });
+});
+
+
+test('Azure Foundry retries from rate-limit reset metadata when retry-after is absent', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+  };
+  let attempts = 0;
+
+  await withMockedFetch(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      return new Response(JSON.stringify({ error: { message: 'Too many requests' } }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'x-ratelimit-remaining-tokens': '0',
+          'x-ratelimit-reset-tokens': '0',
+        },
+      });
+    }
+    return jsonResponse({
+      choices: [{ message: { content: 'Reset header recuperado' }, finish_reason: 'stop' }],
+    });
+  }, async () => {
+    const response = await adapter.send(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    );
+    assert.equal(attempts, 2);
+    assert.equal(response.content, 'Reset header recuperado');
+  });
+});
+
+
+test('Azure Foundry hides singular embedded Kimi tool protocol and retries as text when tools are disabled', async () => {
+  const adapter = new AzureOpenAIAdapter();
+  const kimiRequest: AIRequest = {
+    ...request(),
+    model: 'Kimi-K2.6',
+    intelligence: 'normal',
+    toolsEnabled: false,
+    tools: undefined,
+    messages: [
+      { role: 'system', content: 'Use as fontes grounded e responda em texto normal.' },
+      { role: 'user', content: 'Quais são os tops globais de Fortnite?' },
+    ],
+  };
+  let attempts = 0;
+
+  await withMockedFetch(async (_input, init) => {
+    attempts += 1;
+    const body = JSON.parse(String(init?.body)) as { messages?: Array<{ role?: string; content?: string }>; stream?: boolean };
+    if (attempts === 1) {
+      const raw = '<|toolcallsectionbegin|><|toolcallbegin|>functions.websearch:5<|toolcallargumentbegin|>{"query":"Fortnite top global players ranking leaderboard 2026","limit":8}<|toolcallend|><|toolcallsectionend|>';
+      const sse = [
+        'data: ' + JSON.stringify({ choices: [{ delta: { content: raw }, finish_reason: 'stop' }] }),
+        '',
+        'data: [DONE]',
+        '',
+      ].join('\n');
+      return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    }
+    assert.equal(body.stream, undefined);
+    assert.equal(body.messages?.some((message) => /tentativa anterior tentou emitir um protocolo interno/i.test(message.content || '')), true);
+    return jsonResponse({
+      choices: [{ message: { content: 'Os líderes globais atuais incluem jogadores listados nas fontes recuperadas.' }, finish_reason: 'stop' }],
+    });
+  }, async () => {
+    const events = [];
+    for await (const event of adapter.stream!(
+      config('https://example.services.ai.azure.com/openai/v1'),
+      kimiRequest,
+    )) events.push(event);
+
+    assert.equal(attempts, 2);
+    const text = events.filter((event) => event.type === 'delta').map((event) => event.text || '').join('');
+    assert.equal(text.includes('<|toolcall'), false);
+    assert.equal(text, 'Os líderes globais atuais incluem jogadores listados nas fontes recuperadas.');
+    const complete = events.find((event) => event.type === 'complete');
+    assert.equal(complete?.response?.content, 'Os líderes globais atuais incluem jogadores listados nas fontes recuperadas.');
+  });
+});

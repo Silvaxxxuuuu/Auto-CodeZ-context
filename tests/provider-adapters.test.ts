@@ -98,6 +98,7 @@ test('OpenAI adapter preserves streamed deltas and real Responses tool call even
     assert.equal(events[3].toolCall?.name, 'read_file');
     assert.deepEqual(events[3].toolCall?.input, { path: 'README.md' });
     assert.equal(events[4].response?.content, 'Hello OpenAI');
+    assert.equal(events[4].response?.providerId, 'openai');
   });
 });
 
@@ -123,6 +124,24 @@ test('Google adapter builds generateContent requests and parses tool calls', asy
   });
 });
 
+test('Google adapter creates deterministic IDs when function calls omit provider IDs', async () => {
+  const payload = {
+    candidates: [{ content: { parts: [{ functionCall: { name: 'read_file', args: { path: 'README.md' } } }] } }],
+  };
+  const ids: string[] = [];
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await withMockedFetch(async () => jsonResponse(payload), async () => {
+      const response = await new GoogleAdapter().send(config, request);
+      assert.equal(response.toolCalls?.length, 1);
+      ids.push(response.toolCalls?.[0]?.id ?? '');
+    });
+  }
+
+  assert.equal(ids[0], ids[1]);
+  assert.match(ids[0], /^google_tool_[a-f0-9]{20}$/);
+});
+
 test('Google adapter streams text and tool calls in provider order', async () => {
   await withMockedFetch(async (_input, init) => {
     const body = readBody(init);
@@ -141,6 +160,7 @@ test('Google adapter streams text and tool calls in provider order', async () =>
     assert.equal(events[2].text, 'Google');
     assert.equal(events[3].toolCall?.name, 'read_file');
     assert.equal(events[4].response?.content, 'Hello Google');
+    assert.equal(events[4].response?.providerId, 'google');
   });
 });
 
@@ -193,6 +213,7 @@ test('Anthropic adapter reconstructs streamed tool JSON and text', async () => {
     assert.equal(events[3].toolCall?.id, 'call_5');
     assert.deepEqual(events[3].toolCall?.input, { path: 'README.md' });
     assert.equal(events[4].response?.content, 'Hello Anthropic');
+    assert.equal(events[4].response?.providerId, 'anthropic');
   });
 });
 

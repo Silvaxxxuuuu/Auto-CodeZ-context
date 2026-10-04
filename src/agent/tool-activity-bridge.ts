@@ -1,4 +1,6 @@
 import type { ActivityEvent, AIToolResult, ToolName } from '../ai/types';
+import { AGENT_CORE_V2_CONTRACT_VERSION, type StructuredActivityEvent } from '../agent-core/contracts';
+import { agentCoreV2CapabilityByName } from '../agent-core/baseline-capabilities';
 
 export interface ToolActivitySnapshot {
   type: ActivityEvent['type'];
@@ -22,10 +24,31 @@ function activityStatus(result: AIToolResult): ActivityEvent['status'] {
   return result.ok ? 'success' : 'failed';
 }
 
+function commandLabel(result: AIToolResult): string | undefined {
+  const command = result.commandResult?.command.trim();
+  if (!command) return undefined;
+  return command.length > 90 ? `${command.slice(0, 87)}...` : command;
+}
+
+function changeLabel(result: AIToolResult): string | undefined {
+  const changes = result.changes ?? result.diffPlan?.changes;
+  if (!changes?.length) return undefined;
+  if (changes.length === 1) return changes[0].path;
+  return `${changes.length} arquivos`;
+}
+
 function activityMessage(toolName: ToolName, result: AIToolResult): string {
-  if (result.pendingApproval) return `Aguardando aprovação: ${toolName}`;
-  if (result.ok) return `Concluído: ${toolName}`;
-  return `Falha: ${toolName}`;
+  if (result.pendingApproval) return 'Aguardando sua aprovação.';
+  if (!result.ok) return `Falha ao executar ${toolName}.`;
+  if (toolName === 'run_command') {
+    const command = commandLabel(result);
+    return command ? `Executado: ${command}` : 'Comando concluído.';
+  }
+  const changed = changeLabel(result);
+  if (changed) return `${toolName === 'read_file' ? 'Lido' : 'Preparado'}: ${changed}`;
+  if (toolName === 'search_files') return 'Pesquisa concluída.';
+  if (toolName.startsWith('git_')) return 'Operação Git concluída.';
+  return 'Operação concluída.';
 }
 
 export function createToolActivitySnapshot(runId: string, toolCallId: string, toolName: ToolName, result: AIToolResult): ToolActivitySnapshot {
@@ -45,6 +68,39 @@ export function toActivityInput(snapshot: ToolActivitySnapshot): Omit<ActivityEv
     ...(result.gitResult ? { gitResult: result.gitResult } : {}),
     ...(result.changes ? { changes: result.changes } : {}),
     ...(result.diffPlan ? { diffPlan: result.diffPlan } : {}),
+    ...(result.sources ? { sources: result.sources } : {}),
     ...(result.error ? { error: result.error } : {}),
+  };
+}
+
+/** Adapter for the V2 narrative/inspector. Keeps the existing ActivityEvent channel intact. */
+export function toStructuredToolActivity(snapshot: ToolActivitySnapshot, createdAt: number): StructuredActivityEvent {
+  const { result } = snapshot;
+  const changed = result.changes ?? result.diffPlan?.changes;
+  const subject = changed?.length === 1
+    ? { path: changed[0].path }
+    : result.processId
+      ? { processId: result.processId }
+      : result.commandResult
+        ? { command: result.commandResult.command }
+        : undefined;
+  const capability = agentCoreV2CapabilityByName(snapshot.toolName);
+  const phase: StructuredActivityEvent['phase'] = result.pendingApproval
+    ? 'waiting'
+    : result.ok ? 'completed' : 'failed';
+  return {
+    contractVersion: AGENT_CORE_V2_CONTRACT_VERSION,
+    id: `tool:${snapshot.runId}:${snapshot.toolCallId}:${phase}`,
+    kind: 'tool',
+    phase,
+    runId: snapshot.runId,
+    toolCallId: snapshot.toolCallId,
+    toolName: snapshot.toolName,
+    ...(capability ? { capabilityId: capability.id } : {}),
+    ...(result.executionId ? { executionId: result.executionId } : {}),
+    ...(subject ? { subject } : {}),
+    summary: snapshot.message,
+    ...(result.commandResult ? { durationMs: result.commandResult.durationMs } : {}),
+    createdAt,
   };
 }

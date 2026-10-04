@@ -8,19 +8,30 @@
     <link rel="stylesheet" href="/src/chat-execution-ui.css" />
     <link rel="stylesheet" href="/src/ui-overrides.css" />
     <link rel="stylesheet" href="/src/ui-polish.css" />
+    <link rel="stylesheet" href="/src/ui-final-polish.css" />
+    <link rel="stylesheet" href="/src/ui-v2-polish.css" />
+    <link rel="stylesheet" href="/src/ui-execution-visibility.css" />
+    <link rel="stylesheet" href="/src/profile-ui.css" />
+    <link rel="stylesheet" href="/src/settings-ui.css" />
+    <link rel="stylesheet" href="/src/stop-button.css" />
+    <link rel="stylesheet" href="/src/ui-hierarchy-pass.css" />
+    <link rel="stylesheet" href="/src/startup-splash.css" />
   </head>
 
   <body>
+    <div class="ac-startup" id="auto-codez-startup" data-stage="terminal" aria-label="Carregando Auto CodeZ" role="status">
+      <div class="ac-startup-stage" aria-hidden="true">
+        <div class="ac-startup-word" style="opacity:0;clip-path:inset(0 100% 0 0)">Auto Code</div>
+        <div class="ac-startup-mark">
+          <svg class="ac-startup-glyph" viewBox="0 0 88 80" focusable="false">
+            <line data-splash-segment x1="28" y1="25" x2="44" y2="40"></line>
+            <line data-splash-segment x1="44" y1="40" x2="28" y2="55"></line>
+            <line data-splash-segment data-cursor x1="52" y1="57" x2="72" y2="57"></line>
+          </svg>
+        </div>
+      </div>
+    </div>
     <div id="app"></div>
-    <script type="module" src="/src/renderer.ts"></script>
-    <script type="module" src="/src/terminal-ui.ts"></script>
-    <script type="module" src="/src/activity-ui.ts"></script>
-    <script type="module" src="/src/chat-execution-ui.ts"></script>
-    <script type="module" src="/src/diff-ui.ts"></script>
-    <script type="module" src="/src/git-ui.ts"></script>
-    <script type="module" src="/src/git-actions-ui.ts"></script>
-    <script type="module" src="/src/chat-rename-ui.ts"></script>
-    <script type="module" src="/src/api-key-ui.ts"></script>
-    <script type="module" src="/src/api-settings-routing-ui.ts"></script>
+    <script type="module" src="/src/renderer-entry.ts"></script>
   </body>
 </html>

@@ -1,16 +1,23 @@
+import { currentAbortSignal } from './request-cancellation';
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 60_000;
 
 export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const signal = init.signal;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const signal = init.signal ?? currentAbortSignal();
   const onAbort = (): void => controller.abort();
   signal?.addEventListener('abort', onAbort, { once: true });
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } catch (error) {
-    if (controller.signal.aborted) throw new Error(`A requisição ao provider excedeu o tempo limite de ${Math.round(timeoutMs / 1000)} segundos.`);
+    if (timedOut) throw new Error(`A requisição ao provider excedeu o tempo limite de ${Math.round(timeoutMs / 1000)} segundos.`);
+    if (signal?.aborted) throw error;
     throw error;
   } finally {
     clearTimeout(timer);
