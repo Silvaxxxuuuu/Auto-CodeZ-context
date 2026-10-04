@@ -77,35 +77,28 @@ function acceptanceAdapter(port: number): AIProviderAdapter {
         };
       }
 
-      const closed = parsedToolPayload(request, 'close_instance');
-      if (closed) {
+      const instanceStatus = parsedToolPayload(request, 'instance_status');
+      if (instanceStatus) {
+        const openPayload = parsedToolPayload(request, 'open_instance');
         const processPayload = parsedToolPayload(request, 'start_process');
+        assert.equal(typeof openPayload?.instanceId, 'string');
         assert.equal(typeof processPayload?.processId, 'string');
         return {
           content: '',
           model: request.model,
           providerId: providerConfig.id,
-          toolCalls: [{
-            id: 'stop-server',
-            name: 'stop_process',
-            input: { processId: processPayload?.processId },
-          }],
-        };
-      }
-
-      const instanceStatus = parsedToolPayload(request, 'instance_status');
-      if (instanceStatus) {
-        const openPayload = parsedToolPayload(request, 'open_instance');
-        assert.equal(typeof openPayload?.instanceId, 'string');
-        return {
-          content: '',
-          model: request.model,
-          providerId: providerConfig.id,
-          toolCalls: [{
-            id: 'close-preview',
-            name: 'close_instance',
-            input: { instanceId: openPayload?.instanceId },
-          }],
+          toolCalls: [
+            {
+              id: 'close-preview',
+              name: 'close_instance',
+              input: { instanceId: openPayload?.instanceId },
+            },
+            {
+              id: 'stop-server',
+              name: 'stop_process',
+              input: { processId: processPayload?.processId },
+            },
+          ],
         };
       }
 
@@ -141,6 +134,8 @@ function acceptanceAdapter(port: number): AIProviderAdapter {
 
       const started = parsedToolPayload(request, 'start_process');
       if (started) {
+        const command = parsedToolPayload(request, 'run_command');
+        assert.match(String(command?.output ?? command?.commandResult ?? ''), /workspace-ready/);
         assert.equal(typeof started.processId, 'string');
         assert.equal(started.executionId, 'process:acceptance-run:start-server');
         return {
@@ -160,36 +155,28 @@ function acceptanceAdapter(port: number): AIProviderAdapter {
         };
       }
 
-      const command = parsedToolPayload(request, 'run_command');
-      if (command) {
-        assert.match(String(command.output ?? command.commandResult ?? ''), /workspace-ready/);
-        return {
-          content: '',
-          model: request.model,
-          providerId: providerConfig.id,
-          toolCalls: [{
-            id: 'start-server',
-            name: 'start_process',
-            input: {
-              command: `node -e "require('node:http').createServer((req,res)=>res.end('agent-core-acceptance')).listen(${port},'127.0.0.1')"`,
-            },
-          }],
-        };
-      }
-
       const written = parsedToolPayload(request, 'write_file');
       if (written) {
         return {
           content: '',
           model: request.model,
           providerId: providerConfig.id,
-          toolCalls: [{
-            id: 'verify-workspace',
-            name: 'run_command',
-            input: {
-              command: 'node -e "process.stdout.write(require(\'node:fs\').readFileSync(\'acceptance.txt\',\'utf8\'))"',
+          toolCalls: [
+            {
+              id: 'verify-workspace',
+              name: 'run_command',
+              input: {
+                command: 'node -e "process.stdout.write(require(\'node:fs\').readFileSync(\'acceptance.txt\',\'utf8\'))"',
+              },
             },
-          }],
+            {
+              id: 'start-server',
+              name: 'start_process',
+              input: {
+                command: `node -e "require('node:http').createServer((req,res)=>res.end('agent-core-acceptance')).listen(${port},'127.0.0.1')"`,
+              },
+            },
+          ],
         };
       }
 
@@ -308,7 +295,7 @@ test('AgentRuntime orchestrates a full process and preview lifecycle with stable
     );
 
     assert.equal(result.response.content, 'Preview lifecycle completed with process stopped and instance closed.');
-    assert.equal(result.toolRounds, 8);
+    assert.equal(result.toolRounds, 6);
     assert.deepEqual(
       result.messages.filter((message) => message.role === 'tool').map((message) => message.toolName),
       ['write_file', 'run_command', 'start_process', 'wait_for_port', 'open_instance', 'instance_status', 'close_instance', 'stop_process'],
